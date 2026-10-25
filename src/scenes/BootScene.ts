@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
+import { tryContinue } from '../core/session';
 
-// Generates procedural placeholder textures (no external assets) then hands
-// off to the title menu.
+// Generates procedural placeholder textures (no external assets), then resumes a
+// saved run if one exists, otherwise goes to the title menu.
 export class BootScene extends Phaser.Scene {
   constructor() {
     super('Boot');
@@ -9,7 +10,7 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     this.generatePlaceholderTextures();
-    this.scene.start('Menu');
+    this.scene.start(tryContinue() ? 'Game' : 'Menu');
   }
 
   private generatePlaceholderTextures(): void {

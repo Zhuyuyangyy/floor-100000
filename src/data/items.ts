@@ -3,11 +3,11 @@ import type { Item, ItemId } from '../core/gameTypes';
 // The 15 v0.1 items (docs/01_GDD.md §8). Every material referenced by a recipe
 // or floor must exist here, and every item must have a concrete source.
 export const ITEMS: Record<ItemId, Item> = {
-  clean_water: { id: 'clean_water', displayName: '净水', category: 'consumable', stackable: true, maxStack: 99 },
+  clean_water: { id: 'clean_water', displayName: '净水', category: 'consumable', stackable: true, maxStack: 99, effect: { stat: 'thirst', amount: 30 } },
   dirty_water: { id: 'dirty_water', displayName: '脏水', category: 'consumable', stackable: true, maxStack: 99 },
-  ration_pack: { id: 'ration_pack', displayName: '压缩口粮', category: 'consumable', stackable: true, maxStack: 99 },
-  bread: { id: 'bread', displayName: '面包', category: 'consumable', stackable: true, maxStack: 99 },
-  medkit: { id: 'medkit', displayName: '医疗包', category: 'consumable', stackable: true, maxStack: 99 },
+  ration_pack: { id: 'ration_pack', displayName: '压缩口粮', category: 'consumable', stackable: true, maxStack: 99, effect: { stat: 'hunger', amount: 30 } },
+  bread: { id: 'bread', displayName: '面包', category: 'consumable', stackable: true, maxStack: 99, effect: { stat: 'hunger', amount: 20 } },
+  medkit: { id: 'medkit', displayName: '医疗包', category: 'consumable', stackable: true, maxStack: 99, effect: { stat: 'hp', amount: 40 } },
   battery: { id: 'battery', displayName: '电池', category: 'material', stackable: true, maxStack: 99 },
   scrap_metal: { id: 'scrap_metal', displayName: '废金属', category: 'material', stackable: true, maxStack: 99 },
   wood: { id: 'wood', displayName: '木材', category: 'material', stackable: true, maxStack: 99 },

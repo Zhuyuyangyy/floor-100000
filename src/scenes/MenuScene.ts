@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { startNewGame } from '../core/session';
+import { clearSave } from '../systems/SaveSystem';
 
 // Pixel-art title screen. Minimal by design (P0-00): title + 开始游戏 button.
 export class MenuScene extends Phaser.Scene {
@@ -66,6 +67,7 @@ export class MenuScene extends Phaser.Scene {
     const raw = params.get('seed');
     const parsed = raw !== null ? Number.parseInt(raw, 10) : Number.NaN;
     const seed = Number.isFinite(parsed) ? parsed >>> 0 : Date.now() >>> 0;
+    clearSave();
     startNewGame(seed);
     this.scene.start('Game');
   }

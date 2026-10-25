@@ -1,4 +1,4 @@
-import { SCHEMA_VERSION } from '../core/constants';
+import { SAVE_KEY, SCHEMA_VERSION } from '../core/constants';
 import { getItem, isItemId } from '../data/items';
 import type { GameState } from '../core/gameTypes';
 
@@ -78,4 +78,20 @@ export function deserialize(json: string): SaveResult {
     return { ok: false, error: `存档损坏：${errors.join('；')}` };
   }
   return { ok: true, state: data as GameState };
+}
+
+// LocalStorage persistence. A missing key is a normal "no save yet", not a
+// corrupt save; a present-but-invalid payload returns the graceful error.
+export function saveToStorage(state: GameState, storage: Storage = localStorage): void {
+  storage.setItem(SAVE_KEY, serialize(state));
+}
+
+export function loadFromStorage(storage: Storage = localStorage): SaveResult {
+  const raw = storage.getItem(SAVE_KEY);
+  if (raw === null) return { ok: false, error: '没有存档' };
+  return deserialize(raw);
+}
+
+export function clearSave(storage: Storage = localStorage): void {
+  storage.removeItem(SAVE_KEY);
 }

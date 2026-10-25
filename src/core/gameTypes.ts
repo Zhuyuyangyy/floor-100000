@@ -21,12 +21,20 @@ export type ItemId =
 
 export type ItemCategory = 'consumable' | 'material' | 'tool';
 
+export type StatKey = 'hp' | 'hunger' | 'thirst' | 'energy';
+
+export interface ItemEffect {
+  stat: StatKey;
+  amount: number;
+}
+
 export interface Item {
   id: ItemId;
   displayName: string;
   category: ItemCategory;
   stackable: boolean;
   maxStack: number;
+  effect?: ItemEffect;
 }
 
 // Per-instance state that does not belong to the item definition (e.g. a
@@ -80,11 +88,22 @@ export interface GameState {
 export interface GeneratedContainer {
   id: string;
   label: string;
+  x: number;
   items: InventoryStack[];
+}
+
+// A loose item lying on the floor, picked up on contact.
+export interface GroundItem {
+  key: string;
+  itemId: ItemId;
+  quantity: number;
+  x: number;
+  meta?: Record<string, string>;
 }
 
 export interface GeneratedFloor {
   floorNumber: number;
   name: string;
   containers: GeneratedContainer[];
+  groundItems: GroundItem[];
 }

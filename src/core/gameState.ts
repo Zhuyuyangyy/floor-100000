@@ -1,50 +1,25 @@
 import { GAME_CONFIG } from './config';
 import { ENTRY_X, PLAYABLE_FLOORS_V01, SCHEMA_VERSION } from './constants';
-import { getItem, isItemId } from '../data/items';
-import type { GameState, Inventory, InventoryStack, ItemId } from './gameTypes';
+import { isItemId } from '../data/items';
+import { addItem } from '../systems/InventorySystem';
+import type { GameState, Inventory, ItemId } from './gameTypes';
 
 export function createInventory(slotCount: number): Inventory {
   return { slotCount, slots: [] };
 }
 
-function sameMeta(a?: Record<string, string>, b?: Record<string, string>): boolean {
-  if (!a && !b) return true;
-  if (!a || !b) return false;
-  const ak = Object.keys(a);
-  const bk = Object.keys(b);
-  if (ak.length !== bk.length) return false;
-  return ak.every((k) => a[k] === b[k]);
-}
-
-// Adds items, stacking identical ids (respecting maxStack and meta). Throws when
-// the 12-slot inventory is full — callers surface this as a "背包已满" hint.
+// Adds items (stacking via InventorySystem). Throws when the bag is full — used
+// for controlled starting items; gameplay looting uses InventorySystem.addItem
+// directly so it can report overflow without losing items.
 export function addToInventory(
   inv: Inventory,
   itemId: ItemId,
   quantity: number,
   meta?: Record<string, string>,
 ): void {
-  const item = getItem(itemId);
-  let remaining = quantity;
-  if (item.stackable) {
-    for (const slot of inv.slots) {
-      if (remaining === 0) return;
-      if (slot.itemId === itemId && sameMeta(slot.meta, meta) && slot.quantity < item.maxStack) {
-        const moved = Math.min(item.maxStack - slot.quantity, remaining);
-        slot.quantity += moved;
-        remaining -= moved;
-      }
-    }
-  }
-  while (remaining > 0) {
-    if (inv.slots.length >= inv.slotCount) {
-      throw new Error('inventory full');
-    }
-    const take = item.stackable ? Math.min(item.maxStack, remaining) : 1;
-    const stack: InventoryStack = { itemId, quantity: take };
-    if (meta) stack.meta = { ...meta };
-    inv.slots.push(stack);
-    remaining -= take;
+  const result = addItem(inv, itemId, quantity, meta);
+  if (result.overflow > 0) {
+    throw new Error('inventory full');
   }
 }
 

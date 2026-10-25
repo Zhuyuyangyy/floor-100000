@@ -61,6 +61,7 @@ export function advanceTime(state: GameState, deltaMs: number): TimeTick {
     dayChanged = true;
   }
   state.gameMinuteOfDay = minute;
+  if (dayChanged) state.worldEvents.activeEvent = null; // fresh roll each day
 
   applyDecay(state, gameMinutes);
 
@@ -89,6 +90,7 @@ export function sleep(state: GameState): SleepResult {
   state.day += 1;
   state.gameMinuteOfDay = GAME_CONFIG.time.dayStartMinute;
   state.player.energy = GAME_CONFIG.player.energyMax;
+  state.worldEvents.activeEvent = null; // fresh roll each day
   const won = state.day >= GAME_CONFIG.time.victoryDay;
   if (won) state.status = 'won';
   return { ok: true, won, newDay: state.day };

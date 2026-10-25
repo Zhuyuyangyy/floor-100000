@@ -22,6 +22,7 @@ export class BootScene extends Phaser.Scene {
     this.drawFigure('player', 0x77c6a4);
     this.drawFigure('npc_alin', 0x5a8ab5);
     this.drawFigure('npc_xiaozhou', 0xb5855a);
+    this.drawFigure('wanderer', 0x3a1e24);
   }
 
   private drawFigure(key: string, body: number): void {

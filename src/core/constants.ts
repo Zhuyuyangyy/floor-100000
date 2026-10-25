@@ -24,3 +24,9 @@ export const UP_EXIT_X = 40; // left end -> 上楼 (toward 100000)
 export const DOWN_EXIT_X = FLOOR_WIDTH - 40; // right end -> 下楼 (toward 99996)
 export const BED_X = 1120; // dorm bed on floor 100000 (sleep to pass the night)
 export const CRAFT_X = 480; // dorm workbench on floor 100000 (crafting station)
+
+// Night wanderer threat (docs/01_GDD.md §10): slower than the player so it can be
+// outrun, and it only ever chips HP on a cooldown — never an unavoidable kill.
+export const WANDERER_SPEED = 70;
+export const WANDERER_DAMAGE = 8;
+export const WANDERER_HIT_COOLDOWN_MS = 1200;

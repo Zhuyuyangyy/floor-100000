@@ -63,6 +63,13 @@ export interface PlayerState {
 
 export type GameStatus = 'playing' | 'won' | 'lost';
 
+// A seed-determined night event (docs/01_GDD.md §10). At most one per day.
+export interface ActiveEvent {
+  type: 'blackout' | 'wanderer' | 'leak';
+  floor?: number;
+  message: string;
+}
+
 // Player-caused changes layered over the deterministic base layout of a floor.
 export interface FloorVisit {
   openedContainers: string[];
@@ -80,7 +87,7 @@ export interface GameState {
   player: PlayerState;
   npcStates: Record<string, string>;
   visitedFloors: Record<number, FloorVisit>;
-  worldEvents: { history: string[]; activeEvent: string | null };
+  worldEvents: { history: string[]; activeEvent: ActiveEvent | null };
   status: GameStatus;
 }
 

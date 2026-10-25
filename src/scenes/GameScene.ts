@@ -12,12 +12,16 @@ import {
   ROOM_WIDTH,
   STARTING_FLOOR,
   UP_EXIT_X,
+  WANDERER_DAMAGE,
+  WANDERER_HIT_COOLDOWN_MS,
+  WANDERER_SPEED,
 } from '../core/constants';
 import { currentInteractionZone, hasDownExit, hasUpExit, movePlayerX, tryChangeFloor } from '../systems/FloorSystem';
 import { getFloorView, lootContainer, lootGround } from '../systems/LootSystem';
 import { countItem, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
-import { advanceTime, formatClock, sleep } from '../systems/SurvivalSystem';
+import { advanceTime, formatClock, isNight, sleep } from '../systems/SurvivalSystem';
+import { ensureNightEvent } from '../systems/EventSystem';
 import { saveToStorage } from '../systems/SaveSystem';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
@@ -51,6 +55,8 @@ export class GameScene extends Phaser.Scene {
   private containerObjs = new Map<string, { box: Phaser.GameObjects.Graphics; label: Phaser.GameObjects.Text }>();
   private groundObjs = new Map<string, Phaser.GameObjects.Rectangle>();
   private floorObjects: Phaser.GameObjects.GameObject[] = [];
+  private wanderer?: Phaser.GameObjects.Sprite;
+  private wandererHitAt = Number.NEGATIVE_INFINITY;
 
   private clockText!: Phaser.GameObjects.Text;
   private statsText!: Phaser.GameObjects.Text;
@@ -136,6 +142,8 @@ export class GameScene extends Phaser.Scene {
     this.floorObjects = [];
     this.containerObjs.clear();
     this.groundObjs.clear();
+    this.wanderer?.destroy();
+    this.wanderer = undefined;
   }
 
   // ── world ──────────────────────────────────────────────────────────────
@@ -804,10 +812,19 @@ export class GameScene extends Phaser.Scene {
     }
 
     const tick = advanceTime(state, delta);
+    const rolled = ensureNightEvent(state);
+    if (rolled.rolled && rolled.event) this.flash(rolled.event.message);
     this.refreshClock();
     this.refreshStats();
     this.applyNightLighting();
     if (tick.died || tick.won) {
+      saveToStorage(state);
+      this.scene.start('End');
+      return;
+    }
+
+    this.updateWanderer(delta);
+    if (state.status !== 'playing') {
       saveToStorage(state);
       this.scene.start('End');
       return;
@@ -827,11 +844,44 @@ export class GameScene extends Phaser.Scene {
       this.hintText.setText('按 E 对话');
       return;
     }
+    const event = state.worldEvents.activeEvent;
+    if (event?.type === 'leak' && state.currentFloor === event.floor) {
+      this.hintText.setText('此地漏水，地面物资受潮');
+      return;
+    }
     const container = this.nearestContainer();
     const zone = currentInteractionZone(state);
     if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
     else if (zone === 'up') this.hintText.setText('按 E 上楼');
     else if (zone === 'down') this.hintText.setText('按 E 下楼');
     else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互 · I 背包 · ESC 菜单');
+  }
+
+  // The wanderer only haunts its own floor at night; it is slower than the player
+  // and chips HP on a cooldown, so outrunning it or leaving the floor always works.
+  private updateWanderer(delta: number): void {
+    const state = getGame();
+    const event = state.worldEvents.activeEvent;
+    const active = event?.type === 'wanderer' && isNight(state.gameMinuteOfDay) && state.currentFloor === event.floor;
+    if (!active) {
+      if (this.wanderer) {
+        this.wanderer.destroy();
+        this.wanderer = undefined;
+      }
+      return;
+    }
+    if (!this.wanderer) {
+      const spawnX = state.player.x < FLOOR_WIDTH / 2 ? FLOOR_WIDTH - 48 : 48;
+      this.wanderer = this.add.sprite(spawnX, FLOOR_HEIGHT - 40, 'wanderer').setOrigin(0.5, 1);
+    }
+    const dir = Math.sign(state.player.x - this.wanderer.x);
+    if (dir !== 0) this.wanderer.x += dir * WANDERER_SPEED * (delta / 1000);
+    if (Math.abs(this.wanderer.x - state.player.x) <= 12 && this.time.now - this.wandererHitAt >= WANDERER_HIT_COOLDOWN_MS) {
+      this.wandererHitAt = this.time.now;
+      state.player.hp = Math.max(0, state.player.hp - WANDERER_DAMAGE);
+      this.refreshStats();
+      this.flash(`被巡游体击中！HP -${WANDERER_DAMAGE}，快回宿舍或换层！`);
+      if (state.player.hp <= 0) state.status = 'lost';
+    }
   }
 }

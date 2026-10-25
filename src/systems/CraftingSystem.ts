@@ -59,14 +59,21 @@ export function purifyWater(state: GameState): PurifyResult {
   return { ok: true };
 }
 
-// Night lighting: the dorm lamp keeps floor 100000 lit at night; elsewhere (or
-// without the lamp) it is dark. Returns the dark-overlay alpha (0 = daylight).
+// Night lighting: the dorm lamp lights the dorm; a blackout darkens other floors
+// (a flashlight helps, and the alpha is capped so the screen is never fully black).
 export const LAMP_NIGHT_ALPHA = 0.16;
 export const DARK_NIGHT_ALPHA = 0.6;
+export const BLACKOUT_LIT_ALPHA = 0.4;
+export const BLACKOUT_DARK_ALPHA = 0.82;
 
 export function nightOverlayAlpha(state: GameState): number {
   if (!isNight(state.gameMinuteOfDay)) return 0;
-  if (state.currentFloor === STARTING_FLOOR && hasUpgrade(state, 'lamp')) return LAMP_NIGHT_ALPHA;
+  const onDorm = state.currentFloor === STARTING_FLOOR;
+  if (onDorm && hasUpgrade(state, 'lamp')) return LAMP_NIGHT_ALPHA;
+  if (onDorm) return DARK_NIGHT_ALPHA; // the dorm is a safe zone
+  if (state.worldEvents.activeEvent?.type === 'blackout') {
+    return countItem(state.player.inventory, 'flashlight') > 0 ? BLACKOUT_LIT_ALPHA : BLACKOUT_DARK_ALPHA;
+  }
   return DARK_NIGHT_ALPHA;
 }
 

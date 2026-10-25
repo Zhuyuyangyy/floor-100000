@@ -18,19 +18,21 @@ function ensureVisit(state: GameState, floor: number) {
 
 const containerKey = (containerId: string, index: number): string => `c:${containerId}:${index}`;
 
-// The floor as the player currently sees it: base layout minus looted items.
+// The floor as the player currently sees it: base layout minus looted items, and
+// with loose ground supplies spoiled by a leak on this floor.
 export function getFloorView(state: GameState, floor: number): GeneratedFloor {
   const base = generateFloor(state.runSeed, floor);
+  const event = state.worldEvents.activeEvent;
+  const leakHere = event?.type === 'leak' && event.floor === floor;
   const visit = state.visitedFloors[floor];
-  if (!visit || visit.lootedItems.length === 0) return base;
-  const looted = new Set(visit.lootedItems);
+  const looted = visit ? new Set(visit.lootedItems) : null;
   return {
     ...base,
     containers: base.containers.map((c) => ({
       ...c,
-      items: c.items.filter((_, idx) => !looted.has(containerKey(c.id, idx))),
+      items: looted ? c.items.filter((_, idx) => !looted.has(`c:${c.id}:${idx}`)) : c.items,
     })),
-    groundItems: base.groundItems.filter((g) => !looted.has(g.key)),
+    groundItems: base.groundItems.filter((g) => !looted?.has(g.key) && !leakHere),
   };
 }
 

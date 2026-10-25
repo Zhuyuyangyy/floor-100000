@@ -23,6 +23,7 @@ import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../
 import { advanceTime, formatClock, isNight, sleep } from '../systems/SurvivalSystem';
 import { ensureNightEvent } from '../systems/EventSystem';
 import { clearSave, saveToStorage } from '../systems/SaveSystem';
+import { playSfx } from '../render/audio';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
@@ -533,6 +534,7 @@ export class GameScene extends Phaser.Scene {
         this.refreshCraft();
         this.refreshInventory();
         this.refreshUpgradeBoard();
+        playSfx('craft');
         this.flash(`建造了 ${getRecipe(entry.id!).displayName}`);
       } else {
         this.flash(result.reason);
@@ -543,6 +545,7 @@ export class GameScene extends Phaser.Scene {
         saveToStorage(state);
         this.refreshCraft();
         this.refreshInventory();
+        playSfx('craft');
         this.flash('净化了 1 瓶净水');
       } else {
         this.flash(result.reason);
@@ -687,6 +690,7 @@ export class GameScene extends Phaser.Scene {
       if (result.ok) {
         saveToStorage(getGame());
         this.refreshInventory();
+        playSfx('trade');
       }
     } else {
       d.level = 'main';
@@ -838,6 +842,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     saveToStorage(state);
+    playSfx('sleep');
     if (result.won) this.scene.start('End');
     else this.flash(`睡到第 ${result.newDay} 天 06:00`);
   }
@@ -869,7 +874,7 @@ export class GameScene extends Phaser.Scene {
 
     if (result.took.length === 0 && !result.full) this.flash(`${label} 是空的`);
     else if (result.full) this.flash('背包已满，剩余留在容器');
-    else this.flash(`获得 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}`);
+    else { playSfx('pickup'); this.flash(`获得 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}`); }
   }
 
   private autoPickup(): void {
@@ -883,6 +888,7 @@ export class GameScene extends Phaser.Scene {
         this.floorView = getFloorView(state, state.currentFloor);
         this.refreshInventory();
         saveToStorage(state);
+        playSfx('pickup');
         this.flash(`拾取 ${getItem(r.took.itemId).displayName}×${r.took.quantity}`);
       } else if (r.full) {
         this.flash('背包已满');
@@ -896,6 +902,7 @@ export class GameScene extends Phaser.Scene {
       saveToStorage(getGame());
       this.clearFloor();
       this.drawFloor();
+      this.cameras.main.flash(180, 0, 0, 0); // transition through black
     } else {
       this.flash(result.reason === 'top' ? '已到顶层' : '已到尽头');
     }
@@ -916,7 +923,10 @@ export class GameScene extends Phaser.Scene {
 
     const tick = advanceTime(state, delta);
     const rolled = ensureNightEvent(state);
-    if (rolled.rolled && rolled.event) this.flash(rolled.event.message);
+    if (rolled.rolled && rolled.event) {
+      if (rolled.event.type === 'wanderer') playSfx('danger');
+      this.flash(rolled.event.message);
+    }
     this.refreshClock();
     this.refreshStats();
     this.applyNightLighting();
@@ -983,6 +993,9 @@ export class GameScene extends Phaser.Scene {
       this.wandererHitAt = this.time.now;
       state.player.hp = Math.max(0, state.player.hp - WANDERER_DAMAGE);
       this.refreshStats();
+      playSfx('hurt');
+      this.cameras.main.shake(160, 0.008);
+      this.cameras.main.flash(140, 230, 109, 99); // red damage flash
       this.flash(`被巡游体击中！HP -${WANDERER_DAMAGE}，快回宿舍或换层！`);
       if (state.player.hp <= 0) state.status = 'lost';
     }

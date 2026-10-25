@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { startNewGame, tryContinue } from '../core/session';
 import { clearSave, hasSave } from '../systems/SaveSystem';
+import { playSfx } from '../render/audio';
 
 // Title screen: a keyboard-navigable option list — 开始新游戏 / 继续游戏 (when a
 // save exists) / 操作说明. ↑/↓ to move, Enter to choose (docs/03_TASKS.md#p0-08).
@@ -68,6 +69,7 @@ export class MenuScene extends Phaser.Scene {
       this.toggleHelp();
       return;
     }
+    playSfx('click');
     this.entries[this.selected]?.run();
   }
 

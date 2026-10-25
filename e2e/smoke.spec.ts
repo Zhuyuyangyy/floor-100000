@@ -100,10 +100,10 @@ test('boots to pixel title and switches to placeholder game scene', async ({ pag
     const list = g?.scene.getScene('Game')?.children.list ?? [];
     return {
       hasPlayer: list.some((o) => o.type === 'Sprite' && o.texture?.key === 'player'),
-      hasHint: list.some((o) => o.type === 'Text' && (o.text ?? '').includes('占位场景')),
+      hasFloorHud: list.some((o) => o.type === 'Text' && (o.text ?? '').includes('100000')),
     };
   });
-  expect(gameContents).toEqual({ hasPlayer: true, hasHint: true });
+  expect(gameContents).toEqual({ hasPlayer: true, hasFloorHud: true });
 
   await page.screenshot({ path: 'e2e/screenshots/02-game.png' });
 

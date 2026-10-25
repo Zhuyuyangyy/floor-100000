@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { startNewGame } from '../core/session';
 
 // Pixel-art title screen. Minimal by design (P0-00): title + 开始游戏 button.
 export class MenuScene extends Phaser.Scene {
@@ -44,7 +45,7 @@ export class MenuScene extends Phaser.Scene {
 
     button.on('pointerover', () => button.setFillStyle(0x465865));
     button.on('pointerout', () => button.setFillStyle(0x354650));
-    button.on('pointerup', () => this.scene.start('Game'));
+    button.on('pointerup', () => this.startGame());
 
     this.add
       .text(width / 2, 300, '按 回车 或 点击「开始游戏」', {
@@ -55,7 +56,17 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     const keyboard = this.input.keyboard;
-    keyboard?.once('keydown-ENTER', () => this.scene.start('Game'));
-    keyboard?.once('keydown-SPACE', () => this.scene.start('Game'));
+    keyboard?.once('keydown-ENTER', () => this.startGame());
+    keyboard?.once('keydown-SPACE', () => this.startGame());
+  }
+
+  // New run: seed from ?seed=<n> for QA reproduction, else a time-based seed.
+  private startGame(): void {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('seed');
+    const parsed = raw !== null ? Number.parseInt(raw, 10) : Number.NaN;
+    const seed = Number.isFinite(parsed) ? parsed >>> 0 : Date.now() >>> 0;
+    startNewGame(seed);
+    this.scene.start('Game');
   }
 }

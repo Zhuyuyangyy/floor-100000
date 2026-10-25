@@ -43,6 +43,7 @@ export interface Inventory {
 }
 
 export interface PlayerState {
+  x: number;
   hp: number;
   hunger: number;
   thirst: number;

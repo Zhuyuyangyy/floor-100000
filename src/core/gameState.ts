@@ -1,5 +1,5 @@
 import { GAME_CONFIG } from './config';
-import { PLAYABLE_FLOORS_V01, SCHEMA_VERSION } from './constants';
+import { ENTRY_X, PLAYABLE_FLOORS_V01, SCHEMA_VERSION } from './constants';
 import { getItem, isItemId } from '../data/items';
 import type { GameState, Inventory, InventoryStack, ItemId } from './gameTypes';
 
@@ -78,6 +78,7 @@ export function createNewGame(seed: number): GameState {
     gameMinuteOfDay: cfg.time.dayStartMinute,
     currentFloor: p.startingFloor,
     player: {
+      x: ENTRY_X,
       hp: p.hpStart,
       hunger: p.hungerStart,
       thirst: p.thirstStart,

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { getGame } from '../core/session';
+import { getGame, startNewGame } from '../core/session';
 import {
   BED_X,
   CRAFT_X,
@@ -16,13 +16,13 @@ import {
   WANDERER_HIT_COOLDOWN_MS,
   WANDERER_SPEED,
 } from '../core/constants';
-import { currentInteractionZone, hasDownExit, hasUpExit, movePlayerX, tryChangeFloor } from '../systems/FloorSystem';
+import { currentInteractionZone, floorName, hasDownExit, hasUpExit, movePlayerX, tryChangeFloor } from '../systems/FloorSystem';
 import { getFloorView, lootContainer, lootGround } from '../systems/LootSystem';
 import { countItem, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
 import { advanceTime, formatClock, isNight, sleep } from '../systems/SurvivalSystem';
 import { ensureNightEvent } from '../systems/EventSystem';
-import { saveToStorage } from '../systems/SaveSystem';
+import { clearSave, saveToStorage } from '../systems/SaveSystem';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
@@ -31,6 +31,13 @@ import type { GameState, GeneratedContainer, GeneratedFloor, ItemId, StatKey } f
 
 const STAT_LABEL: Record<StatKey, string> = { hp: '生命', hunger: '饱食', thirst: '水分', energy: '精力' };
 const INVENTORY_SLOTS = 12;
+const STAT_BARS: Array<{ label: string; color: number }> = [
+  { label: 'HP', color: 0xe56d63 },
+  { label: '饥', color: 0xf4b66a },
+  { label: '渴', color: 0x6aa8e5 },
+  { label: '精', color: 0x77c6a4 },
+];
+const PAUSE_OPTIONS = ['继续游戏', '重新开始', '返回标题'];
 type DirKeys = {
   up: Phaser.Input.Keyboard.Key;
   down: Phaser.Input.Keyboard.Key;
@@ -59,7 +66,9 @@ export class GameScene extends Phaser.Scene {
   private wandererHitAt = Number.NEGATIVE_INFINITY;
 
   private clockText!: Phaser.GameObjects.Text;
-  private statsText!: Phaser.GameObjects.Text;
+  private barsGfx!: Phaser.GameObjects.Graphics;
+  private statLabels: Phaser.GameObjects.Text[] = [];
+  private tooltipText!: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
   private feedbackText!: Phaser.GameObjects.Text;
   private feedbackTimer?: Phaser.Time.TimerEvent;
@@ -86,6 +95,11 @@ export class GameScene extends Phaser.Scene {
   private dialogueMessage!: Phaser.GameObjects.Text;
   private dialogueOptions: Phaser.GameObjects.Text[] = [];
 
+  private pauseOpen = false;
+  private pauseObjects: Array<Phaser.GameObjects.Text | Phaser.GameObjects.Graphics> = [];
+  private pauseOptionTexts: Phaser.GameObjects.Text[] = [];
+  private pauseSelected = 0;
+
   constructor() {
     super({ key: 'Game' });
   }
@@ -103,7 +117,12 @@ export class GameScene extends Phaser.Scene {
     this.buildInventoryPanel();
     this.buildCraftPanel();
     this.buildDialoguePanel();
+    this.buildPausePanel();
     this.bindInput();
+
+    if (getGame().day === 1) {
+      this.flash('目标：活到第 8 天 06:00。A/D 移动 · E 交互 · I 背包 · C 制作');
+    }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       // cameras.main can be null during teardown (Phaser 4 shutdown gotcha).
@@ -233,9 +252,12 @@ export class GameScene extends Phaser.Scene {
       .setScrollFactor(0).setDepth(100);
     this.refreshClock();
 
-    this.statsText = this.add
-      .text(12, 38, '', { fontFamily: 'monospace', fontSize: '12px', color: '#ece8d8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
-      .setScrollFactor(0).setDepth(100);
+    this.barsGfx = this.add.graphics().setScrollFactor(0).setDepth(100);
+    STAT_BARS.forEach((s, i) => {
+      this.statLabels.push(
+        this.add.text(12, 40 + i * 13, s.label, { fontFamily: 'monospace', fontSize: '10px', color: '#ece8d8' }).setScrollFactor(0).setDepth(101),
+      );
+    });
     this.refreshStats();
 
     this.feedbackText = this.add
@@ -249,7 +271,7 @@ export class GameScene extends Phaser.Scene {
 
   private refreshClock(): void {
     const s = getGame();
-    const label = `第 ${s.day} 天 ${formatClock(s.gameMinuteOfDay)} · ${s.currentFloor} 层`;
+    const label = `第 ${s.day} 天 ${formatClock(s.gameMinuteOfDay)} · ${s.currentFloor} 层 ${floorName(s.currentFloor)}`;
     if (label !== this.lastClock) {
       this.lastClock = label;
       this.clockText.setText(label);
@@ -258,11 +280,18 @@ export class GameScene extends Phaser.Scene {
 
   private refreshStats(): void {
     const p = getGame().player;
-    const label = `HP ${Math.round(p.hp)} · 饥 ${Math.round(p.hunger)} · 渴 ${Math.round(p.thirst)} · 精 ${Math.round(p.energy)}`;
-    if (label !== this.lastStats) {
-      this.lastStats = label;
-      this.statsText.setText(label);
-    }
+    const values = [p.hp, p.hunger, p.thirst, p.energy];
+    const key = values.map((v) => Math.round(v)).join(',');
+    if (key === this.lastStats) return;
+    this.lastStats = key;
+    this.barsGfx.clear();
+    values.forEach((v, i) => {
+      const y = 40 + i * 13;
+      this.barsGfx.fillStyle(0x0b0f12, 0.7);
+      this.barsGfx.fillRect(34, y + 2, 84, 7);
+      this.barsGfx.fillStyle(STAT_BARS[i].color, 1);
+      this.barsGfx.fillRect(34, y + 2, 84 * Math.max(0, Math.min(1, v / 100)), 7);
+    });
   }
 
   private buildInventoryPanel(): void {
@@ -290,6 +319,9 @@ export class GameScene extends Phaser.Scene {
       this.invObjects.push(t);
     }
 
+    this.tooltipText = this.add.text(left + 20, top + 266, '', { fontFamily: 'monospace', fontSize: '12px', color: '#f4b66a' });
+    this.invObjects.push(this.tooltipText);
+
     const footer = this.add.text(cx, top + panelH - 16, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
     this.invObjects.push(footer);
 
@@ -308,6 +340,15 @@ export class GameScene extends Phaser.Scene {
       } else {
         t.setText('  （空）');
       }
+    }
+    const selected = slots[this.invSelected];
+    if (selected) {
+      const item = getItem(selected.itemId);
+      const category = item.category === 'consumable' ? '消耗品' : item.category === 'material' ? '材料' : '工具';
+      const effect = item.effect ? ` · ${STAT_LABEL[item.effect.stat]} +${item.effect.amount}` : '';
+      this.tooltipText.setText(`${item.displayName} · ${category}${effect}`);
+    } else {
+      this.tooltipText.setText('');
     }
   }
 
@@ -420,8 +461,60 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private buildPausePanel(): void {
+    const { width, height } = this.cameras.main;
+    const panelW = 380;
+    const panelH = 220;
+    const cx = width / 2;
+    const cy = height / 2;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x0b0f12, 0.96);
+    bg.fillRoundedRect(left, top, panelW, panelH, 8);
+    bg.lineStyle(2, 0xf4b66a, 1);
+    bg.strokeRoundedRect(left, top, panelW, panelH, 8);
+    const title = this.add.text(cx, top + 20, '已暂停', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
+    const controls = this.add.text(cx, top + 50, 'A/D 移动 · E 交互 · I 背包 · C 制作', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
+    this.pauseObjects.push(bg, title, controls);
+
+    PAUSE_OPTIONS.forEach((label, i) => {
+      const t = this.add.text(cx, top + 92 + i * 28, label, { fontFamily: 'monospace', fontSize: '15px', color: '#ece8d8' }).setOrigin(0.5);
+      this.pauseOptionTexts.push(t);
+      this.pauseObjects.push(t);
+    });
+
+    for (const o of this.pauseObjects) o.setScrollFactor(0).setDepth(230).setVisible(false);
+  }
+
+  private refreshPause(): void {
+    this.pauseOptionTexts.forEach((t, i) => t.setText(`${i === this.pauseSelected ? '▶ ' : '  '}${PAUSE_OPTIONS[i]}`));
+  }
+
+  private togglePause(): void {
+    this.pauseOpen = !this.pauseOpen;
+    for (const o of this.pauseObjects) o.setVisible(this.pauseOpen);
+    if (this.pauseOpen) {
+      this.pauseSelected = 0;
+      this.refreshPause();
+    }
+  }
+
+  private activatePause(): void {
+    if (this.pauseSelected === 0) {
+      this.togglePause(); // 继续游戏
+    } else if (this.pauseSelected === 1) {
+      clearSave();
+      startNewGame(Date.now() >>> 0); // 重新开始
+      this.scene.start('Game');
+    } else {
+      this.scene.start('Menu'); // 返回标题
+    }
+  }
+
   private onToggleCrafting(): void {
-    if (this.inventoryOpen || this.dialogueOpen) return;
+    if (this.inventoryOpen || this.dialogueOpen || this.pauseOpen) return;
     if (!this.craftingOpen && getGame().currentFloor !== STARTING_FLOOR) {
       this.flash('只能在宿舍工作台制作');
       return;
@@ -635,7 +728,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onToggleInventory(): void {
-    if (this.craftingOpen || this.dialogueOpen) return;
+    if (this.craftingOpen || this.dialogueOpen || this.pauseOpen) return;
     this.toggleInventory();
   }
 
@@ -643,7 +736,7 @@ export class GameScene extends Phaser.Scene {
     if (this.inventoryOpen) this.toggleInventory();
     else if (this.craftingOpen) this.toggleCrafting();
     else if (this.dialogueOpen) this.dialogueBack();
-    else this.scene.start('Menu');
+    else this.togglePause();
   }
 
   private onNavUp(): void {
@@ -656,6 +749,9 @@ export class GameScene extends Phaser.Scene {
     } else if (this.dialogueOpen && this.dialogue) {
       this.dialogue.selected = Math.max(0, this.dialogue.selected - 1);
       this.refreshDialogue();
+    } else if (this.pauseOpen) {
+      this.pauseSelected = Math.max(0, this.pauseSelected - 1);
+      this.refreshPause();
     }
   }
 
@@ -672,6 +768,9 @@ export class GameScene extends Phaser.Scene {
       const count = this.dialogueOptionLabels().length;
       this.dialogue.selected = Math.min(Math.max(0, count - 1), this.dialogue.selected + 1);
       this.refreshDialogue();
+    } else if (this.pauseOpen) {
+      this.pauseSelected = Math.min(PAUSE_OPTIONS.length - 1, this.pauseSelected + 1);
+      this.refreshPause();
     }
   }
 
@@ -694,11 +793,15 @@ export class GameScene extends Phaser.Scene {
       this.activateCraftEntry();
       return;
     }
-    if (this.dialogueOpen) this.activateDialogueOption();
+    if (this.dialogueOpen) {
+      this.activateDialogueOption();
+      return;
+    }
+    if (this.pauseOpen) this.activatePause();
   }
 
   private onInteract(): void {
-    if (this.inventoryOpen || this.craftingOpen) return;
+    if (this.inventoryOpen || this.craftingOpen || this.pauseOpen) return;
     if (this.dialogueOpen) {
       this.closeDialogue();
       return;
@@ -800,7 +903,7 @@ export class GameScene extends Phaser.Scene {
 
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
-    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen) return;
+    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen) return;
     const state = getGame();
 
     let dir = 0;

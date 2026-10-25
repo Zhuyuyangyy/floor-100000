@@ -6,6 +6,7 @@ import {
   UP_EXIT_X,
   PLAYABLE_FLOORS_V01,
 } from '../core/constants';
+import { getFloorTemplate } from '../data/floorTemplates';
 import type { GameState } from '../core/gameTypes';
 
 // Pure floor/movement rules (docs/02_TECH_SPEC.md §3: core rules are testable,
@@ -22,6 +23,10 @@ export function hasUpExit(floor: number): boolean {
 
 export function hasDownExit(floor: number): boolean {
   return PLAYABLE_FLOORS_V01.includes(floor - 1);
+}
+
+export function floorName(floor: number): string {
+  return getFloorTemplate(floor)?.name ?? '未知区域';
 }
 
 // Applies a floor change to state on success (moving the player to the entry

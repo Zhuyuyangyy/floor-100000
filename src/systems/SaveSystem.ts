@@ -95,3 +95,7 @@ export function loadFromStorage(storage: Storage = localStorage): SaveResult {
 export function clearSave(storage: Storage = localStorage): void {
   storage.removeItem(SAVE_KEY);
 }
+
+export function hasSave(storage: Storage = localStorage): boolean {
+  return storage.getItem(SAVE_KEY) !== null;
+}

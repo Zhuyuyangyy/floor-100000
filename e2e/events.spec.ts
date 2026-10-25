@@ -57,14 +57,21 @@ async function setX(page: Page, x: number): Promise<void> {
   }, x);
 }
 
+// Press E and wait for the interaction to take effect, retrying against a
+// dropped synthetic keypress (Phaser's input is frame-based).
+async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 5): Promise<void> {
+  for (let i = 0; i < tries; i++) {
+    if (await check()) return;
+    await page.keyboard.press('E');
+    await page.waitForTimeout(200);
+  }
+  if (!(await check())) throw new Error('interact (E) did not take effect');
+}
+
 async function goDown(page: Page): Promise<void> {
   await setX(page, 1200);
   const before = (await readState(page)).currentFloor;
-  await page.keyboard.press('E');
-  await page.waitForFunction((f) => {
-    const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
-    return !!s && s.currentFloor < f;
-  }, before, { timeout: 5000 });
+  await pressEUntil(page, async () => (await readState(page)).currentFloor < before);
 }
 
 test('the night event is reproducible for a given seed', async ({ page }) => {

@@ -75,8 +75,12 @@ test('looting a container fills the bag and a reload does not re-loot', async ({
   const afterLoot = await waterCount(page);
   expect(afterLoot).toBeGreaterThan(before);
 
-  // Reload: the run resumes from LocalStorage; the cabinet must stay empty.
+  // Reload: the title menu appears; choose 继续游戏 to resume the saved run.
   await page.reload();
+  await waitForScene(page, 'Menu');
+  await page.keyboard.press('ArrowDown'); // -> 继续游戏
+  await page.waitForTimeout(150);
+  await page.keyboard.press('Enter');
   await waitForScene(page, 'Game');
   await page.waitForFunction(
     (w) => {

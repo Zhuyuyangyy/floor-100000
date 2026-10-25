@@ -50,6 +50,22 @@ async function nightAlpha(page: Page): Promise<number> {
   });
 }
 
+// Press ArrowDown until the ▶ cursor lands on the option starting with `prefix`
+// (self-correcting against a dropped synthetic keypress).
+async function navTo(page: import('@playwright/test').Page, prefix: string): Promise<void> {
+  for (let i = 0; i < 8; i++) {
+    const onTarget = await page.evaluate((p) => {
+      const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean }> } } | null } } }).__PHASER_GAME__;
+      const t = g?.scene.getScene('Game')?.children.list.find((o) => o.type === 'Text' && o.visible && (o.text ?? '').startsWith('▶'));
+      return t ? (t.text ?? '').startsWith(`▶ ${p}`) : false;
+    }, prefix);
+    if (onTarget) return;
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(120);
+  }
+  throw new Error(`could not nav to ${prefix}`);
+}
+
 test('crafting deducts materials and the upgrade persists across reload', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -61,9 +77,10 @@ test('crafting deducts materials and the upgrade persists across reload', async 
     s?.player.inventory.slots.push({ itemId: 'wood', quantity: 2 }, { itemId: 'tape', quantity: 1 });
   });
 
-  // Open the workbench (C), select 加固门 (index 1), craft (Enter).
+  // Open the workbench (C), select 加固门, craft (Enter).
   await page.keyboard.press('C');
-  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(200); // let the panel open
+  await navTo(page, '加固门');
   await page.screenshot({ path: 'e2e/screenshots/08-craft.png' });
   await page.keyboard.press('Enter');
 
@@ -78,8 +95,12 @@ test('crafting deducts materials and the upgrade persists across reload', async 
   expect(await count(page, 'wood')).toBe(0);
   expect(await count(page, 'tape')).toBe(0);
 
-  // Reload: the run resumes and the upgrade is retained.
+  // Reload: the title menu appears; choose 继续游戏 to resume the saved run.
   await page.reload();
+  await waitForScene(page, 'Menu');
+  await page.keyboard.press('ArrowDown'); // -> 继续游戏
+  await page.waitForTimeout(150);
+  await page.keyboard.press('Enter');
   await waitForScene(page, 'Game');
   const s = await readState(page);
   expect(s.player.homeUpgrades).toContain('reinforced_door');

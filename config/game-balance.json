@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "time": {
+    "gameMinutesPerRealSecond": 3,
+    "dayStartMinute": 360,
+    "nightRiskStartMinute": 1200,
+    "victoryDay": 8,
+    "victoryMinute": 360,
+    "maxMajorEventsPerDay": 1
+  },
+  "player": {
+    "startingFloor": 100000,
+    "hpMax": 100,
+    "hpStart": 100,
+    "hungerMax": 100,
+    "hungerStart": 80,
+    "hungerLossPerGameHour": 2,
+    "thirstMax": 100,
+    "thirstStart": 80,
+    "thirstLossPerGameHour": 3,
+    "energyMax": 100,
+    "energyStart": 80,
+    "energyLossPerGameHour": 3
+  },
+  "inventory": {
+    "slotCount": 12,
+    "startingItems": [
+      { "itemId": "clean_water", "displayName": "净水", "quantity": 3 },
+      { "itemId": "ration_pack", "displayName": "压缩口粮", "quantity": 2 },
+      { "itemId": "flashlight", "displayName": "低电量手电", "quantity": 1, "batteryState": "low" }
+    ]
+  },
+  "world": {
+    "startingFloor": 100000,
+    "playableFloorsV01": [100000, 99999, 99998, 99997, 99996],
+    "targetTotalFloors": 100000,
+    "preloadAllFloors": false,
+    "fixedQaSeeds": [1, 42, 2026]
+  },
+  "notes": [
+    "这些是首版初始平衡值，必须通过真实试玩调整。",
+    "不要为补齐配置而自行添加未在设计文档中批准的复杂系统。",
+    "道具、配方和楼层掉落的详细定义由对应 TypeScript 数据模块维护，并以本文件中的数值为准。"
+  ]
+}

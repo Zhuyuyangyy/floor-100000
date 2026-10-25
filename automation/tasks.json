@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "projectId": "floor-100000",
+  "taskSource": "docs/03_TASKS.md",
+  "policy": {
+    "oneTaskPerRun": true,
+    "requireDependenciesComplete": true,
+    "stopAfterCurrentTask": true,
+    "neverAutoMergeMain": true,
+    "neverAutoDeploy": true
+  },
+  "tasks": [
+    { "id": "P0-00", "title": "工程底座", "status": "todo", "dependsOn": [], "acceptanceSource": "docs/03_TASKS.md#p0-00" },
+    { "id": "P0-01", "title": "游戏状态与数据底座", "status": "todo", "dependsOn": ["P0-00"], "acceptanceSource": "docs/03_TASKS.md#p0-01" },
+    { "id": "P0-02", "title": "玩家移动与楼层", "status": "todo", "dependsOn": ["P0-01"], "acceptanceSource": "docs/03_TASKS.md#p0-02" },
+    { "id": "P0-03", "title": "物资与背包", "status": "todo", "dependsOn": ["P0-02"], "acceptanceSource": "docs/03_TASKS.md#p0-03" },
+    { "id": "P0-04", "title": "时间、生存与胜败", "status": "todo", "dependsOn": ["P0-03"], "acceptanceSource": "docs/03_TASKS.md#p0-04" },
+    { "id": "P0-05", "title": "宿舍制作与升级", "status": "todo", "dependsOn": ["P0-04"], "acceptanceSource": "docs/03_TASKS.md#p0-05" },
+    { "id": "P0-06", "title": "邻居 NPC 与交易", "status": "todo", "dependsOn": ["P0-04"], "acceptanceSource": "docs/03_TASKS.md#p0-06" },
+    { "id": "P0-07", "title": "夜间风险事件", "status": "todo", "dependsOn": ["P0-04", "P0-05"], "acceptanceSource": "docs/03_TASKS.md#p0-07" },
+    { "id": "P0-08", "title": "HUD、菜单、教学提示", "status": "todo", "dependsOn": ["P0-05", "P0-06", "P0-07"], "acceptanceSource": "docs/03_TASKS.md#p0-08" },
+    { "id": "P0-09", "title": "综合实玩与回归", "status": "todo", "dependsOn": ["P0-08"], "acceptanceSource": "docs/03_TASKS.md#p0-09" },
+    { "id": "P0-10", "title": "交付可试玩版本", "status": "todo", "dependsOn": ["P0-09"], "acceptanceSource": "docs/03_TASKS.md#p0-10" }
+  ]
+}

@@ -1,0 +1,16 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# test / tooling artifacts
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+e2e/screenshots/
+
+# local env / os
+*.local
+.DS_Store

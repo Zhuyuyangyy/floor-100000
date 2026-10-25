@@ -1,5 +1,5 @@
 import { GAME_CONFIG } from '../core/config';
-import { MINUTES_PER_DAY } from '../core/constants';
+import { DAY_START_MINUTE, MINUTES_PER_DAY } from '../core/constants';
 import type { GameState } from '../core/gameTypes';
 
 // Time & survival rules (docs/01_GDD.md §5-6, config/game-balance.json).
@@ -98,4 +98,10 @@ export function deathCause(state: GameState): string {
   if (state.player.thirst <= 0) return '严重脱水';
   if (state.player.hunger <= 0) return '饥饿';
   return '伤势过重';
+}
+
+// Night is 18:00 -> 06:00 (day runs 06:00-18:00).
+export const NIGHT_START_MINUTE = 1080;
+export function isNight(minuteOfDay: number): boolean {
+  return minuteOfDay >= NIGHT_START_MINUTE || minuteOfDay < DAY_START_MINUTE;
 }

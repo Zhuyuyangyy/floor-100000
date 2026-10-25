@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { getGame } from '../core/session';
 import {
   BED_X,
+  CRAFT_X,
   DOWN_EXIT_X,
   FLOOR_HEIGHT,
   FLOOR_WIDTH,
@@ -14,11 +15,13 @@ import {
 } from '../core/constants';
 import { currentInteractionZone, hasDownExit, hasUpExit, movePlayerX, tryChangeFloor } from '../systems/FloorSystem';
 import { getFloorView, lootContainer, lootGround } from '../systems/LootSystem';
-import { useConsumable } from '../systems/InventorySystem';
+import { countItem, useConsumable } from '../systems/InventorySystem';
+import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
 import { advanceTime, formatClock, sleep } from '../systems/SurvivalSystem';
 import { saveToStorage } from '../systems/SaveSystem';
 import { getItem } from '../data/items';
-import type { GameState, GeneratedContainer, GeneratedFloor, StatKey } from '../core/gameTypes';
+import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
+import type { GameState, GeneratedContainer, GeneratedFloor, ItemId, StatKey } from '../core/gameTypes';
 
 const STAT_LABEL: Record<StatKey, string> = { hp: '生命', hunger: '饱食', thirst: '水分', energy: '精力' };
 const INVENTORY_SLOTS = 12;
@@ -53,6 +56,14 @@ export class GameScene extends Phaser.Scene {
   private invSelected = 0;
   private inventoryOpen = false;
 
+  private craftingOpen = false;
+  private craftObjects: Array<Phaser.GameObjects.Text | Phaser.GameObjects.Graphics> = [];
+  private craftEntryTexts: Phaser.GameObjects.Text[] = [];
+  private craftSelected = 0;
+  private nightOverlay!: Phaser.GameObjects.Rectangle;
+  private upgradeBoard!: Phaser.GameObjects.Text;
+  private keyC!: Phaser.Input.Keyboard.Key;
+
   constructor() {
     super({ key: 'Game' });
   }
@@ -64,18 +75,25 @@ export class GameScene extends Phaser.Scene {
 
     this.cameras.main.setBackgroundColor(0x22303a);
     this.cameras.main.setBounds(0, 0, FLOOR_WIDTH, FLOOR_HEIGHT);
+    this.nightOverlay = this.add
+      .rectangle(FLOOR_WIDTH / 2, FLOOR_HEIGHT / 2, FLOOR_WIDTH, FLOOR_HEIGHT, 0x05070a, 0)
+      .setName('night-overlay');
 
     this.drawCorridor(floor);
     this.drawExits(floor);
     this.buildContainers();
     this.buildGround();
-    if (floor === STARTING_FLOOR) this.drawBed();
+    if (floor === STARTING_FLOOR) {
+      this.drawBed();
+      this.drawWorkbench();
+    }
 
     this.player = this.add.sprite(state.player.x, FLOOR_HEIGHT - 40, 'player').setOrigin(0.5, 1);
     this.cameras.main.startFollow(this.player, true, 0.15, 0.15);
 
     this.buildHud();
     this.buildInventoryPanel();
+    this.buildCraftPanel();
     this.bindInput();
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -260,6 +278,136 @@ export class GameScene extends Phaser.Scene {
     this.feedbackTimer = this.time.delayedCall(1600, () => this.feedbackText.setText(''));
   }
 
+  private applyNightLighting(): void {
+    this.nightOverlay.setAlpha(nightOverlayAlpha(getGame()));
+  }
+
+  private nearCraftStation(state: GameState): boolean {
+    return state.currentFloor === STARTING_FLOOR && Math.abs(state.player.x - CRAFT_X) <= INTERACT_DISTANCE;
+  }
+
+  private drawWorkbench(): void {
+    const y = FLOOR_HEIGHT - 64;
+    const g = this.add.graphics();
+    g.fillStyle(0x3a4c58, 1);
+    g.fillRect(CRAFT_X - 18, y - 14, 36, 30);
+    g.fillStyle(0x465865, 1);
+    g.fillRect(CRAFT_X - 18, y - 14, 36, 4);
+    this.add.text(CRAFT_X, y - 26, '工作台', { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
+    this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
+    this.refreshUpgradeBoard();
+  }
+
+  private refreshUpgradeBoard(): void {
+    if (!this.upgradeBoard) return;
+    const built = getGame().player.homeUpgrades.map((id) => getRecipe(id as UpgradeId).displayName);
+    this.upgradeBoard.setText(built.length > 0 ? `已建：${built.join('、')}` : '');
+  }
+
+  private buildCraftPanel(): void {
+    const { width, height } = this.cameras.main;
+    const panelW = 460;
+    const panelH = 300;
+    const cx = width / 2;
+    const cy = height / 2;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x0b0f12, 0.96);
+    bg.fillRoundedRect(left, top, panelW, panelH, 8);
+    bg.lineStyle(2, 0xf4b66a, 1);
+    bg.strokeRoundedRect(left, top, panelW, panelH, 8);
+    const title = this.add.text(cx, top + 18, '工作台 · 制作', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
+    this.craftObjects.push(bg, title);
+
+    for (let i = 0; i < 4; i++) {
+      const t = this.add.text(left + 18, top + 48 + i * 24, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' });
+      this.craftEntryTexts.push(t);
+      this.craftObjects.push(t);
+    }
+    const footer = this.add.text(cx, top + panelH - 16, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
+    this.craftObjects.push(footer);
+
+    for (const o of this.craftObjects) o.setScrollFactor(0).setDepth(210).setVisible(false);
+  }
+
+  private craftEntries(): Array<{ kind: 'recipe' | 'purify'; id?: UpgradeId }> {
+    const entries: Array<{ kind: 'recipe' | 'purify'; id?: UpgradeId }> = RECIPES.map((r) => ({ kind: 'recipe', id: r.id }));
+    if (hasUpgrade(getGame(), 'purifier')) entries.push({ kind: 'purify' });
+    return entries;
+  }
+
+  private refreshCraft(): void {
+    const state = getGame();
+    const entries = this.craftEntries();
+    if (this.craftSelected >= entries.length) this.craftSelected = Math.max(0, entries.length - 1);
+    for (let i = 0; i < 4; i++) {
+      const t = this.craftEntryTexts[i];
+      const entry = entries[i];
+      if (!entry) {
+        t.setText('');
+        continue;
+      }
+      const cursor = i === this.craftSelected ? '▶ ' : '  ';
+      if (entry.kind === 'recipe') {
+        const recipe = getRecipe(entry.id!);
+        const cost = Object.entries(recipe.cost).map(([id, n]) => `${getItem(id as ItemId).displayName}×${n}`).join(' ');
+        const status = hasUpgrade(state, entry.id!) ? '[已建]' : canCraft(state, entry.id!).ok ? '[可制作]' : '[材料不足]';
+        t.setText(`${cursor}${recipe.displayName}（${cost}）${status}`);
+      } else {
+        const can = countItem(state.player.inventory, 'dirty_water') >= 1;
+        t.setText(`${cursor}净化 脏水→净水 ${can ? '[可净化]' : '[无脏水]'}`);
+      }
+    }
+  }
+
+  private toggleCrafting(): void {
+    this.craftingOpen = !this.craftingOpen;
+    for (const o of this.craftObjects) o.setVisible(this.craftingOpen);
+    if (this.craftingOpen) {
+      this.craftSelected = 0;
+      this.refreshCraft();
+    }
+  }
+
+  private onToggleCrafting(): void {
+    if (this.inventoryOpen) return;
+    if (!this.craftingOpen && getGame().currentFloor !== STARTING_FLOOR) {
+      this.flash('只能在宿舍工作台制作');
+      return;
+    }
+    this.toggleCrafting();
+  }
+
+  private activateCraftEntry(): void {
+    const state = getGame();
+    const entry = this.craftEntries()[this.craftSelected];
+    if (!entry) return;
+    if (entry.kind === 'recipe') {
+      const result = craft(state, entry.id!);
+      if (result.ok) {
+        saveToStorage(state);
+        this.refreshCraft();
+        this.refreshInventory();
+        this.refreshUpgradeBoard();
+        this.flash(`建造了 ${getRecipe(entry.id!).displayName}`);
+      } else {
+        this.flash(result.reason);
+      }
+    } else {
+      const result = purifyWater(state);
+      if (result.ok) {
+        saveToStorage(state);
+        this.refreshCraft();
+        this.refreshInventory();
+        this.flash('净化了 1 瓶净水');
+      } else {
+        this.flash(result.reason);
+      }
+    }
+  }
+
   // ── input ──────────────────────────────────────────────────────────────
   private bindInput(): void {
     const keyboard = this.input.keyboard;
@@ -270,12 +418,14 @@ export class GameScene extends Phaser.Scene {
     this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.keyI = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I);
     this.keyEnter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+    this.keyC = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
     keyboard.addCapture([Phaser.Input.Keyboard.KeyCodes.LEFT, Phaser.Input.Keyboard.KeyCodes.RIGHT]);
 
     this.keyE.on('down', this.onInteract, this);
     this.keyEsc.on('down', this.onEsc, this);
     this.keyI.on('down', this.onToggleInventory, this);
     this.keyEnter.on('down', this.onUse, this);
+    this.keyC.on('down', this.onToggleCrafting, this);
     this.cursors.up.on('down', this.onNavUp, this);
     this.cursors.down.on('down', this.onNavDown, this);
   }
@@ -285,49 +435,64 @@ export class GameScene extends Phaser.Scene {
     this.keyEsc?.off('down', this.onEsc, this);
     this.keyI?.off('down', this.onToggleInventory, this);
     this.keyEnter?.off('down', this.onUse, this);
+    this.keyC?.off('down', this.onToggleCrafting, this);
     this.cursors?.up.off('down', this.onNavUp, this);
     this.cursors?.down.off('down', this.onNavDown, this);
   }
 
   private onToggleInventory(): void {
+    if (this.craftingOpen) return;
     this.toggleInventory();
   }
 
   private onEsc(): void {
     if (this.inventoryOpen) this.toggleInventory();
+    else if (this.craftingOpen) this.toggleCrafting();
     else this.scene.start('Menu');
   }
 
   private onNavUp(): void {
-    if (!this.inventoryOpen) return;
-    this.invSelected = Math.max(0, this.invSelected - 1);
-    this.refreshInventory();
-  }
-
-  private onNavDown(): void {
-    if (!this.inventoryOpen) return;
-    const count = getGame().player.inventory.slots.length;
-    this.invSelected = Math.min(Math.max(0, count - 1), this.invSelected + 1);
-    this.refreshInventory();
-  }
-
-  private onUse(): void {
-    if (!this.inventoryOpen) return;
-    const stack = getGame().player.inventory.slots[this.invSelected];
-    if (!stack) return;
-    const result = useConsumable(getGame(), stack.itemId);
-    if (result.ok) {
-      saveToStorage(getGame());
+    if (this.inventoryOpen) {
+      this.invSelected = Math.max(0, this.invSelected - 1);
       this.refreshInventory();
-      this.refreshStats();
-      this.flash(`使用 ${getItem(stack.itemId).displayName} · ${STAT_LABEL[result.stat!]} +${result.amount}`);
-    } else {
-      this.flash(result.reason ?? '无法使用');
+    } else if (this.craftingOpen) {
+      this.craftSelected = Math.max(0, this.craftSelected - 1);
+      this.refreshCraft();
     }
   }
 
+  private onNavDown(): void {
+    if (this.inventoryOpen) {
+      const count = getGame().player.inventory.slots.length;
+      this.invSelected = Math.min(Math.max(0, count - 1), this.invSelected + 1);
+      this.refreshInventory();
+    } else if (this.craftingOpen) {
+      const count = this.craftEntries().length;
+      this.craftSelected = Math.min(Math.max(0, count - 1), this.craftSelected + 1);
+      this.refreshCraft();
+    }
+  }
+
+  private onUse(): void {
+    if (this.inventoryOpen) {
+      const stack = getGame().player.inventory.slots[this.invSelected];
+      if (!stack) return;
+      const result = useConsumable(getGame(), stack.itemId);
+      if (result.ok) {
+        saveToStorage(getGame());
+        this.refreshInventory();
+        this.refreshStats();
+        this.flash(`使用 ${getItem(stack.itemId).displayName} · ${STAT_LABEL[result.stat!]} +${result.amount}`);
+      } else {
+        this.flash(result.reason ?? '无法使用');
+      }
+      return;
+    }
+    if (this.craftingOpen) this.activateCraftEntry();
+  }
+
   private onInteract(): void {
-    if (this.inventoryOpen) return;
+    if (this.inventoryOpen || this.craftingOpen) return;
     const state = getGame();
     if (this.nearBed(state)) {
       this.attemptSleep();
@@ -419,7 +584,7 @@ export class GameScene extends Phaser.Scene {
 
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
-    if (this.inventoryOpen) return;
+    if (this.inventoryOpen || this.craftingOpen) return;
     const state = getGame();
 
     let dir = 0;
@@ -433,6 +598,7 @@ export class GameScene extends Phaser.Scene {
     const tick = advanceTime(state, delta);
     this.refreshClock();
     this.refreshStats();
+    this.applyNightLighting();
     if (tick.died || tick.won) {
       saveToStorage(state);
       this.scene.start('End');
@@ -443,6 +609,10 @@ export class GameScene extends Phaser.Scene {
 
     if (this.nearBed(state)) {
       this.hintText.setText('按 E 睡觉');
+      return;
+    }
+    if (this.nearCraftStation(state)) {
+      this.hintText.setText('按 C 制作');
       return;
     }
     const container = this.nearestContainer();

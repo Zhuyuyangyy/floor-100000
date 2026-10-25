@@ -21,10 +21,18 @@ import { advanceTime, formatClock, sleep } from '../systems/SurvivalSystem';
 import { saveToStorage } from '../systems/SaveSystem';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
+import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
+import { trade } from '../systems/TradeSystem';
 import type { GameState, GeneratedContainer, GeneratedFloor, ItemId, StatKey } from '../core/gameTypes';
 
 const STAT_LABEL: Record<StatKey, string> = { hp: '生命', hunger: '饱食', thirst: '水分', energy: '精力' };
 const INVENTORY_SLOTS = 12;
+type DirKeys = {
+  up: Phaser.Input.Keyboard.Key;
+  down: Phaser.Input.Keyboard.Key;
+  left: Phaser.Input.Keyboard.Key;
+  right: Phaser.Input.Keyboard.Key;
+};
 
 // Playable floor view (P0-02 + P0-03): scrolling corridor, movable character,
 // up/down exits, lootable containers & ground items, a 12-slot inventory, and
@@ -32,7 +40,7 @@ const INVENTORY_SLOTS = 12;
 // renders and feeds input back through pure logic functions.
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
-  private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+  private cursors!: DirKeys;
   private wasd!: { left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key };
   private keyE!: Phaser.Input.Keyboard.Key;
   private keyEsc!: Phaser.Input.Keyboard.Key;
@@ -42,6 +50,7 @@ export class GameScene extends Phaser.Scene {
   private floorView!: GeneratedFloor;
   private containerObjs = new Map<string, { box: Phaser.GameObjects.Graphics; label: Phaser.GameObjects.Text }>();
   private groundObjs = new Map<string, Phaser.GameObjects.Rectangle>();
+  private floorObjects: Phaser.GameObjects.GameObject[] = [];
 
   private clockText!: Phaser.GameObjects.Text;
   private statsText!: Phaser.GameObjects.Text;
@@ -64,20 +73,47 @@ export class GameScene extends Phaser.Scene {
   private upgradeBoard!: Phaser.GameObjects.Text;
   private keyC!: Phaser.Input.Keyboard.Key;
 
+  private dialogueOpen = false;
+  private dialogue: { npc: NpcId; level: 'main' | 'trade'; selected: number; message: string; lineToggle: number } | null = null;
+  private dialogueObjects: Array<Phaser.GameObjects.Text | Phaser.GameObjects.Graphics> = [];
+  private dialogueTitle!: Phaser.GameObjects.Text;
+  private dialogueMessage!: Phaser.GameObjects.Text;
+  private dialogueOptions: Phaser.GameObjects.Text[] = [];
+
   constructor() {
     super({ key: 'Game' });
   }
 
   create(): void {
-    const state = getGame();
-    const floor = state.currentFloor;
-    this.floorView = getFloorView(state, floor);
-
     this.cameras.main.setBackgroundColor(0x22303a);
     this.cameras.main.setBounds(0, 0, FLOOR_WIDTH, FLOOR_HEIGHT);
     this.nightOverlay = this.add
       .rectangle(FLOOR_WIDTH / 2, FLOOR_HEIGHT / 2, FLOOR_WIDTH, FLOOR_HEIGHT, 0x05070a, 0)
       .setName('night-overlay');
+
+    this.drawFloor();
+
+    this.buildHud();
+    this.buildInventoryPanel();
+    this.buildCraftPanel();
+    this.buildDialoguePanel();
+    this.bindInput();
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      // cameras.main can be null during teardown (Phaser 4 shutdown gotcha).
+      this.cameras.main?.stopFollow();
+      this.feedbackTimer?.remove(false);
+      this.unbindInput();
+    });
+  }
+
+  // Floor content is rebuilt in place on floor changes. We avoid scene.restart():
+  // its teardown leaves the hidden UI panel text objects with null texture frames
+  // in Phaser 4, so setText on them throws once the scene is recreated.
+  private drawFloor(): void {
+    const state = getGame();
+    const floor = state.currentFloor;
+    this.floorView = getFloorView(state, floor);
 
     this.drawCorridor(floor);
     this.drawExits(floor);
@@ -87,21 +123,19 @@ export class GameScene extends Phaser.Scene {
       this.drawBed();
       this.drawWorkbench();
     }
+    if (floor === NPC_FLOOR) this.drawNpcs();
 
     this.player = this.add.sprite(state.player.x, FLOOR_HEIGHT - 40, 'player').setOrigin(0.5, 1);
+    this.floorObjects.push(this.player);
     this.cameras.main.startFollow(this.player, true, 0.15, 0.15);
+  }
 
-    this.buildHud();
-    this.buildInventoryPanel();
-    this.buildCraftPanel();
-    this.bindInput();
-
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      // cameras.main can be null during teardown (Phaser 4 shutdown gotcha).
-      this.cameras.main?.stopFollow();
-      this.feedbackTimer?.remove(false);
-      this.unbindInput();
-    });
+  private clearFloor(): void {
+    this.cameras.main.stopFollow();
+    for (const o of this.floorObjects) o.destroy();
+    this.floorObjects = [];
+    this.containerObjs.clear();
+    this.groundObjs.clear();
   }
 
   // ── world ──────────────────────────────────────────────────────────────
@@ -122,6 +156,7 @@ export class GameScene extends Phaser.Scene {
     }
     g.fillStyle(0xf4b66a, 0.22);
     for (let r = 0; r < ROOM_COUNT; r++) g.fillRect(r * ROOM_WIDTH + 48, 76, 56, 44);
+    this.floorObjects.push(g);
   }
 
   private drawExits(floor: number): void {
@@ -129,13 +164,15 @@ export class GameScene extends Phaser.Scene {
       const g = this.add.graphics();
       g.fillStyle(0x77c6a4, 1);
       g.fillRect(UP_EXIT_X - 12, FLOOR_HEIGHT - 96, 24, 48);
-      this.add.text(UP_EXIT_X, FLOOR_HEIGHT - 104, '↑ 上楼', { fontFamily: 'monospace', fontSize: '12px', color: '#77c6a4' }).setOrigin(0.5);
+      const upLabel = this.add.text(UP_EXIT_X, FLOOR_HEIGHT - 104, '↑ 上楼', { fontFamily: 'monospace', fontSize: '12px', color: '#77c6a4' }).setOrigin(0.5);
+      this.floorObjects.push(g, upLabel);
     }
     if (hasDownExit(floor)) {
       const g = this.add.graphics();
       g.fillStyle(0xf4b66a, 1);
       g.fillRect(DOWN_EXIT_X - 12, FLOOR_HEIGHT - 96, 24, 48);
-      this.add.text(DOWN_EXIT_X, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: 'monospace', fontSize: '12px', color: '#f4b66a' }).setOrigin(0.5);
+      const downLabel = this.add.text(DOWN_EXIT_X, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: 'monospace', fontSize: '12px', color: '#f4b66a' }).setOrigin(0.5);
+      this.floorObjects.push(g, downLabel);
     }
   }
 
@@ -149,6 +186,7 @@ export class GameScene extends Phaser.Scene {
       box.strokeRect(c.x - 14, y - 16, 28, 32);
       const label = this.add.text(c.x, y - 26, c.label, { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
       this.containerObjs.set(c.id, { box, label });
+      this.floorObjects.push(box, label);
       this.setContainerEmptyVisual(c.id, c.items.length === 0);
     }
   }
@@ -165,6 +203,7 @@ export class GameScene extends Phaser.Scene {
     for (const g of this.floorView.groundItems) {
       const rect = this.add.rectangle(g.x, FLOOR_HEIGHT - 52, 10, 10, 0x77c6a4).setStrokeStyle(1, 0xece8d8);
       this.groundObjs.set(g.key, rect);
+      this.floorObjects.push(rect);
     }
   }
 
@@ -175,7 +214,8 @@ export class GameScene extends Phaser.Scene {
     g.fillRect(BED_X - 20, y - 12, 40, 28);
     g.fillStyle(0xece8d8, 1);
     g.fillRect(BED_X - 16, y - 10, 14, 10);
-    this.add.text(BED_X, y - 24, '床（睡觉）', { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
+    const bedLabel = this.add.text(BED_X, y - 24, '床（睡觉）', { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
+    this.floorObjects.push(g, bedLabel);
   }
 
   // ── HUD & inventory UI ─────────────────────────────────────────────────
@@ -293,8 +333,9 @@ export class GameScene extends Phaser.Scene {
     g.fillRect(CRAFT_X - 18, y - 14, 36, 30);
     g.fillStyle(0x465865, 1);
     g.fillRect(CRAFT_X - 18, y - 14, 36, 4);
-    this.add.text(CRAFT_X, y - 26, '工作台', { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
+    const benchLabel = this.add.text(CRAFT_X, y - 26, '工作台', { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
     this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
+    this.floorObjects.push(g, benchLabel, this.upgradeBoard);
     this.refreshUpgradeBoard();
   }
 
@@ -372,7 +413,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onToggleCrafting(): void {
-    if (this.inventoryOpen) return;
+    if (this.inventoryOpen || this.dialogueOpen) return;
     if (!this.craftingOpen && getGame().currentFloor !== STARTING_FLOOR) {
       this.flash('只能在宿舍工作台制作');
       return;
@@ -408,18 +449,163 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // ── NPCs & dialogue ─────────────────────────────────────────────────────
+  private drawNpcs(): void {
+    for (const npc of NPCS) {
+      const key = npc.id === 'alin' ? 'npc_alin' : 'npc_xiaozhou';
+      const sprite = this.add.sprite(npc.x, FLOOR_HEIGHT - 40, key).setOrigin(0.5, 1);
+      const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
+      this.floorObjects.push(sprite, nameLabel);
+    }
+  }
+
+  private nearestNpc(state: GameState): NpcDef | null {
+    if (state.currentFloor !== NPC_FLOOR) return null;
+    for (const npc of NPCS) {
+      if (Math.abs(npc.x - state.player.x) <= INTERACT_DISTANCE) return npc;
+    }
+    return null;
+  }
+
+  private buildDialoguePanel(): void {
+    const { width, height } = this.cameras.main;
+    const panelW = 460;
+    const panelH = 260;
+    const cx = width / 2;
+    const cy = height / 2;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x0b0f12, 0.97);
+    bg.fillRoundedRect(left, top, panelW, panelH, 8);
+    bg.lineStyle(2, 0x77c6a4, 1);
+    bg.strokeRoundedRect(left, top, panelW, panelH, 8);
+    // Create with placeholder content so each text's canvas/frame exists up front
+    // (setText on a never-rendered empty text throws in Phaser 4).
+    this.dialogueTitle = this.add.text(cx, top + 20, '对话', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
+    this.dialogueMessage = this.add.text(cx, top + 58, '……', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8', align: 'center' }).setOrigin(0.5);
+    this.dialogueObjects.push(bg, this.dialogueTitle, this.dialogueMessage);
+
+    for (let i = 0; i < 4; i++) {
+      const t = this.add.text(left + 20, top + 112 + i * 26, '……', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' });
+      this.dialogueOptions.push(t);
+      this.dialogueObjects.push(t);
+    }
+    const footer = this.add.text(cx, top + panelH - 14, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
+    this.dialogueObjects.push(footer);
+
+    for (const o of this.dialogueObjects) o.setScrollFactor(0).setDepth(220).setVisible(false);
+  }
+
+  private dialogueOptionLabels(): string[] {
+    const d = this.dialogue;
+    if (!d) return [];
+    if (d.level === 'main') return ['问候', '询问', '交易', '退出'];
+    const npc = getNpc(d.npc);
+    return [
+      ...npc.offers.map(
+        (o) => `用 ${getItem(o.get.itemId).displayName}×${o.get.quantity} 换 ${getItem(o.give.itemId).displayName}×${o.give.quantity}`,
+      ),
+      '返回',
+    ];
+  }
+
+  private openDialogue(npc: NpcDef): void {
+    this.dialogue = { npc: npc.id, level: 'main', selected: 0, message: npc.greetings[0], lineToggle: 0 };
+    this.dialogueOpen = true;
+    for (const o of this.dialogueObjects) o.setVisible(true);
+    this.refreshDialogue();
+  }
+
+  private closeDialogue(): void {
+    this.dialogueOpen = false;
+    this.dialogue = null;
+    for (const o of this.dialogueObjects) o.setVisible(false);
+  }
+
+  private dialogueBack(): void {
+    if (!this.dialogue) return;
+    if (this.dialogue.level === 'trade') {
+      this.dialogue.level = 'main';
+      this.dialogue.selected = 0;
+      this.dialogue.message = '';
+      this.refreshDialogue();
+    } else {
+      this.closeDialogue();
+    }
+  }
+
+  private refreshDialogue(): void {
+    const d = this.dialogue;
+    if (!d) return;
+    const npc = getNpc(d.npc);
+    this.dialogueTitle.setText(`${npc.name}（${npc.title}）`);
+    this.dialogueMessage.setText(d.message || '……');
+    const labels = this.dialogueOptionLabels();
+    if (d.selected >= labels.length) d.selected = labels.length - 1;
+    for (let i = 0; i < this.dialogueOptions.length; i++) {
+      const label = labels[i];
+      if (label === undefined) {
+        this.dialogueOptions[i].setText('');
+        continue;
+      }
+      this.dialogueOptions[i].setText(`${i === d.selected ? '▶ ' : '  '}${label}`);
+    }
+  }
+
+  private activateDialogueOption(): void {
+    const d = this.dialogue;
+    if (!d) return;
+    const npc = getNpc(d.npc);
+    if (d.level === 'main') {
+      switch (d.selected) {
+        case 0:
+          d.message = npc.greetings[d.lineToggle % npc.greetings.length];
+          d.lineToggle++;
+          break;
+        case 1:
+          d.message = npc.asks[d.lineToggle % npc.asks.length];
+          d.lineToggle++;
+          break;
+        case 2:
+          d.level = 'trade';
+          d.selected = 0;
+          d.message = '想换点什么？';
+          break;
+        default:
+          this.closeDialogue();
+          return;
+      }
+    } else if (d.selected < npc.offers.length) {
+      const offer = npc.offers[d.selected];
+      const result = trade(getGame(), offer);
+      d.message = result.ok
+        ? `换到了 ${getItem(offer.give.itemId).displayName}×${offer.give.quantity}`
+        : result.reason;
+      if (result.ok) {
+        saveToStorage(getGame());
+        this.refreshInventory();
+      }
+    } else {
+      d.level = 'main';
+      d.selected = 0;
+      d.message = '';
+    }
+    this.refreshDialogue();
+  }
+
   // ── input ──────────────────────────────────────────────────────────────
   private bindInput(): void {
     const keyboard = this.input.keyboard;
     if (!keyboard) return;
-    this.cursors = keyboard.createCursorKeys();
+    this.cursors = keyboard.addKeys({ up: 'UP', down: 'DOWN', left: 'LEFT', right: 'RIGHT' }) as DirKeys;
     this.wasd = keyboard.addKeys({ left: 'A', right: 'D' }) as typeof this.wasd;
     this.keyE = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
     this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.keyI = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I);
     this.keyEnter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
     this.keyC = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
-    keyboard.addCapture([Phaser.Input.Keyboard.KeyCodes.LEFT, Phaser.Input.Keyboard.KeyCodes.RIGHT]);
 
     this.keyE.on('down', this.onInteract, this);
     this.keyEsc.on('down', this.onEsc, this);
@@ -441,13 +627,14 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onToggleInventory(): void {
-    if (this.craftingOpen) return;
+    if (this.craftingOpen || this.dialogueOpen) return;
     this.toggleInventory();
   }
 
   private onEsc(): void {
     if (this.inventoryOpen) this.toggleInventory();
     else if (this.craftingOpen) this.toggleCrafting();
+    else if (this.dialogueOpen) this.dialogueBack();
     else this.scene.start('Menu');
   }
 
@@ -458,6 +645,9 @@ export class GameScene extends Phaser.Scene {
     } else if (this.craftingOpen) {
       this.craftSelected = Math.max(0, this.craftSelected - 1);
       this.refreshCraft();
+    } else if (this.dialogueOpen && this.dialogue) {
+      this.dialogue.selected = Math.max(0, this.dialogue.selected - 1);
+      this.refreshDialogue();
     }
   }
 
@@ -470,6 +660,10 @@ export class GameScene extends Phaser.Scene {
       const count = this.craftEntries().length;
       this.craftSelected = Math.min(Math.max(0, count - 1), this.craftSelected + 1);
       this.refreshCraft();
+    } else if (this.dialogueOpen && this.dialogue) {
+      const count = this.dialogueOptionLabels().length;
+      this.dialogue.selected = Math.min(Math.max(0, count - 1), this.dialogue.selected + 1);
+      this.refreshDialogue();
     }
   }
 
@@ -488,12 +682,25 @@ export class GameScene extends Phaser.Scene {
       }
       return;
     }
-    if (this.craftingOpen) this.activateCraftEntry();
+    if (this.craftingOpen) {
+      this.activateCraftEntry();
+      return;
+    }
+    if (this.dialogueOpen) this.activateDialogueOption();
   }
 
   private onInteract(): void {
     if (this.inventoryOpen || this.craftingOpen) return;
+    if (this.dialogueOpen) {
+      this.closeDialogue();
+      return;
+    }
     const state = getGame();
+    const npc = this.nearestNpc(state);
+    if (npc) {
+      this.openDialogue(npc);
+      return;
+    }
     if (this.nearBed(state)) {
       this.attemptSleep();
       return;
@@ -521,7 +728,7 @@ export class GameScene extends Phaser.Scene {
     }
     saveToStorage(state);
     if (result.won) this.scene.start('End');
-    else this.scene.restart();
+    else this.flash(`睡到第 ${result.newDay} 天 06:00`);
   }
 
   private nearestContainer(): GeneratedContainer | null {
@@ -576,7 +783,8 @@ export class GameScene extends Phaser.Scene {
     const result = tryChangeFloor(getGame(), direction);
     if (result.ok) {
       saveToStorage(getGame());
-      this.scene.restart();
+      this.clearFloor();
+      this.drawFloor();
     } else {
       this.flash(result.reason === 'top' ? '已到顶层' : '已到尽头');
     }
@@ -584,7 +792,7 @@ export class GameScene extends Phaser.Scene {
 
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
-    if (this.inventoryOpen || this.craftingOpen) return;
+    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen) return;
     const state = getGame();
 
     let dir = 0;
@@ -613,6 +821,10 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.nearCraftStation(state)) {
       this.hintText.setText('按 C 制作');
+      return;
+    }
+    if (this.nearestNpc(state)) {
+      this.hintText.setText('按 E 对话');
       return;
     }
     const container = this.nearestContainer();

@@ -19,16 +19,21 @@ export class BootScene extends Phaser.Scene {
   }
 
   private generatePlaceholderTextures(): void {
-    // 16x24 placeholder character drawn with a handful of pixels.
+    this.drawFigure('player', 0x77c6a4);
+    this.drawFigure('npc_alin', 0x5a8ab5);
+    this.drawFigure('npc_xiaozhou', 0xb5855a);
+  }
+
+  private drawFigure(key: string, body: number): void {
     const g = this.add.graphics();
-    g.fillStyle(0x77c6a4, 1); // body
+    g.fillStyle(body, 1);
     g.fillRect(2, 9, 12, 15);
-    g.fillStyle(0xece8d8, 1); // head
+    g.fillStyle(0xece8d8, 1);
     g.fillRect(5, 2, 6, 6);
-    g.fillStyle(0x18242c, 1); // eyes
+    g.fillStyle(0x18242c, 1);
     g.fillRect(6, 4, 1, 1);
     g.fillRect(9, 4, 1, 1);
-    g.generateTexture('player', 16, 24);
+    g.generateTexture(key, 16, 24);
     g.destroy();
   }
 }

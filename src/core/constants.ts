@@ -22,3 +22,4 @@ export const ENTRY_X = FLOOR_WIDTH / 2;
 export const INTERACT_DISTANCE = 44;
 export const UP_EXIT_X = 40; // left end -> 上楼 (toward 100000)
 export const DOWN_EXIT_X = FLOOR_WIDTH - 40; // right end -> 下楼 (toward 99996)
+export const BED_X = 1120; // dorm bed on floor 100000 (sleep to pass the night)

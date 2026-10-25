@@ -10,7 +10,12 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     this.generatePlaceholderTextures();
-    this.scene.start(tryContinue() ? 'Game' : 'Menu');
+    const state = tryContinue();
+    if (!state) {
+      this.scene.start('Menu');
+    } else {
+      this.scene.start(state.status === 'playing' ? 'Game' : 'End');
+    }
   }
 
   private generatePlaceholderTextures(): void {

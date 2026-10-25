@@ -100,8 +100,8 @@ test('inventory panel opens and using a consumable raises a clamped stat', async
   page.on('pageerror', (e) => errors.push(e.message));
 
   await startGame(page, 42);
-  const start = await readState(page);
-  expect(start.player.thirst).toBe(80);
+  const before = await readState(page);
+  const thirstBefore = before.player.thirst;
 
   // Open inventory (I). Slot 0 is the starting 净水 x3.
   await page.keyboard.press('I');
@@ -113,18 +113,19 @@ test('inventory panel opens and using a consumable raises a clamped stat', async
   expect(panelShowsWater).toBe(true);
   await page.screenshot({ path: 'e2e/screenshots/05-inventory.png' });
 
-  // Use the selected consumable (Enter): thirst 80 + 30 -> clamped 100, one consumed.
+  // Use the selected consumable (Enter): restores ~30 thirst, clamped to max.
   await page.keyboard.press('Enter');
   await page.waitForFunction(
-    () => {
+    (t0) => {
       const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
-      return !!s && s.player.thirst === 100;
+      return !!s && s.player.thirst >= t0 + 20;
     },
-    undefined,
+    thirstBefore,
     { timeout: 5000 },
   );
   const after = await readState(page);
-  expect(after.player.thirst).toBe(100); // clamped, not 110
+  expect(after.player.thirst).toBeGreaterThan(thirstBefore); // restored
+  expect(after.player.thirst).toBeLessThanOrEqual(100); // clamped, never overflows
   expect(after.player.inventory.slots.find((x) => x.itemId === 'clean_water')?.quantity ?? 0).toBe(2);
 
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);

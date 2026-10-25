@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { getGame } from '../core/session';
 import {
+  BED_X,
   DOWN_EXIT_X,
   FLOOR_HEIGHT,
   FLOOR_WIDTH,
@@ -8,14 +9,16 @@ import {
   PLAYER_SPEED,
   ROOM_COUNT,
   ROOM_WIDTH,
+  STARTING_FLOOR,
   UP_EXIT_X,
 } from '../core/constants';
 import { currentInteractionZone, hasDownExit, hasUpExit, movePlayerX, tryChangeFloor } from '../systems/FloorSystem';
 import { getFloorView, lootContainer, lootGround } from '../systems/LootSystem';
 import { useConsumable } from '../systems/InventorySystem';
+import { advanceTime, formatClock, sleep } from '../systems/SurvivalSystem';
 import { saveToStorage } from '../systems/SaveSystem';
 import { getItem } from '../data/items';
-import type { GeneratedContainer, GeneratedFloor, StatKey } from '../core/gameTypes';
+import type { GameState, GeneratedContainer, GeneratedFloor, StatKey } from '../core/gameTypes';
 
 const STAT_LABEL: Record<StatKey, string> = { hp: '生命', hunger: '饱食', thirst: '水分', energy: '精力' };
 const INVENTORY_SLOTS = 12;
@@ -37,10 +40,13 @@ export class GameScene extends Phaser.Scene {
   private containerObjs = new Map<string, { box: Phaser.GameObjects.Graphics; label: Phaser.GameObjects.Text }>();
   private groundObjs = new Map<string, Phaser.GameObjects.Rectangle>();
 
+  private clockText!: Phaser.GameObjects.Text;
   private statsText!: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
   private feedbackText!: Phaser.GameObjects.Text;
   private feedbackTimer?: Phaser.Time.TimerEvent;
+  private lastClock = '';
+  private lastStats = '';
 
   private invObjects: Array<Phaser.GameObjects.Text | Phaser.GameObjects.Graphics> = [];
   private invSlotTexts: Phaser.GameObjects.Text[] = [];
@@ -63,11 +69,12 @@ export class GameScene extends Phaser.Scene {
     this.drawExits(floor);
     this.buildContainers();
     this.buildGround();
+    if (floor === STARTING_FLOOR) this.drawBed();
 
     this.player = this.add.sprite(state.player.x, FLOOR_HEIGHT - 40, 'player').setOrigin(0.5, 1);
     this.cameras.main.startFollow(this.player, true, 0.15, 0.15);
 
-    this.buildHud(floor);
+    this.buildHud();
     this.buildInventoryPanel();
     this.bindInput();
 
@@ -143,11 +150,22 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private drawBed(): void {
+    const y = FLOOR_HEIGHT - 64;
+    const g = this.add.graphics();
+    g.fillStyle(0x6a4a3a, 1);
+    g.fillRect(BED_X - 20, y - 12, 40, 28);
+    g.fillStyle(0xece8d8, 1);
+    g.fillRect(BED_X - 16, y - 10, 14, 10);
+    this.add.text(BED_X, y - 24, '床（睡觉）', { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
+  }
+
   // ── HUD & inventory UI ─────────────────────────────────────────────────
-  private buildHud(floor: number): void {
-    this.add
-      .text(12, 12, `第 ${floor} 层`, { fontFamily: 'monospace', fontSize: '16px', color: '#ece8d8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 4 } })
+  private buildHud(): void {
+    this.clockText = this.add
+      .text(12, 12, '', { fontFamily: 'monospace', fontSize: '16px', color: '#ece8d8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 4 } })
       .setScrollFactor(0).setDepth(100);
+    this.refreshClock();
 
     this.statsText = this.add
       .text(12, 38, '', { fontFamily: 'monospace', fontSize: '12px', color: '#ece8d8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
@@ -163,9 +181,22 @@ export class GameScene extends Phaser.Scene {
       .setScrollFactor(0).setDepth(100);
   }
 
+  private refreshClock(): void {
+    const s = getGame();
+    const label = `第 ${s.day} 天 ${formatClock(s.gameMinuteOfDay)} · ${s.currentFloor} 层`;
+    if (label !== this.lastClock) {
+      this.lastClock = label;
+      this.clockText.setText(label);
+    }
+  }
+
   private refreshStats(): void {
     const p = getGame().player;
-    this.statsText.setText(`HP ${p.hp} · 饥 ${p.hunger} · 渴 ${p.thirst} · 精 ${p.energy}`);
+    const label = `HP ${Math.round(p.hp)} · 饥 ${Math.round(p.hunger)} · 渴 ${Math.round(p.thirst)} · 精 ${Math.round(p.energy)}`;
+    if (label !== this.lastStats) {
+      this.lastStats = label;
+      this.statsText.setText(label);
+    }
   }
 
   private buildInventoryPanel(): void {
@@ -298,6 +329,10 @@ export class GameScene extends Phaser.Scene {
   private onInteract(): void {
     if (this.inventoryOpen) return;
     const state = getGame();
+    if (this.nearBed(state)) {
+      this.attemptSleep();
+      return;
+    }
     const container = this.nearestContainer();
     if (container) {
       this.openContainer(container.id);
@@ -306,6 +341,22 @@ export class GameScene extends Phaser.Scene {
     const zone = currentInteractionZone(state);
     if (zone === 'up') this.changeFloor(1);
     else if (zone === 'down') this.changeFloor(-1);
+  }
+
+  private nearBed(state: GameState): boolean {
+    return state.currentFloor === STARTING_FLOOR && Math.abs(state.player.x - BED_X) <= INTERACT_DISTANCE;
+  }
+
+  private attemptSleep(): void {
+    const state = getGame();
+    const result = sleep(state);
+    if (!result.ok) {
+      this.flash(result.reason);
+      return;
+    }
+    saveToStorage(state);
+    if (result.won) this.scene.start('End');
+    else this.scene.restart();
   }
 
   private nearestContainer(): GeneratedContainer | null {
@@ -370,18 +421,30 @@ export class GameScene extends Phaser.Scene {
   override update(_time: number, delta: number): void {
     if (this.inventoryOpen) return;
     const state = getGame();
-    const dt = delta / 1000;
 
     let dir = 0;
     if (this.cursors?.left.isDown || this.wasd?.left.isDown) dir -= 1;
     if (this.cursors?.right.isDown || this.wasd?.right.isDown) dir += 1;
     if (dir !== 0) {
-      movePlayerX(state, dir * PLAYER_SPEED * dt);
+      movePlayerX(state, dir * PLAYER_SPEED * (delta / 1000));
       this.player.x = state.player.x;
+    }
+
+    const tick = advanceTime(state, delta);
+    this.refreshClock();
+    this.refreshStats();
+    if (tick.died || tick.won) {
+      saveToStorage(state);
+      this.scene.start('End');
+      return;
     }
 
     this.autoPickup();
 
+    if (this.nearBed(state)) {
+      this.hintText.setText('按 E 睡觉');
+      return;
+    }
     const container = this.nearestContainer();
     const zone = currentInteractionZone(state);
     if (container) this.hintText.setText(`按 E 打开 ${container.label}`);

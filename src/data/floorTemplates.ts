@@ -84,7 +84,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         label: '铁箱',
         x: 800,
         loot: [
-          { itemId: 'scrap_metal', min: 1, max: 3, probability: 0.8 },
+          { itemId: 'scrap_metal', min: 2, max: 2, probability: 1, guaranteed: true },
           { itemId: 'battery', min: 1, max: 2, probability: 0.6 },
         ],
       },
@@ -97,16 +97,23 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
   99997: {
     floorNumber: 99997,
     name: '维修层',
-    description: '漆黑区域，稳定可找到的保险丝',
+    description: '漆黑区域，稳定可找到的保险丝、滤芯与储水',
     containers: [
       {
         id: 'fuse_box',
         label: '电箱',
-        x: 800,
+        x: 640,
         loot: [
           { itemId: 'fuse', min: 1, max: 1, probability: 1, guaranteed: true },
-          { itemId: 'wire', min: 1, max: 2, probability: 0.7 },
+          { itemId: 'filter', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'wire', min: 1, max: 1, probability: 1, guaranteed: true },
         ],
+      },
+      {
+        id: 'water_tank',
+        label: '储水罐',
+        x: 240,
+        loot: [{ itemId: 'dirty_water', min: 4, max: 4, probability: 1, guaranteed: true }],
       },
     ],
     ground: [],
@@ -121,15 +128,15 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         label: '餐台',
         x: 480,
         loot: [
-          { itemId: 'ration_pack', min: 1, max: 2, probability: 0.7 },
-          { itemId: 'dirty_water', min: 1, max: 2, probability: 0.6 },
+          { itemId: 'ration_pack', min: 3, max: 3, probability: 1, guaranteed: true },
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
         ],
       },
       {
         id: 'pantry',
         label: '补给架',
         x: 1120,
-        loot: [{ itemId: 'bread', min: 1, max: 3, probability: 0.6 }],
+        loot: [{ itemId: 'bread', min: 4, max: 4, probability: 1, guaranteed: true }],
       },
     ],
     ground: [{ itemId: 'bread', quantity: 1, x: 160 }],

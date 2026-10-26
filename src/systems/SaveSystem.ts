@@ -1,5 +1,6 @@
 import { PLAYABLE_FLOORS_V01, SAVE_KEY, SCHEMA_VERSION } from '../core/constants';
 import { getItem, isItemId } from '../data/items';
+import { STAT_MAX } from './InventorySystem';
 import type { ActiveEvent, FloorVisit, GameState } from '../core/gameTypes';
 
 // Save protocol (docs/02_TECH_SPEC.md §6). Deserialization never throws: a bad
@@ -85,7 +86,12 @@ export function validateGameState(data: unknown): string[] {
     if (typeof player.x !== 'number' || !Number.isFinite(player.x)) errors.push('player.x 无效');
     for (const key of ['hp', 'hunger', 'thirst', 'energy'] as const) {
       const v = player[key];
-      if (typeof v !== 'number' || Number.isNaN(v) || v < 0 || v > 100) errors.push(`player.${key} 超出范围`);
+      // Ceilings come from the balance config, not a hardcoded 100 — otherwise
+      // tuning hpMax would make the validator reject legitimately-saved runs
+      // (GHI-03 m3).
+      if (typeof v !== 'number' || Number.isNaN(v) || v < 0 || v > STAT_MAX[key]) {
+        errors.push(`player.${key} 超出范围`);
+      }
     }
     if (player.equipped !== null && (typeof player.equipped !== 'string' || !isItemId(player.equipped))) {
       errors.push('player.equipped 无效');
@@ -142,8 +148,16 @@ export function deserialize(json: string): SaveResult {
 
 // LocalStorage persistence. A missing key is a normal "no save yet", not a
 // corrupt save; a present-but-invalid payload returns the graceful error.
-export function saveToStorage(state: GameState, storage: Storage = localStorage): void {
-  storage.setItem(SAVE_KEY, serialize(state));
+// Best-effort on write: a rejected setItem (quota, private mode) must not break
+// the caller — the M3 autosave runs from update(), where a throw would kill the
+// frame loop (GHI-03 m5).
+export function saveToStorage(state: GameState, storage: Storage = localStorage): boolean {
+  try {
+    storage.setItem(SAVE_KEY, serialize(state));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function loadFromStorage(storage: Storage = localStorage): SaveResult {

@@ -12,11 +12,6 @@ export function startNewGame(seed: number): GameState {
   return current;
 }
 
-export function loadState(state: GameState): GameState {
-  current = state;
-  return current;
-}
-
 export type ContinueResult = { ok: true; state: GameState } | { ok: false; error: string };
 
 // Loads a saved run if one exists and is valid. Reports *why* it could not be

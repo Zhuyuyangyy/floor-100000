@@ -1,3 +1,5 @@
+import { GAME_CONFIG } from './config';
+
 // Save protocol constants (docs/02_TECH_SPEC.md §6).
 // v2: GHI-03 M1/M2 changed the loot key format and the seed derivation, so a v1
 // save's "already looted" markers match nothing — accepting it would silently
@@ -7,9 +9,10 @@
 export const SCHEMA_VERSION = 2;
 export const SAVE_KEY = 'floor100000.save.v1';
 
-// Floors playable in v0.1 (config/game-balance.json world.playableFloorsV01).
-export const STARTING_FLOOR = 100000;
-export const PLAYABLE_FLOORS_V01: readonly number[] = [100000, 99999, 99998, 99997, 99996];
+// Derived from config/game-balance.json rather than hand-copied, so editing the
+// JSON cannot leave the code on a stale floor list (GHI-03 m7).
+export const STARTING_FLOOR = GAME_CONFIG.player.startingFloor;
+export const PLAYABLE_FLOORS_V01: readonly number[] = GAME_CONFIG.world.playableFloorsV01;
 
 // A game day runs 06:00 -> next 06:00. 360 = 06:00, 1200 = 20:00.
 export const MINUTES_PER_DAY = 1440;

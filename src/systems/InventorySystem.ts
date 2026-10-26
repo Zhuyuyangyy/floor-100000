@@ -79,7 +79,7 @@ export function removeItem(inv: Inventory, itemId: ItemId, quantity = 1): number
   return quantity - remaining;
 }
 
-const STAT_MAX: Record<StatKey, number> = {
+export const STAT_MAX: Record<StatKey, number> = {
   hp: GAME_CONFIG.player.hpMax,
   hunger: GAME_CONFIG.player.hungerMax,
   thirst: GAME_CONFIG.player.thirstMax,

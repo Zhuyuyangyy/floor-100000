@@ -15,7 +15,7 @@ import type { GameState } from '../core/gameTypes';
 
 export type FloorChangeResult =
   | { ok: true; from: number; to: number }
-  | { ok: false; reason: 'top' | 'bottom' | 'not-adjacent' };
+  | { ok: false; reason: 'top' | 'bottom' };
 
 export function hasUpExit(floor: number): boolean {
   return PLAYABLE_FLOORS_V01.includes(floor + 1);
@@ -31,14 +31,13 @@ export function floorName(floor: number): string {
 
 // Applies a floor change to state on success (moving the player to the entry
 // point). Returns a typed failure instead of throwing for out-of-range moves.
+// `direction` is ±1, so the target is always adjacent — the range check below is
+// the only way this can fail.
 export function tryChangeFloor(state: GameState, direction: 1 | -1): FloorChangeResult {
   const from = state.currentFloor;
   const to = from + direction;
   if (!PLAYABLE_FLOORS_V01.includes(to)) {
     return { ok: false, reason: direction === 1 ? 'top' : 'bottom' };
-  }
-  if (Math.abs(to - from) !== 1) {
-    return { ok: false, reason: 'not-adjacent' };
   }
   state.currentFloor = to;
   state.player.x = ENTRY_X;

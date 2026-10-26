@@ -1,5 +1,4 @@
 import { containerItemKey, generateFloor } from '../data/floorTemplates';
-import { INTERACT_DISTANCE } from '../core/constants';
 import { addItem, removeItem } from './InventorySystem';
 import type { GameState, GeneratedFloor, InventoryStack } from '../core/gameTypes';
 
@@ -93,20 +92,4 @@ export function lootGround(
   }
   visit.lootedItems.push(key);
   return { took: { itemId: ground.itemId, quantity: ground.quantity }, full: false };
-}
-
-// Nearest not-yet-emptied container within interaction range, if any.
-export function nearestContainerId(state: GameState, floor: number, playerX: number): string | null {
-  const view = getFloorView(state, floor);
-  let best: string | null = null;
-  let bestDist = INTERACT_DISTANCE;
-  for (const c of view.containers) {
-    if (c.items.length === 0) continue;
-    const dist = Math.abs(c.x - playerX);
-    if (dist <= bestDist) {
-      bestDist = dist;
-      best = c.id;
-    }
-  }
-  return best;
 }

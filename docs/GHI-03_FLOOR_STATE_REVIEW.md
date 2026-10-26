@@ -12,25 +12,25 @@
 
 | # | 严重度 | 位置 | 问题 |
 |---|---|---|---|
-| C1 | CRITICAL | `SaveSystem.ts:30-67` | 存档可不校验 `visitedFloors`/`worldEvents`/`player.x`，通过校验后白屏 |
-| C2 | CRITICAL | `SaveSystem.ts:43` | `currentFloor` 不限定可玩范围，坏档直接抛错白屏 |
+| C1 | CRITICAL **已修** | `SaveSystem.ts:30-67` | 存档可不校验 `visitedFloors`/`worldEvents`/`player.x`，通过校验后白屏 |
+| C2 | CRITICAL **已修** | `SaveSystem.ts:43` | `currentFloor` 不限定可玩范围，坏档直接抛错白屏 |
 | M1 | MAJOR **已修** | `floorTemplates.ts:182`、`LootSystem.ts:19` | loot 键是索引型，改模板即静默破坏既有存档 |
 | M2 | MAJOR **已修** | `floorTemplates.ts:152` | loot 数据版本未进 seed 派生，同 seed 世界静默改变 |
 | M3 | MAJOR **已修** | `GameScene.ts:912-971` | 时钟与属性衰减从不落盘，可回退刷消耗 |
-| M4 | MAJOR | `MenuScene.ts:94-96` | 坏档静默无提示，违反「坏档提示用户」门槛 |
+| M4 | MAJOR **已修** | `MenuScene.ts:94-96` | 坏档静默无提示，违反「坏档提示用户」门槛 |
 | M5 | MAJOR **已修** | `GameScene.ts:882`、`LootSystem.ts:78-94` | leak 事件与地面物资视图不同步 |
-| m1 | minor | `FloorSystem.ts:40-42` | `not-adjacent` 分支不可达（死代码） |
-| m2 | minor | `floorTemplates.ts:156` | guaranteed spec 静默忽略 `max` |
-| m3 | minor | `SaveSystem.ts:52` | 属性上限 0..100 硬编码，与 config 耦合 |
-| m4 | minor | `gameState.ts` / `FloorSystem.ts:49-53` | `player.x` 缺失 → `NaN` 且永不恢复 |
-| m5 | minor | `SaveSystem.ts:85` | `saveToStorage` 无配额保护 |
-| m6 | minor | `LootSystem.ts:97` | `nearestContainerId` 是死代码 |
-| m7 | minor | `constants.ts:7` | 可玩楼层列表三处重复（JSON / constants / FLOOR_TEMPLATES） |
-| m8 | minor | `config.ts:46` | `GAME_CONFIG` 是无校验强转，`schemaVersion` 从未检查 |
-| n1 | nit | `LootSystem.ts:33` | 容器 key 内联拼接与 helper 重复 |
-| n2 | nit | `GameScene.ts:837` | `attemptSleep` 不刷新 `floorView`（v0.1 不可达） |
-| n3 | nit | `gameTypes.ts:60,88` | `equipped` / `npcStates` 零消费方、零校验 |
-| m9 | minor | `MenuScene.ts:53-55` 等 | 突发键盘投递不可靠：会丢键，也会把一次 ↓ 重复投递（详见 §5） |
+| m1 | minor **已清理** | `FloorSystem.ts:40-42` | `not-adjacent` 分支不可达（死代码） |
+| m2 | minor **已清理** | `floorTemplates.ts:156` | guaranteed spec 静默忽略 `max` |
+| m3 | minor **已清理** | `SaveSystem.ts:52` | 属性上限 0..100 硬编码，与 config 耦合 |
+| m4 | minor **已由 C1 解决** | `gameState.ts` / `FloorSystem.ts:49-53` | `player.x` 缺失 → `NaN` 且永不恢复 |
+| m5 | minor **已清理** | `SaveSystem.ts:85` | `saveToStorage` 无配额保护 |
+| m6 | minor **已清理** | `LootSystem.ts:97` | `nearestContainerId` 是死代码 |
+| m7 | minor **已清理** | `constants.ts:7` | 可玩楼层列表三处重复（JSON / constants / FLOOR_TEMPLATES） |
+| m8 | minor **已清理** | `config.ts:46` | `GAME_CONFIG` 是无校验强转，`schemaVersion` 从未检查 |
+| n1 | nit **已由 63ee148 解决** | `LootSystem.ts:33` | 容器 key 内联拼接与 helper 重复 |
+| n2 | nit **已由 M5 解决** | `GameScene.ts:837` | `attemptSleep` 不刷新 `floorView`（v0.1 不可达） |
+| n3 | nit **已记录** | `gameTypes.ts:60,88` | `equipped` / `npcStates` 零消费方、零校验 |
+| m9 | minor **未修** | `MenuScene.ts:53-55` 等 | 突发键盘投递不可靠：会丢键，也会把一次 ↓ 重复投递（详见 §5） |
 
 **合规通过项**（同为审查结论）：`src/` 无 `Math.random()`；`Date.now()` 仅 3 处新 run 取种子且可被 `?seed=` 覆盖；seed key 与 spec §3 要求的 `worldSeed + floorNumber + containerId` 一致；`MAX_FRAME_MS = 250` 的单帧钳制存在**且被测到**（`survivalSystem.test.ts:40`）；交易原子性成立；`visitedFloors` 有界（只被 loot 路径懒创建，最多 5 层）。
 
@@ -222,7 +222,7 @@ tuned:    crate_wood:tape      ← 同 seed 世界静默改变
 
 测试状态（全部实跑）：`npm run typecheck` 无错误；`npm test` **117 passed**（98 → 117）；`npx playwright test` **25 passed**。
 
-**仍未修**：m1–m8、n1–n3、§5 的键盘突发投递。
+**仍未修**：m9（§5 的键盘突发投递）。另注意：`constants.ts` 里的 `DAY_START_MINUTE` / `NIGHT_RISK_START_MINUTE` 与 config 的 `time.*` 仍是手抄副本（与 m7 同类，但原清单未列，本次未动）。
 
 > 本轮实测中另发现一处**既有的**输入问题并记入 §5：背靠背派发按键时一次 ↓ 会被重复投递（6/6 复现，stash 掉本轮改动后在 `1be6afa` 上同样复现）。为此新增的坏档 e2e 每键之间须间隔 ≥120ms。
 
@@ -275,3 +275,26 @@ tuned:    crate_wood:tape      ← 同 seed 世界静默改变
 - `containerLootSeed` 折叠了版本（`≠ deriveSeed(42, ...)`）且对同输入稳定。
 
 回归：`npm run typecheck` 无错误；`npm test` **136 passed**（124→136）；`npx playwright test` **27 passed**。
+
+### 8.4 追加清理：m1–m8 / n1–n3
+
+2026-10-26 当日完成。**其中 3 项已被此前的修复顺带解决，未再改代码**：m4（`player.x` 缺失致 NaN —— C1 加了有限数校验后不可达）、n1（容器 key 重复 —— 63ee148 统一走 `containerItemKey`）、n2（`attemptSleep` 不刷新 view —— M5 的事件变化重算已覆盖，睡觉清空 `activeEvent` 后下一帧即刷新）。
+
+**先红后绿的 3 项：**
+- **m2** `resolveLoot` 对 `min !== max` 的 guaranteed 条目改为**抛错**而非静默取 `min`。没有改成 `rng.nextInt(min, max)`：那会消耗 RNG 并打乱同一容器后续所有 roll，等于又一次静默换世界（要配 `LOOT_DATA_VERSION` bump）。同时加了一条测试钉住「所有已发布的 guaranteed 条目都是单值」。
+- **m5** `saveToStorage` 改为返回 `boolean` 且**不再抛**。这条因 M3 而变重要：自动存档现在每 ~1.7 秒从 `update()` 跑一次，`setItem` 抛异常会直接打死帧循环。实测过：配额拒绝时旧代码抛 `QuotaExceededError`。
+- **m8** 新增导出的 `assertGameBalanceConfig(raw)`，`GAME_CONFIG` 改由它校验后产出。校验对象形态、`schemaVersion`、21 个游戏直接读取的数字字段（缺父块也能报出路径）、`playableFloorsV01` 非空整数数组、`startingItems` 是数组。原先的 `as unknown as` 强转会让 JSON 拼错变成 `createNewGame()` 里深处的 `undefined`。
+
+**无行为变化、靠既有测试护航的删除/收敛（这几项无法驱动变红，因为今天的行为本就正确）：**
+- **m1** 删除 `tryChangeFloor` 里不可达的 `not-adjacent` 分支及 `FloorChangeResult` 的对应成员（`direction` 恒为 ±1，目标必然相邻）。`floorSystem.test.ts:37-48` 已覆盖顶/底层边界。
+- **m6** 删除 `nearestContainerId`（全仓库零调用方，GameScene 有自己的 `nearestContainer()`），连带删掉随之无用的 `INTERACT_DISTANCE` import。
+- **m3** 属性上限从硬编码 `100` 改为读 `STAT_MAX`（从 `InventorySystem` 导出复用，消除第二份 config 派生映射）。已加参数化测试：每个属性在 config 上限处被接受、超 1 被拒。
+- **m7** `PLAYABLE_FLOORS_V01` 与 `STARTING_FLOOR` 改为从 `GAME_CONFIG` 派生，删掉手抄副本。
+- **n3** `equipped` / `npcStates` **保留**（spec §4 的数据模型列了它们，属 v0.2 预留），但在 `gameTypes.ts` 加注释标明「无 v0.1 消费方」，避免读者误以为是活状态。
+
+**额外发现（不在原清单）**：`session.loadState()` 全仓库零调用方（`tryContinue` 直接赋值 `current`），已删除。
+
+**仍未修**：m9（§5 的键盘突发投递）。
+
+回归：`npm run typecheck` 无错误；`npm test` **152 passed**（139→152）；`npx playwright test` **28 passed**；`npm run build` 通过（1,430.20 kB / gzip 375.94 kB）。
+> 抖动记录：清理后第一轮全量 e2e 有 3 条失败（blackout / wanderer / 换楼层），针对性重跑与随后两轮全量均 28/28 通过，判定为并行 worker 高负载下的偶发（与 §5 的突发投递同源），非本次改动引入。

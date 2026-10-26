@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { SCHEMA_VERSION } from '../core/constants';
-import { deserialize, serialize, validateGameState } from '../systems/SaveSystem';
+import { GAME_CONFIG } from '../core/config';
+import { deserialize, saveToStorage, serialize, validateGameState } from '../systems/SaveSystem';
 import { getFloorView } from '../systems/LootSystem';
 import { tryContinue } from '../core/session';
 import type { GameState } from '../core/gameTypes';
@@ -222,6 +223,61 @@ describe('saves from before the loot-key migration (GHI-03 M1/M2)', () => {
   it('accepts a save at the current version', () => {
     expect(validateGameState(completeSave())).toEqual([]);
     expect(deserialize(serialize(completeSave() as unknown as GameState)).ok).toBe(true);
+  });
+});
+
+// GHI-03 m3: the stat range was a hardcoded 0..100 while the real ceilings come
+// from config/game-balance.json, so tuning hpMax would have made the validator
+// reject legitimately-saved runs.
+describe('stat bounds follow the balance config (GHI-03 m3)', () => {
+  it('accepts each stat at its configured maximum and rejects one above it', () => {
+    const s = completeSave();
+    const p = s.player as Record<string, unknown>;
+    const maxima: Array<[string, number]> = [
+      ['hp', GAME_CONFIG.player.hpMax],
+      ['hunger', GAME_CONFIG.player.hungerMax],
+      ['thirst', GAME_CONFIG.player.thirstMax],
+      ['energy', GAME_CONFIG.player.energyMax],
+    ];
+    for (const [key, max] of maxima) {
+      p[key] = max;
+      expect(validateGameState(s), `${key} at max`).toEqual([]);
+      p[key] = max + 1;
+      expect(validateGameState(s).some((e) => e.includes(`player.${key}`)), `${key} above max`).toBe(true);
+      p[key] = max;
+    }
+  });
+});
+
+// GHI-03 m5: the autosave added for M3 runs from update(), so a throwing
+// setItem (quota, private mode) would break the frame loop instead of just
+// failing to persist.
+describe('saveToStorage never throws (GHI-03 m5)', () => {
+  function fakeStorage(fail: boolean): Storage {
+    let stored: string | null = null;
+    return {
+      length: stored === null ? 0 : 1,
+      clear: () => {
+        stored = null;
+      },
+      getItem: () => stored,
+      key: () => null,
+      removeItem: () => {
+        stored = null;
+      },
+      setItem: (_k: string, v: string) => {
+        if (fail) throw new Error('QuotaExceededError');
+        stored = v;
+      },
+    };
+  }
+
+  it('reports failure instead of throwing when the write is rejected', () => {
+    expect(saveToStorage(createNewGame(1), fakeStorage(true))).toBe(false);
+  });
+
+  it('reports success when the write lands', () => {
+    expect(saveToStorage(createNewGame(1), fakeStorage(false))).toBe(true);
   });
 });
 

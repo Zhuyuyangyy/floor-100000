@@ -57,6 +57,8 @@ export interface PlayerState {
   thirst: number;
   energy: number;
   inventory: Inventory;
+  // Reserved by docs/02_TECH_SPEC.md §4 for v0.2 equipment; no v0.1 system reads
+  // or writes it beyond the initial null (GHI-03 n3).
   equipped: ItemId | null;
   homeUpgrades: string[];
 }
@@ -85,6 +87,8 @@ export interface GameState {
   gameMinuteOfDay: number;
   currentFloor: number;
   player: PlayerState;
+  // Reserved by docs/02_TECH_SPEC.md §4 for v0.2 NPC state; no v0.1 system reads
+  // or writes it beyond the initial empty map (GHI-03 n3).
   npcStates: Record<string, string>;
   visitedFloors: Record<number, FloorVisit>;
   worldEvents: { history: string[]; activeEvent: ActiveEvent | null };

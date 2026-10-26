@@ -95,6 +95,35 @@ describe('loot keys identify the item, not its position (GHI-03 M1)', () => {
   });
 });
 
+// GHI-03 m2: a guaranteed entry silently ignored its `max`, so
+// {min:1, max:3, guaranteed:true} handed out 1 with no warning. Rolling the
+// range would consume RNG and reshuffle every later roll in the container, so
+// the range is rejected instead.
+describe('guaranteed loot entries (GHI-03 m2)', () => {
+  it('every shipped guaranteed entry is a single value', () => {
+    for (const t of Object.values(FLOOR_TEMPLATES)) {
+      for (const c of t.containers) {
+        for (const l of c.loot) {
+          if (l.guaranteed) expect(l.min, `floor ${t.floorNumber}/${c.id}/${l.itemId}`).toBe(l.max);
+        }
+      }
+    }
+  });
+
+  it('rejects a guaranteed entry whose range is not a single value', () => {
+    const original = FLOOR_TEMPLATES[100000].containers;
+    FLOOR_TEMPLATES[100000].containers = original.map((c) => ({
+      ...c,
+      loot: c.loot.map((l) => (l.guaranteed ? { ...l, min: 1, max: 3 } : l)),
+    }));
+    try {
+      expect(() => generateFloor(42, 100000)).toThrow(/min === max/);
+    } finally {
+      FLOOR_TEMPLATES[100000].containers = original;
+    }
+  });
+});
+
 // GHI-03 M2: the world identity is (LOOT_DATA_VERSION, runSeed), not runSeed
 // alone — otherwise tuning a table silently reshuffles an existing world.
 describe('the loot data version folds into every derived seed (GHI-03 M2)', () => {

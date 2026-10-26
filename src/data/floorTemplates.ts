@@ -171,6 +171,12 @@ function resolveLoot(
   const out: InventoryStack[] = [];
   for (const spec of specs) {
     if (spec.guaranteed) {
+      // A guaranteed entry pins its quantity. Rolling the range would consume RNG
+      // and reshuffle every later roll in this container, so a range is rejected
+      // rather than silently ignored (GHI-03 m2).
+      if (spec.min !== spec.max) {
+        throw new Error(`guaranteed loot ${spec.itemId} must have min === max (got ${spec.min}..${spec.max})`);
+      }
       out.push({ itemId: spec.itemId, quantity: spec.min });
       continue;
     }

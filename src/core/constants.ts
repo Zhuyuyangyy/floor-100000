@@ -1,5 +1,10 @@
 // Save protocol constants (docs/02_TECH_SPEC.md §6).
-export const SCHEMA_VERSION = 1;
+// v2: GHI-03 M1/M2 changed the loot key format and the seed derivation, so a v1
+// save's "already looted" markers match nothing — accepting it would silently
+// respawn loot and roll fresh container contents. SAVE_KEY deliberately stays
+// put: a stable slot means an old save is still found and listed in the menu,
+// then refused with a readable reason instead of being silently orphaned.
+export const SCHEMA_VERSION = 2;
 export const SAVE_KEY = 'floor100000.save.v1';
 
 // Floors playable in v0.1 (config/game-balance.json world.playableFloorsV01).

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { addToInventory, createInventory, createNewGame } from '../core/gameState';
+import { SCHEMA_VERSION } from '../core/constants';
 import { GAME_CONFIG } from '../core/config';
 
 describe('createNewGame', () => {
@@ -9,7 +10,7 @@ describe('createNewGame', () => {
     expect(s.day).toBe(1);
     expect(s.gameMinuteOfDay).toBe(GAME_CONFIG.time.dayStartMinute);
     expect(s.status).toBe('playing');
-    expect(s.schemaVersion).toBe(1);
+    expect(s.schemaVersion).toBe(SCHEMA_VERSION);
     expect(s.runSeed).toBe(42);
   });
 

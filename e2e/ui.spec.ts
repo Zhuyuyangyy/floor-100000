@@ -128,6 +128,59 @@ test('a corrupt save is reported instead of silently doing nothing', async ({ pa
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
 
+// GHI-03 M1/M2: a save written before the loot-key migration would pass
+// validation and then silently mismatch (looted items respawn), so
+// SCHEMA_VERSION was bumped. It must now be refused with a readable reason,
+// keeping the new-game entry — not a white screen and not a silent no-op.
+test('a save from before the loot-key migration is refused with a reason', async ({ page }) => {
+  await page.addInitScript(() => {
+    // What 63ee148 and earlier wrote: schemaVersion 1 plus index-style loot keys.
+    localStorage.setItem(
+      'floor100000.save.v1',
+      JSON.stringify({
+        schemaVersion: 1,
+        runSeed: 42,
+        day: 2,
+        gameMinuteOfDay: 500,
+        currentFloor: 99998,
+        status: 'playing',
+        player: {
+          x: 640,
+          hp: 90,
+          hunger: 70,
+          thirst: 65,
+          energy: 80,
+          equipped: null,
+          homeUpgrades: [],
+          inventory: { slotCount: 12, slots: [{ itemId: 'battery', quantity: 1 }] },
+        },
+        npcStates: {},
+        visitedFloors: {
+          99998: { openedContainers: ['crate_wood'], lootedItems: ['g:0', 'c:crate_wood:0'], unlockedDoors: [], localEvents: [] },
+        },
+        worldEvents: { history: [], activeEvent: null },
+      }),
+    );
+  });
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  await page.goto('/?seed=42');
+  await waitForScene(page, 'Menu');
+  expect(await hasVisibleText(page, '继续游戏')).toBe(true); // still listed
+
+  await page.keyboard.press('ArrowDown'); // -> 继续游戏
+  await page.waitForTimeout(120);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+
+  expect(await hasVisibleText(page, '存档损坏')).toBe(true);
+  // Still a usable title screen: the new-game entry survives, no white screen.
+  await waitForScene(page, 'Menu');
+  expect(await hasVisibleText(page, '开始新游戏')).toBe(true);
+  expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+});
+
 test('the inventory shows an item tooltip', async ({ page }) => {
   await startGame(page, 42);
   await page.keyboard.press('I');

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
+import { SCHEMA_VERSION } from '../core/constants';
 import { deserialize, serialize, validateGameState } from '../systems/SaveSystem';
 import { getFloorView } from '../systems/LootSystem';
 import { tryContinue } from '../core/session';
@@ -10,7 +11,7 @@ import type { GameState } from '../core/gameTypes';
 // than only the handful of fields it happened to look at (GHI-03 C1).
 function completeSave(): Record<string, unknown> {
   return {
-    schemaVersion: 1,
+    schemaVersion: SCHEMA_VERSION,
     runSeed: 42,
     day: 1,
     gameMinuteOfDay: 360,
@@ -182,6 +183,48 @@ describe('an accepted save is consumable by the floor system', () => {
 
 // GHI-03 M4: a corrupt save must report why, so the menu can tell the user
 // instead of silently doing nothing.
+// GHI-03 M1/M2 changed both the loot key format and the seed derivation, so a
+// save written before 63ee148 would pass validation and then silently mismatch:
+// its index-style looted keys match nothing, looted items respawn and containers
+// roll fresh contents. SCHEMA_VERSION was bumped so those saves are refused with
+// a readable reason instead.
+describe('saves from before the loot-key migration (GHI-03 M1/M2)', () => {
+  function legacySave(): Record<string, unknown> {
+    return {
+      ...completeSave(),
+      schemaVersion: 1,
+      day: 2,
+      currentFloor: 99998,
+      visitedFloors: {
+        99998: {
+          openedContainers: ['crate_wood'],
+          lootedItems: ['g:0', 'c:crate_wood:0'],
+          unlockedDoors: [],
+          localEvents: [],
+        },
+      },
+    };
+  }
+
+  it('rejects a pre-migration save', () => {
+    expect(validateGameState(legacySave()).some((e) => e.includes('不支持的存档版本'))).toBe(true);
+    const r = deserialize(serialize(legacySave() as unknown as GameState));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('存档损坏');
+  });
+
+  it('names the version it needs so the message is actionable', () => {
+    const r = deserialize(serialize(legacySave() as unknown as GameState));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain(`需要 ${SCHEMA_VERSION}`);
+  });
+
+  it('accepts a save at the current version', () => {
+    expect(validateGameState(completeSave())).toEqual([]);
+    expect(deserialize(serialize(completeSave() as unknown as GameState)).ok).toBe(true);
+  });
+});
+
 describe('tryContinue reports why a save is unusable (GHI-03 M4)', () => {
   function fakeStorage(raw: string | null): Storage {
     return {

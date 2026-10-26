@@ -222,7 +222,7 @@ tuned:    crate_wood:tape      ← 同 seed 世界静默改变
 
 测试状态（全部实跑）：`npm run typecheck` 无错误；`npm test` **117 passed**（98 → 117）；`npx playwright test` **25 passed**。
 
-**仍未修**：m1–m8、n1–n3、§5 的键盘突发投递，以及 §8.3 记录的一次性存档迁移后果（是否 bump `SCHEMA_VERSION` 待定）。
+**仍未修**：m1–m8、n1–n3、§5 的键盘突发投递。
 
 > 本轮实测中另发现一处**既有的**输入问题并记入 §5：背靠背派发按键时一次 ↓ 会被重复投递（6/6 复现，stash 掉本轮改动后在 `1be6afa` 上同样复现）。为此新增的坏档 e2e 每键之间须间隔 ≥120ms。
 
@@ -264,7 +264,8 @@ tuned:    crate_wood:tape      ← 同 seed 世界静默改变
 - `LOOT_DATA_VERSION = 1` + `containerLootSeed(worldSeed, floorNumber, containerId)` = `deriveSeed(LOOT_DATA_VERSION, worldSeed, floorNumber, containerId)`，`resolveLoot()` 改走它。世界的身份从此是 `(LOOT_DATA_VERSION, runSeed)` 而非 `runSeed`  alone；调 loot 表时 bump 这个常量，改动会显式出现在 diff 里，而不是静默换掉一个已有世界。
 - 注意这是**手动**版本号，忘了 bump 就退回 M2 的静默状态。若要免维护，可改为对 loot 表做内容哈希（`deriveSeed(hash(JSON.stringify(loot specs)), ...)`），本次未做。
 
-**一次性迁移后果（重要，未处理）**：键格式与 seed 派生同时变了，因此**本次提交之前产生的存档会失效**——旧格式的 `lootedItems` 键（`g:0`、`c:crate_wood:0`）匹配不上新键，已搜刮的物资会重新出现，且容器内容按新种子重滚。项目尚未发布、无真实玩家存档，故按可接受处理。若要干净拒绝而非静默错乱，应把 `SCHEMA_VERSION` 提到 2——坏档会走 C1/M4 修好的提示路径（「存档损坏，无法继续」+ 保留新游戏入口）。**这一条留给你决定。**
+**一次性迁移后果（已处理）**：键格式与 seed 派生同时变了，因此 `63ee148` 之前产生的存档会失效——旧格式的 `lootedItems` 键（`g:0`、`c:crate_wood:0`）匹配不上新键，已搜刮的物资会重新出现，且容器内容按新种子重滚。项目尚未发布、无真实玩家存档，但静默错乱比干净拒绝更难排查，故已把 `SCHEMA_VERSION` 提到 **2**：旧存档现在被 `validateGameState` 拒绝，走 C1/M4 修好的提示路径（「存档损坏：不支持的存档版本 schemaVersion=1（需要 2）」+ 保留新游戏入口）。
+`SAVE_KEY` **故意不变**（规格 §6 固定为 `floor100000.save.v1`）：存储槽保持稳定，旧存档才会被 `hasSave()` 发现并在菜单里列出，然后激活时被拒；换成 `.v2` 会让旧存档被无声孤立，用户连提示都看不到。
 
 测试（`src/tests/floorTemplates.test.ts` + `src/tests/lootSystem.test.ts`，共 12 条新增）：
 - 键构造函数本身；`generateFloor(42, 99996)` 的 ground key 为 `g:bread:160`；往 99996 层 ground 前插一条后键变为 `['g:medkit:200', 'g:bread:160']`（bread 的键不变）。

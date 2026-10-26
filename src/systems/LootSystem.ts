@@ -80,10 +80,13 @@ export function lootGround(
   floor: number,
   key: string,
 ): { took: InventoryStack | null; full: boolean } {
-  const base = generateFloor(state.runSeed, floor);
-  const ground = base.groundItems.find((g) => g.key === key);
+  // Read through the same view the scene renders from, so a leak spoiling this
+  // floor's loose supplies hides them here too — reading the raw layout let a
+  // "受潮" item go straight into the bag (GHI-03 M5).
+  const ground = getFloorView(state, floor).groundItems.find((g) => g.key === key);
+  if (!ground) return { took: null, full: false };
   const visit = ensureVisit(state, floor);
-  if (!ground || visit.lootedItems.includes(key)) return { took: null, full: false };
+  if (visit.lootedItems.includes(key)) return { took: null, full: false };
   const result = addItem(state.player.inventory, ground.itemId, ground.quantity, ground.meta);
   if (result.overflow > 0) {
     removeItem(state.player.inventory, ground.itemId, result.added);

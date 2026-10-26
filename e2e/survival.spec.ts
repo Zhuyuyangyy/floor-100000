@@ -37,6 +37,13 @@ async function readState(page: Page): Promise<State> {
   });
 }
 
+async function countItem(page: Page, itemId: string): Promise<number> {
+  return page.evaluate((id) => {
+    const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { player: { inventory: { slots: Array<{ itemId: string; quantity: number }> } } } | null } }).__PHASER_SESSION__?.getState();
+    return (s?.player.inventory.slots ?? []).filter((x) => x.itemId === id).reduce((n, x) => n + x.quantity, 0);
+  }, itemId);
+}
+
 async function readSave(page: Page): Promise<State | null> {
   return page.evaluate(() => {
     const raw = localStorage.getItem('floor100000.save.v1');
@@ -113,6 +120,58 @@ test('standing still advances the clock and decays survival stats', async ({ pag
   const after = await readState(page);
   expect(after.gameMinuteOfDay).toBeGreaterThan(before.gameMinuteOfDay);
   expect(after.player.thirst).toBeLessThan(before.player.thirst);
+  expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+});
+
+// GHI-03 M5: floorView was only rebuilt on entering a floor / opening a
+// container / a successful pickup, so a leak starting (or clearing) while the
+// player stood there left stale ground rectangles and stale pickability until
+// they left and came back.
+test('a leak spoils the floor\'s ground supplies and they recover when it clears', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  await startGame(page, 42);
+
+  // Descend to 99998, the only floor with loose ground supplies (battery at
+  // x=160). Teleporting to the stairs is enough — the zone check reads
+  // state.player.x directly.
+  for (const target of [99999, 99998]) {
+    await page.evaluate(() => {
+      const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { player: { x: number } } | null } }).__PHASER_SESSION__?.getState();
+      if (s) s.player.x = 1240; // DOWN_EXIT_X
+    });
+    await page.keyboard.press('E');
+    await page.waitForFunction(
+      (t) => {
+        const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { currentFloor: number } | null } }).__PHASER_SESSION__?.getState();
+        return !!s && s.currentFloor === t;
+      },
+      target,
+      { timeout: 10_000 },
+    );
+  }
+
+  const setEvent = (type: 'leak' | null): Promise<void> =>
+    page.evaluate((t) => {
+      const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { currentFloor: number; worldEvents: { activeEvent: unknown } } | null } }).__PHASER_SESSION__?.getState();
+      if (s) s.worldEvents.activeEvent = t === null ? null : { type: t, floor: s.currentFloor, message: '漏水' };
+    }, type);
+
+  // Spoiled: stand on the battery while a leak is active here.
+  await setEvent('leak');
+  await page.evaluate(() => {
+    const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { player: { x: number } } | null } }).__PHASER_SESSION__?.getState();
+    if (s) s.player.x = 160;
+  });
+  await page.waitForTimeout(400);
+  expect(await countItem(page, 'battery'), 'spoiled supply must not be pickable').toBe(0);
+
+  // Recovered: the supplies come back without leaving the floor.
+  await setEvent(null);
+  await page.waitForTimeout(400);
+  expect(await countItem(page, 'battery'), 'supply must return once the leak clears').toBe(1);
+
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
 

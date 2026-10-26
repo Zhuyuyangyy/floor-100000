@@ -28,7 +28,7 @@ import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
 import { trade } from '../systems/TradeSystem';
-import type { GameState, GeneratedContainer, GeneratedFloor, ItemId, StatKey } from '../core/gameTypes';
+import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId, StatKey } from '../core/gameTypes';
 
 const STAT_LABEL: Record<StatKey, string> = { hp: '生命', hunger: '饱食', thirst: '水分', energy: '精力' };
 const INVENTORY_SLOTS = 12;
@@ -101,6 +101,7 @@ export class GameScene extends Phaser.Scene {
   private pauseOptionTexts: Phaser.GameObjects.Text[] = [];
   private pauseSelected = 0;
   private lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
+  private lastActiveEvent: ActiveEvent | null = null;
 
   constructor() {
     super({ key: 'Game' });
@@ -111,6 +112,7 @@ export class GameScene extends Phaser.Scene {
     // autosave cursor here — otherwise 重新开始 inherits the previous run's
     // value and the fresh run's clock looks like it has not moved yet.
     this.lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
+    this.lastActiveEvent = null;
 
     this.cameras.main.setBackgroundColor(0x22303a);
     this.cameras.main.setBounds(0, 0, FLOOR_WIDTH, FLOOR_HEIGHT);
@@ -239,6 +241,17 @@ export class GameScene extends Phaser.Scene {
       this.groundObjs.set(g.key, rect);
       this.floorObjects.push(rect);
     }
+  }
+
+  // Ground rectangles are built once per floor visit, so a view change has to
+  // rebuild them: otherwise a leak leaves unpickable graphics on the floor, and
+  // the supplies stay missing after it clears until the player re-enters.
+  private rebuildGround(): void {
+    const stale: Phaser.GameObjects.GameObject[] = [...this.groundObjs.values()];
+    for (const rect of this.groundObjs.values()) rect.destroy();
+    if (stale.length > 0) this.floorObjects = this.floorObjects.filter((o) => !stale.includes(o));
+    this.groundObjs.clear();
+    this.buildGround();
   }
 
   private drawBed(): void {
@@ -933,6 +946,8 @@ export class GameScene extends Phaser.Scene {
       if (rolled.event.type === 'wanderer') playSfx('danger');
       this.flash(rolled.event.message);
     }
+    // Read after ensureNightEvent so an event rolled this very frame counts.
+    const event = state.worldEvents.activeEvent;
     this.refreshClock();
     this.refreshStats();
     this.applyNightLighting();
@@ -945,6 +960,16 @@ export class GameScene extends Phaser.Scene {
     if (absolute - this.lastSavedAbsoluteMinute >= AUTOSAVE_EVERY_GAME_MINUTES) {
       this.lastSavedAbsoluteMinute = absolute;
       saveToStorage(state);
+    }
+
+    // GHI-03 M5: the night event can start or clear while the player stands on
+    // the floor, but floorView was only rebuilt on entering a floor / opening a
+    // container / a successful pickup — so a leak left stale ground rectangles
+    // and stale pickability behind until the player left and came back.
+    if (event !== this.lastActiveEvent) {
+      this.lastActiveEvent = event;
+      this.floorView = getFloorView(state, state.currentFloor);
+      this.rebuildGround();
     }
 
     if (tick.died || tick.won) {
@@ -974,7 +999,6 @@ export class GameScene extends Phaser.Scene {
       this.hintText.setText('按 E 对话');
       return;
     }
-    const event = state.worldEvents.activeEvent;
     if (event?.type === 'leak' && state.currentFloor === event.floor) {
       this.hintText.setText('此地漏水，地面物资受潮');
       return;

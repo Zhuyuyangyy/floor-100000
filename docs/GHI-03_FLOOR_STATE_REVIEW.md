@@ -18,7 +18,7 @@
 | M2 | MAJOR | `floorTemplates.ts:152` | loot 数据版本未进 seed 派生，同 seed 世界静默改变 |
 | M3 | MAJOR **已修** | `GameScene.ts:912-971` | 时钟与属性衰减从不落盘，可回退刷消耗 |
 | M4 | MAJOR | `MenuScene.ts:94-96` | 坏档静默无提示，违反「坏档提示用户」门槛 |
-| M5 | MAJOR | `GameScene.ts:882`、`LootSystem.ts:78-94` | leak 事件与地面物资视图不同步 |
+| M5 | MAJOR **已修** | `GameScene.ts:882`、`LootSystem.ts:78-94` | leak 事件与地面物资视图不同步 |
 | m1 | minor | `FloorSystem.ts:40-42` | `not-adjacent` 分支不可达（死代码） |
 | m2 | minor | `floorTemplates.ts:156` | guaranteed spec 静默忽略 `max` |
 | m3 | minor | `SaveSystem.ts:52` | 属性上限 0..100 硬编码，与 config 耦合 |
@@ -237,3 +237,16 @@ tuned:    crate_wood:tape      ← 同 seed 世界静默改变
 **为什么是 5 游戏分钟而不是文档原先建议的「每个整分钟」**：时钟是 `gameMinutesPerRealSecond = 3`，按整分钟存等于每秒写 3 次。5 游戏分钟 ≈ 1.7 秒真实时间、约 0.6 次写入/秒，最坏回退量（5 游戏分钟 ≈ 饥饿 -0.5 / 口渴 -0.75）小到无法利用。
 
 **残留（未修）**：巡游体扣血（`GameScene.ts:1004` 附近）发生在两次节流存档之间，若在受伤后立刻关标签页，这 8 点 HP 损失不会落盘。死亡路径本身仍会存档，所以只影响这一种极窄的中间态。
+
+### 8.2 追加修复：M5（leak 与地面物资视图不同步）
+
+2026-10-26 当日按 TDD 完成 §7 建议 3。两处改动，各治一半：
+
+- **`src/systems/LootSystem.ts`** —— `lootGround()` 原先读 `generateFloor()` 的原始布局，绕过了 `getFloorView()` 的 leak 过滤，于是 HUD 写着「地面物资受潮」而物品照样进包。改为**直接读 view**（`getFloorView(state, floor).groundItems`），从根上消掉这份重复的过滤逻辑——以后 view 加任何新规则，拾取自动跟随。
+- **`src/scenes/GameScene.ts`** —— `floorView` 原先只在进层 / 开箱 / 拾取成功时重算，玩家站在原地时事件开始或结束都不会刷新。现在 `update()` 里比对 `worldEvents.activeEvent` 引用，变化时重算 view 并 `rebuildGround()`（销毁旧矩形、从 `floorObjects` 摘掉、按新 view 重建）。这同时修掉两个镜像症状：leak 结束后物资不再「继续消失」，leak 期间开箱也不会留下不可拾取的死图形。`lastActiveEvent` 同样在 `create()` 里重置。
+
+测试：
+- `src/tests/lootSystem.test.ts` —— 3 条：漏水时拒绝拾取、leak 清除后可以拾取、别的楼层漏水不影响本层。
+- `e2e/survival.spec.ts` —— 「a leak spoils the floor's ground supplies and they recover when it clears」：传送到 99998（唯一有地面物资的层），注入 leak → 站在 battery 上捡不到；清除 leak → 不用离开楼层就能捡到。修复前第一条断言即红（battery 被捡走）。
+
+回归：`npm run typecheck` 无错误；`npm test` **124 passed**（121→124）；`npx playwright test` **27 passed**（26→27）。

@@ -43,6 +43,29 @@ describe('lootGround', () => {
     expect(lootGround(s, 99998, 'g:0').took).toBeNull();
     expect(countItem(s.player.inventory, 'battery')).toBe(1);
   });
+
+  // GHI-03 M5: getFloorView() hides a floor's ground supplies while a leak is
+  // active there, but lootGround() read the raw layout and still handed them
+  // over — the HUD said 受潮 while the item went into the bag anyway.
+  it('refuses a ground item spoiled by a leak on this floor', () => {
+    const s = createNewGame(42);
+    s.worldEvents.activeEvent = { type: 'leak', floor: 99998, message: '漏水' };
+    expect(lootGround(s, 99998, 'g:0').took).toBeNull();
+    expect(countItem(s.player.inventory, 'battery')).toBe(0);
+  });
+
+  it('hands the item over once the leak has cleared', () => {
+    const s = createNewGame(42);
+    s.worldEvents.activeEvent = { type: 'leak', floor: 99998, message: '漏水' };
+    s.worldEvents.activeEvent = null;
+    expect(lootGround(s, 99998, 'g:0').took).toEqual({ itemId: 'battery', quantity: 1 });
+  });
+
+  it('is unaffected by a leak on a different floor', () => {
+    const s = createNewGame(42);
+    s.worldEvents.activeEvent = { type: 'leak', floor: 99997, message: '漏水' };
+    expect(lootGround(s, 99998, 'g:0').took).toEqual({ itemId: 'battery', quantity: 1 });
+  });
 });
 
 describe('save round-trip prevents re-loot', () => {

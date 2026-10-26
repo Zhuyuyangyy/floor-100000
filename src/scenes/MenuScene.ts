@@ -33,6 +33,11 @@ export class MenuScene extends Phaser.Scene {
     this.entries.push({ label: '操作说明', run: () => this.toggleHelp() });
     this.selected = 0;
 
+    // Phaser does not re-run field initialisers on scene restart, so clear the
+    // per-create caches — otherwise they accumulate destroyed objects and
+    // refreshOptions() indexes past the end of `entries` (pre-existing bug:
+    // 暂停 -> 返回标题 crashed the title screen).
+    this.optionTexts = [];
     this.entries.forEach((entry, i) => {
       const t = this.add.text(width / 2, 210 + i * 30, entry.label, { fontFamily: 'monospace', fontSize: '18px', color: '#ece8d8' }).setOrigin(0.5);
       this.optionTexts.push(t);

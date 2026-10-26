@@ -68,6 +68,37 @@ test('ESC opens the pause menu and 继续 resumes the game', async ({ page }) =>
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
 
+// Regression: MenuScene's per-create caches are class fields, and Phaser does
+// not re-run field initialisers on scene restart. 返回标题 re-runs create(), so
+// optionTexts must be reset there — otherwise it keeps the previous run's
+// objects and refreshOptions() indexes past the end of `entries`, crashing the
+// title screen.
+test('returning to the title from the pause menu leaves a working title screen', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  await startGame(page, 42);
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  await page.keyboard.press('ArrowDown'); // -> 重新开始
+  await page.keyboard.press('ArrowDown'); // -> 返回标题
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(400); // any crash lands on the next game step
+
+  expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+  await waitForScene(page, 'Menu');
+
+  expect(await hasVisibleText(page, '开始新游戏')).toBe(true);
+
+  // Still keyboard-navigable, which only holds if create() ran to completion.
+  await page.keyboard.press('ArrowDown'); // -> 操作说明
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  expect(await hasVisibleText(page, 'A/D 或 ←/→ 移动')).toBe(true);
+  expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+});
+
 test('the inventory shows an item tooltip', async ({ page }) => {
   await startGame(page, 42);
   await page.keyboard.press('I');

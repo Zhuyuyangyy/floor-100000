@@ -4,6 +4,7 @@ node_modules/
 # build output
 dist/
 release/
+release-installer/
 
 # test / tooling artifacts
 test-results/

@@ -1,0 +1,15 @@
+appId: com.floor100000.game
+productName: Floor100000
+copyright: 第100000层：末日宿舍
+directories:
+  output: release-installer
+files:
+  - dist/**
+  - electron/**
+  - package.json
+win:
+  target: nsis
+  artifactName: ${productName}-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

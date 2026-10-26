@@ -59,6 +59,17 @@ e2e/                 Playwright 浏览器测试与截图
 
 `npm run build` 生成纯静态站点（`dist/`），可部署到任意静态托管。**公开部署需项目负责人另行许可**，不得默认推送到线上服务。
 
+## 桌面版（Electron）
+
+打包成 Windows 可执行版本：
+
+```bash
+npm run build       # 先构建 dist/
+npm run dist:win    # 输出 release/Floor100000-win32-x64/Floor100000.exe
+```
+
+以桌面窗口直接运行（需先 `npm run build`）：`npm run electron`。打包使用本机已缓存的 Electron，无需联网下载。
+
 ## 素材与法务
 
 首版使用程序化生成的像素占位美术与自制提示音，全部原创；未使用任何第三方视频/图片/音乐素材。

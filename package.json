@@ -4,20 +4,26 @@
   "version": "0.1.0",
   "description": "第100000层：末日宿舍 — 2D 横版像素生存游戏（开发规格基线 v0.1）",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "electron": "electron .",
+    "dist:win": "electron-packager . Floor100000 --platform=win32 --arch=x64 --out=release --overwrite --ignore=/node_modules/"
   },
   "dependencies": {
     "phaser": "4.2.1"
   },
   "devDependencies": {
+    "@electron/packager": "^20.3.0",
     "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.5",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"

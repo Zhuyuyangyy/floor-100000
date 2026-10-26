@@ -41,6 +41,20 @@ async function selectedOption(page: Page): Promise<string> {
   });
 }
 
+// Texture keys of every nine-slice frame currently on screen.
+async function panelFrames(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const scenes = (window as unknown as { __PHASER_GAME__?: { scene: { scenes: Array<{ children: { list: Array<{ type: string; texture?: { key?: string } }> } }> } } }).__PHASER_GAME__?.scene.scenes ?? [];
+    const keys: string[] = [];
+    for (const sc of scenes) {
+      for (const o of sc.children.list ?? []) {
+        if (o.type === 'NineSlice' && o.texture?.key) keys.push(o.texture.key);
+      }
+    }
+    return keys;
+  });
+}
+
 test('the title menu is keyboard-navigable and has a help panel', async ({ page }) => {
   await page.goto('/?seed=42');
   await waitForScene(page, 'Menu');
@@ -251,6 +265,22 @@ test('a lone ArrowDown advances the menu by exactly one entry', async ({ page })
   await page.keyboard.press('ArrowDown');
   await page.waitForTimeout(250);
   expect(await selectedOption(page)).toBe('▶ 操作说明');
+});
+
+// GHI-04 trial: panels are framed with the licensed nine-slice texture rather
+// than a Graphics stroke.
+test('the inventory panel is framed with the licensed pixel texture', async ({ page }) => {
+  await startGame(page, 42);
+  await page.keyboard.press('I');
+  await page.waitForTimeout(250);
+  expect((await panelFrames(page)).some((k) => k.startsWith('ui-panel-'))).toBe(true);
+});
+
+test('the pause panel is framed with the licensed pixel texture', async ({ page }) => {
+  await startGame(page, 42);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  expect((await panelFrames(page)).some((k) => k.startsWith('ui-panel-'))).toBe(true);
 });
 
 test('the inventory shows an item tooltip', async ({ page }) => {

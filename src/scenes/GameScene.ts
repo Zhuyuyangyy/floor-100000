@@ -24,6 +24,7 @@ import { absoluteMinute, advanceTime, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, 
 import { ensureNightEvent } from '../systems/EventSystem';
 import { clearSave, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
+import { buildPanel, type PanelObject } from '../render/panels';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
@@ -76,13 +77,13 @@ export class GameScene extends Phaser.Scene {
   private lastClock = '';
   private lastStats = '';
 
-  private invObjects: Array<Phaser.GameObjects.Text | Phaser.GameObjects.Graphics> = [];
+  private invObjects: PanelObject[] = [];
   private invSlotTexts: Phaser.GameObjects.Text[] = [];
   private invSelected = 0;
   private inventoryOpen = false;
 
   private craftingOpen = false;
-  private craftObjects: Array<Phaser.GameObjects.Text | Phaser.GameObjects.Graphics> = [];
+  private craftObjects: PanelObject[] = [];
   private craftEntryTexts: Phaser.GameObjects.Text[] = [];
   private craftSelected = 0;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
@@ -91,13 +92,13 @@ export class GameScene extends Phaser.Scene {
 
   private dialogueOpen = false;
   private dialogue: { npc: NpcId; level: 'main' | 'trade'; selected: number; message: string; lineToggle: number } | null = null;
-  private dialogueObjects: Array<Phaser.GameObjects.Text | Phaser.GameObjects.Graphics> = [];
+  private dialogueObjects: PanelObject[] = [];
   private dialogueTitle!: Phaser.GameObjects.Text;
   private dialogueMessage!: Phaser.GameObjects.Text;
   private dialogueOptions: Phaser.GameObjects.Text[] = [];
 
   private pauseOpen = false;
-  private pauseObjects: Array<Phaser.GameObjects.Text | Phaser.GameObjects.Graphics> = [];
+  private pauseObjects: PanelObject[] = [];
   private pauseOptionTexts: Phaser.GameObjects.Text[] = [];
   private pauseSelected = 0;
   private lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
@@ -323,14 +324,10 @@ export class GameScene extends Phaser.Scene {
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
-    const bg = this.add.graphics();
-    bg.fillStyle(0x0b0f12, 0.96);
-    bg.fillRoundedRect(left, top, panelW, panelH, 8);
-    bg.lineStyle(2, 0x77c6a4, 1);
-    bg.strokeRoundedRect(left, top, panelW, panelH, 8);
+    this.invObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green'));
 
     const title = this.add.text(cx, top + 18, '背包', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
-    this.invObjects.push(bg, title);
+    this.invObjects.push(title);
 
     const startY = top + 44;
     for (let i = 0; i < INVENTORY_SLOTS; i++) {
@@ -423,13 +420,9 @@ export class GameScene extends Phaser.Scene {
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
-    const bg = this.add.graphics();
-    bg.fillStyle(0x0b0f12, 0.96);
-    bg.fillRoundedRect(left, top, panelW, panelH, 8);
-    bg.lineStyle(2, 0xf4b66a, 1);
-    bg.strokeRoundedRect(left, top, panelW, panelH, 8);
+    this.craftObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow'));
     const title = this.add.text(cx, top + 18, '工作台 · 制作', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
-    this.craftObjects.push(bg, title);
+    this.craftObjects.push(title);
 
     for (let i = 0; i < 4; i++) {
       const t = this.add.text(left + 18, top + 48 + i * 24, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' });
@@ -487,17 +480,12 @@ export class GameScene extends Phaser.Scene {
     const panelH = 220;
     const cx = width / 2;
     const cy = height / 2;
-    const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
-    const bg = this.add.graphics();
-    bg.fillStyle(0x0b0f12, 0.96);
-    bg.fillRoundedRect(left, top, panelW, panelH, 8);
-    bg.lineStyle(2, 0xf4b66a, 1);
-    bg.strokeRoundedRect(left, top, panelW, panelH, 8);
+    this.pauseObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow'));
     const title = this.add.text(cx, top + 20, '已暂停', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
     const controls = this.add.text(cx, top + 50, 'A/D 移动 · E 交互 · I 背包 · C 制作', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
-    this.pauseObjects.push(bg, title, controls);
+    this.pauseObjects.push(title, controls);
 
     PAUSE_OPTIONS.forEach((label, i) => {
       const t = this.add.text(cx, top + 92 + i * 28, label, { fontFamily: 'monospace', fontSize: '15px', color: '#ece8d8' }).setOrigin(0.5);
@@ -599,16 +587,12 @@ export class GameScene extends Phaser.Scene {
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
-    const bg = this.add.graphics();
-    bg.fillStyle(0x0b0f12, 0.97);
-    bg.fillRoundedRect(left, top, panelW, panelH, 8);
-    bg.lineStyle(2, 0x77c6a4, 1);
-    bg.strokeRoundedRect(left, top, panelW, panelH, 8);
+    this.dialogueObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green'));
     // Create with placeholder content so each text's canvas/frame exists up front
     // (setText on a never-rendered empty text throws in Phaser 4).
     this.dialogueTitle = this.add.text(cx, top + 20, '对话', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
     this.dialogueMessage = this.add.text(cx, top + 58, '……', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8', align: 'center' }).setOrigin(0.5);
-    this.dialogueObjects.push(bg, this.dialogueTitle, this.dialogueMessage);
+    this.dialogueObjects.push(this.dialogueTitle, this.dialogueMessage);
 
     for (let i = 0; i < 4; i++) {
       const t = this.add.text(left + 20, top + 112 + i * 26, '……', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' });

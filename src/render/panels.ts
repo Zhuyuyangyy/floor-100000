@@ -1,0 +1,38 @@
+import Phaser from 'phaser';
+
+// GHI-04: licensed pixel UI pack (CC0 1.0, Kenney — see THIRD_PARTY_NOTICES.md).
+// A panel is a dark fill plus a crisp pixel nine-slice frame. The fill keeps the
+// art guide's "dark translucent background + high-contrast text" rule; the frame
+// replaces the old Graphics strokeRoundedRect, whose soft anti-aliased corners
+// broke the pixel look.
+const PANEL_FILL = 0x0b0f12;
+const PANEL_FILL_ALPHA = 0.96;
+
+// The frame texture is 48x48 with a ~4px border, so an 8px slice keeps the
+// corners crisp without pulling border pixels into the stretched centre.
+const PANEL_SLICE = 8;
+
+export type PanelAccent = 'green' | 'yellow';
+
+// What a panel's object list holds: text, the dark fill, the nine-slice frame,
+// and (in GameScene's container boxes) plain Graphics.
+export type PanelObject =
+  | Phaser.GameObjects.Text
+  | Phaser.GameObjects.Rectangle
+  | Phaser.GameObjects.NineSlice
+  | Phaser.GameObjects.Graphics;
+
+// `green` is the 安全青 accent (inventory / dialogue / help), `yellow` the
+// 灯光橙 accent (crafting / pause) — matching what each panel used to stroke.
+export function buildPanel(
+  scene: Phaser.Scene,
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+  accent: PanelAccent,
+): PanelObject[] {
+  const fill = scene.add.rectangle(cx, cy, w, h, PANEL_FILL, PANEL_FILL_ALPHA);
+  const frame = scene.add.nineslice(cx, cy, `ui-panel-${accent}`, undefined, w, h, PANEL_SLICE, PANEL_SLICE, PANEL_SLICE, PANEL_SLICE);
+  return [fill, frame];
+}

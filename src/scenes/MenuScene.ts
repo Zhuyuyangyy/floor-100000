@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { startNewGame, tryContinue } from '../core/session';
 import { clearSave, hasSave } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
+import { buildPanel, type PanelObject } from '../render/panels';
 
 // Title screen: a keyboard-navigable option list — 开始新游戏 / 继续游戏 (when a
 // save exists) / 操作说明. ↑/↓ to move, Enter to choose (docs/03_TASKS.md#p0-08).
@@ -15,7 +16,7 @@ export class MenuScene extends Phaser.Scene {
   private keyEnter!: Phaser.Input.Keyboard.Key;
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private helpOpen = false;
-  private helpObjects: Array<Phaser.GameObjects.Text | Phaser.GameObjects.Graphics> = [];
+  private helpObjects: PanelObject[] = [];
   private messageText!: Phaser.GameObjects.Text;
   private messageTimer?: Phaser.Time.TimerEvent;
   private lastInputFrame: Record<InputSlot, number> = { up: -1, down: -1, enter: -1, esc: -1 };
@@ -157,16 +158,12 @@ export class MenuScene extends Phaser.Scene {
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
-    const bg = this.add.graphics();
-    bg.fillStyle(0x0b0f12, 0.97);
-    bg.fillRoundedRect(left, top, panelW, panelH, 8);
-    bg.lineStyle(2, 0x77c6a4, 1);
-    bg.strokeRoundedRect(left, top, panelW, panelH, 8);
+    this.helpObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green'));
     const title = this.add.text(cx, top + 20, '操作说明', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
     const lines = ['A/D 或 ←/→ 移动', 'E 交互（开箱 / 对话 / 上下楼 / 睡觉）', 'I 背包 · C 制作 · ESC 暂停', '目标：熬过 7 天，第 8 天 06:00 仍活着'];
     const texts = lines.map((line, i) => this.add.text(left + 24, top + 58 + i * 26, line, { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }));
     const footer = this.add.text(cx, top + panelH - 18, '按 Enter / ESC 关闭', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
-    this.helpObjects = [bg, title, ...texts, footer];
+    this.helpObjects.push(title, ...texts, footer);
     for (const o of this.helpObjects) o.setScrollFactor(0).setDepth(300).setVisible(false);
   }
 

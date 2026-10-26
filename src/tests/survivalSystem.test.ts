@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
-import { advanceTime, deathCause, formatClock, sleep } from '../systems/SurvivalSystem';
+import { absoluteMinute, advanceTime, AUTOSAVE_EVERY_GAME_MINUTES, deathCause, formatClock, sleep } from '../systems/SurvivalSystem';
 import { GAME_CONFIG } from '../core/config';
 
 // Drive the clock in small real-time steps (like the render loop).
@@ -9,6 +9,41 @@ function tick(state: ReturnType<typeof createNewGame>, ms: number, step = 16) {
   for (let t = 0; t < ms; t += step) last = advanceTime(state, step);
   return last;
 }
+
+// GHI-03 M3: the autosave cadence is measured in a monotonic minute index, so a
+// midnight rollover must not look like "no time passed" and skip a save.
+describe('absoluteMinute (autosave cadence)', () => {
+  it('advances with the clock inside a day', () => {
+    const s = createNewGame(1);
+    s.gameMinuteOfDay = 100;
+    const a = absoluteMinute(s);
+    s.gameMinuteOfDay = 260;
+    expect(absoluteMinute(s)).toBeGreaterThan(a);
+  });
+
+  it('floors fractional minutes so one index covers a whole minute', () => {
+    const s = createNewGame(1);
+    s.gameMinuteOfDay = 100.9;
+    expect(absoluteMinute(s)).toBe(absoluteMinute({ ...s, gameMinuteOfDay: 100.1 }));
+  });
+
+  it('does not go backwards across a day rollover', () => {
+    const s = createNewGame(1);
+    s.day = 1;
+    s.gameMinuteOfDay = 1439.9;
+    const before = absoluteMinute(s);
+    s.day = 2;
+    s.gameMinuteOfDay = 0;
+    expect(absoluteMinute(s)).toBeGreaterThan(before);
+  });
+
+  it('uses a cadence coarse enough not to write every frame', () => {
+    // The clock runs at gameMinutesPerRealSecond, so one game minute can pass in
+    // a fraction of a second; saving per whole minute would mean several writes
+    // per second.
+    expect(AUTOSAVE_EVERY_GAME_MINUTES).toBeGreaterThan(1);
+  });
+});
 
 describe('formatClock', () => {
   it('formats minute-of-day as HH:MM', () => {

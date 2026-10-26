@@ -16,7 +16,7 @@
 | C2 | CRITICAL | `SaveSystem.ts:43` | `currentFloor` 不限定可玩范围，坏档直接抛错白屏 |
 | M1 | MAJOR | `floorTemplates.ts:182`、`LootSystem.ts:19` | loot 键是索引型，改模板即静默破坏既有存档 |
 | M2 | MAJOR | `floorTemplates.ts:152` | loot 数据版本未进 seed 派生，同 seed 世界静默改变 |
-| M3 | MAJOR | `GameScene.ts:912-971` | 时钟与属性衰减从不落盘，可回退刷消耗 |
+| M3 | MAJOR **已修** | `GameScene.ts:912-971` | 时钟与属性衰减从不落盘，可回退刷消耗 |
 | M4 | MAJOR | `MenuScene.ts:94-96` | 坏档静默无提示，违反「坏档提示用户」门槛 |
 | M5 | MAJOR | `GameScene.ts:882`、`LootSystem.ts:78-94` | leak 事件与地面物资视图不同步 |
 | m1 | minor | `FloorSystem.ts:40-42` | `not-adjacent` 分支不可达（死代码） |
@@ -222,6 +222,18 @@ tuned:    crate_wood:tape      ← 同 seed 世界静默改变
 
 测试状态（全部实跑）：`npm run typecheck` 无错误；`npm test` **117 passed**（98 → 117）；`npx playwright test` **25 passed**。
 
-**仍未修**：M1/M2、M3、M5、m1–m8、n1–n3、§5 的键盘突发投递。§7 的建议顺序不变。
+**仍未修**：M1/M2、M5、m1–m8、n1–n3、§5 的键盘突发投递。§7 的建议顺序不变（下一项 M5）。
 
 > 本轮实测中另发现一处**既有的**输入问题并记入 §5：背靠背派发按键时一次 ↓ 会被重复投递（6/6 复现，stash 掉本轮改动后在 `1be6afa` 上同样复现）。为此新增的坏档 e2e 每键之间须间隔 ≥120ms。
+
+### 8.1 追加修复：M3（时钟与衰减落盘）
+
+2026-10-26 当日按 TDD 完成 §7 建议 2。改动：
+- `src/systems/SurvivalSystem.ts` —— 新增 `AUTOSAVE_EVERY_GAME_MINUTES = 5` 与纯函数 `absoluteMinute(state)`（`day * 1440 + floor(minute)`，跨天单调，避免午夜翻转被误判成「时间没走」而跳过存档）。
+- `src/scenes/GameScene.ts` —— `update()` 里按游戏分钟节流存档；`lastSavedAbsoluteMinute` 字段在 `create()` 中重置（Phaser 不重跑字段初始化器，否则「重新开始」会继承上一轮的值，让新局的时钟看起来没动）。
+- `src/tests/survivalSystem.test.ts` —— 4 条单测覆盖 `absoluteMinute` 的单调性/取整/跨天。
+- `e2e/survival.spec.ts` —— 新增「standing still persists the clock and decay into the save」：完全无输入，等时钟走过 10 游戏分钟后，localStorage 里必须存在存档、且其 `gameMinuteOfDay`/`thirst` 与实时状态相差不超过一个节流间隔（修复前 `saved` 为 `null`）。
+
+**为什么是 5 游戏分钟而不是文档原先建议的「每个整分钟」**：时钟是 `gameMinutesPerRealSecond = 3`，按整分钟存等于每秒写 3 次。5 游戏分钟 ≈ 1.7 秒真实时间、约 0.6 次写入/秒，最坏回退量（5 游戏分钟 ≈ 饥饿 -0.5 / 口渴 -0.75）小到无法利用。
+
+**残留（未修）**：巡游体扣血（`GameScene.ts:1004` 附近）发生在两次节流存档之间，若在受伤后立刻关标签页，这 8 点 HP 损失不会落盘。死亡路径本身仍会存档，所以只影响这一种极窄的中间态。

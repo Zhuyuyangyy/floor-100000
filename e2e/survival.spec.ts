@@ -37,6 +37,13 @@ async function readState(page: Page): Promise<State> {
   });
 }
 
+async function readSave(page: Page): Promise<State | null> {
+  return page.evaluate(() => {
+    const raw = localStorage.getItem('floor100000.save.v1');
+    return raw ? (JSON.parse(raw) as State) : null;
+  });
+}
+
 async function walkRightTo(page: Page, x: number): Promise<void> {
   await page.keyboard.down('ArrowRight');
   await page.waitForFunction(
@@ -49,6 +56,43 @@ async function walkRightTo(page: Page, x: number): Promise<void> {
   );
   await page.keyboard.up('ArrowRight');
 }
+
+// Must stay in sync with AUTOSAVE_EVERY_GAME_MINUTES in
+// src/systems/SurvivalSystem.ts.
+const AUTOSAVE_EVERY_GAME_MINUTES = 5;
+
+// GHI-03 M3: the clock and decay only ever advance inside GameScene.update(),
+// which never saved — standing still and closing the tab rolled the run back to
+// the last discrete action, and that could be farmed to erase decay.
+test('standing still persists the clock and decay into the save', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  await startGame(page, 42);
+  // No input at all: only the frame loop advances time, and no discrete action
+  // (loot / craft / trade / sleep / floor change) fires a save.
+  await page.waitForFunction(
+    () => {
+      const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
+      return !!s && s.gameMinuteOfDay > 390 && s.player.thirst < 80;
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+
+  const live = await readState(page);
+  const saved = await readSave(page);
+  expect(saved, 'a save must exist without any discrete action').not.toBeNull();
+  if (!saved) return;
+
+  // The snapshot must track the live run instead of lagging a whole action behind.
+  expect(saved.day).toBe(live.day);
+  expect(live.gameMinuteOfDay - saved.gameMinuteOfDay).toBeLessThanOrEqual(AUTOSAVE_EVERY_GAME_MINUTES + 1);
+  // Decay actually reached the save (a fresh run starts at thirst 80).
+  expect(saved.player.thirst).toBeLessThan(80);
+  expect(saved.player.thirst).toBeGreaterThanOrEqual(live.player.thirst);
+  expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+});
 
 test('standing still advances the clock and decays survival stats', async ({ page }) => {
   const errors: string[] = [];

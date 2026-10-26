@@ -14,6 +14,18 @@ export const HP_STARVE_LOSS_PER_HOUR = 4;
 // (docs/02_TECH_SPEC.md §3: no frame-rate-dependent survival).
 export const MAX_FRAME_MS = 250;
 
+// Autosave cadence in game minutes. The clock advances gameMinutesPerRealSecond
+// game-minutes per real second, so saving on every whole minute would mean
+// several writes per second; this bounds how much time and decay a closed tab
+// can roll back while staying cheap (GHI-03 M3).
+export const AUTOSAVE_EVERY_GAME_MINUTES = 5;
+
+// Monotonic minute index across days, so a midnight rollover cannot look like
+// "no time passed" and skip an autosave.
+export function absoluteMinute(state: GameState): number {
+  return state.day * MINUTES_PER_DAY + Math.floor(state.gameMinuteOfDay);
+}
+
 const clamp = (v: number, min: number, max: number): number => Math.max(min, Math.min(max, v));
 
 export interface TimeTick {

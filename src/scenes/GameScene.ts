@@ -20,7 +20,7 @@ import { currentInteractionZone, floorName, hasDownExit, hasUpExit, movePlayerX,
 import { getFloorView, lootContainer, lootGround } from '../systems/LootSystem';
 import { countItem, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
-import { advanceTime, formatClock, isNight, sleep } from '../systems/SurvivalSystem';
+import { absoluteMinute, advanceTime, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, isNight, sleep } from '../systems/SurvivalSystem';
 import { ensureNightEvent } from '../systems/EventSystem';
 import { clearSave, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
@@ -100,12 +100,18 @@ export class GameScene extends Phaser.Scene {
   private pauseObjects: Array<Phaser.GameObjects.Text | Phaser.GameObjects.Graphics> = [];
   private pauseOptionTexts: Phaser.GameObjects.Text[] = [];
   private pauseSelected = 0;
+  private lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
 
   constructor() {
     super({ key: 'Game' });
   }
 
   create(): void {
+    // Phaser does not re-run field initialisers on scene restart, so reset the
+    // autosave cursor here — otherwise 重新开始 inherits the previous run's
+    // value and the fresh run's clock looks like it has not moved yet.
+    this.lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
+
     this.cameras.main.setBackgroundColor(0x22303a);
     this.cameras.main.setBounds(0, 0, FLOOR_WIDTH, FLOOR_HEIGHT);
     this.nightOverlay = this.add
@@ -930,6 +936,17 @@ export class GameScene extends Phaser.Scene {
     this.refreshClock();
     this.refreshStats();
     this.applyNightLighting();
+
+    // GHI-03 M3: the clock and the survival decay only ever advance here, and
+    // nothing else in this loop persisted them — standing still and closing the
+    // tab rolled the run back to the last discrete action, and that could be
+    // farmed to erase decay. Persist on a coarse game-minute cadence.
+    const absolute = absoluteMinute(state);
+    if (absolute - this.lastSavedAbsoluteMinute >= AUTOSAVE_EVERY_GAME_MINUTES) {
+      this.lastSavedAbsoluteMinute = absolute;
+      saveToStorage(state);
+    }
+
     if (tick.died || tick.won) {
       saveToStorage(state);
       this.scene.start('End');

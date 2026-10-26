@@ -46,7 +46,8 @@ export function createMarker(scene: Phaser.Scene): Phaser.GameObjects.Image {
   return scene.add.image(0, 0, 'ui-marker').setVisible(false);
 }
 
-// Park the marker just left of a centred label.
+// Park the marker just left of a label. Uses the rendered bounds rather than
+// label.x so it works for both centred and left-aligned rows.
 export function placeMarker(marker: Phaser.GameObjects.Image, label: Phaser.GameObjects.Text): void {
-  marker.setPosition(label.x - label.width / 2 - 12, label.y);
+  marker.setPosition(label.getBounds().left - 12, label.y);
 }

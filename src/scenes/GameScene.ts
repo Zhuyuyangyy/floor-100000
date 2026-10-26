@@ -25,6 +25,8 @@ import { ensureNightEvent } from '../systems/EventSystem';
 import { clearSave, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { buildPanel, createMarker, placeMarker, type PanelObject } from '../render/panels';
+import { itemIconKey } from '../render/itemIcons';
+import { containerTextureKey } from '../render/furniture';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
@@ -33,6 +35,22 @@ import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId
 
 const STAT_LABEL: Record<StatKey, string> = { hp: '生命', hunger: '饱食', thirst: '水分', energy: '精力' };
 const INVENTORY_SLOTS = 12;
+// Row pitch for the inventory list: 20px fits a full-size 16x16 icon with a 2px
+// gap either side, and keeps every offset an integer (no scaling, no blur).
+const INV_ROW_PITCH = 20;
+// Crafting rows: same 16px icon, 24px pitch keeps the cost text readable.
+const CRAFT_ROW_PITCH = 24;
+// HUD type scale (docs/05_ART_GUIDE.md §2: no size too small to read). Title 16 /
+// body 13 / auxiliary 11 — all integer pixels, since any fractional size would be
+// resampled and blur the pixel look.
+const TYPE_TITLE = 16;
+const TYPE_BODY = 13;
+const TYPE_AUX = 11;
+
+// Row pitch for the four HUD stat bars. 15px gives an 11px label plus a 7px bar
+// with breathing room; 13px was too cramped to read at a glance.
+const STAT_ROW_PITCH = 15;
+
 const STAT_BARS: Array<{ label: string; color: number }> = [
   { label: 'HP', color: 0xe56d63 },
   { label: '饥', color: 0xf4b66a },
@@ -61,7 +79,7 @@ export class GameScene extends Phaser.Scene {
   private keyEnter!: Phaser.Input.Keyboard.Key;
 
   private floorView!: GeneratedFloor;
-  private containerObjs = new Map<string, { box: Phaser.GameObjects.Graphics; label: Phaser.GameObjects.Text }>();
+  private containerObjs = new Map<string, { box: Phaser.GameObjects.Graphics | Phaser.GameObjects.Image; label: Phaser.GameObjects.Text }>();
   private groundObjs = new Map<string, Phaser.GameObjects.Rectangle>();
   private floorObjects: Phaser.GameObjects.GameObject[] = [];
   private wanderer?: Phaser.GameObjects.Sprite;
@@ -79,6 +97,7 @@ export class GameScene extends Phaser.Scene {
 
   private invObjects: PanelObject[] = [];
   private invSlotTexts: Phaser.GameObjects.Text[] = [];
+  private invSlotIcons: Phaser.GameObjects.Image[] = [];
   private invMarker!: Phaser.GameObjects.Image;
   private invSelected = 0;
   private inventoryOpen = false;
@@ -86,6 +105,7 @@ export class GameScene extends Phaser.Scene {
   private craftingOpen = false;
   private craftObjects: PanelObject[] = [];
   private craftEntryTexts: Phaser.GameObjects.Text[] = [];
+  private craftEntryIcons: Phaser.GameObjects.Image[] = [];
   private craftMarker!: Phaser.GameObjects.Image;
   private craftSelected = 0;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
@@ -98,6 +118,7 @@ export class GameScene extends Phaser.Scene {
   private dialogueTitle!: Phaser.GameObjects.Text;
   private dialogueMessage!: Phaser.GameObjects.Text;
   private dialogueOptions: Phaser.GameObjects.Text[] = [];
+  private dialogueOptionIcons: Phaser.GameObjects.Image[] = [];
   private dialogueMarker!: Phaser.GameObjects.Image;
 
   private pauseOpen = false;
@@ -128,15 +149,18 @@ export class GameScene extends Phaser.Scene {
     this.groundObjs.clear();
     this.invObjects = [];
     this.invSlotTexts = [];
+    this.invSlotIcons = [];
     this.invMarker = createMarker(this);
     this.craftObjects = [];
     this.craftEntryTexts = [];
+    this.craftEntryIcons = [];
     this.craftMarker = createMarker(this);
     this.pauseObjects = [];
     this.pauseOptionTexts = [];
     this.pauseMarker = createMarker(this);
     this.dialogueObjects = [];
     this.dialogueOptions = [];
+    this.dialogueOptionIcons = [];
     this.dialogueMarker = createMarker(this);
     // 重新开始 runs while the pause menu is still open, and these flags survive a
     // restart. Left set, update() early-returns forever and every panel handler
@@ -240,14 +264,14 @@ export class GameScene extends Phaser.Scene {
       const g = this.add.graphics();
       g.fillStyle(0x77c6a4, 1);
       g.fillRect(UP_EXIT_X - 12, FLOOR_HEIGHT - 96, 24, 48);
-      const upLabel = this.add.text(UP_EXIT_X, FLOOR_HEIGHT - 104, '↑ 上楼', { fontFamily: 'monospace', fontSize: '12px', color: '#77c6a4' }).setOrigin(0.5);
+      const upLabel = this.add.text(UP_EXIT_X, FLOOR_HEIGHT - 104, '↑ 上楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#77c6a4' }).setOrigin(0.5);
       this.floorObjects.push(g, upLabel);
     }
     if (hasDownExit(floor)) {
       const g = this.add.graphics();
       g.fillStyle(0xf4b66a, 1);
       g.fillRect(DOWN_EXIT_X - 12, FLOOR_HEIGHT - 96, 24, 48);
-      const downLabel = this.add.text(DOWN_EXIT_X, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: 'monospace', fontSize: '12px', color: '#f4b66a' }).setOrigin(0.5);
+      const downLabel = this.add.text(DOWN_EXIT_X, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#f4b66a' }).setOrigin(0.5);
       this.floorObjects.push(g, downLabel);
     }
   }
@@ -255,12 +279,21 @@ export class GameScene extends Phaser.Scene {
   private buildContainers(): void {
     for (const c of this.floorView.containers) {
       const y = FLOOR_HEIGHT - 64;
-      const box = this.add.graphics();
-      box.fillStyle(0x4a3a2a, 1);
-      box.fillRect(c.x - 14, y - 16, 28, 32);
-      box.lineStyle(2, 0xf4b66a, 1);
-      box.strokeRect(c.x - 14, y - 16, 28, 32);
       const label = this.add.text(c.x, y - 26, c.label, { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
+      const key = containerTextureKey(c.id);
+      // Texture where a matching asset exists, Graphics box otherwise — never a
+      // lookalike. The interaction box is unchanged either way: hit detection
+      // still goes through c.x and INTERACT_DISTANCE.
+      const box: Phaser.GameObjects.Graphics | Phaser.GameObjects.Image = key
+        ? this.add.image(c.x, y - 4, key).setOrigin(0.5, 1)
+        : this.add.graphics();
+      if (!key) {
+        const g = box as Phaser.GameObjects.Graphics;
+        g.fillStyle(0x4a3a2a, 1);
+        g.fillRect(c.x - 14, y - 16, 28, 32);
+        g.lineStyle(2, 0xf4b66a, 1);
+        g.strokeRect(c.x - 14, y - 16, 28, 32);
+      }
       this.containerObjs.set(c.id, { box, label });
       this.floorObjects.push(box, label);
       this.setContainerEmptyVisual(c.id, c.items.length === 0);
@@ -296,36 +329,33 @@ export class GameScene extends Phaser.Scene {
 
   private drawBed(): void {
     const y = FLOOR_HEIGHT - 64;
-    const g = this.add.graphics();
-    g.fillStyle(0x6a4a3a, 1);
-    g.fillRect(BED_X - 20, y - 12, 40, 28);
-    g.fillStyle(0xece8d8, 1);
-    g.fillRect(BED_X - 16, y - 10, 14, 10);
+    // furn_bed is 32x16; origin (0.5, 1) puts its base on the floor line.
+    const bed = this.add.image(BED_X, y + 4, 'furn_bed').setOrigin(0.5, 1);
     const bedLabel = this.add.text(BED_X, y - 24, '床（睡觉）', { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
-    this.floorObjects.push(g, bedLabel);
+    this.floorObjects.push(bed, bedLabel);
   }
 
   // ── HUD & inventory UI ─────────────────────────────────────────────────
   private buildHud(): void {
     this.clockText = this.add
-      .text(12, 12, '', { fontFamily: 'monospace', fontSize: '16px', color: '#ece8d8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 4 } })
+      .text(12, 12, '', { fontFamily: 'monospace', fontSize: `${TYPE_TITLE}px`, color: '#ece8d8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 4 } })
       .setScrollFactor(0).setDepth(100);
     this.refreshClock();
 
     this.barsGfx = this.add.graphics().setScrollFactor(0).setDepth(100);
     STAT_BARS.forEach((s, i) => {
       this.statLabels.push(
-        this.add.text(12, 40 + i * 13, s.label, { fontFamily: 'monospace', fontSize: '10px', color: '#ece8d8' }).setScrollFactor(0).setDepth(101),
+        this.add.text(12, 40 + i * STAT_ROW_PITCH, s.label, { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#ece8d8' }).setScrollFactor(0).setDepth(101),
       );
     });
     this.refreshStats();
 
     this.feedbackText = this.add
-      .text(FLOOR_WIDTH / 2, 60, '', { fontFamily: 'monospace', fontSize: '13px', color: '#f4b66a', backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } })
+      .text(FLOOR_WIDTH / 2, 60, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#f4b66a', backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } })
       .setOrigin(0.5).setScrollFactor(0).setDepth(120);
 
     this.hintText = this.add
-      .text(12, FLOOR_HEIGHT - 22, 'A/D 或 ←/→ 移动 · E 交互 · I 背包 · ESC 菜单', { fontFamily: 'monospace', fontSize: '12px', color: '#77c6a4', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
+      .text(12, FLOOR_HEIGHT - 22, 'A/D 或 ←/→ 移动 · E 交互 · I 背包 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
       .setScrollFactor(0).setDepth(100);
   }
 
@@ -346,7 +376,7 @@ export class GameScene extends Phaser.Scene {
     this.lastStats = key;
     this.barsGfx.clear();
     values.forEach((v, i) => {
-      const y = 40 + i * 13;
+      const y = 40 + i * STAT_ROW_PITCH;
       this.barsGfx.fillStyle(0x0b0f12, 0.7);
       this.barsGfx.fillRect(34, y + 2, 84, 7);
       this.barsGfx.fillStyle(STAT_BARS[i].color, 1);
@@ -357,7 +387,7 @@ export class GameScene extends Phaser.Scene {
   private buildInventoryPanel(): void {
     const { width, height } = this.cameras.main;
     const panelW = 380;
-    const panelH = 320;
+    const panelH = 340;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -368,14 +398,19 @@ export class GameScene extends Phaser.Scene {
     const title = this.add.text(cx, top + 18, '背包', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
     this.invObjects.push(title);
 
-    const startY = top + 44;
+    // One row per slot: 16x16 icon + label. Row pitch is 20px so a full-size
+    // icon fits without scaling (scaling would blur the pixels).
+    const startY = top + 46;
     for (let i = 0; i < INVENTORY_SLOTS; i++) {
-      const t = this.add.text(left + 20, startY + i * 18, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' });
+      const rowY = startY + i * INV_ROW_PITCH;
+      const icon = this.add.image(left + 22, rowY + 10, '').setOrigin(0, 0.5);
+      const t = this.add.text(left + 44, rowY + 10, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }).setOrigin(0, 0.5);
+      this.invSlotIcons.push(icon);
       this.invSlotTexts.push(t);
-      this.invObjects.push(t);
+      this.invObjects.push(icon, t);
     }
 
-    this.tooltipText = this.add.text(left + 20, top + 266, '', { fontFamily: 'monospace', fontSize: '12px', color: '#f4b66a' });
+    this.tooltipText = this.add.text(left + 22, top + 288, '', { fontFamily: 'monospace', fontSize: '11px', color: '#f4b66a' });
     this.invObjects.push(this.tooltipText);
 
     const footer = this.add.text(cx, top + panelH - 16, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
@@ -389,11 +424,15 @@ export class GameScene extends Phaser.Scene {
     if (this.invSelected >= slots.length) this.invSelected = Math.max(0, slots.length - 1);
     for (let i = 0; i < INVENTORY_SLOTS; i++) {
       const t = this.invSlotTexts[i];
+      const icon = this.invSlotIcons[i];
       const stack = slots[i];
       if (stack) {
         t.setText(`${getItem(stack.itemId).displayName} ×${stack.quantity}`);
+        // Keyed by item id, never by display name — see itemIconKey().
+        icon.setTexture(itemIconKey(stack.itemId)).setVisible(true);
       } else {
         t.setText('（空）');
+        icon.setVisible(false);
       }
     }
     const selectedText = this.invSlotTexts[this.invSelected];
@@ -435,14 +474,11 @@ export class GameScene extends Phaser.Scene {
 
   private drawWorkbench(): void {
     const y = FLOOR_HEIGHT - 64;
-    const g = this.add.graphics();
-    g.fillStyle(0x3a4c58, 1);
-    g.fillRect(CRAFT_X - 18, y - 14, 36, 30);
-    g.fillStyle(0x465865, 1);
-    g.fillRect(CRAFT_X - 18, y - 14, 36, 4);
+    // furn_workbench is 32x16; origin (0.5, 1) puts its base on the floor line.
+    const bench = this.add.image(CRAFT_X, y + 4, 'furn_workbench').setOrigin(0.5, 1);
     const benchLabel = this.add.text(CRAFT_X, y - 26, '工作台', { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
     this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
-    this.floorObjects.push(g, benchLabel, this.upgradeBoard);
+    this.floorObjects.push(bench, benchLabel, this.upgradeBoard);
     this.refreshUpgradeBoard();
   }
 
@@ -466,9 +502,12 @@ export class GameScene extends Phaser.Scene {
     this.craftObjects.push(title);
 
     for (let i = 0; i < 4; i++) {
-      const t = this.add.text(left + 18, top + 48 + i * 24, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' });
+      const rowY = top + 48 + i * CRAFT_ROW_PITCH;
+      const icon = this.add.image(left + 26, rowY + 7, '').setOrigin(0, 0.5);
+      const t = this.add.text(left + 48, rowY + 7, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }).setOrigin(0, 0.5);
+      this.craftEntryIcons.push(icon);
       this.craftEntryTexts.push(t);
-      this.craftObjects.push(t);
+      this.craftObjects.push(icon, t);
     }
     const footer = this.add.text(cx, top + panelH - 16, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
     this.craftObjects.push(footer, this.craftMarker);
@@ -488,18 +527,24 @@ export class GameScene extends Phaser.Scene {
     if (this.craftSelected >= entries.length) this.craftSelected = Math.max(0, entries.length - 1);
     for (let i = 0; i < 4; i++) {
       const t = this.craftEntryTexts[i];
+      const icon = this.craftEntryIcons[i];
       const entry = entries[i];
       if (!entry) {
         t.setText('');
+        icon.setVisible(false);
         continue;
       }
+      // Recipes produce an upgrade, not an item, so they have no item icon —
+      // showing one would be a mismatch. Only 净化 outputs a real item.
       if (entry.kind === 'recipe') {
+        icon.setVisible(false);
         const recipe = getRecipe(entry.id!);
         const cost = Object.entries(recipe.cost).map(([id, n]) => `${getItem(id as ItemId).displayName}×${n}`).join(' ');
         const status = hasUpgrade(state, entry.id!) ? '[已建]' : canCraft(state, entry.id!).ok ? '[可制作]' : '[材料不足]';
         t.setText(`${recipe.displayName}（${cost}）${status}`);
       } else {
         const can = countItem(state.player.inventory, 'dirty_water') >= 1;
+        icon.setTexture(itemIconKey('clean_water')).setVisible(true);
         t.setText(`净化 脏水→净水 ${can ? '[可净化]' : '[无脏水]'}`);
       }
     }
@@ -531,7 +576,7 @@ export class GameScene extends Phaser.Scene {
     this.pauseObjects.push(title, controls, this.pauseMarker);
 
     PAUSE_OPTIONS.forEach((label, i) => {
-      const t = this.add.text(cx, top + 92 + i * 28, label, { fontFamily: 'monospace', fontSize: '15px', color: '#ece8d8' }).setOrigin(0.5);
+      const t = this.add.text(cx, top + 92 + i * 28, label, { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#ece8d8' }).setOrigin(0.5);
       this.pauseOptionTexts.push(t);
       this.pauseObjects.push(t);
     });
@@ -640,9 +685,12 @@ export class GameScene extends Phaser.Scene {
     this.dialogueObjects.push(this.dialogueTitle, this.dialogueMessage);
 
     for (let i = 0; i < 4; i++) {
-      const t = this.add.text(left + 20, top + 112 + i * 26, '……', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' });
+      const rowY = top + 112 + i * 26;
+      const icon = this.add.image(left + 26, rowY + 7, '').setOrigin(0, 0.5);
+      const t = this.add.text(left + 48, rowY + 7, '……', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }).setOrigin(0, 0.5);
+      this.dialogueOptionIcons.push(icon);
       this.dialogueOptions.push(t);
-      this.dialogueObjects.push(t);
+      this.dialogueObjects.push(icon, t);
     }
     const footer = this.add.text(cx, top + panelH - 14, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
     this.dialogueObjects.push(footer, this.dialogueMarker);
@@ -650,16 +698,22 @@ export class GameScene extends Phaser.Scene {
     for (const o of this.dialogueObjects) o.setScrollFactor(0).setDepth(220).setVisible(false);
   }
 
-  private dialogueOptionLabels(): string[] {
+  // Label + icon key per dialogue option. The icon is the item the player
+  // RECEIVES (the trade's output), matching how the crafting list shows outputs;
+  // 问候/询问/退出/返回 are not items and get no icon.
+  private dialogueOptionsView(): Array<{ label: string; icon?: ItemId }> {
     const d = this.dialogue;
     if (!d) return [];
-    if (d.level === 'main') return ['问候', '询问', '交易', '退出'];
+    if (d.level === 'main') {
+      return ['问候', '询问', '交易', '退出'].map((label) => ({ label }));
+    }
     const npc = getNpc(d.npc);
     return [
-      ...npc.offers.map(
-        (o) => `用 ${getItem(o.get.itemId).displayName}×${o.get.quantity} 换 ${getItem(o.give.itemId).displayName}×${o.give.quantity}`,
-      ),
-      '返回',
+      ...npc.offers.map((o) => ({
+        label: `用 ${getItem(o.get.itemId).displayName}×${o.get.quantity} 换 ${getItem(o.give.itemId).displayName}×${o.give.quantity}`,
+        icon: o.give.itemId,
+      })),
+      { label: '返回' },
     ];
   }
 
@@ -694,19 +748,23 @@ export class GameScene extends Phaser.Scene {
     const npc = getNpc(d.npc);
     this.dialogueTitle.setText(`${npc.name}（${npc.title}）`);
     this.dialogueMessage.setText(d.message || '……');
-    const labels = this.dialogueOptionLabels();
-    if (d.selected >= labels.length) d.selected = labels.length - 1;
+    const options = this.dialogueOptionsView();
+    if (d.selected >= options.length) d.selected = options.length - 1;
     for (let i = 0; i < this.dialogueOptions.length; i++) {
-      const label = labels[i];
-      if (label === undefined) {
+      const option = options[i];
+      const icon = this.dialogueOptionIcons[i];
+      if (option === undefined) {
         this.dialogueOptions[i].setText('');
+        icon.setVisible(false);
         continue;
       }
-      this.dialogueOptions[i].setText(label);
+      this.dialogueOptions[i].setText(option.label);
+      if (option.icon) icon.setTexture(itemIconKey(option.icon)).setVisible(true);
+      else icon.setVisible(false);
     }
     const selectedText = this.dialogueOptions[d.selected];
-    this.dialogueMarker.setVisible(labels[d.selected] !== undefined);
-    if (labels[d.selected] && selectedText) placeMarker(this.dialogueMarker, selectedText);
+    this.dialogueMarker.setVisible(options[d.selected] !== undefined);
+    if (options[d.selected] && selectedText) placeMarker(this.dialogueMarker, selectedText);
   }
 
   private activateDialogueOption(): void {
@@ -820,7 +878,7 @@ export class GameScene extends Phaser.Scene {
       this.craftSelected = Math.min(Math.max(0, count - 1), this.craftSelected + 1);
       this.refreshCraft();
     } else if (this.dialogueOpen && this.dialogue) {
-      const count = this.dialogueOptionLabels().length;
+      const count = this.dialogueOptionsView().length;
       this.dialogue.selected = Math.min(Math.max(0, count - 1), this.dialogue.selected + 1);
       this.refreshDialogue();
     } else if (this.pauseOpen) {

@@ -1,4 +1,7 @@
 import Phaser from 'phaser';
+import { ITEM_IDS } from '../data/items';
+import type { ItemId } from '../core/gameTypes';
+import { itemIconKey } from './itemIcons';
 
 // Procedural pixel-art factory for 《第100000层：末日宿舍》.
 //
@@ -601,6 +604,27 @@ function drawIconFlashlight(g: Phaser.GameObjects.Graphics): void {
 }
 
 // ── public entry point ─────────────────────────────────────────────────────────
+// One drawer per item, keyed by ItemId. The Record type forces every ItemId to
+// have an icon, so adding an item without art is a compile error rather than a
+// silently missing texture.
+const ICON_DRAWERS: Record<ItemId, DrawFn> = {
+  clean_water: drawIconCleanWater,
+  dirty_water: drawIconDirtyWater,
+  ration_pack: drawIconRationPack,
+  bread: drawIconBread,
+  battery: drawIconBattery,
+  scrap_metal: drawIconScrapMetal,
+  wood: drawIconWood,
+  cloth: drawIconCloth,
+  tape: drawIconTape,
+  filter: drawIconFilter,
+  wire: drawIconWire,
+  medkit: drawIconMedkit,
+  crowbar: drawIconCrowbar,
+  fuse: drawIconFuse,
+  flashlight: drawIconFlashlight,
+};
+
 // Bakes every texture the game references. Call once from a Boot-style scene's create().
 // Regenerating a key simply overwrites the existing texture.
 export function generateAllPixelArt(scene: Phaser.Scene): void {
@@ -627,20 +651,6 @@ export function generateAllPixelArt(scene: Phaser.Scene): void {
   bake(scene, 'furn_fusebox', 16, 16, drawFurnFuseBox);
   bake(scene, 'furn_shelf', 16, 24, drawFurnShelf);
 
-  // 16x16 item icons
-  bake(scene, 'clean_water', 16, 16, drawIconCleanWater);
-  bake(scene, 'dirty_water', 16, 16, drawIconDirtyWater);
-  bake(scene, 'ration_pack', 16, 16, drawIconRationPack);
-  bake(scene, 'bread', 16, 16, drawIconBread);
-  bake(scene, 'battery', 16, 16, drawIconBattery);
-  bake(scene, 'scrap_metal', 16, 16, drawIconScrapMetal);
-  bake(scene, 'wood', 16, 16, drawIconWood);
-  bake(scene, 'cloth', 16, 16, drawIconCloth);
-  bake(scene, 'tape', 16, 16, drawIconTape);
-  bake(scene, 'filter', 16, 16, drawIconFilter);
-  bake(scene, 'wire', 16, 16, drawIconWire);
-  bake(scene, 'medkit', 16, 16, drawIconMedkit);
-  bake(scene, 'crowbar', 16, 16, drawIconCrowbar);
-  bake(scene, 'fuse', 16, 16, drawIconFuse);
-  bake(scene, 'flashlight', 16, 16, drawIconFlashlight);
+  // 16x16 item icons — baked under each item's own id (see ICON_DRAWERS).
+  for (const id of ITEM_IDS) bake(scene, itemIconKey(id), 16, 16, ICON_DRAWERS[id]);
 }

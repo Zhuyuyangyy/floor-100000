@@ -28,6 +28,19 @@ async function hasVisibleText(page: Page, substr: string): Promise<boolean> {
   }, substr);
 }
 
+// The option currently carrying the ▶ marker.
+async function selectedOption(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const scenes = (window as unknown as { __PHASER_GAME__?: { scene: { scenes: Array<{ children: { list: Array<{ type: string; text?: string; visible: boolean }> } }> } } }).__PHASER_GAME__?.scene.scenes ?? [];
+    for (const sc of scenes) {
+      for (const o of sc.children.list ?? []) {
+        if (o.type === 'Text' && o.visible && (o.text ?? '').startsWith('▶')) return o.text ?? '';
+      }
+    }
+    return '(none)';
+  });
+}
+
 test('the title menu is keyboard-navigable and has a help panel', async ({ page }) => {
   await page.goto('/?seed=42');
   await waitForScene(page, 'Menu');
@@ -179,6 +192,65 @@ test('a save from before the loot-key migration is refused with a reason', async
   await waitForScene(page, 'Menu');
   expect(await hasVisibleText(page, '开始新游戏')).toBe(true);
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+});
+
+// GHI-03 m9: Phaser delivered one ArrowDown three times inside a single frame
+// whenever another key landed in the same queue drain (measured: frame 28, three
+// deliveries of the same event). The menu advanced once per delivery, so the
+// selection skipped 继续游戏 and Enter opened the help panel instead of loading
+// the save. Menu input is now accepted at most once per key per frame.
+const LEGACY_SAVE = JSON.stringify({
+  schemaVersion: 2,
+  runSeed: 42,
+  day: 1,
+  gameMinuteOfDay: 360,
+  currentFloor: 100000,
+  status: 'playing',
+  player: {
+    x: 640,
+    hp: 100,
+    hunger: 80,
+    thirst: 80,
+    energy: 80,
+    equipped: null,
+    homeUpgrades: [],
+    inventory: { slotCount: 12, slots: [] },
+  },
+  npcStates: {},
+  visitedFloors: {},
+  worldEvents: { history: [], activeEvent: null },
+});
+
+test('a keypress is not doubled by another key in the same frame', async ({ page }) => {
+  // Three entries need a save; with two, the skip is hidden by the clamp.
+  await page.addInitScript((save) => localStorage.setItem('floor100000.save.v1', save), LEGACY_SAVE);
+  await page.goto('/?seed=42');
+  await waitForScene(page, 'Menu');
+  await page.waitForTimeout(250);
+
+  // One ArrowDown immediately followed by Enter — the shape that reproduced it.
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+
+  // The selection must still be 继续游戏, so Enter loads the save.
+  await waitForScene(page, 'Game');
+});
+
+// Guard against over-debouncing: a keypress in a later frame must still register.
+test('a lone ArrowDown advances the menu by exactly one entry', async ({ page }) => {
+  await page.addInitScript((save) => localStorage.setItem('floor100000.save.v1', save), LEGACY_SAVE);
+  await page.goto('/?seed=42');
+  await waitForScene(page, 'Menu');
+  await page.waitForTimeout(250);
+
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(250);
+  expect(await selectedOption(page)).toBe('▶ 继续游戏');
+
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(250);
+  expect(await selectedOption(page)).toBe('▶ 操作说明');
 });
 
 test('the inventory shows an item tooltip', async ({ page }) => {

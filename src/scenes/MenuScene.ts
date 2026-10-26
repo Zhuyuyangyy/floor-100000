@@ -5,6 +5,8 @@ import { playSfx } from '../render/audio';
 
 // Title screen: a keyboard-navigable option list — 开始新游戏 / 继续游戏 (when a
 // save exists) / 操作说明. ↑/↓ to move, Enter to choose (docs/03_TASKS.md#p0-08).
+type InputSlot = 'up' | 'down' | 'enter' | 'esc';
+
 export class MenuScene extends Phaser.Scene {
   private optionTexts: Phaser.GameObjects.Text[] = [];
   private entries: Array<{ label: string; run: () => void }> = [];
@@ -16,12 +18,18 @@ export class MenuScene extends Phaser.Scene {
   private helpObjects: Array<Phaser.GameObjects.Text | Phaser.GameObjects.Graphics> = [];
   private messageText!: Phaser.GameObjects.Text;
   private messageTimer?: Phaser.Time.TimerEvent;
+  private lastInputFrame: Record<InputSlot, number> = { up: -1, down: -1, enter: -1, esc: -1 };
 
   constructor() {
     super('Menu');
   }
 
   create(): void {
+    // Field initialisers do not re-run on scene restart, and the frame counter is
+    // monotonic across the session, so a stale slot would never match anyway —
+    // reset anyway to keep the per-create state honest.
+    this.lastInputFrame = { up: -1, down: -1, enter: -1, esc: -1 };
+
     const { width, height } = this.cameras.main;
     this.add.rectangle(width / 2, height / 2, width, height, 0x18242c);
 
@@ -56,13 +64,37 @@ export class MenuScene extends Phaser.Scene {
       this.cursors = keyboard.addKeys({ up: 'UP', down: 'DOWN' }) as typeof this.cursors;
       this.keyEnter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
       this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
-      this.cursors.up.on('down', () => this.move(-1), this);
-      this.cursors.down.on('down', () => this.move(1), this);
-      this.keyEnter.on('down', () => this.activate(), this);
-      this.keyEsc.on('down', () => {
-        if (this.helpOpen) this.toggleHelp();
-      }, this);
+      this.cursors.up.on('down', () => this.onNav('up', -1), this);
+      this.cursors.down.on('down', () => this.onNav('down', 1), this);
+      this.keyEnter.on('down', () => this.onConfirm('enter'), this);
+      this.keyEsc.on('down', () => this.onConfirm('esc'), this);
     }
+  }
+
+  // Phaser can deliver one keydown several times inside a single frame when
+  // several keys land in the same queue drain (measured: one ArrowDown arrived
+  // three times in frame 28). The event path then advanced the selection once per
+  // delivery, skipping a menu entry and leaving 继续游戏 unreachable. Accept each
+  // key at most once per frame (GHI-03 m9).
+  private accept(slot: InputSlot): boolean {
+    const frame = this.game.getFrame();
+    if (this.lastInputFrame[slot] === frame) return false;
+    this.lastInputFrame[slot] = frame;
+    return true;
+  }
+
+  private onNav(slot: 'up' | 'down', delta: number): void {
+    if (this.helpOpen || !this.accept(slot)) return;
+    this.move(delta);
+  }
+
+  private onConfirm(slot: 'enter' | 'esc'): void {
+    if (!this.accept(slot)) return;
+    if (this.helpOpen) {
+      this.toggleHelp(); // Enter and Esc both close the help panel
+      return;
+    }
+    if (slot === 'enter') this.activate();
   }
 
   private refreshOptions(): void {
@@ -70,17 +102,12 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private move(delta: number): void {
-    if (this.helpOpen) return;
     this.selected = Phaser.Math.Clamp(this.selected + delta, 0, this.entries.length - 1);
     this.refreshOptions();
     this.hideMessage();
   }
 
   private activate(): void {
-    if (this.helpOpen) {
-      this.toggleHelp();
-      return;
-    }
     this.hideMessage();
     playSfx('click');
     this.entries[this.selected]?.run();

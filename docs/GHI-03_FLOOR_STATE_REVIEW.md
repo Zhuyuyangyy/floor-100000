@@ -30,7 +30,7 @@
 | n1 | nit **已由 63ee148 解决** | `LootSystem.ts:33` | 容器 key 内联拼接与 helper 重复 |
 | n2 | nit **已由 M5 解决** | `GameScene.ts:837` | `attemptSleep` 不刷新 `floorView`（v0.1 不可达） |
 | n3 | nit **已记录** | `gameTypes.ts:60,88` | `equipped` / `npcStates` 零消费方、零校验 |
-| m9 | minor **未修** | `MenuScene.ts:53-55` 等 | 突发键盘投递不可靠：会丢键，也会把一次 ↓ 重复投递（详见 §5） |
+| m9 | minor **已修** | `MenuScene.ts:53-55` 等 | 突发键盘投递不可靠：会丢键，也会把一次 ↓ 重复投递（详见 §5） |
 
 **合规通过项**（同为审查结论）：`src/` 无 `Math.random()`；`Date.now()` 仅 3 处新 run 取种子且可被 `?seed=` 覆盖；seed key 与 spec §3 要求的 `worldSeed + floorNumber + containerId` 一致；`MAX_FRAME_MS = 250` 的单帧钳制存在**且被测到**（`survivalSystem.test.ts:40`）；交易原子性成立；`visitedFloors` 有界（只被 loot 路径懒创建，最多 5 层）。
 
@@ -176,12 +176,35 @@ tuned:    crate_wood:tape      ← 同 seed 世界静默改变
 
 `e2e/ui.spec.ts` 的「title menu is keyboard-navigable」只按一次 ↓，而当时菜单**只有 2 项**（无存档），↓ 落在最后一项——重复投递被 `Phaser.Math.Clamp` 吃掉了，所以断言照样通过。一旦菜单有 3 项（有存档时），中间的「继续游戏」就会被跳过。
 
+### 5.5 修复：m9（同一帧内只接受一次菜单输入）
+
+2026-10-26 当日完成。
+
+**机理（实测钉死）**：给 MenuScene 的键盘回调打日志后看到——一次 `keyboard.press('ArrowDown')` 紧跟 `press('Enter')`，在**同一帧（frame 28）内 ArrowDown 被投递了 3 次，而且是同一个事件对象**，Enter 只 1 次：
+
+```
+[m9] down  frame=28 evt=0.1654 isDown=true
+[m9] down  frame=28 evt=0.1654 isDown=true
+[m9] enter frame=28 evt=0.0487 isDown=true
+[m9] down  frame=28 evt=0.1654 isDown=true
+```
+
+事件回调路径每次投递都触发一次 `move(1)`，于是选中项前进 2 格，「继续游戏」被跳过，Enter 转而去开帮助面板。
+
+**修法**：`MenuScene` 的四个键改为经 `accept(slot)` 进门——用 `this.game.getFrame()` 记录每个键上一次被接受的帧号，同帧内重复投递直接忽略。`move()` / `activate()` 里的 `helpOpen` 判断相应上移到 `onNav` / `onConfirm`。`lastInputFrame` 在 `create()` 里重置（帧计数器跨会话单调，陈旧值本就不会误匹配，重置只为保持一致）。
+
+**试过但否决的方案**：改成在 `update()` 里轮询 `Phaser.Input.Keyboard.JustDown()`。`JustDown` 只在按下沿置位 `_justDown`，而同步派发的 keyup 会立刻把它清掉，实测轮询完全收不到输入。另外 `window.Phaser` 在 Vite 打包里并不存在，别用它做线上探针。
+
+**残留**：§5.2 里「同一个 JS 任务内派发的 N 个键，最后一个被丢」那条**未修**——它是合成事件单任务派送的产物，真人不可达，且与本次修的重复投递是两个不同症状。要治本得改 Phaser 的键盘队列，超出本项目范围。
+
+回归：`npm run typecheck` 无错误；`npm test` **152 passed**；`npx playwright test` **30 passed**（28→30，连跑两轮）；`npm run build` 通过（1,430.50 kB / gzip 376.05 kB）。
+
 ### 5.4 实际影响
 
 - **真人几乎不可达**：需要两次按键落在同一帧（<16ms），人手做不到。
 - **低帧率下可达**：切后台 / 慢机器单帧可达 200ms+，间隔 100ms 的两次按键会同帧，第二次被重复或丢弃。
 - **主要价值是 e2e 编写警戒**：背靠背派发按键会静默改变语义。本轮新增的坏档测试就因此先红后绿，改为每键间隔 120ms 后 4/4 稳定。
-- 若要彻底修，方向是给菜单输入加「同一帧内只接受一次导航」的去抖，而不是改场景启动时机。
+- 重复投递那一半已由 §5.5 修掉；丢键那一半见 §5.5 的「残留」。
 
 ---
 
@@ -222,7 +245,7 @@ tuned:    crate_wood:tape      ← 同 seed 世界静默改变
 
 测试状态（全部实跑）：`npm run typecheck` 无错误；`npm test` **117 passed**（98 → 117）；`npx playwright test` **25 passed**。
 
-**仍未修**：m9（§5 的键盘突发投递）。另注意：`constants.ts` 里的 `DAY_START_MINUTE` / `NIGHT_RISK_START_MINUTE` 与 config 的 `time.*` 仍是手抄副本（与 m7 同类，但原清单未列，本次未动）。
+**GHI-03 清单已全部处理完毕**（最后一项 m9 见 §5.5）。
 
 > 本轮实测中另发现一处**既有的**输入问题并记入 §5：背靠背派发按键时一次 ↓ 会被重复投递（6/6 复现，stash 掉本轮改动后在 `1be6afa` 上同样复现）。为此新增的坏档 e2e 每键之间须间隔 ≥120ms。
 

@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../core/design';
 import { getGame, startNewGame } from '../core/session';
 import {
   BED_X,
@@ -24,7 +25,7 @@ import { absoluteMinute, advanceTime, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, 
 import { ensureNightEvent } from '../systems/EventSystem';
 import { clearSave, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
-import { buildPanel, createMarker, placeMarker, type PanelObject } from '../render/panels';
+import { buildPanel, createMarker, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { getItem } from '../data/items';
@@ -350,12 +351,15 @@ export class GameScene extends Phaser.Scene {
     });
     this.refreshStats();
 
+    // Centred on the CAMERA viewport, not the floor: FLOOR_WIDTH is the 1280px
+    // world, but a scrollFactor-0 object is positioned in screen space, so
+    // FLOOR_WIDTH/2 (=640) sat half outside the 640px canvas.
     this.feedbackText = this.add
-      .text(FLOOR_WIDTH / 2, 60, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#f4b66a', backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } })
+      .text(DESIGN_WIDTH / 2, 60, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#f4b66a', backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } })
       .setOrigin(0.5).setScrollFactor(0).setDepth(120);
 
     this.hintText = this.add
-      .text(12, FLOOR_HEIGHT - 22, 'A/D 或 ←/→ 移动 · E 交互 · I 背包 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
+      .text(12, DESIGN_HEIGHT - 22, 'A/D 或 ←/→ 移动 · E 交互 · I 背包 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
       .setScrollFactor(0).setDepth(100);
   }
 
@@ -403,8 +407,8 @@ export class GameScene extends Phaser.Scene {
     const startY = top + 46;
     for (let i = 0; i < INVENTORY_SLOTS; i++) {
       const rowY = startY + i * INV_ROW_PITCH;
-      const icon = this.add.image(left + 22, rowY + 10, '').setOrigin(0, 0.5);
-      const t = this.add.text(left + 44, rowY + 10, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }).setOrigin(0, 0.5);
+      const icon = this.add.image(left + 30, rowY + 10, '').setOrigin(0, 0.5);
+      const t = this.add.text(left + 52, rowY + 10, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }).setOrigin(0, 0.5);
       this.invSlotIcons.push(icon);
       this.invSlotTexts.push(t);
       this.invObjects.push(icon, t);
@@ -435,10 +439,10 @@ export class GameScene extends Phaser.Scene {
         icon.setVisible(false);
       }
     }
-    const selectedText = this.invSlotTexts[this.invSelected];
     const selected = slots[this.invSelected];
+    const selectedIcon = this.invSlotIcons[this.invSelected];
     this.invMarker.setVisible(selected !== undefined);
-    if (selected && selectedText) placeMarker(this.invMarker, selectedText);
+    if (selected && selectedIcon) placeMarkerLeftOf(this.invMarker, selectedIcon);
     if (selected) {
       const item = getItem(selected.itemId);
       const category = item.category === 'consumable' ? '消耗品' : item.category === 'material' ? '材料' : '工具';
@@ -503,8 +507,8 @@ export class GameScene extends Phaser.Scene {
 
     for (let i = 0; i < 4; i++) {
       const rowY = top + 48 + i * CRAFT_ROW_PITCH;
-      const icon = this.add.image(left + 26, rowY + 7, '').setOrigin(0, 0.5);
-      const t = this.add.text(left + 48, rowY + 7, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }).setOrigin(0, 0.5);
+      const icon = this.add.image(left + 30, rowY + 7, '').setOrigin(0, 0.5);
+      const t = this.add.text(left + 52, rowY + 7, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }).setOrigin(0, 0.5);
       this.craftEntryIcons.push(icon);
       this.craftEntryTexts.push(t);
       this.craftObjects.push(icon, t);
@@ -548,9 +552,9 @@ export class GameScene extends Phaser.Scene {
         t.setText(`净化 脏水→净水 ${can ? '[可净化]' : '[无脏水]'}`);
       }
     }
-    const selectedText = this.craftEntryTexts[this.craftSelected];
+    const selectedIcon = this.craftEntryIcons[this.craftSelected];
     this.craftMarker.setVisible(entries[this.craftSelected] !== undefined);
-    if (entries[this.craftSelected] && selectedText) placeMarker(this.craftMarker, selectedText);
+    if (entries[this.craftSelected] && selectedIcon) placeMarkerLeftOf(this.craftMarker, selectedIcon);
   }
 
   private toggleCrafting(): void {
@@ -686,7 +690,7 @@ export class GameScene extends Phaser.Scene {
 
     for (let i = 0; i < 4; i++) {
       const rowY = top + 112 + i * 26;
-      const icon = this.add.image(left + 26, rowY + 7, '').setOrigin(0, 0.5);
+      const icon = this.add.image(left + 30, rowY + 7, '').setOrigin(0, 0.5);
       const t = this.add.text(left + 48, rowY + 7, '……', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }).setOrigin(0, 0.5);
       this.dialogueOptionIcons.push(icon);
       this.dialogueOptions.push(t);
@@ -762,9 +766,9 @@ export class GameScene extends Phaser.Scene {
       if (option.icon) icon.setTexture(itemIconKey(option.icon)).setVisible(true);
       else icon.setVisible(false);
     }
-    const selectedText = this.dialogueOptions[d.selected];
+    const selectedIcon = this.dialogueOptionIcons[d.selected];
     this.dialogueMarker.setVisible(options[d.selected] !== undefined);
-    if (options[d.selected] && selectedText) placeMarker(this.dialogueMarker, selectedText);
+    if (options[d.selected] && selectedIcon) placeMarkerLeftOf(this.dialogueMarker, selectedIcon);
   }
 
   private activateDialogueOption(): void {

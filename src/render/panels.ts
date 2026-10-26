@@ -5,8 +5,11 @@ import Phaser from 'phaser';
 // art guide's "dark translucent background + high-contrast text" rule; the frame
 // replaces the old Graphics strokeRoundedRect, whose soft anti-aliased corners
 // broke the pixel look.
+// Fully opaque: at 0.96 the world's furniture labels and the HUD bled through
+// the panel and made the text inside hard to read. The art guide asks for a dark
+// translucent background, but readability of the panel's own contents wins.
 const PANEL_FILL = 0x0b0f12;
-const PANEL_FILL_ALPHA = 0.96;
+const PANEL_FILL_ALPHA = 1;
 
 // The frame texture is 48x48 with a ~4px border, so an 8px slice keeps the
 // corners crisp without pulling border pixels into the stretched centre.
@@ -46,8 +49,18 @@ export function createMarker(scene: Phaser.Scene): Phaser.GameObjects.Image {
   return scene.add.image(0, 0, 'ui-marker').setVisible(false);
 }
 
-// Park the marker just left of a label. Uses the rendered bounds rather than
-// label.x so it works for both centred and left-aligned rows.
+// Park the marker just left of a centred label.
 export function placeMarker(marker: Phaser.GameObjects.Image, label: Phaser.GameObjects.Text): void {
   marker.setPosition(label.getBounds().left - 12, label.y);
+}
+
+// Park the marker just left of a row's first element. Offsetting from the icon
+// rather than the label matters: the label sits 16px right of the icon, so
+// offsetting from the label put the marker on top of the icon.
+export function placeMarkerLeftOf(
+  marker: Phaser.GameObjects.Image,
+  element: { getBounds: () => Phaser.Geom.Rectangle },
+): void {
+  const b = element.getBounds();
+  marker.setPosition(b.x - 12, b.y + b.height / 2);
 }

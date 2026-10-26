@@ -15,11 +15,12 @@ const PANEL_SLICE = 8;
 export type PanelAccent = 'green' | 'yellow';
 
 // What a panel's object list holds: text, the dark fill, the nine-slice frame,
-// and (in GameScene's container boxes) plain Graphics.
+// the selection marker, and (in GameScene's container boxes) plain Graphics.
 export type PanelObject =
   | Phaser.GameObjects.Text
   | Phaser.GameObjects.Rectangle
   | Phaser.GameObjects.NineSlice
+  | Phaser.GameObjects.Image
   | Phaser.GameObjects.Graphics;
 
 // `green` is the 安全青 accent (inventory / dialogue / help), `yellow` the
@@ -35,4 +36,17 @@ export function buildPanel(
   const fill = scene.add.rectangle(cx, cy, w, h, PANEL_FILL, PANEL_FILL_ALPHA);
   const frame = scene.add.nineslice(cx, cy, `ui-panel-${accent}`, undefined, w, h, PANEL_SLICE, PANEL_SLICE, PANEL_SLICE, PANEL_SLICE);
   return [fill, frame];
+}
+
+// The licensed arrow used as the selection marker in every list, replacing the
+// old text "▶ " prefix (which shifted each label and broke the pixel look).
+// Starts hidden: each list's refresh places and reveals its own marker, and the
+// marker is pushed into the panel's object list so it toggles with the panel.
+export function createMarker(scene: Phaser.Scene): Phaser.GameObjects.Image {
+  return scene.add.image(0, 0, 'ui-marker').setVisible(false);
+}
+
+// Park the marker just left of a centred label.
+export function placeMarker(marker: Phaser.GameObjects.Image, label: Phaser.GameObjects.Text): void {
+  marker.setPosition(label.x - label.width / 2 - 12, label.y);
 }

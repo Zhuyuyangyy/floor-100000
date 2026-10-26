@@ -72,10 +72,11 @@
 
 ## 5. 评估过但本轮不用的候选
 
-| 包 | 文件数 | 像素合规 | 覆盖 | 不用的原因 |
+| 包 | 文件数 | 像素合规 | 覆盖 | 结论 |
 |---|---|---|---|---|
+| `ui/pixel-ui-pack` | 38 | ✓ | 像素 9-slice 面板框 + 方向箭头 | **已试用并采用**——见 §6.1 |
 | `tiles-terrain/pixel-platformer-food-expansion` | 120 | ✓ | 仅食物/饮料，15 种物品中约 4-5 种 | **覆盖不全**：其余 10 种仍无图标，背包会半有图标半没有；且配色明亮甜美（亮粉/亮黄），与 `#18242C` 楼体的「末日压抑」基调冲突 |
-| `ui/pixel-ui-pack` | 38 | ✓ | 像素 9-slice 面板框 + 四色方向箭头 | **已试用并采用（仅面板框）**——见 §6.1 |
+
 
 ---
 
@@ -98,22 +99,23 @@
 
 ## 6.1 试用结果：`ui/pixel-ui-pack` 的面板框（已采用）
 
-2026-10-26 当日，经项目负责人批准后试用。**只采用了 9-Slice 面板框，未采用箭头。**
+2026-10-26 当日，经项目负责人批准后试用。**面板框与箭头标记均已采用。**
 
-**做法**：新增 `src/render/panels.ts` 的 `buildPanel()`，把 5 处面板（背包/制作/暂停/对话/菜单帮助）原先的 `Graphics.fillRoundedRect + strokeRoundedRect` 换成「深色填充矩形 +  licensed 像素 nine-slice 边框」。accent 按各面板原描边色一一对应：安全青 `#77C6A4` → green 框（背包/对话/帮助），灯光橙 `#F4B66A` → yellow 框（制作/暂停）。`BootScene.preload()` 加载贴图。
+**做法**：新增 `src/render/panels.ts` 的 `buildPanel()` / `createMarker()` / `placeMarker()`。5 处面板（背包/制作/暂停/对话/菜单帮助）原先的 `Graphics.fillRoundedRect + strokeRoundedRect` 换成「深色填充矩形 + licensed 像素 nine-slice 边框」，accent 按各面板原描边色对应：安全青 `#77C6A4` → green 框（背包/对话/帮助），灯光橙 `#F4B66A` → yellow 框（制作/暂停）。`▶` 文字前缀在 5 处列表（菜单/背包/制作/暂停/对话）全部换成包内 spritesheet 裁出的 16x16 像素箭头，标签随之左对齐——原先前缀还把每个标签往右推了一格。`BootScene.preload()` 加载贴图。
 
-**过程中实测发现并修掉的一个坑**：`Outline/*.png` 的名字容易误判——它的 interior 是**不透明 `#EEEEEE`**，不是透明。直接用会把浅灰底盖在深色填充上，变成「浅底 + 米白字」，对比度崩掉。已把 interior 精确抹成透明（只清除 `238,238,238` 像素，边框与圆角原样保留），深色填充这才透上来。CC0 允许修改，已在 `THIRD_PARTY_NOTICES.md` 记录。
+**过程中实测发现并修掉的三个坑**：
 
-**截图审查结论（通过）**：背包（绿框）与制作（黄框）均为深色底 + 清晰硬边缘像素边框 + 圆角，文字对比度良好；相比原先抗锯齿的 `strokeRoundedRect` 是明确提升。
+1. `Outline/*.png` 的名字容易误判——它的 interior 是**不透明 `#EEEEEE`**，不是透明。直接用会把浅灰底盖在深色填充上，变成「浅底 + 米白字」，对比度崩掉。已把 interior 精确抹成透明（只清除 `238,238,238` 像素，边框与圆角原样保留），深色填充这才透上来。CC0 允许修改，已在 `THIRD_PARTY_NOTICES.md` 记录。
+2. 4 个 marker 精灵若不在建成时隐藏、也不加进面板对象数组，就会有 3 个停在 `(0,0)` 一直可见——屏幕左上角挂着一排箭头。e2e 查找 marker 也必须过滤 `visible`，否则会命中隐藏的那个。
+3. **顺带修掉一个比本轮主题更严重的真 bug**：`重新开始` 时暂停菜单还开着，而 `pauseOpen` / `inventoryOpen` 等 UI 状态字段**不随场景重启重置**，`update()` 于是一直 early-return——重启后的游戏完全冻住，背包和暂停菜单都打不开，且无任何报错。同类的还有 `invSlotTexts` / `craftEntryTexts` / `dialogueOptions` / `pauseObjects` / `floorObjects` / `invObjects` 等**只在 builder 里 push、从不在 `create()` 重置**的数组（含我改动 `helpObjects` 时自己引入的一处回归）。已在 `create()` 开头统一重置，并有 e2e 守卫。
 
-**箭头（包内 spritesheet 里的 16x16 像素箭头）本轮未采用**：`▶` 文字前缀实际用在 **5 处**（菜单、背包、制作、暂停、对话），且这些列表的文本都存放在 `invSlotTexts` / `craftEntryTexts` / `dialogueOptions` / `pauseObjects` 这类**只在 builder 里 push、从不在 `create()` 重置**的类字段里——正是本会话早先在 MenuScene 修过的同一类 Phaser 字段初始化器坑。把标记换成精灵需要同时处理这 5 处的布局与可见性编组，与面板替换混在一起会让截图审查无法归因，故留作独立改动。
+**截图审查结论（通过）**：背包为深色底 + 清晰硬边缘像素边框 + 圆角，箭头标记在选中行左侧、标签左对齐，文字对比度良好；相比原先抗锯齿的 `strokeRoundedRect` 与带前缀的文本游标是明确提升。
 
-> 顺带发现（未修，超出本轮范围）：上述 4 个 GameScene 数组在「重新开始」导致的 scene restart 后会累积上一轮的对象。建议后续按 MenuScene 的先例在 `create()` 里重置。
-
-回归：`npm run typecheck` 无错误；`npm test` **152 passed**；`npx playwright test` **32 passed**（30→32）；`npm run build` 通过，贴图正确产出到 `dist/assets/ui/`。
+回归：`npm run typecheck` 无错误；`npm test` **152 passed**；`npx playwright test` **35 passed**（30→35）；`npm run build` 通过，贴图正确产出到 `dist/assets/ui/`。
 
 ## 7. 本轮改动与测试状态
-- 改动文件：`docs/GHI-04_ASSET_TRIAL.md`（新增）。**未引入任何素材、未建 `public/assets/`、未改业务代码、未改依赖/lockfile。**
-- `git diff --stat`：空（无已跟踪文件改动）。
-- 下载的预览图与样本一律放在系统临时目录并已删除，未进仓库。
-- 测试状态：本轮**未运行回归测试**（未改任何业务代码）。仓库工作区与本轮开始前一致。
+
+- **第一轮（授权核实，只读）**：仅新增 `docs/GHI-04_ASSET_TRIAL.md`。未引入素材、未建 `public/`、未改业务代码与依赖，未跑回归。
+- **第二轮（面板框 + 箭头试用）**：新增 `public/assets/ui/{panel-green,panel-yellow,marker}.png`、`src/render/panels.ts`、`THIRD_PARTY_NOTICES.md`；改 `BootScene`、`GameScene`、`MenuScene` 及 `e2e/{ui,npc,crafting}.spec.ts`。
+- 下载的预览图与样本一律放系统临时目录并已删除，未把整个素材包入库。
+- 回归（第二轮实跑）：`npm run typecheck` 无错误；`npm test` **152 passed**；`npx playwright test` **35 passed**；`npm run build` 通过，贴图正确产出到 `dist/assets/ui/`。

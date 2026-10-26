@@ -50,14 +50,17 @@ async function nightAlpha(page: Page): Promise<number> {
   });
 }
 
-// Press ArrowDown until the ▶ cursor lands on the option starting with `prefix`
-// (self-correcting against a dropped synthetic keypress).
+// Press ArrowDown until the arrow marker lands on the option starting with
+// `prefix` (self-correcting against a dropped synthetic keypress).
 async function navTo(page: import('@playwright/test').Page, prefix: string): Promise<void> {
   for (let i = 0; i < 8; i++) {
     const onTarget = await page.evaluate((p) => {
-      const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean }> } } | null } } }).__PHASER_GAME__;
-      const t = g?.scene.getScene('Game')?.children.list.find((o) => o.type === 'Text' && o.visible && (o.text ?? '').startsWith('▶'));
-      return t ? (t.text ?? '').startsWith(`▶ ${p}`) : false;
+      const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean; y: number; texture?: { key?: string } }> } } | null } } }).__PHASER_GAME__;
+      const list = g?.scene.getScene('Game')?.children.list ?? [];
+      const marker = list.find((o) => o.type === 'Image' && o.texture?.key === 'ui-marker' && o.visible);
+      if (!marker) return false;
+      const label = list.find((o) => o.type === 'Text' && o.visible && Math.abs(o.y - marker.y) <= 4);
+      return (label?.text ?? '').startsWith(p);
     }, prefix);
     if (onTarget) return;
     await page.keyboard.press('ArrowDown');

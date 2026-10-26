@@ -12,6 +12,7 @@ export class BootScene extends Phaser.Scene {
     // CC0 1.0, Kenney (kenney.nl) — see THIRD_PARTY_NOTICES.md.
     this.load.image('ui-panel-green', 'assets/ui/panel-green.png');
     this.load.image('ui-panel-yellow', 'assets/ui/panel-yellow.png');
+    this.load.image('ui-marker', 'assets/ui/marker.png');
   }
 
   create(): void {

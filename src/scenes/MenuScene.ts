@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { startNewGame, tryContinue } from '../core/session';
 import { clearSave, hasSave } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
-import { buildPanel, type PanelObject } from '../render/panels';
+import { buildPanel, createMarker, placeMarker, type PanelObject } from '../render/panels';
 
 // Title screen: a keyboard-navigable option list — 开始新游戏 / 继续游戏 (when a
 // save exists) / 操作说明. ↑/↓ to move, Enter to choose (docs/03_TASKS.md#p0-08).
@@ -17,6 +17,7 @@ export class MenuScene extends Phaser.Scene {
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private helpOpen = false;
   private helpObjects: PanelObject[] = [];
+  private marker!: Phaser.GameObjects.Image;
   private messageText!: Phaser.GameObjects.Text;
   private messageTimer?: Phaser.Time.TimerEvent;
   private lastInputFrame: Record<InputSlot, number> = { up: -1, down: -1, enter: -1, esc: -1 };
@@ -30,6 +31,9 @@ export class MenuScene extends Phaser.Scene {
     // monotonic across the session, so a stale slot would never match anyway —
     // reset anyway to keep the per-create state honest.
     this.lastInputFrame = { up: -1, down: -1, enter: -1, esc: -1 };
+    // Survives a scene restart; left true, the help panel would still swallow
+    // navigation on the fresh title screen.
+    this.helpOpen = false;
 
     const { width, height } = this.cameras.main;
     this.add.rectangle(width / 2, height / 2, width, height, 0x18242c);
@@ -49,10 +53,14 @@ export class MenuScene extends Phaser.Scene {
     // refreshOptions() indexes past the end of `entries` (pre-existing bug:
     // 暂停 -> 返回标题 crashed the title screen).
     this.optionTexts = [];
+    // buildHelp() only pushes, and field initialisers do not re-run on scene
+    // restart — without this the help panel accumulates destroyed objects.
+    this.helpObjects = [];
     this.entries.forEach((entry, i) => {
       const t = this.add.text(width / 2, 210 + i * 30, entry.label, { fontFamily: 'monospace', fontSize: '18px', color: '#ece8d8' }).setOrigin(0.5);
       this.optionTexts.push(t);
     });
+    this.marker = createMarker(this);
     this.refreshOptions();
     this.messageText = this.add
       .text(width / 2, height - 30, '', { fontFamily: 'monospace', fontSize: '13px', color: '#e0705a', align: 'center' })
@@ -99,7 +107,10 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private refreshOptions(): void {
-    this.optionTexts.forEach((t, i) => t.setText(`${i === this.selected ? '▶ ' : '  '}${this.entries[i].label}`));
+    this.optionTexts.forEach((t, i) => t.setText(this.entries[i].label));
+    const selected = this.optionTexts[this.selected];
+    this.marker.setVisible(selected !== undefined);
+    if (selected) placeMarker(this.marker, selected);
   }
 
   private move(delta: number): void {

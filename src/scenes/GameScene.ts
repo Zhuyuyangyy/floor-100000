@@ -24,7 +24,7 @@ import { absoluteMinute, advanceTime, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, 
 import { ensureNightEvent } from '../systems/EventSystem';
 import { clearSave, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
-import { buildPanel, type PanelObject } from '../render/panels';
+import { buildPanel, createMarker, placeMarker, type PanelObject } from '../render/panels';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
@@ -79,12 +79,14 @@ export class GameScene extends Phaser.Scene {
 
   private invObjects: PanelObject[] = [];
   private invSlotTexts: Phaser.GameObjects.Text[] = [];
+  private invMarker!: Phaser.GameObjects.Image;
   private invSelected = 0;
   private inventoryOpen = false;
 
   private craftingOpen = false;
   private craftObjects: PanelObject[] = [];
   private craftEntryTexts: Phaser.GameObjects.Text[] = [];
+  private craftMarker!: Phaser.GameObjects.Image;
   private craftSelected = 0;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
   private upgradeBoard!: Phaser.GameObjects.Text;
@@ -96,10 +98,12 @@ export class GameScene extends Phaser.Scene {
   private dialogueTitle!: Phaser.GameObjects.Text;
   private dialogueMessage!: Phaser.GameObjects.Text;
   private dialogueOptions: Phaser.GameObjects.Text[] = [];
+  private dialogueMarker!: Phaser.GameObjects.Image;
 
   private pauseOpen = false;
   private pauseObjects: PanelObject[] = [];
   private pauseOptionTexts: Phaser.GameObjects.Text[] = [];
+  private pauseMarker!: Phaser.GameObjects.Image;
   private pauseSelected = 0;
   private lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
   private lastActiveEvent: ActiveEvent | null = null;
@@ -114,6 +118,41 @@ export class GameScene extends Phaser.Scene {
     // value and the fresh run's clock looks like it has not moved yet.
     this.lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
     this.lastActiveEvent = null;
+
+    // Every builder below only pushes into these, and field initialisers do not
+    // re-run on scene restart. Without the reset, 重新开始 left them holding the
+    // previous run's destroyed objects, so refreshInventory() / togglePause()
+    // wrote to dead objects and both panels came up empty.
+    this.floorObjects = [];
+    this.containerObjs.clear();
+    this.groundObjs.clear();
+    this.invObjects = [];
+    this.invSlotTexts = [];
+    this.invMarker = createMarker(this);
+    this.craftObjects = [];
+    this.craftEntryTexts = [];
+    this.craftMarker = createMarker(this);
+    this.pauseObjects = [];
+    this.pauseOptionTexts = [];
+    this.pauseMarker = createMarker(this);
+    this.dialogueObjects = [];
+    this.dialogueOptions = [];
+    this.dialogueMarker = createMarker(this);
+    // 重新开始 runs while the pause menu is still open, and these flags survive a
+    // restart. Left set, update() early-returns forever and every panel handler
+    // refuses to run, so the restarted game looks frozen.
+    this.inventoryOpen = false;
+    this.invSelected = 0;
+    this.craftingOpen = false;
+    this.craftSelected = 0;
+    this.dialogueOpen = false;
+    this.dialogue = null;
+    this.pauseOpen = false;
+    this.pauseSelected = 0;
+    this.wanderer = undefined;
+    this.wandererHitAt = Number.NEGATIVE_INFINITY;
+    this.lastClock = '';
+    this.lastStats = '';
 
     this.cameras.main.setBackgroundColor(0x22303a);
     this.cameras.main.setBounds(0, 0, FLOOR_WIDTH, FLOOR_HEIGHT);
@@ -340,7 +379,7 @@ export class GameScene extends Phaser.Scene {
     this.invObjects.push(this.tooltipText);
 
     const footer = this.add.text(cx, top + panelH - 16, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
-    this.invObjects.push(footer);
+    this.invObjects.push(footer, this.invMarker);
 
     for (const o of this.invObjects) o.setScrollFactor(0).setDepth(200).setVisible(false);
   }
@@ -352,13 +391,15 @@ export class GameScene extends Phaser.Scene {
       const t = this.invSlotTexts[i];
       const stack = slots[i];
       if (stack) {
-        const cursor = i === this.invSelected ? '▶ ' : '  ';
-        t.setText(`${cursor}${getItem(stack.itemId).displayName} ×${stack.quantity}`);
+        t.setText(`${getItem(stack.itemId).displayName} ×${stack.quantity}`);
       } else {
-        t.setText('  （空）');
+        t.setText('（空）');
       }
     }
+    const selectedText = this.invSlotTexts[this.invSelected];
     const selected = slots[this.invSelected];
+    this.invMarker.setVisible(selected !== undefined);
+    if (selected && selectedText) placeMarker(this.invMarker, selectedText);
     if (selected) {
       const item = getItem(selected.itemId);
       const category = item.category === 'consumable' ? '消耗品' : item.category === 'material' ? '材料' : '工具';
@@ -430,7 +471,7 @@ export class GameScene extends Phaser.Scene {
       this.craftObjects.push(t);
     }
     const footer = this.add.text(cx, top + panelH - 16, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
-    this.craftObjects.push(footer);
+    this.craftObjects.push(footer, this.craftMarker);
 
     for (const o of this.craftObjects) o.setScrollFactor(0).setDepth(210).setVisible(false);
   }
@@ -452,17 +493,19 @@ export class GameScene extends Phaser.Scene {
         t.setText('');
         continue;
       }
-      const cursor = i === this.craftSelected ? '▶ ' : '  ';
       if (entry.kind === 'recipe') {
         const recipe = getRecipe(entry.id!);
         const cost = Object.entries(recipe.cost).map(([id, n]) => `${getItem(id as ItemId).displayName}×${n}`).join(' ');
         const status = hasUpgrade(state, entry.id!) ? '[已建]' : canCraft(state, entry.id!).ok ? '[可制作]' : '[材料不足]';
-        t.setText(`${cursor}${recipe.displayName}（${cost}）${status}`);
+        t.setText(`${recipe.displayName}（${cost}）${status}`);
       } else {
         const can = countItem(state.player.inventory, 'dirty_water') >= 1;
-        t.setText(`${cursor}净化 脏水→净水 ${can ? '[可净化]' : '[无脏水]'}`);
+        t.setText(`净化 脏水→净水 ${can ? '[可净化]' : '[无脏水]'}`);
       }
     }
+    const selectedText = this.craftEntryTexts[this.craftSelected];
+    this.craftMarker.setVisible(entries[this.craftSelected] !== undefined);
+    if (entries[this.craftSelected] && selectedText) placeMarker(this.craftMarker, selectedText);
   }
 
   private toggleCrafting(): void {
@@ -485,7 +528,7 @@ export class GameScene extends Phaser.Scene {
     this.pauseObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow'));
     const title = this.add.text(cx, top + 20, '已暂停', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
     const controls = this.add.text(cx, top + 50, 'A/D 移动 · E 交互 · I 背包 · C 制作', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
-    this.pauseObjects.push(title, controls);
+    this.pauseObjects.push(title, controls, this.pauseMarker);
 
     PAUSE_OPTIONS.forEach((label, i) => {
       const t = this.add.text(cx, top + 92 + i * 28, label, { fontFamily: 'monospace', fontSize: '15px', color: '#ece8d8' }).setOrigin(0.5);
@@ -497,7 +540,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private refreshPause(): void {
-    this.pauseOptionTexts.forEach((t, i) => t.setText(`${i === this.pauseSelected ? '▶ ' : '  '}${PAUSE_OPTIONS[i]}`));
+    this.pauseOptionTexts.forEach((t, i) => t.setText(PAUSE_OPTIONS[i]));
+    const selectedText = this.pauseOptionTexts[this.pauseSelected];
+    if (selectedText) placeMarker(this.pauseMarker, selectedText);
   }
 
   private togglePause(): void {
@@ -600,7 +645,7 @@ export class GameScene extends Phaser.Scene {
       this.dialogueObjects.push(t);
     }
     const footer = this.add.text(cx, top + panelH - 14, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
-    this.dialogueObjects.push(footer);
+    this.dialogueObjects.push(footer, this.dialogueMarker);
 
     for (const o of this.dialogueObjects) o.setScrollFactor(0).setDepth(220).setVisible(false);
   }
@@ -657,8 +702,11 @@ export class GameScene extends Phaser.Scene {
         this.dialogueOptions[i].setText('');
         continue;
       }
-      this.dialogueOptions[i].setText(`${i === d.selected ? '▶ ' : '  '}${label}`);
+      this.dialogueOptions[i].setText(label);
     }
+    const selectedText = this.dialogueOptions[d.selected];
+    this.dialogueMarker.setVisible(labels[d.selected] !== undefined);
+    if (labels[d.selected] && selectedText) placeMarker(this.dialogueMarker, selectedText);
   }
 
   private activateDialogueOption(): void {

@@ -28,16 +28,36 @@ async function hasVisibleText(page: Page, substr: string): Promise<boolean> {
   }, substr);
 }
 
-// The option currently carrying the ▶ marker.
+// The option the arrow marker sits on.
 async function selectedOption(page: Page): Promise<string> {
   return page.evaluate(() => {
-    const scenes = (window as unknown as { __PHASER_GAME__?: { scene: { scenes: Array<{ children: { list: Array<{ type: string; text?: string; visible: boolean }> } }> } } }).__PHASER_GAME__?.scene.scenes ?? [];
+    const scenes = (window as unknown as { __PHASER_GAME__?: { scene: { scenes: Array<{ children: { list: Array<{ type: string; text?: string; visible: boolean; y: number; texture?: { key?: string } }> } }> } } }).__PHASER_GAME__?.scene.scenes ?? [];
+    let my = Number.NaN;
+    const texts: Array<{ y: number; text: string }> = [];
     for (const sc of scenes) {
       for (const o of sc.children.list ?? []) {
-        if (o.type === 'Text' && o.visible && (o.text ?? '').startsWith('▶')) return o.text ?? '';
+        if (o.type === 'Image' && o.texture?.key === 'ui-marker' && o.visible) my = o.y;
+        if (o.type === 'Text' && o.visible && o.text) texts.push({ y: o.y, text: o.text });
       }
     }
-    return '(none)';
+    let best = '(none)';
+    let bestD = Infinity;
+    for (const t of texts) {
+      const d = Math.abs(t.y - my);
+      if (d < bestD) {
+        bestD = d;
+        best = t.text;
+      }
+    }
+    return bestD <= 4 ? best : '(none)';
+  });
+}
+
+// Whether the licensed arrow sprite is on screen as the selection marker.
+async function hasMarkerSprite(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const scenes = (window as unknown as { __PHASER_GAME__?: { scene: { scenes: Array<{ children: { list: Array<{ type: string; texture?: { key?: string }; visible: boolean }> } }> } } }).__PHASER_GAME__?.scene.scenes ?? [];
+    return scenes.some((sc) => (sc.children.list ?? []).some((o) => o.type === 'Image' && o.texture?.key === 'ui-marker' && o.visible));
   });
 }
 
@@ -260,11 +280,11 @@ test('a lone ArrowDown advances the menu by exactly one entry', async ({ page })
 
   await page.keyboard.press('ArrowDown');
   await page.waitForTimeout(250);
-  expect(await selectedOption(page)).toBe('▶ 继续游戏');
+  expect(await selectedOption(page)).toBe('继续游戏');
 
   await page.keyboard.press('ArrowDown');
   await page.waitForTimeout(250);
-  expect(await selectedOption(page)).toBe('▶ 操作说明');
+  expect(await selectedOption(page)).toBe('操作说明');
 });
 
 // GHI-04 trial: panels are framed with the licensed nine-slice texture rather
@@ -281,6 +301,64 @@ test('the pause panel is framed with the licensed pixel texture', async ({ page 
   await page.keyboard.press('Escape');
   await page.waitForTimeout(250);
   expect((await panelFrames(page)).some((k) => k.startsWith('ui-panel-'))).toBe(true);
+});
+
+// GHI-04 follow-up: the panel builders only ever push into their class-field
+// arrays, and Phaser does not re-run field initialisers on scene restart — so
+// 重新开始 left those arrays holding the previous run's destroyed objects and
+// refreshInventory()/togglePause() wrote to the dead ones instead of the visible
+// ones. Both panels came up empty, with no error.
+test('重新开始 leaves the panels working', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  await startGame(page, 42);
+  await page.keyboard.press('I');
+  await page.waitForTimeout(300);
+  expect(await hasVisibleText(page, '净水 ×3')).toBe(true);
+  await page.keyboard.press('Escape'); // close inventory
+  await page.waitForTimeout(200);
+
+  // Pause -> 重新开始 (restarts the Game scene).
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  await page.keyboard.press('ArrowDown'); // -> 重新开始
+  await page.waitForTimeout(150);
+  await page.keyboard.press('Enter');
+  await waitForScene(page, 'Game');
+  await page.waitForTimeout(600);
+
+  await page.keyboard.press('I');
+  await page.waitForTimeout(300);
+  expect(await hasVisibleText(page, '净水 ×3'), 'inventory must survive a restart').toBe(true);
+  await page.keyboard.press('Escape'); // close inventory
+  await page.waitForTimeout(200);
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  expect(await hasVisibleText(page, '已暂停'), 'pause menu must survive a restart').toBe(true);
+
+  expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+});
+
+// GHI-04 follow-up: the text "▶ " prefix is replaced by the licensed arrow
+// sprite in all five lists (menu, inventory, crafting, pause, dialogue).
+test('the menu marker is the licensed arrow sprite, not a text prefix', async ({ page }) => {
+  await page.goto('/?seed=42');
+  await waitForScene(page, 'Menu');
+  await page.waitForTimeout(250);
+
+  expect(await hasMarkerSprite(page)).toBe(true);
+  expect(await hasVisibleText(page, '▶'), 'the ▶ text prefix should be gone').toBe(false);
+});
+
+test('the inventory marker is the licensed arrow sprite, not a text prefix', async ({ page }) => {
+  await startGame(page, 42);
+  await page.keyboard.press('I');
+  await page.waitForTimeout(300);
+
+  expect(await hasMarkerSprite(page)).toBe(true);
+  expect(await hasVisibleText(page, '▶'), 'the ▶ text prefix should be gone').toBe(false);
 });
 
 test('the inventory shows an item tooltip', async ({ page }) => {

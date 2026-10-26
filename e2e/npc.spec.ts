@@ -58,17 +58,20 @@ async function hasVisibleText(page: Page, substr: string): Promise<boolean> {
   }, substr);
 }
 
-// The label under the ▶ cursor in the open dialogue/menu.
+// The label the arrow marker sits on in the open dialogue/menu.
 async function cursorLabel(page: Page): Promise<string> {
   return page.evaluate(() => {
-    const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean }> } } | null } } }).__PHASER_GAME__;
-    const t = g?.scene.getScene('Game')?.children.list.find((o) => o.type === 'Text' && o.visible && (o.text ?? '').startsWith('▶'));
-    return t ? (t.text ?? '').replace('▶', '').trim() : '';
+    const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean; y: number; texture?: { key?: string } }> } } | null } } }).__PHASER_GAME__;
+    const list = g?.scene.getScene('Game')?.children.list ?? [];
+    const marker = list.find((o) => o.type === 'Image' && o.texture?.key === 'ui-marker' && o.visible);
+    if (!marker) return '';
+    const label = list.find((o) => o.type === 'Text' && o.visible && Math.abs(o.y - marker.y) <= 4);
+    return label?.text ?? '';
   });
 }
 
-// Move the ▶ cursor onto `target`, self-correcting against over/under-shoot so a
-// dropped or double-registered synthetic keypress can't derail the menu.
+// Move the arrow marker onto `target`, self-correcting against over/under-shoot so
+// a dropped or double-registered synthetic keypress can't derail the menu.
 async function selectInMenu(page: Page, options: string[], target: string): Promise<void> {
   const targetIdx = options.indexOf(target);
   if (targetIdx < 0) throw new Error(`target "${target}" not a known option`);

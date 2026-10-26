@@ -214,7 +214,11 @@ export class GameScene extends Phaser.Scene {
     const floor = state.currentFloor;
     this.floorView = getFloorView(state, floor);
 
-    this.drawCorridor(floor);
+    if (floor === STARTING_FLOOR) {
+      this.drawDormRoom();
+    } else {
+      this.drawCorridor(floor);
+    }
     this.drawExits(floor);
     this.buildContainers();
     this.buildGround();
@@ -240,6 +244,78 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ── world ──────────────────────────────────────────────────────────────
+  // Floor 100000 — the player's dorm, and the visual template the other floors
+  // will follow. Wall and floor are tiled with the existing tile_* textures via
+  // TileSprite (two objects, not one per tile); windows, doors and props are
+  // placed at 1:1 pixel scale so nothing is resampled.
+  private drawDormRoom(): void {
+    const wallH = FLOOR_HEIGHT - 48; // the floor band is 48px = 3 tiles
+
+    const wall = this.add.tileSprite(0, 8, FLOOR_WIDTH, wallH - 8, 'tile_wall').setOrigin(0, 0);
+    const floor = this.add.tileSprite(0, wallH, FLOOR_WIDTH, FLOOR_HEIGHT - wallH, 'tile_floor').setOrigin(0, 0);
+
+    const g = this.add.graphics();
+    // Ceiling shadow, skirting where the wall meets the floor, and two service
+    // pipes running the length of the room.
+    g.fillStyle(0x0b0f12, 1);
+    g.fillRect(0, 0, FLOOR_WIDTH, 8);
+    g.fillRect(0, wallH - 3, FLOOR_WIDTH, 3);
+    g.fillStyle(0x2a3238, 1);
+    g.fillRect(0, 58, FLOOR_WIDTH, 4);
+    g.fillStyle(0x232a30, 1);
+    g.fillRect(0, 66, FLOOR_WIDTH, 2);
+    // Damp patches, so the wall is not a flat repeat.
+    g.fillStyle(0x0e1418, 0.45);
+    g.fillRect(210, 150, 44, 60);
+    g.fillRect(880, 190, 36, 48);
+
+    // One lit window per room. The glow is stacked in decreasing-alpha bands so
+    // it reads as light falloff rather than a hard rectangle.
+    for (let r = 0; r < ROOM_COUNT; r++) {
+      const cx = r * ROOM_WIDTH + ROOM_WIDTH / 2;
+      g.fillStyle(0xf4b66a, 0.05);
+      g.fillRect(cx - 72, 70, 144, 112);
+      g.fillStyle(0xf4b66a, 0.09);
+      g.fillRect(cx - 48, 84, 96, 84);
+      g.fillStyle(0xf4b66a, 0.16);
+      g.fillRect(cx - 28, 98, 56, 56);
+      this.floorObjects.push(this.add.image(cx - 8, 116, 'tile_window').setOrigin(0.5));
+    }
+
+    // Wall lamps between the windows, each with its own small pool of light —
+    // the warm counterpoint to the cold daylight through the glass.
+    for (let r = 0; r < ROOM_COUNT; r++) {
+      const cx = r * ROOM_WIDTH + ROOM_WIDTH / 2;
+      const lampX = cx + (r % 2 === 0 ? 96 : -96);
+      g.fillStyle(0xf4b66a, 0.12);
+      g.fillRect(lampX - 26, 150, 52, 44);
+      g.fillStyle(0x6a4a2a, 1);
+      g.fillRect(lampX - 2, 142, 4, 8);
+      g.fillStyle(0xf4b66a, 1);
+      g.fillRect(lampX - 5, 150, 10, 4);
+    }
+
+    // Cables drooping from the pipes, and a torn notice pinned to the wall.
+    g.fillStyle(0x1a2026, 1);
+    g.fillRect(268, 68, 2, 34);
+    g.fillRect(268, 100, 26, 2);
+    g.fillRect(1044, 68, 2, 52);
+    g.fillRect(1018, 118, 28, 2);
+    g.fillStyle(0xb8b09a, 0.85);
+    g.fillRect(736, 168, 22, 28);
+    g.fillStyle(0x8a8474, 0.9);
+    g.fillRect(740, 176, 14, 2);
+    g.fillRect(740, 182, 10, 2);
+
+    // Doors on the room boundaries, standing on the floor line. Decorative only:
+    // they sit above the floor band, so they never block the walkable strip.
+    for (let i = 1; i < ROOM_COUNT; i++) {
+      this.floorObjects.push(this.add.image(i * ROOM_WIDTH, wallH - 16, 'tile_door').setOrigin(0.5, 1));
+    }
+
+    this.floorObjects.push(wall, floor, g);
+  }
+
   private drawCorridor(floor: number): void {
     const wallColors: Record<number, number> = {
       100000: 0x2a2a33, 99999: 0x243038, 99998: 0x1e2a33, 99997: 0x14181e, 99996: 0x2e2a26,
@@ -260,20 +336,19 @@ export class GameScene extends Phaser.Scene {
     this.floorObjects.push(g);
   }
 
+  // The stairwells, drawn with the tile_stairs_* textures instead of a flat
+  // block. Three rows of 16px tiles make a readable staircase; the labels sit
+  // above and the tiles stay inside the floor band so nothing shifts.
   private drawExits(floor: number): void {
     if (hasUpExit(floor)) {
-      const g = this.add.graphics();
-      g.fillStyle(0x77c6a4, 1);
-      g.fillRect(UP_EXIT_X - 12, FLOOR_HEIGHT - 96, 24, 48);
+      const stairs = this.add.tileSprite(UP_EXIT_X - 16, FLOOR_HEIGHT - 48, 32, 48, 'tile_stairs_up').setOrigin(0, 0);
       const upLabel = this.add.text(UP_EXIT_X, FLOOR_HEIGHT - 104, '↑ 上楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#77c6a4' }).setOrigin(0.5);
-      this.floorObjects.push(g, upLabel);
+      this.floorObjects.push(stairs, upLabel);
     }
     if (hasDownExit(floor)) {
-      const g = this.add.graphics();
-      g.fillStyle(0xf4b66a, 1);
-      g.fillRect(DOWN_EXIT_X - 12, FLOOR_HEIGHT - 96, 24, 48);
+      const stairs = this.add.tileSprite(DOWN_EXIT_X - 16, FLOOR_HEIGHT - 48, 32, 48, 'tile_stairs_down').setOrigin(0, 0);
       const downLabel = this.add.text(DOWN_EXIT_X, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#f4b66a' }).setOrigin(0.5);
-      this.floorObjects.push(g, downLabel);
+      this.floorObjects.push(stairs, downLabel);
     }
   }
 

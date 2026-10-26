@@ -14,8 +14,8 @@
 |---|---|---|---|
 | C1 | CRITICAL | `SaveSystem.ts:30-67` | 存档可不校验 `visitedFloors`/`worldEvents`/`player.x`，通过校验后白屏 |
 | C2 | CRITICAL | `SaveSystem.ts:43` | `currentFloor` 不限定可玩范围，坏档直接抛错白屏 |
-| M1 | MAJOR | `floorTemplates.ts:182`、`LootSystem.ts:19` | loot 键是索引型，改模板即静默破坏既有存档 |
-| M2 | MAJOR | `floorTemplates.ts:152` | loot 数据版本未进 seed 派生，同 seed 世界静默改变 |
+| M1 | MAJOR **已修** | `floorTemplates.ts:182`、`LootSystem.ts:19` | loot 键是索引型，改模板即静默破坏既有存档 |
+| M2 | MAJOR **已修** | `floorTemplates.ts:152` | loot 数据版本未进 seed 派生，同 seed 世界静默改变 |
 | M3 | MAJOR **已修** | `GameScene.ts:912-971` | 时钟与属性衰减从不落盘，可回退刷消耗 |
 | M4 | MAJOR | `MenuScene.ts:94-96` | 坏档静默无提示，违反「坏档提示用户」门槛 |
 | M5 | MAJOR **已修** | `GameScene.ts:882`、`LootSystem.ts:78-94` | leak 事件与地面物资视图不同步 |
@@ -222,7 +222,7 @@ tuned:    crate_wood:tape      ← 同 seed 世界静默改变
 
 测试状态（全部实跑）：`npm run typecheck` 无错误；`npm test` **117 passed**（98 → 117）；`npx playwright test` **25 passed**。
 
-**仍未修**：M1/M2、M5、m1–m8、n1–n3、§5 的键盘突发投递。§7 的建议顺序不变（下一项 M5）。
+**仍未修**：m1–m8、n1–n3、§5 的键盘突发投递，以及 §8.3 记录的一次性存档迁移后果（是否 bump `SCHEMA_VERSION` 待定）。
 
 > 本轮实测中另发现一处**既有的**输入问题并记入 §5：背靠背派发按键时一次 ↓ 会被重复投递（6/6 复现，stash 掉本轮改动后在 `1be6afa` 上同样复现）。为此新增的坏档 e2e 每键之间须间隔 ≥120ms。
 
@@ -250,3 +250,27 @@ tuned:    crate_wood:tape      ← 同 seed 世界静默改变
 - `e2e/survival.spec.ts` —— 「a leak spoils the floor's ground supplies and they recover when it clears」：传送到 99998（唯一有地面物资的层），注入 leak → 站在 battery 上捡不到；清除 leak → 不用离开楼层就能捡到。修复前第一条断言即红（battery 被捡走）。
 
 回归：`npm run typecheck` 无错误；`npm test` **124 passed**（121→124）；`npx playwright test` **27 passed**（26→27）。
+
+### 8.3 追加修复：M1 + M2（loot 键稳定身份 + seed 数据版本）
+
+2026-10-26 当日按 TDD 完成 §7 建议 4。这两条是**改 loot 配置前必须先做**的。
+
+**M1 —— 键改为身份型**
+- `src/data/floorTemplates.ts` 新增并导出两个键构造函数：`groundItemKey(itemId, x)` → `g:${itemId}:${x}`，`containerItemKey(containerId, itemId)` → `c:${containerId}:${itemId}`。原先 ground 用 `g:${i}`、容器用 `c:${containerId}:${index}`（index 还是**解析后**数组的下标，概率一改就漂移）。
+- `generateFloor()` 用 `groundItemKey` 生成 ground key；`LootSystem` 的 `getFloorView()` 与 `lootContainer()` 都用 `containerItemKey`，并删掉原先内联拼字符串的 `containerKey` helper（顺带消掉 n1  nit 指的重复）。
+- 键方案依赖一个不变量：**同一容器内同一 itemId 只出现一条、同一层同一 (itemId, x) 只出现一条**。已加两条单测把这个不变量钉住，将来加数据时若违反会立刻红。
+
+**M2 —— seed 派生折叠数据版本**
+- `LOOT_DATA_VERSION = 1` + `containerLootSeed(worldSeed, floorNumber, containerId)` = `deriveSeed(LOOT_DATA_VERSION, worldSeed, floorNumber, containerId)`，`resolveLoot()` 改走它。世界的身份从此是 `(LOOT_DATA_VERSION, runSeed)` 而非 `runSeed`  alone；调 loot 表时 bump 这个常量，改动会显式出现在 diff 里，而不是静默换掉一个已有世界。
+- 注意这是**手动**版本号，忘了 bump 就退回 M2 的静默状态。若要免维护，可改为对 loot 表做内容哈希（`deriveSeed(hash(JSON.stringify(loot specs)), ...)`），本次未做。
+
+**一次性迁移后果（重要，未处理）**：键格式与 seed 派生同时变了，因此**本次提交之前产生的存档会失效**——旧格式的 `lootedItems` 键（`g:0`、`c:crate_wood:0`）匹配不上新键，已搜刮的物资会重新出现，且容器内容按新种子重滚。项目尚未发布、无真实玩家存档，故按可接受处理。若要干净拒绝而非静默错乱，应把 `SCHEMA_VERSION` 提到 2——坏档会走 C1/M4 修好的提示路径（「存档损坏，无法继续」+ 保留新游戏入口）。**这一条留给你决定。**
+
+测试（`src/tests/floorTemplates.test.ts` + `src/tests/lootSystem.test.ts`，共 12 条新增）：
+- 键构造函数本身；`generateFloor(42, 99996)` 的 ground key 为 `g:bread:160`；往 99996 层 ground 前插一条后键变为 `['g:medkit:200', 'g:bread:160']`（bread 的键不变）。
+- **行为不变量**：存档里标记 `c:crate_metal:scrap_metal` 已拿 → 往 crate_metal 的 loot 前插一条 wood 后，scrap_metal 仍然不在 view 里、wood 照常可拿（旧代码下 scrap_metal 会复活、wood 会永久捡不到）。
+- ground 同理：标记 `g:bread:160` 已拿 → 前插 medkit 后 view 只剩 `g:medkit:200`。
+- `lootContainer` / `lootGround` 记录的是身份键。
+- `containerLootSeed` 折叠了版本（`≠ deriveSeed(42, ...)`）且对同输入稳定。
+
+回归：`npm run typecheck` 无错误；`npm test` **136 passed**（124→136）；`npx playwright test` **27 passed**。

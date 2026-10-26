@@ -33,6 +33,24 @@ export interface FloorTemplate {
   ground: GroundSpec[];
 }
 
+// A world is identified by (LOOT_DATA_VERSION, runSeed), not runSeed alone:
+// bump this whenever the loot tables change so a tuned table produces a
+// deliberately different world instead of silently reshuffling an existing one
+// (GHI-03 M2). Old saves keep their runSeed and simply roll fresh contents.
+export const LOOT_DATA_VERSION = 1;
+
+// Stable identity for one loot entry. Keys must name the item, never its slot
+// in the template array: index-based keys made a saved run's "already looted"
+// marker slide onto a different item as soon as the table was edited, respawning
+// the old one and stranding the new one (GHI-03 M1).
+export const groundItemKey = (itemId: string, x: number): string => `g:${itemId}:${x}`;
+export const containerItemKey = (containerId: string, itemId: string): string => `c:${containerId}:${itemId}`;
+
+// The seed behind one container's loot rolls, version-folded per M2.
+export function containerLootSeed(worldSeed: number, floorNumber: number, containerId: string): number {
+  return deriveSeed(LOOT_DATA_VERSION, worldSeed, floorNumber, containerId);
+}
+
 export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
   100000: {
     floorNumber: 100000,
@@ -149,7 +167,7 @@ function resolveLoot(
   floorNumber: number,
   containerId: string,
 ): InventoryStack[] {
-  const rng = makeRng(deriveSeed(worldSeed, floorNumber, containerId));
+  const rng = makeRng(containerLootSeed(worldSeed, floorNumber, containerId));
   const out: InventoryStack[] = [];
   for (const spec of specs) {
     if (spec.guaranteed) {
@@ -178,8 +196,8 @@ export function generateFloor(worldSeed: number, floorNumber: number): Generated
     x: c.x,
     items: resolveLoot(c.loot, worldSeed, floorNumber, c.id),
   }));
-  const groundItems: GroundItem[] = template.ground.map((g, i) => ({
-    key: `g:${i}`,
+  const groundItems: GroundItem[] = template.ground.map((g) => ({
+    key: groundItemKey(g.itemId, g.x),
     itemId: g.itemId,
     quantity: g.quantity,
     x: g.x,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
+import { FLOOR_TEMPLATES, groundItemKey } from '../data/floorTemplates';
 import { getFloorView, lootContainer, lootGround } from '../systems/LootSystem';
 import { countItem } from '../systems/InventorySystem';
 import { deserialize, serialize } from '../systems/SaveSystem';
@@ -38,9 +39,9 @@ describe('lootContainer', () => {
 describe('lootGround', () => {
   it('picks up a ground item exactly once', () => {
     const s = createNewGame(42);
-    expect(lootGround(s, 99998, 'g:0').took?.itemId).toBe('battery');
+    expect(lootGround(s, 99998, groundItemKey('battery', 160)).took?.itemId).toBe('battery');
     expect(countItem(s.player.inventory, 'battery')).toBe(1);
-    expect(lootGround(s, 99998, 'g:0').took).toBeNull();
+    expect(lootGround(s, 99998, groundItemKey('battery', 160)).took).toBeNull();
     expect(countItem(s.player.inventory, 'battery')).toBe(1);
   });
 
@@ -50,7 +51,7 @@ describe('lootGround', () => {
   it('refuses a ground item spoiled by a leak on this floor', () => {
     const s = createNewGame(42);
     s.worldEvents.activeEvent = { type: 'leak', floor: 99998, message: '漏水' };
-    expect(lootGround(s, 99998, 'g:0').took).toBeNull();
+    expect(lootGround(s, 99998, groundItemKey('battery', 160)).took).toBeNull();
     expect(countItem(s.player.inventory, 'battery')).toBe(0);
   });
 
@@ -58,13 +59,76 @@ describe('lootGround', () => {
     const s = createNewGame(42);
     s.worldEvents.activeEvent = { type: 'leak', floor: 99998, message: '漏水' };
     s.worldEvents.activeEvent = null;
-    expect(lootGround(s, 99998, 'g:0').took).toEqual({ itemId: 'battery', quantity: 1 });
+    expect(lootGround(s, 99998, groundItemKey('battery', 160)).took).toEqual({ itemId: 'battery', quantity: 1 });
   });
 
   it('is unaffected by a leak on a different floor', () => {
     const s = createNewGame(42);
     s.worldEvents.activeEvent = { type: 'leak', floor: 99997, message: '漏水' };
-    expect(lootGround(s, 99998, 'g:0').took).toEqual({ itemId: 'battery', quantity: 1 });
+    expect(lootGround(s, 99998, groundItemKey('battery', 160)).took).toEqual({ itemId: 'battery', quantity: 1 });
+  });
+});
+
+// GHI-03 M1: with identity keys, editing a loot table cannot make a looted item
+// respawn or a freshly added one permanently unlootable.
+describe('loot keys survive a table edit (GHI-03 M1)', () => {
+  it('a looted container item stays looted when a new entry is inserted ahead of it', () => {
+    const s = createNewGame(42);
+    s.visitedFloors[99998] = {
+      openedContainers: [],
+      lootedItems: ['c:crate_metal:scrap_metal'],
+      unlockedDoors: [],
+      localEvents: [],
+    };
+    const crate = (): string[] | undefined =>
+      getFloorView(s, 99998).containers.find((c) => c.id === 'crate_metal')?.items.map((i) => i.itemId);
+    expect(crate()).not.toContain('scrap_metal');
+
+    const original = FLOOR_TEMPLATES[99998].containers;
+    FLOOR_TEMPLATES[99998].containers = original.map((c) =>
+      c.id === 'crate_metal'
+        ? { ...c, loot: [{ itemId: 'wood', min: 1, max: 1, probability: 1, guaranteed: true }, ...c.loot] }
+        : c,
+    );
+    try {
+      expect(crate()).not.toContain('scrap_metal'); // still taken
+      expect(crate()).toContain('wood'); // and the new entry is lootable
+    } finally {
+      FLOOR_TEMPLATES[99998].containers = original;
+    }
+  });
+
+  it('a looted ground item stays looted when another is inserted before it', () => {
+    const s = createNewGame(42);
+    s.visitedFloors[99996] = {
+      openedContainers: [],
+      lootedItems: [groundItemKey('bread', 160)],
+      unlockedDoors: [],
+      localEvents: [],
+    };
+    expect(getFloorView(s, 99996).groundItems.map((g) => g.key)).toEqual([]);
+
+    const original = FLOOR_TEMPLATES[99996].ground;
+    FLOOR_TEMPLATES[99996].ground = [{ itemId: 'medkit', quantity: 1, x: 200 }, ...original];
+    try {
+      expect(getFloorView(s, 99996).groundItems.map((g) => g.key)).toEqual([groundItemKey('medkit', 200)]);
+    } finally {
+      FLOOR_TEMPLATES[99996].ground = original;
+    }
+  });
+
+  it('lootContainer records item-identity keys', () => {
+    const s = createNewGame(42);
+    lootContainer(s, 99998, 'crate_metal');
+    const keys = s.visitedFloors[99998].lootedItems;
+    expect(keys).toContain('c:crate_metal:scrap_metal');
+    expect(keys.every((k) => k.startsWith('c:crate_metal:'))).toBe(true);
+  });
+
+  it('lootGround records item-identity keys', () => {
+    const s = createNewGame(42);
+    expect(lootGround(s, 99998, groundItemKey('battery', 160)).took?.itemId).toBe('battery');
+    expect(s.visitedFloors[99998].lootedItems).toEqual([groundItemKey('battery', 160)]);
   });
 });
 

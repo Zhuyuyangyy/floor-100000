@@ -1,4 +1,4 @@
-import { generateFloor } from '../data/floorTemplates';
+import { containerItemKey, generateFloor } from '../data/floorTemplates';
 import { INTERACT_DISTANCE } from '../core/constants';
 import { addItem, removeItem } from './InventorySystem';
 import type { GameState, GeneratedFloor, InventoryStack } from '../core/gameTypes';
@@ -16,7 +16,9 @@ function ensureVisit(state: GameState, floor: number) {
   return visit;
 }
 
-const containerKey = (containerId: string, index: number): string => `c:${containerId}:${index}`;
+// Which loot entries of a container the player has already taken.
+const containerLooted = (containerId: string, items: InventoryStack[], looted: Set<string> | null): InventoryStack[] =>
+  looted ? items.filter((s) => !looted.has(containerItemKey(containerId, s.itemId))) : items;
 
 // The floor as the player currently sees it: base layout minus looted items, and
 // with loose ground supplies spoiled by a leak on this floor.
@@ -28,10 +30,7 @@ export function getFloorView(state: GameState, floor: number): GeneratedFloor {
   const looted = visit ? new Set(visit.lootedItems) : null;
   return {
     ...base,
-    containers: base.containers.map((c) => ({
-      ...c,
-      items: looted ? c.items.filter((_, idx) => !looted.has(`c:${c.id}:${idx}`)) : c.items,
-    })),
+    containers: base.containers.map((c) => ({ ...c, items: containerLooted(c.id, c.items, looted) })),
     groundItems: base.groundItems.filter((g) => !looted?.has(g.key) && !leakHere),
   };
 }
@@ -53,10 +52,10 @@ export function lootContainer(state: GameState, floor: number, containerId: stri
   let full = false;
 
   if (baseContainer) {
-    baseContainer.items.forEach((stack, idx) => {
-      if (full) return;
-      const key = containerKey(containerId, idx);
-      if (looted.has(key)) return;
+    for (const stack of baseContainer.items) {
+      if (full) break;
+      const key = containerItemKey(containerId, stack.itemId);
+      if (looted.has(key)) continue;
       const result = addItem(state.player.inventory, stack.itemId, stack.quantity, stack.meta);
       if (result.overflow === 0) {
         looted.add(key);
@@ -65,7 +64,7 @@ export function lootContainer(state: GameState, floor: number, containerId: stri
         removeItem(state.player.inventory, stack.itemId, result.added); // undo partial add
         full = true;
       }
-    });
+    }
   }
 
   visit.lootedItems = [...looted];

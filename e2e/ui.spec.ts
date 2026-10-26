@@ -99,6 +99,35 @@ test('returning to the title from the pause menu leaves a working title screen',
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
 
+// GHI-03 M4: a corrupt save must say so. Previously 继续游戏 was listed for any
+// save key and pressing it silently did nothing (spec §6: 坏档要提示用户).
+test('a corrupt save is reported instead of silently doing nothing', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('floor100000.save.v1', '{ not json');
+  });
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  await page.goto('/?seed=42');
+  await waitForScene(page, 'Menu');
+  // Two keys delivered inside one frame are unreliable: Phaser re-processes the
+  // burst and a single ArrowDown advances the selection twice (reproduced 0/6
+  // back-to-back vs 6/6 with a frame between them). Separate the presses.
+  await page.waitForTimeout(250);
+  expect(await hasVisibleText(page, '继续游戏')).toBe(true); // still listed
+
+  await page.keyboard.press('ArrowDown'); // -> 继续游戏
+  await page.waitForTimeout(120);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+
+  expect(await hasVisibleText(page, '存档损坏')).toBe(true);
+  // Still a usable title screen: the new-game entry survives, no white screen.
+  await waitForScene(page, 'Menu');
+  expect(await hasVisibleText(page, '开始新游戏')).toBe(true);
+  expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+});
+
 test('the inventory shows an item tooltip', async ({ page }) => {
   await startGame(page, 42);
   await page.keyboard.press('I');

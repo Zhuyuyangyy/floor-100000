@@ -1,6 +1,6 @@
-import { SAVE_KEY, SCHEMA_VERSION } from '../core/constants';
+import { PLAYABLE_FLOORS_V01, SAVE_KEY, SCHEMA_VERSION } from '../core/constants';
 import { getItem, isItemId } from '../data/items';
-import type { GameState } from '../core/gameTypes';
+import type { ActiveEvent, FloorVisit, GameState } from '../core/gameTypes';
 
 // Save protocol (docs/02_TECH_SPEC.md §6). Deserialization never throws: a bad
 // save returns a graceful error so the UI can show "存档损坏" and keep the
@@ -27,6 +27,36 @@ function validateStack(raw: unknown): string | null {
   return null;
 }
 
+const VISIT_KEYS: Array<keyof FloorVisit> = ['openedContainers', 'lootedItems', 'unlockedDoors', 'localEvents'];
+const EVENT_TYPES: Array<ActiveEvent['type']> = ['blackout', 'wanderer', 'leak'];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): boolean {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string');
+}
+
+function validateVisit(value: unknown): string | null {
+  if (!isRecord(value)) return 'visitedFloors 条目无效';
+  for (const key of VISIT_KEYS) {
+    if (!isStringArray(value[key])) return `visitedFloors 条目的 ${key} 无效`;
+  }
+  return null;
+}
+
+function validateActiveEvent(value: unknown): string | null {
+  if (value === null) return null;
+  if (!isRecord(value)) return 'worldEvents.activeEvent 无效';
+  if (!EVENT_TYPES.includes(value.type as ActiveEvent['type'])) return 'worldEvents.activeEvent.type 无效';
+  if (typeof value.message !== 'string') return 'worldEvents.activeEvent.message 无效';
+  if (value.floor !== undefined && (typeof value.floor !== 'number' || !PLAYABLE_FLOORS_V01.includes(value.floor))) {
+    return 'worldEvents.activeEvent.floor 无效';
+  }
+  return null;
+}
+
 export function validateGameState(data: unknown): string[] {
   if (typeof data !== 'object' || data === null) return ['存档不是有效对象'];
   const s = data as Record<string, unknown>;
@@ -41,16 +71,26 @@ export function validateGameState(data: unknown): string[] {
     errors.push('gameMinuteOfDay 超出范围');
   }
   if (typeof s.currentFloor !== 'number' || !Number.isInteger(s.currentFloor)) errors.push('currentFloor 无效');
+  else if (!PLAYABLE_FLOORS_V01.includes(s.currentFloor)) {
+    errors.push(`currentFloor ${String(s.currentFloor)} 不在可玩楼层范围`);
+  }
   if (s.status !== 'playing' && s.status !== 'won' && s.status !== 'lost') errors.push('status 无效');
 
   const player = s.player as Record<string, unknown> | undefined;
   if (!player || typeof player !== 'object') {
     errors.push('缺少 player');
   } else {
+    // Read unconditionally by GameScene/FloorSystem: a missing or non-finite x
+    // silently poisons movement into NaN instead of failing loudly (GHI-03 C1).
+    if (typeof player.x !== 'number' || !Number.isFinite(player.x)) errors.push('player.x 无效');
     for (const key of ['hp', 'hunger', 'thirst', 'energy'] as const) {
       const v = player[key];
       if (typeof v !== 'number' || Number.isNaN(v) || v < 0 || v > 100) errors.push(`player.${key} 超出范围`);
     }
+    if (player.equipped !== null && (typeof player.equipped !== 'string' || !isItemId(player.equipped))) {
+      errors.push('player.equipped 无效');
+    }
+    if (!isStringArray(player.homeUpgrades)) errors.push('player.homeUpgrades 无效');
     const inv = player.inventory as Record<string, unknown> | undefined;
     if (!inv || typeof inv !== 'object' || !Array.isArray(inv.slots)) {
       errors.push('player.inventory 无效');
@@ -62,6 +102,26 @@ export function validateGameState(data: unknown): string[] {
         if (e) errors.push(e);
       }
     }
+  }
+
+  // Everything below is dereferenced without a guard by getFloorView() and the
+  // scene layer, so an unchecked save here became a white screen (GHI-03 C1).
+  if (!isRecord(s.npcStates)) errors.push('npcStates 无效');
+  if (!isRecord(s.visitedFloors)) {
+    errors.push('visitedFloors 无效');
+  } else {
+    for (const [floor, visit] of Object.entries(s.visitedFloors)) {
+      const e = validateVisit(visit);
+      if (e) errors.push(`${e}（floor ${floor}）`);
+    }
+  }
+  if (!isRecord(s.worldEvents)) {
+    errors.push('worldEvents 无效');
+  } else {
+    const we = s.worldEvents;
+    if (!isStringArray(we.history)) errors.push('worldEvents.history 无效');
+    const e = validateActiveEvent(we.activeEvent);
+    if (e) errors.push(e);
   }
   return errors;
 }

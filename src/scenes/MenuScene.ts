@@ -14,6 +14,8 @@ export class MenuScene extends Phaser.Scene {
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private helpOpen = false;
   private helpObjects: Array<Phaser.GameObjects.Text | Phaser.GameObjects.Graphics> = [];
+  private messageText!: Phaser.GameObjects.Text;
+  private messageTimer?: Phaser.Time.TimerEvent;
 
   constructor() {
     super('Menu');
@@ -43,6 +45,10 @@ export class MenuScene extends Phaser.Scene {
       this.optionTexts.push(t);
     });
     this.refreshOptions();
+    this.messageText = this.add
+      .text(width / 2, height - 30, '', { fontFamily: 'monospace', fontSize: '13px', color: '#e0705a', align: 'center' })
+      .setOrigin(0.5)
+      .setVisible(false);
     this.buildHelp(width, height);
 
     const keyboard = this.input.keyboard;
@@ -67,6 +73,7 @@ export class MenuScene extends Phaser.Scene {
     if (this.helpOpen) return;
     this.selected = Phaser.Math.Clamp(this.selected + delta, 0, this.entries.length - 1);
     this.refreshOptions();
+    this.hideMessage();
   }
 
   private activate(): void {
@@ -74,6 +81,7 @@ export class MenuScene extends Phaser.Scene {
       this.toggleHelp();
       return;
     }
+    this.hideMessage();
     playSfx('click');
     this.entries[this.selected]?.run();
   }
@@ -92,9 +100,26 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private continueRun(): void {
-    const state = tryContinue();
-    if (!state) return;
-    this.scene.start(state.status === 'playing' ? 'Game' : 'End');
+    const result = tryContinue();
+    if (!result.ok) {
+      // docs/02_TECH_SPEC.md §6: a bad save must say so and keep the new-game
+      // entry, never white-screen or silently swallow the keypress.
+      this.showMessage(result.error);
+      return;
+    }
+    this.scene.start(result.state.status === 'playing' ? 'Game' : 'End');
+  }
+
+  private showMessage(text: string): void {
+    this.messageTimer?.remove();
+    this.messageText.setText(text).setVisible(true);
+    this.messageTimer = this.time.delayedCall(3200, () => this.messageText.setVisible(false));
+  }
+
+  private hideMessage(): void {
+    this.messageTimer?.remove();
+    this.messageTimer = undefined;
+    this.messageText.setVisible(false);
   }
 
   private buildHelp(width: number, height: number): void {

@@ -17,14 +17,16 @@ export function loadState(state: GameState): GameState {
   return current;
 }
 
-// Loads a saved run if one exists and is valid; otherwise returns null.
-export function tryContinue(): GameState | null {
-  const result = loadFromStorage();
-  if (result.ok) {
-    current = result.state;
-    return current;
-  }
-  return null;
+export type ContinueResult = { ok: true; state: GameState } | { ok: false; error: string };
+
+// Loads a saved run if one exists and is valid. Reports *why* it could not be
+// used so the caller can tell the player instead of doing nothing silently
+// (GHI-03 M4: docs/02_TECH_SPEC.md §6 requires a visible 存档损坏 message).
+export function tryContinue(storage: Storage = localStorage): ContinueResult {
+  const result = loadFromStorage(storage);
+  if (!result.ok) return { ok: false, error: result.error };
+  current = result.state;
+  return { ok: true, state: current };
 }
 
 export function hasGame(): boolean {

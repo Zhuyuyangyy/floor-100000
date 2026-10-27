@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { FLOOR_TEMPLATES, groundItemKey } from '../data/floorTemplates';
-import { getFloorView, lootContainer, lootGround } from '../systems/LootSystem';
+import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
 import { countItem } from '../systems/InventorySystem';
 import { deserialize, serialize } from '../systems/SaveSystem';
 
@@ -36,8 +36,7 @@ describe('lootContainer', () => {
   });
 });
 
-describe('lootGround', () => {
-  it('picks up a ground item exactly once', () => {
+describe('lootGround', () => {  it('picks up a ground item exactly once', () => {
     const s = createNewGame(42);
     expect(lootGround(s, 3, groundItemKey('battery', 160)).took?.itemId).toBe('battery');
     expect(countItem(s.player.inventory, 'battery')).toBe(1);
@@ -129,6 +128,58 @@ describe('loot keys survive a table edit (GHI-03 M1)', () => {
     const s = createNewGame(42);
     expect(lootGround(s, 3, groundItemKey('battery', 160)).took?.itemId).toBe('battery');
     expect(s.visitedFloors[3].lootedItems).toEqual([groundItemKey('battery', 160)]);
+  });
+});
+
+// B3-02 §4.3: "explored" used to mean "looted something here", because
+// ensureVisit only ran on the loot paths. The tower's colouring reads
+// visitedFloors, so a floor the player simply walked through was drawn as
+// never-visited — which contradicts GAME_DESIGN_LOCK.md §2.6 ("floor identity
+// and explored state must persist"). Entering a floor is now what records it.
+describe('recordFloorVisit', () => {
+  it('records a floor the player only walked into', () => {
+    const s = createNewGame(42);
+    expect(s.visitedFloors[2]).toBeUndefined();
+    recordFloorVisit(s, 2);
+    expect(s.visitedFloors[2]).toBeDefined();
+    expect(s.visitedFloors[2].openedContainers).toEqual([]);
+    expect(s.visitedFloors[2].lootedItems).toEqual([]);
+  });
+
+  it('is idempotent and never discards an existing loot record', () => {
+    const s = createNewGame(42);
+    lootContainer(s, 4, 'fuse_box');
+    const before = s.visitedFloors[4];
+    recordFloorVisit(s, 4);
+    recordFloorVisit(s, 4);
+    expect(s.visitedFloors[4]).toBe(before); // same object, not a fresh empty one
+    expect(s.visitedFloors[4].openedContainers).toEqual(['fuse_box']);
+    expect(s.visitedFloors[4].lootedItems.length).toBeGreaterThan(0);
+  });
+
+  it('keeps a walk-through floor distinct from a looted one', () => {
+    const s = createNewGame(42);
+    recordFloorVisit(s, 2); // passed through
+    lootContainer(s, 4, 'fuse_box'); // took something
+    expect(s.visitedFloors[2].lootedItems).toEqual([]);
+    expect(s.visitedFloors[4].lootedItems.length).toBeGreaterThan(0);
+  });
+
+  it('survives a save round-trip, so explored floors stay explored', () => {
+    const s = createNewGame(42);
+    recordFloorVisit(s, 2);
+    const reloaded = deserialize(serialize(s));
+    expect(reloaded.ok).toBe(true);
+    if (!reloaded.ok) return;
+    expect(reloaded.state.visitedFloors[2]).toBeDefined();
+    expect(reloaded.state.visitedFloors[2].openedContainers).toEqual([]);
+  });
+
+  it('does not re-spawn loot on a floor that was only walked through', () => {
+    const s = createNewGame(42);
+    const before = getFloorView(s, 4).containers.find((c) => c.id === 'fuse_box')?.items.length ?? 0;
+    recordFloorVisit(s, 4);
+    expect(getFloorView(s, 4).containers.find((c) => c.id === 'fuse_box')?.items.length ?? 0).toBe(before);
   });
 });
 

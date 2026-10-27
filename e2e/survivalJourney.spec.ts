@@ -156,7 +156,10 @@ test.describe('B3-02 full survival journey', () => {
     expect(await count(page, 'ration_pack')).toBe(2);
     expect(await count(page, 'flashlight')).toBe(1);
     expect(start.player.inventory.slots.length).toBe(3);
-    expect(start.visitedFloors).toEqual({}); // nothing explored yet
+    // Standing on floor 1 is what records it (B3-02.1): the visited set starts
+    // with exactly the floor the player is standing on — not empty, and not the
+    // whole tower.
+    expect(Object.keys(start.visitedFloors)).toEqual(['1']);
     await page.screenshot({ path: 'e2e/screenshots/40-journey-1-wake.png' });
 
     // Top up before the walk, so the bag has room for what the tower holds.
@@ -212,15 +215,12 @@ test.describe('B3-02 full survival journey', () => {
     expect(home.player.hunger).toBeLessThanOrEqual(beforeReturn.player.hunger);
     expect(home.player.thirst).toBeLessThanOrEqual(beforeReturn.player.thirst);
     expect(home.day).toBe(beforeReturn.day);
-    // Every floor the player actually took something from is still recorded.
-    // Floor 2 deliberately is not: the route passes through it without looting,
-    // and visitedFloors is written by lootContainer/lootGround only — never by
-    // stepping onto a floor. That is a real gap (see the report): the map's
-    // "explored" colour means "took something here", not "have been here".
-    for (const f of [3, 4, 5]) {
+    // Every floor the player set foot on is recorded. Entering a floor is what
+    // marks it explored (B3-02.1 §4.3), so floor 2 counts even though the route
+    // only walks through it — the map no longer draws it as never-visited.
+    for (const f of [2, 3, 4, 5]) {
       expect(home.visitedFloors[f], `floor ${f} exploration`).toBeDefined();
     }
-    expect(home.visitedFloors[2]).toBeUndefined();
     expect(await count(page, 'scrap_metal')).toBe(3);
     expect(await count(page, 'wood')).toBe(2);
     expect(await count(page, 'cloth')).toBeGreaterThanOrEqual(1);
@@ -329,8 +329,8 @@ test.describe('B3-02 full survival journey', () => {
     expect(await count(page, 'wood')).toBe(0);
     expect(await count(page, 'ration_pack')).toBe(5);
     expect(await count(page, 'clean_water')).toBeGreaterThanOrEqual(1); // from the cabinet
-    // The exploration record survived too.
-    expect(Object.keys(resumed.visitedFloors).length).toBeGreaterThanOrEqual(3);
+    // The exploration record survived too — all five floors the player set foot on.
+    expect(Object.keys(resumed.visitedFloors).length).toBeGreaterThanOrEqual(5);
     await page.screenshot({ path: 'e2e/screenshots/47-journey-8-resumed.png' });
 
     expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);

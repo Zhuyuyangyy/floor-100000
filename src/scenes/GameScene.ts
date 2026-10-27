@@ -18,8 +18,8 @@ import {
   WANDERER_SPEED,
 } from '../core/constants';
 import { currentInteractionZone, floorName, hasDownExit, hasUpExit, movePlayerX, tryChangeFloor } from '../systems/FloorSystem';
-import { getFloorView, lootContainer, lootGround } from '../systems/LootSystem';
-import { countItem, useConsumable } from '../systems/InventorySystem';
+import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
+import { countItem, isBagFull, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
 import { absoluteMinute, advanceTime, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, isNight, sleep } from '../systems/SurvivalSystem';
 import { ensureNightEvent } from '../systems/EventSystem';
@@ -94,6 +94,12 @@ export class GameScene extends Phaser.Scene {
   private tooltipText!: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
   private feedbackText!: Phaser.GameObjects.Text;
+  // B3-02 §4.2: a full bag used to be a 1.6s flash, so a player who filled the
+  // bag on floor 3 arrived on floor 4 with no reminder and lost the next
+  // container's loot to what looked like a bug. This one stays until a slot
+  // frees up, so the state is readable whenever the player looks.
+  private bagFullText!: Phaser.GameObjects.Text;
+  private bagFullShown = false;
   private feedbackTimer?: Phaser.Time.TimerEvent;
   private lastClock = '';
   private lastStats = '';
@@ -156,6 +162,9 @@ export class GameScene extends Phaser.Scene {
     // The frame counter is monotonic across the session, so a stale slot would
     // never match anyway — reset to keep the per-create state honest.
     this.lastInputFrame = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, up: -1, down: -1 };
+    // Field initialisers do not re-run, so the HUD's cached visibility has to be
+    // re-derived against the fresh bag of a restarted run.
+    this.bagFullShown = false;
 
     // Every builder below only pushes into these, and field initialisers do not
     // re-run on scene restart. Without the reset, 重新开始 left them holding the
@@ -228,6 +237,10 @@ export class GameScene extends Phaser.Scene {
   private drawFloor(): void {
     const state = getGame();
     const floor = state.currentFloor;
+    // Standing on a floor is what makes it explored (B3-02 §4.3). drawFloor is
+    // the single place the player arrives — new game, continue, dev entry and
+    // every stairwell — so recording here covers all of them at once.
+    recordFloorVisit(state, floor);
     this.floorView = getFloorView(state, floor);
 
     if (floor === STARTING_FLOOR) {
@@ -459,6 +472,17 @@ export class GameScene extends Phaser.Scene {
     this.feedbackText = this.add
       .text(DESIGN_WIDTH / 2, 60, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#f4b66a', backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } })
       .setOrigin(0.5).setScrollFactor(0).setDepth(120);
+
+    // Red rather than amber: this is a standing blocker, not news. It sits below
+    // the flash so both can be on screen at once without overlapping.
+    this.bagFullText = this.add
+      .text(
+        DESIGN_WIDTH / 2,
+        86,
+        `背包已满 · 使用、制作或交易腾出格子，否则搜刮会留在原处`,
+        { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#e8907c', backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } },
+      )
+      .setOrigin(0.5).setScrollFactor(0).setDepth(120).setVisible(false);
 
     this.hintText = this.add
       .text(12, DESIGN_HEIGHT - 22, 'A/D 或 ←/→ 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
@@ -1146,17 +1170,29 @@ export class GameScene extends Phaser.Scene {
   private changeFloor(direction: 1 | -1): void {
     const result = tryChangeFloor(getGame(), direction);
     if (result.ok) {
-      saveToStorage(getGame());
       this.clearFloor();
-      this.drawFloor();
+      this.drawFloor(); // records the visit for the floor just entered...
+      saveToStorage(getGame()); // ...so the save that follows includes it
       this.cameras.main.flash(180, 0, 0, 0); // transition through black
     } else {
       this.flash(result.reason === 'top' ? '已到顶层' : '已到尽头');
     }
   }
 
+  // Keeps the standing bag-full warning in step with the bag. Runs before the
+  // panel early-return below on purpose: a full bag matters most while the
+  // inventory panel is open, which is exactly when the player is looking for
+  // something to spend.
+  private refreshBagFullWarning(): void {
+    const full = isBagFull(getGame().player.inventory);
+    if (full === this.bagFullShown) return;
+    this.bagFullShown = full;
+    this.bagFullText.setVisible(full);
+  }
+
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
+    this.refreshBagFullWarning();
     if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen) return;
     const state = getGame();
 

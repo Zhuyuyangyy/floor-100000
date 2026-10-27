@@ -29,7 +29,8 @@
 |---|---|
 | `clockText` | 「第 N 天 HH:MM · M 层 楼层名」 |
 | `barsGfx` + `statLabels` | 四条状态条：HP / 饥 / 渴 / 精 |
-| `feedbackText` | 屏幕中上方闪现提示（目标、操作反馈） |
+| `feedbackText` | 屏幕中上方闪现提示（目标、操作反馈），1.6 秒自消 |
+| `bagFullText` | 背包满常驻警告（`y=86`，红色），直到腾出格子才消失；打开背包时依然显示 |
 | `hintText` | 底部操作提示行 |
 | `nightOverlay` | 名为 `night-overlay` 的全屏矩形，夜间/停电压暗 |
 | `upgradeBoard` | 宿舍已建升级列表 |

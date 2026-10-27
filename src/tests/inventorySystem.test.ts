@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createInventory, createNewGame } from '../core/gameState';
-import { addItem, countItem, removeItem, useConsumable } from '../systems/InventorySystem';
+import { addItem, countItem, isBagFull, removeItem, useConsumable } from '../systems/InventorySystem';
 
 describe('addItem stacking & full-bag', () => {
   it('stacks identical ids into one slot', () => {
@@ -38,6 +38,44 @@ describe('removeItem', () => {
     expect(inv.slots[0].quantity).toBe(1);
     removeItem(inv, 'ration_pack', 1);
     expect(inv.slots).toHaveLength(0);
+  });
+});
+
+// B3-02 §4.2: looting a container into a full bag leaves the stack in place and
+// reports `full`, which is correct — but the player was told once, for 1.6
+// seconds. The HUD now keeps the state on screen until a slot frees up, so the
+// predicate has to be a real rule rather than a scene-local guess.
+describe('isBagFull', () => {
+  it('is false while a slot is free', () => {
+    const inv = createInventory(3);
+    addItem(inv, 'wood', 1);
+    addItem(inv, 'tape', 1);
+    expect(isBagFull(inv)).toBe(false);
+  });
+
+  it('is true exactly when every slot is occupied', () => {
+    const inv = createInventory(2);
+    addItem(inv, 'wood', 1);
+    expect(isBagFull(inv)).toBe(false);
+    addItem(inv, 'tape', 1);
+    expect(isBagFull(inv)).toBe(true);
+  });
+
+  it('does not care how full a stack is, only how many slots it uses', () => {
+    const inv = createInventory(1);
+    addItem(inv, 'wood', 99); // maxStack, still one slot
+    expect(isBagFull(inv)).toBe(true);
+  });
+
+  it('turns false again once a stack is consumed or spent', () => {
+    const s = createNewGame(1);
+    const inv = s.player.inventory;
+    inv.slots = []; // drop the starting kit so the count is ours to control
+    inv.slotCount = 1;
+    addItem(inv, 'clean_water', 1);
+    expect(isBagFull(inv)).toBe(true);
+    useConsumable(s, 'clean_water');
+    expect(isBagFull(inv)).toBe(false);
   });
 });
 

@@ -6,7 +6,11 @@ import type { GameState, GeneratedFloor, InventoryStack } from '../core/gameType
 // (docs/03_TASKS.md#p0-03). visitedFloors[floor].lootedItems stores stable keys;
 // getFloorView removes them from the deterministic base layout.
 
-function ensureVisit(state: GameState, floor: number) {
+// Standing on a floor is what makes it explored. The tower's colouring reads
+// visitedFloors, and this used to run on the loot paths only, so a floor the
+// player simply walked through left no record and the map could not tell
+// "passed by" from "never been" (B3-02 §4.3, GAME_DESIGN_LOCK.md §2.6).
+export function recordFloorVisit(state: GameState, floor: number) {
   let visit = state.visitedFloors[floor];
   if (!visit) {
     visit = { openedContainers: [], lootedItems: [], unlockedDoors: [], localEvents: [] };
@@ -45,7 +49,7 @@ export interface LootResult {
 export function lootContainer(state: GameState, floor: number, containerId: string): LootResult {
   const base = generateFloor(state.runSeed, floor);
   const baseContainer = base.containers.find((c) => c.id === containerId);
-  const visit = ensureVisit(state, floor);
+  const visit = recordFloorVisit(state, floor);
   const looted = new Set(visit.lootedItems);
   const took: InventoryStack[] = [];
   let full = false;
@@ -83,7 +87,7 @@ export function lootGround(
   // "受潮" item go straight into the bag (GHI-03 M5).
   const ground = getFloorView(state, floor).groundItems.find((g) => g.key === key);
   if (!ground) return { took: null, full: false };
-  const visit = ensureVisit(state, floor);
+  const visit = recordFloorVisit(state, floor);
   if (visit.lootedItems.includes(key)) return { took: null, full: false };
   const result = addItem(state.player.inventory, ground.itemId, ground.quantity, ground.meta);
   if (result.overflow > 0) {

@@ -65,6 +65,13 @@ export function countItem(inv: Inventory, itemId: ItemId): number {
   return n;
 }
 
+// True when no slot is free. Loot deliberately stays where it is in this state
+// (see lootContainer), so the player needs to be able to see the state rather
+// than be told about it once for 1.6 seconds (B3-02 §4.2).
+export function isBagFull(inv: Inventory): boolean {
+  return inv.slots.length >= inv.slotCount;
+}
+
 // Removes up to `quantity`, deleting emptied slots. Returns the amount removed.
 export function removeItem(inv: Inventory, itemId: ItemId, quantity = 1): number {
   let remaining = quantity;

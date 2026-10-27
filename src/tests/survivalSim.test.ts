@@ -9,6 +9,10 @@ import type { GameState } from '../core/gameTypes';
 
 // Headless integration sim (docs/03_TASKS.md#p0-09): drives the real survival
 // systems over 7 days to prove a viable path exists for the fixed QA seeds.
+//
+// The v0.1 prototype ended the run on day 8. The frozen design ends it at the
+// summit (B8), so the sim now asserts the run is still alive and viable on
+// day 8 rather than auto-won.
 
 function advanceGameMinutes(state: GameState, minutes: number): void {
   const stepMs = 250; // advanceTime clamps each call to 250ms = 0.75 game-min
@@ -17,7 +21,7 @@ function advanceGameMinutes(state: GameState, minutes: number): void {
 }
 
 // Loot water/food + purifier materials first so the 12-slot bag keeps them.
-const LOOT_ORDER = [99996, 99997, 100000, 99998, 99999];
+const LOOT_ORDER = [5, 4, 1, 3, 2];
 
 function simulate(seed: number, gather: boolean) {
   const state = createNewGame(seed);
@@ -49,9 +53,11 @@ function simulate(seed: number, gather: boolean) {
 
 describe('7-day survival feasibility (QA seeds)', () => {
   for (const seed of [1, 42, 2026]) {
-    it(`seed ${seed} has a viable path to the day-8 victory`, () => {
+    it(`seed ${seed} is still alive and viable on day 8`, () => {
       const result = simulate(seed, true);
-      expect(result.status).toBe('won');
+      // No auto-win: the run simply continues, which is the point — the frozen
+      // design ends at the summit, not on a calendar day.
+      expect(result.status).toBe('playing');
       expect(result.day).toBe(8);
       expect(result.hp).toBeGreaterThan(0);
     });

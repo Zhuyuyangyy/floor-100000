@@ -39,7 +39,7 @@ describe('deriveSeed', () => {
   });
 
   it('handles string keys distinctly', () => {
-    expect(deriveSeed(42, 99998, 'crate_wood')).toBe(deriveSeed(42, 99998, 'crate_wood'));
-    expect(deriveSeed(42, 99998, 'crate_wood')).not.toBe(deriveSeed(42, 99998, 'crate_metal'));
+    expect(deriveSeed(42, 3, 'crate_wood')).toBe(deriveSeed(42, 3, 'crate_wood'));
+    expect(deriveSeed(42, 3, 'crate_wood')).not.toBe(deriveSeed(42, 3, 'crate_metal'));
   });
 });

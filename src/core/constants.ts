@@ -12,7 +12,13 @@ export const SAVE_KEY = 'floor100000.save.v1';
 // Derived from config/game-balance.json rather than hand-copied, so editing the
 // JSON cannot leave the code on a stale floor list (GHI-03 m7).
 export const STARTING_FLOOR = GAME_CONFIG.player.startingFloor;
+// The slum range the player starts in (floors 1..5). Floor 100000 is the
+// summit and the long-term goal, never the spawn point.
 export const PLAYABLE_FLOORS_V01: readonly number[] = GAME_CONFIG.world.playableFloorsV01;
+
+// Dev-only: the retired v0.1 dorm scene, kept for testing. Reachable only via
+// the ?devfloor= query parameter, never as a normal spawn point.
+export const DEV_TEST_FLOORS: readonly number[] = [100000];
 
 // A game day runs 06:00 -> next 06:00. 360 = 06:00, 1200 = 20:00.
 export const MINUTES_PER_DAY = 1440;
@@ -28,10 +34,10 @@ export const ROOM_WIDTH = FLOOR_WIDTH / ROOM_COUNT;
 export const PLAYER_SPEED = 130; // px / second
 export const ENTRY_X = FLOOR_WIDTH / 2;
 export const INTERACT_DISTANCE = 44;
-export const UP_EXIT_X = 40; // left end -> 上楼 (toward 100000)
-export const DOWN_EXIT_X = FLOOR_WIDTH - 40; // right end -> 下楼 (toward 99996)
-export const BED_X = 1120; // dorm bed on floor 100000 (sleep to pass the night)
-export const CRAFT_X = 480; // dorm workbench on floor 100000 (crafting station)
+export const UP_EXIT_X = 40; // left end -> 上楼 (toward higher floors)
+export const DOWN_EXIT_X = FLOOR_WIDTH - 40; // right end -> 下楼 (toward lower floors)
+export const BED_X = 1120; // dorm bed on the starting floor (sleep to pass the night)
+export const CRAFT_X = 480; // dorm workbench on the starting floor (crafting station)
 
 // Night wanderer threat (docs/01_GDD.md §10): slower than the player so it can be
 // outrun, and it only ever chips HP on a cooldown — never an unavoidable kill.

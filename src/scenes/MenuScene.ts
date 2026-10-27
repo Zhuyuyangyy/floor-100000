@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { startNewGame, tryContinue } from '../core/session';
+import { devEntry } from '../core/devMode';
 import { clearSave, hasSave } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { buildPanel, createMarker, placeMarker, type PanelObject } from '../render/panels';
@@ -52,6 +53,21 @@ export class MenuScene extends Phaser.Scene {
     // per-create caches — otherwise they accumulate destroyed objects and
     // refreshOptions() indexes past the end of `entries` (pre-existing bug:
     // 暂停 -> 返回标题 crashed the title screen).
+    // Bind input first: waitForScene() reports the scene active as soon as its
+    // settings flip, which is before create() finishes. Callers (Playwright
+    // startGame, and real players mashing keys during the transition) can
+    // otherwise press a key into a scene whose listeners do not exist yet.
+    const keyboard = this.input.keyboard;
+    if (keyboard) {
+      this.cursors = keyboard.addKeys({ up: 'UP', down: 'DOWN' }) as typeof this.cursors;
+      this.keyEnter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+      this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+      this.cursors.up.on('down', () => this.onNav('up', -1), this);
+      this.cursors.down.on('down', () => this.onNav('down', 1), this);
+      this.keyEnter.on('down', () => this.onConfirm('enter'), this);
+      this.keyEsc.on('down', () => this.onConfirm('esc'), this);
+    }
+
     this.optionTexts = [];
     // buildHelp() only pushes, and field initialisers do not re-run on scene
     // restart — without this the help panel accumulates destroyed objects.
@@ -67,17 +83,6 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setVisible(false);
     this.buildHelp(width, height);
-
-    const keyboard = this.input.keyboard;
-    if (keyboard) {
-      this.cursors = keyboard.addKeys({ up: 'UP', down: 'DOWN' }) as typeof this.cursors;
-      this.keyEnter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
-      this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
-      this.cursors.up.on('down', () => this.onNav('up', -1), this);
-      this.cursors.down.on('down', () => this.onNav('down', 1), this);
-      this.keyEnter.on('down', () => this.onConfirm('enter'), this);
-      this.keyEsc.on('down', () => this.onConfirm('esc'), this);
-    }
   }
 
   // Phaser can deliver one keydown several times inside a single frame when
@@ -134,7 +139,13 @@ export class MenuScene extends Phaser.Scene {
 
   private startNew(): void {
     clearSave();
-    startNewGame(this.seed());
+    const state = startNewGame(this.seed());
+    // Dev-only: the retired v0.1 dorm scene (floor 100000) stays in the world as
+    // the future summit, but it is never a spawn point. Only an explicit
+    // ?devfloor= flag starts a run there, and only because it is in
+    // DEV_TEST_FLOORS — a normal run always begins on floor 1.
+    const devFloor = devEntry().floor;
+    if (devFloor !== null) state.currentFloor = devFloor;
     this.scene.start('Game');
   }
 
@@ -171,7 +182,7 @@ export class MenuScene extends Phaser.Scene {
 
     this.helpObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green'));
     const title = this.add.text(cx, top + 20, '操作说明', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
-    const lines = ['A/D 或 ←/→ 移动', 'E 交互（开箱 / 对话 / 上下楼 / 睡觉）', 'I 背包 · C 制作 · ESC 暂停', '目标：熬过 7 天，第 8 天 06:00 仍活着'];
+    const lines = ['A/D 或 ←/→ 移动', 'E 交互（开箱 / 对话 / 上下楼 / 睡觉）', 'I 背包 · C 制作 · M 塔楼地图 · ESC 暂停', '目标：从第 1 层爬到第 100000 层的统治核心'];
     const texts = lines.map((line, i) => this.add.text(left + 24, top + 58 + i * 26, line, { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }));
     const footer = this.add.text(cx, top + panelH - 18, '按 Enter / ESC 关闭', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
     this.helpObjects.push(title, ...texts, footer);

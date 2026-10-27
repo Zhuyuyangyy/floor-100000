@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   containerItemKey,
   containerLootSeed,
+  DEV_FLOOR_ALIAS,
   FLOOR_TEMPLATES,
   generateFloor,
   getFloorTemplate,
@@ -9,7 +10,36 @@ import {
   LOOT_DATA_VERSION,
 } from '../data/floorTemplates';
 import { deriveSeed } from '../core/rng';
-import { PLAYABLE_FLOORS_V01 } from '../core/constants';
+import { DEV_TEST_FLOORS, PLAYABLE_FLOORS_V01 } from '../core/constants';
+
+// The retired v0.1 dorm scene stays bootable behind ?devfloor= without
+// duplicating its layout: it resolves to the floor-1 template under its old
+// address. Floor 100000 is still a valid logical floor and the future summit —
+// it just has no authored content until B4 generates it.
+describe('the dev-only floor alias', () => {
+  it('resolves the dev test floor to an authored template', () => {
+    for (const floor of DEV_TEST_FLOORS) {
+      expect(getFloorTemplate(floor), `dev floor ${floor} must render`).toBeDefined();
+      expect(DEV_FLOOR_ALIAS[floor]).toBeDefined();
+    }
+  });
+
+  it('does not alias any playable floor', () => {
+    for (const floor of PLAYABLE_FLOORS_V01) {
+      expect(DEV_FLOOR_ALIAS[floor]).toBeUndefined();
+    }
+  });
+
+  it('keeps the authored table at five entries', () => {
+    expect(Object.keys(FLOOR_TEMPLATES)).toHaveLength(5);
+  });
+
+  it('generates the dev floor under its own number', () => {
+    const dev = generateFloor(42, 100000);
+    expect(dev.floorNumber).toBe(100000);
+    expect(dev.containers.length).toBeGreaterThan(0);
+  });
+});
 
 describe('floor templates', () => {
   it('defines all 5 v0.1 floors', () => {
@@ -20,14 +50,14 @@ describe('floor templates', () => {
   });
 
   it('the same seed generates the same world', () => {
-    expect(generateFloor(42, 99998)).toEqual(generateFloor(42, 99998));
+    expect(generateFloor(42, 3)).toEqual(generateFloor(42, 3));
   });
 
   it('different seeds can differ on non-critical loot', () => {
-    const base = JSON.stringify(generateFloor(1, 99998));
+    const base = JSON.stringify(generateFloor(1, 3));
     let differs = false;
     for (let seed = 2; seed <= 60; seed++) {
-      if (JSON.stringify(generateFloor(seed, 99998)) !== base) {
+      if (JSON.stringify(generateFloor(seed, 3)) !== base) {
         differs = true;
         break;
       }
@@ -37,7 +67,7 @@ describe('floor templates', () => {
 
   it('guaranteed (critical) loot is present for every QA seed', () => {
     for (const seed of [1, 42, 2026]) {
-      const floor = generateFloor(seed, 99997);
+      const floor = generateFloor(seed, 4);
       const fuseBox = floor.containers.find((c) => c.id === 'fuse_box');
       expect(fuseBox?.items.some((i) => i.itemId === 'fuse' && i.quantity >= 1)).toBe(true);
     }
@@ -66,14 +96,14 @@ describe('loot keys identify the item, not its position (GHI-03 M1)', () => {
   });
 
   it('a ground item keeps its key when another is inserted before it', () => {
-    expect(generateFloor(42, 99996).groundItems.map((g) => g.key)).toEqual(['g:bread:160']);
+    expect(generateFloor(42, 5).groundItems.map((g) => g.key)).toEqual(['g:bread:160']);
 
-    const original = FLOOR_TEMPLATES[99996].ground;
-    FLOOR_TEMPLATES[99996].ground = [{ itemId: 'medkit', quantity: 1, x: 200 }, ...original];
+    const original = FLOOR_TEMPLATES[5].ground;
+    FLOOR_TEMPLATES[5].ground = [{ itemId: 'medkit', quantity: 1, x: 200 }, ...original];
     try {
-      expect(generateFloor(42, 99996).groundItems.map((g) => g.key)).toEqual(['g:medkit:200', 'g:bread:160']);
+      expect(generateFloor(42, 5).groundItems.map((g) => g.key)).toEqual(['g:medkit:200', 'g:bread:160']);
     } finally {
-      FLOOR_TEMPLATES[99996].ground = original;
+      FLOOR_TEMPLATES[5].ground = original;
     }
   });
 
@@ -111,15 +141,15 @@ describe('guaranteed loot entries (GHI-03 m2)', () => {
   });
 
   it('rejects a guaranteed entry whose range is not a single value', () => {
-    const original = FLOOR_TEMPLATES[100000].containers;
-    FLOOR_TEMPLATES[100000].containers = original.map((c) => ({
+    const original = FLOOR_TEMPLATES[1].containers;
+    FLOOR_TEMPLATES[1].containers = original.map((c) => ({
       ...c,
       loot: c.loot.map((l) => (l.guaranteed ? { ...l, min: 1, max: 3 } : l)),
     }));
     try {
-      expect(() => generateFloor(42, 100000)).toThrow(/min === max/);
+      expect(() => generateFloor(42, 1)).toThrow(/min === max/);
     } finally {
-      FLOOR_TEMPLATES[100000].containers = original;
+      FLOOR_TEMPLATES[1].containers = original;
     }
   });
 });
@@ -133,13 +163,13 @@ describe('the loot data version folds into every derived seed (GHI-03 M2)', () =
   });
 
   it('participates in the container seed derivation', () => {
-    const seeded = containerLootSeed(42, 99998, 'crate_metal');
-    expect(seeded).toBe(deriveSeed(LOOT_DATA_VERSION, 42, 99998, 'crate_metal'));
-    expect(seeded).not.toBe(deriveSeed(42, 99998, 'crate_metal'));
+    const seeded = containerLootSeed(42, 3, 'crate_metal');
+    expect(seeded).toBe(deriveSeed(LOOT_DATA_VERSION, 42, 3, 'crate_metal'));
+    expect(seeded).not.toBe(deriveSeed(42, 3, 'crate_metal'));
   });
 
   it('is stable for the same inputs', () => {
-    expect(containerLootSeed(42, 99998, 'crate_metal')).toBe(containerLootSeed(42, 99998, 'crate_metal'));
-    expect(containerLootSeed(42, 99998, 'crate_metal')).not.toBe(containerLootSeed(42, 99998, 'crate_wood'));
+    expect(containerLootSeed(42, 3, 'crate_metal')).toBe(containerLootSeed(42, 3, 'crate_metal'));
+    expect(containerLootSeed(42, 3, 'crate_metal')).not.toBe(containerLootSeed(42, 3, 'crate_wood'));
   });
 });

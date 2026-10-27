@@ -7,9 +7,9 @@ describe('game-balance config', () => {
     expect(GAME_CONFIG.schemaVersion).toBe(1);
   });
 
-  it('declares the 5 playable v0.1 floors including 100000', () => {
-    expect(GAME_CONFIG.world.playableFloorsV01).toEqual([100000, 99999, 99998, 99997, 99996]);
-    expect(GAME_CONFIG.world.playableFloorsV01).toContain(100000);
+  it('declares the 5 playable v0.1 floors including 1', () => {
+    expect(GAME_CONFIG.world.playableFloorsV01).toEqual([1, 2, 3, 4, 5]);
+    expect(GAME_CONFIG.world.playableFloorsV01).toContain(1);
   });
 
   it('starting items match the GDD baseline exactly', () => {
@@ -23,7 +23,7 @@ describe('game-balance config', () => {
 
   it('starting player stats match config', () => {
     expect(GAME_CONFIG.player.hpStart).toBe(100);
-    expect(GAME_CONFIG.player.startingFloor).toBe(100000);
+    expect(GAME_CONFIG.player.startingFloor).toBe(1);
   });
 });
 
@@ -77,7 +77,7 @@ describe('config validation (GHI-03 m8)', () => {
   it('rejects an empty or malformed playable floor list', () => {
     expect(() => assertGameBalanceConfig(mutated((c) => { at(c, 'world').playableFloorsV01 = []; }))).toThrow(/playableFloorsV01/);
     expect(() =>
-      assertGameBalanceConfig(mutated((c) => { at(c, 'world').playableFloorsV01 = [100000, 'nope']; })),
+      assertGameBalanceConfig(mutated((c) => { at(c, 'world').playableFloorsV01 = [1, 'nope']; })),
     ).toThrow(/playableFloorsV01/);
   });
 

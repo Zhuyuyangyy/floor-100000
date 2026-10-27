@@ -52,8 +52,8 @@ export function containerLootSeed(worldSeed: number, floorNumber: number, contai
 }
 
 export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
-  100000: {
-    floorNumber: 100000,
+  1: {
+    floorNumber: 1,
     name: '玩家宿舍',
     description: '初始床铺、储物、制作、睡眠的安全屋',
     containers: [
@@ -69,8 +69,8 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     ],
     ground: [],
   },
-  99999: {
-    floorNumber: 99999,
+  2: {
+    floorNumber: 2,
     name: '邻居宿舍',
     description: '2 名可交易 NPC',
     containers: [
@@ -83,8 +83,8 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     ],
     ground: [],
   },
-  99998: {
-    floorNumber: 99998,
+  3: {
+    floorNumber: 3,
     name: '废弃储物层',
     description: '搜集木材、金属、胶带、电池',
     containers: [
@@ -112,8 +112,8 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
       { itemId: 'cloth', quantity: 1, x: 1120 },
     ],
   },
-  99997: {
-    floorNumber: 99997,
+  4: {
+    floorNumber: 4,
     name: '维修层',
     description: '漆黑区域，稳定可找到的保险丝、滤芯与储水',
     containers: [
@@ -136,8 +136,8 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     ],
     ground: [],
   },
-  99996: {
-    floorNumber: 99996,
+  5: {
+    floorNumber: 5,
     name: '废弃食堂',
     description: '食物补给，首版探索终点',
     containers: [
@@ -187,12 +187,23 @@ function resolveLoot(
   return out;
 }
 
+// Dev-only: the retired v0.1 dorm scene, reachable through ?devfloor= so the
+// legacy fixtures can still boot it. Its layout now lives at floor 1 (the real
+// starting floor), so the alias reuses that table instead of duplicating it.
+// Floor 100000 stays a valid logical floor and the future summit — it simply
+// has no authored content until B4 generates it.
+export const DEV_FLOOR_ALIAS: Record<number, number> = { 100000: 1 };
+
+function templateFor(floorNumber: number): FloorTemplate | undefined {
+  return FLOOR_TEMPLATES[DEV_FLOOR_ALIAS[floorNumber] ?? floorNumber];
+}
+
 export function getFloorTemplate(floorNumber: number): FloorTemplate | undefined {
-  return FLOOR_TEMPLATES[floorNumber];
+  return templateFor(floorNumber);
 }
 
 export function generateFloor(worldSeed: number, floorNumber: number): GeneratedFloor {
-  const template = FLOOR_TEMPLATES[floorNumber];
+  const template = templateFor(floorNumber);
   if (!template) {
     throw new Error(`no floor template for floor ${floorNumber}`);
   }

@@ -4,9 +4,9 @@ import { SCHEMA_VERSION } from '../core/constants';
 import { GAME_CONFIG } from '../core/config';
 
 describe('createNewGame', () => {
-  it('starts at floor 100000, day 1, 06:00, playing, with the given seed', () => {
+  it('starts at floor 1, day 1, 06:00, playing, with the given seed', () => {
     const s = createNewGame(42);
-    expect(s.currentFloor).toBe(100000);
+    expect(s.currentFloor).toBe(1);
     expect(s.day).toBe(1);
     expect(s.gameMinuteOfDay).toBe(GAME_CONFIG.time.dayStartMinute);
     expect(s.status).toBe('playing');

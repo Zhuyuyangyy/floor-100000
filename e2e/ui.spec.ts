@@ -128,8 +128,12 @@ test('returning to the title from the pause menu leaves a working title screen',
 
   await page.keyboard.press('Escape');
   await page.waitForTimeout(150);
+  await page.keyboard.press('ArrowDown'); // -> 塔楼地图
+  await page.waitForTimeout(120);
   await page.keyboard.press('ArrowDown'); // -> 重新开始
+  await page.waitForTimeout(120);
   await page.keyboard.press('ArrowDown'); // -> 返回标题
+  await page.waitForTimeout(120);
   await page.keyboard.press('Enter');
   await page.waitForTimeout(400); // any crash lands on the next game step
 
@@ -189,7 +193,7 @@ test('a save from before the loot-key migration is refused with a reason', async
         runSeed: 42,
         day: 2,
         gameMinuteOfDay: 500,
-        currentFloor: 99998,
+        currentFloor: 3,
         status: 'playing',
         player: {
           x: 640,
@@ -203,7 +207,7 @@ test('a save from before the loot-key migration is refused with a reason', async
         },
         npcStates: {},
         visitedFloors: {
-          99998: { openedContainers: ['crate_wood'], lootedItems: ['g:0', 'c:crate_wood:0'], unlockedDoors: [], localEvents: [] },
+          3: { openedContainers: ['crate_wood'], lootedItems: ['g:0', 'c:crate_wood:0'], unlockedDoors: [], localEvents: [] },
         },
         worldEvents: { history: [], activeEvent: null },
       }),
@@ -238,7 +242,7 @@ const LEGACY_SAVE = JSON.stringify({
   runSeed: 42,
   day: 1,
   gameMinuteOfDay: 360,
-  currentFloor: 100000,
+  currentFloor: 1,
   status: 'playing',
   player: {
     x: 640,
@@ -322,6 +326,8 @@ test('重新开始 leaves the panels working', async ({ page }) => {
   // Pause -> 重新开始 (restarts the Game scene).
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
+  await page.keyboard.press('ArrowDown'); // -> 塔楼地图
+  await page.waitForTimeout(150);
   await page.keyboard.press('ArrowDown'); // -> 重新开始
   await page.waitForTimeout(150);
   await page.keyboard.press('Enter');

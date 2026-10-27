@@ -15,11 +15,11 @@ describe('rollDayEvent', () => {
     expect(types.size).toBeGreaterThan(1);
   });
 
-  it('never targets the safe dorm (100000) with a wanderer/leak', () => {
+  it('never targets the safe dorm (1) with a wanderer/leak', () => {
     for (let seed = 1; seed <= 60; seed++) {
       for (let day = 1; day <= 6; day++) {
         const e = rollDayEvent(seed, day);
-        if (e.type === 'wanderer' || e.type === 'leak') expect(e.floor).not.toBe(100000);
+        if (e.type === 'wanderer' || e.type === 'leak') expect(e.floor).not.toBe(1);
       }
     }
   });

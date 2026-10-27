@@ -16,7 +16,7 @@ function completeSave(): Record<string, unknown> {
     runSeed: 42,
     day: 1,
     gameMinuteOfDay: 360,
-    currentFloor: 100000,
+    currentFloor: 1,
     status: 'playing',
     player: {
       x: 640,
@@ -156,7 +156,7 @@ describe('save validation pins currentFloor to the playable range (GHI-03 C2)', 
   });
 
   it('accepts every playable floor', () => {
-    for (const f of [100000, 99999, 99998, 99997, 99996]) {
+    for (const f of [1, 2, 3, 4, 5]) {
       const s = completeSave();
       s.currentFloor = f;
       expect(validateGameState(s), `floor ${f}`).toEqual([]);
@@ -173,7 +173,7 @@ describe('an accepted save is consumable by the floor system', () => {
   });
 
   it('getFloorView never throws on an accepted save for every playable floor', () => {
-    for (const f of [100000, 99999, 99998, 99997, 99996]) {
+    for (const f of [1, 2, 3, 4, 5]) {
       const s = completeSave() as unknown as GameState;
       s.currentFloor = f;
       expect(validateGameState(s), `floor ${f}`).toEqual([]);
@@ -195,9 +195,9 @@ describe('saves from before the loot-key migration (GHI-03 M1/M2)', () => {
       ...completeSave(),
       schemaVersion: 1,
       day: 2,
-      currentFloor: 99998,
+      currentFloor: 3,
       visitedFloors: {
-        99998: {
+        3: {
           openedContainers: ['crate_wood'],
           lootedItems: ['g:0', 'c:crate_wood:0'],
           unlockedDoors: [],

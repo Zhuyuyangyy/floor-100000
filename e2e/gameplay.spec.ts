@@ -35,7 +35,7 @@ test('player walks, switches floor via E, and never duplicates', async ({ page }
   }, undefined, { timeout: 10_000 });
 
   const start = await readState(page);
-  expect(start.currentFloor).toBe(100000);
+  expect(start.currentFloor).toBe(1);
 
   // Walk right.
   await page.keyboard.down('ArrowRight');
@@ -51,13 +51,13 @@ test('player walks, switches floor via E, and never duplicates', async ({ page }
   const afterLeft = (await readState(page)).x;
   expect(afterLeft).toBeLessThan(afterRight);
 
-  // Walk to the down-exit (right end) and switch floor with E.
-  await page.keyboard.down('ArrowRight');
+  // Walk to the up-exit (left end) and switch floor with E.
+  await page.keyboard.down('ArrowLeft');
   await page.waitForFunction(() => {
     const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { player: { x: number } } | null } }).__PHASER_SESSION__?.getState();
-    return !!s && s.player.x > 1196;
+    return !!s && s.player.x < 44;
   }, undefined, { timeout: 20_000 });
-  await page.keyboard.up('ArrowRight');
+  await page.keyboard.up('ArrowLeft');
 
   await page.keyboard.press('E');
   await page.waitForFunction(() => {
@@ -65,11 +65,11 @@ test('player walks, switches floor via E, and never duplicates', async ({ page }
     const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; texture?: { key: string } }> } } | null } } }).__PHASER_GAME__;
     const list = g?.scene.getScene('Game')?.children.list ?? [];
     const hasPlayer = list.some((o) => o.type === 'Sprite' && o.texture?.key === 'player');
-    return !!s && s.currentFloor === 99999 && hasPlayer;
+    return !!s && s.currentFloor === 2 && hasPlayer;
   }, undefined, { timeout: 10_000 });
 
   const afterSwitch = await readState(page);
-  expect(afterSwitch.currentFloor).toBe(99999);
+  expect(afterSwitch.currentFloor).toBe(2);
   expect(afterSwitch.x).toBe(640); // reset to entry point
 
   const playerCount = await page.evaluate(() => {
@@ -79,7 +79,7 @@ test('player walks, switches floor via E, and never duplicates', async ({ page }
   });
   expect(playerCount).toBe(1); // no duplicate cloning across scene restart
 
-  await page.screenshot({ path: 'e2e/screenshots/04-floor-99999.png' });
+  await page.screenshot({ path: 'e2e/screenshots/04-floor-2.png' });
 
   expect(pageErrors, `page errors: ${pageErrors.join(' | ')}`).toEqual([]);
 });

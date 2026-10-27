@@ -9,7 +9,7 @@
     "maxMajorEventsPerDay": 1
   },
   "player": {
-    "startingFloor": 100000,
+    "startingFloor": 1,
     "hpMax": 100,
     "hpStart": 100,
     "hungerMax": 100,
@@ -31,8 +31,8 @@
     ]
   },
   "world": {
-    "startingFloor": 100000,
-    "playableFloorsV01": [100000, 99999, 99998, 99997, 99996],
+    "startingFloor": 1,
+    "playableFloorsV01": [1, 2, 3, 4, 5],
     "targetTotalFloors": 100000,
     "preloadAllFloors": false,
     "fixedQaSeeds": [1, 42, 2026]

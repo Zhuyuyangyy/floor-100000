@@ -58,7 +58,8 @@ const STAT_BARS: Array<{ label: string; color: number }> = [
   { label: '渴', color: 0x6aa8e5 },
   { label: '精', color: 0x77c6a4 },
 ];
-const PAUSE_OPTIONS = ['继续游戏', '重新开始', '返回标题'];
+const PAUSE_OPTIONS = ['继续游戏', '塔楼地图', '重新开始', '返回标题'];
+type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 'up' | 'down';
 type DirKeys = {
   up: Phaser.Input.Keyboard.Key;
   down: Phaser.Input.Keyboard.Key;
@@ -112,6 +113,7 @@ export class GameScene extends Phaser.Scene {
   private nightOverlay!: Phaser.GameObjects.Rectangle;
   private upgradeBoard!: Phaser.GameObjects.Text;
   private keyC!: Phaser.Input.Keyboard.Key;
+  private keyM!: Phaser.Input.Keyboard.Key;
 
   private dialogueOpen = false;
   private dialogue: { npc: NpcId; level: 'main' | 'trade'; selected: number; message: string; lineToggle: number } | null = null;
@@ -129,6 +131,12 @@ export class GameScene extends Phaser.Scene {
   private pauseSelected = 0;
   private lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
   private lastActiveEvent: ActiveEvent | null = null;
+  // Per-frame input guard (GHI-03 m9). Phaser can deliver one DOM keydown
+  // several times inside a single frame when several keys land in the same queue
+  // drain, so every menu action has to be accepted at most once per frame —
+  // otherwise one ArrowDown moves the pause selection two entries and the
+  // player lands on 重新开始 when they asked for 塔楼地图.
+  private lastInputFrame: Record<GameKey, number> = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, up: -1, down: -1 };
 
   constructor() {
     super({ key: 'Game' });
@@ -140,6 +148,9 @@ export class GameScene extends Phaser.Scene {
     // value and the fresh run's clock looks like it has not moved yet.
     this.lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
     this.lastActiveEvent = null;
+    // The frame counter is monotonic across the session, so a stale slot would
+    // never match anyway — reset to keep the per-create state honest.
+    this.lastInputFrame = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, up: -1, down: -1 };
 
     // Every builder below only pushes into these, and field initialisers do not
     // re-run on scene restart. Without the reset, 重新开始 left them holding the
@@ -195,7 +206,7 @@ export class GameScene extends Phaser.Scene {
     this.bindInput();
 
     if (getGame().day === 1) {
-      this.flash('目标：活到第 8 天 06:00。A/D 移动 · E 交互 · I 背包 · C 制作');
+      this.flash('目标：从第 1 层一路爬到第 100000 层。A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图');
     }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -244,10 +255,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ── world ──────────────────────────────────────────────────────────────
-  // Floor 100000 — the player's dorm, and the visual template the other floors
-  // will follow. Wall and floor are tiled with the existing tile_* textures via
-  // TileSprite (two objects, not one per tile); windows, doors and props are
-  // placed at 1:1 pixel scale so nothing is resampled.
+  // The starting floor — the player's dorm, and the visual template the other
+  // floors will follow. Wall and floor are tiled with the existing tile_*
+  // textures via TileSprite (two objects, not one per tile); windows, doors and
+  // props are placed at 1:1 pixel scale so nothing is resampled.
   private drawDormRoom(): void {
     const wallH = FLOOR_HEIGHT - 48; // the floor band is 48px = 3 tiles
 
@@ -318,7 +329,7 @@ export class GameScene extends Phaser.Scene {
 
   private drawCorridor(floor: number): void {
     const wallColors: Record<number, number> = {
-      100000: 0x2a2a33, 99999: 0x243038, 99998: 0x1e2a33, 99997: 0x14181e, 99996: 0x2e2a26,
+      1: 0x2a2a33, 2: 0x243038, 3: 0x1e2a33, 4: 0x14181e, 5: 0x2e2a26,
     };
     const g = this.add.graphics();
     g.fillStyle(wallColors[floor] ?? 0x22303a, 1);
@@ -434,7 +445,7 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5).setScrollFactor(0).setDepth(120);
 
     this.hintText = this.add
-      .text(12, DESIGN_HEIGHT - 22, 'A/D 或 ←/→ 移动 · E 交互 · I 背包 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
+      .text(12, DESIGN_HEIGHT - 22, 'A/D 或 ←/→ 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
       .setScrollFactor(0).setDepth(100);
   }
 
@@ -682,12 +693,21 @@ export class GameScene extends Phaser.Scene {
     if (this.pauseSelected === 0) {
       this.togglePause(); // 继续游戏
     } else if (this.pauseSelected === 1) {
+      this.openTowerOverview(); // 塔楼地图
+    } else if (this.pauseSelected === 2) {
       clearSave();
       startNewGame(Date.now() >>> 0); // 重新开始
       this.scene.start('Game');
     } else {
       this.scene.start('Menu'); // 返回标题
     }
+  }
+
+  // Opening the map hands the scene off entirely: GameScene is stopped, so the
+  // survival clock stops with it, and coming back re-runs create() against the
+  // same module-level GameState. Nothing about the run is reset on the way out.
+  private openTowerOverview(): void {
+    this.scene.start('TowerOverview');
   }
 
   private onToggleCrafting(): void {
@@ -899,24 +919,47 @@ export class GameScene extends Phaser.Scene {
     this.keyI = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I);
     this.keyEnter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
     this.keyC = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
+    this.keyM = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
 
-    this.keyE.on('down', this.onInteract, this);
-    this.keyEsc.on('down', this.onEsc, this);
-    this.keyI.on('down', this.onToggleInventory, this);
-    this.keyEnter.on('down', this.onUse, this);
-    this.keyC.on('down', this.onToggleCrafting, this);
-    this.cursors.up.on('down', this.onNavUp, this);
-    this.cursors.down.on('down', this.onNavDown, this);
+    this.keyE.on('down', () => this.guard('e', this.onInteract), this);
+    this.keyEsc.on('down', () => this.guard('esc', this.onEsc), this);
+    this.keyI.on('down', () => this.guard('i', this.onToggleInventory), this);
+    this.keyEnter.on('down', () => this.guard('enter', this.onUse), this);
+    this.keyC.on('down', () => this.guard('c', this.onToggleCrafting), this);
+    this.keyM.on('down', () => this.guard('m', this.onToggleMap), this);
+    this.cursors.up.on('down', () => this.guard('up', this.onNavUp), this);
+    this.cursors.down.on('down', () => this.guard('down', this.onNavDown), this);
+  }
+
+  // Accept a key at most once per frame (GHI-03 m9). The action has to be
+  // invoked with the scene as `this` — passing a bare method reference would
+  // lose it. Movement is NOT routed through here: it reads
+  // cursors.left/right.isDown in update(), so holding a direction key works.
+  private guard(slot: GameKey, action: () => void): void {
+    const frame = this.game.getFrame();
+    if (this.lastInputFrame[slot] === frame) return;
+    this.lastInputFrame[slot] = frame;
+    action.call(this);
   }
 
   private unbindInput(): void {
-    this.keyE?.off('down', this.onInteract, this);
-    this.keyEsc?.off('down', this.onEsc, this);
-    this.keyI?.off('down', this.onToggleInventory, this);
-    this.keyEnter?.off('down', this.onUse, this);
-    this.keyC?.off('down', this.onToggleCrafting, this);
-    this.cursors?.up.off('down', this.onNavUp, this);
-    this.cursors?.down.off('down', this.onNavDown, this);
+    // removeAllListeners per key rather than off(): the bound handlers above are
+    // closures, and Phaser does not re-run field initialisers on a scene restart
+    // — addKey() hands back the same Key object, so a restart would otherwise
+    // stack a second set of listeners on it.
+    this.keyE?.removeAllListeners();
+    this.keyEsc?.removeAllListeners();
+    this.keyI?.removeAllListeners();
+    this.keyEnter?.removeAllListeners();
+    this.keyC?.removeAllListeners();
+    this.keyM?.removeAllListeners();
+    this.cursors?.up.removeAllListeners();
+    this.cursors?.down.removeAllListeners();
+  }
+
+  private onToggleMap(): void {
+    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen) return;
+    this.openTowerOverview();
   }
 
   private onToggleInventory(): void {

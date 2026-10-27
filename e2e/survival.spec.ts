@@ -133,13 +133,13 @@ test('a leak spoils the floor\'s ground supplies and they recover when it clears
 
   await startGame(page, 42);
 
-  // Descend to 99998, the only floor with loose ground supplies (battery at
+  // Ascend to 3, the only floor with loose ground supplies (battery at
   // x=160). Teleporting to the stairs is enough — the zone check reads
   // state.player.x directly.
-  for (const target of [99999, 99998]) {
+  for (const target of [2, 3]) {
     await page.evaluate(() => {
       const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { player: { x: number } } | null } }).__PHASER_SESSION__?.getState();
-      if (s) s.player.x = 1240; // DOWN_EXIT_X
+      if (s) s.player.x = 40; // UP_EXIT_X
     });
     await page.keyboard.press('E');
     await page.waitForFunction(
@@ -224,7 +224,10 @@ test('dehydration causes death and shows the lose screen', async ({ page }) => {
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
 
-test('surviving to day 8 wins', async ({ page }) => {
+// The v0.1 prototype auto-won on day 8. The frozen design ends at the summit
+// (B8), so in a normal run day 8 is just another day — the retired threshold
+// only still fires under the ?devwin=1 fixture, which e2e/tower.spec.ts covers.
+test('day 8 no longer auto-wins; the run carries on', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
 
@@ -237,11 +240,14 @@ test('surviving to day 8 wins', async ({ page }) => {
     }
   });
   await walkRightTo(page, 1090);
-  await page.keyboard.press('E');
-  await waitForScene(page, 'End');
+  await page.keyboard.press('E'); // sleep into day 8
+
+  await page.waitForFunction(() => {
+    const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
+    return !!s && s.day === 8;
+  }, undefined, { timeout: 5000 });
   const s = await readState(page);
-  expect(s.status).toBe('won');
   expect(s.day).toBe(8);
-  await page.screenshot({ path: 'e2e/screenshots/06-win.png' });
+  expect(s.status).toBe('playing'); // no auto-win, no EndScene
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });

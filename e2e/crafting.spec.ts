@@ -167,10 +167,14 @@ test('the purifier converts dirty water to clean water', async ({ page }) => {
   const cleanBefore = await count(page, 'clean_water');
 
   // Open workbench; the purify action is the 4th entry (after 3 recipes).
+  // Separate the presses: a synthetic keypress can be dropped, and landing on a
+  // recipe instead of purify would make this test assert the wrong thing.
   await page.keyboard.press('C');
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(150);
+  for (let i = 0; i < 3; i++) {
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(120);
+  }
   await page.keyboard.press('Enter');
 
   await page.waitForFunction(

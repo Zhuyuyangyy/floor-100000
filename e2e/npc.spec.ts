@@ -96,8 +96,8 @@ async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 5)
 }
 
 async function goToNeighborFloor(page: Page): Promise<void> {
-  await setX(page, 1200);
-  await pressEUntil(page, async () => (await readState(page)).currentFloor === 99999);
+  await setX(page, 40); // UP_EXIT_X: floor 1 -> 2
+  await pressEUntil(page, async () => (await readState(page)).currentFloor === 2);
 }
 
 test('trade with 阿林 changes the bag (电线 for 废金属)', async ({ page }) => {
@@ -141,6 +141,7 @@ test('trade with 小周 changes the bag (面包 for 口粮)', async ({ page }) =
   await pressEUntil(page, async () => hasVisibleText(page, '小周（邻居）'));
   await selectInMenu(page, MAIN_OPTIONS, '交易');
   await page.keyboard.press('Enter'); // open trade menu
+  await page.waitForTimeout(150);
   await page.keyboard.press('Enter'); // offer 0 (面包 <- 口粮)
 
   await page.waitForFunction(() => {
@@ -163,6 +164,7 @@ test('a failed trade leaves no half-exchange', async ({ page }) => {
   await pressEUntil(page, async () => hasVisibleText(page, '阿林（维修工）'));
   await selectInMenu(page, MAIN_OPTIONS, '交易');
   await page.keyboard.press('Enter'); // trade menu
+  await page.waitForTimeout(150);
   await page.keyboard.press('Enter'); // offer 0
   await page.waitForTimeout(300);
 

@@ -4,6 +4,7 @@ import { BootScene } from '../scenes/BootScene';
 import { EndScene } from '../scenes/EndScene';
 import { GameScene } from '../scenes/GameScene';
 import { MenuScene } from '../scenes/MenuScene';
+import { TowerOverviewScene } from '../scenes/TowerOverviewScene';
 
 export function createGameConfig(parent: string): Phaser.Types.Core.GameConfig {
   return {
@@ -17,6 +18,6 @@ export function createGameConfig(parent: string): Phaser.Types.Core.GameConfig {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [BootScene, MenuScene, GameScene, EndScene],
+    scene: [BootScene, MenuScene, GameScene, TowerOverviewScene, EndScene],
   };
 }

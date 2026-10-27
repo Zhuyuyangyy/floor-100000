@@ -68,10 +68,11 @@ async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 5)
   if (!(await check())) throw new Error('interact (E) did not take effect');
 }
 
-async function goDown(page: Page): Promise<void> {
-  await setX(page, 1200);
+// Floors run upward: 1 -> 2 -> 3. The up-exit is the left end of the floor.
+async function goUp(page: Page): Promise<void> {
+  await setX(page, 40); // UP_EXIT_X
   const before = (await readState(page)).currentFloor;
-  await pressEUntil(page, async () => (await readState(page)).currentFloor < before);
+  await pressEUntil(page, async () => (await readState(page)).currentFloor > before);
 }
 
 test('the night event is reproducible for a given seed', async ({ page }) => {
@@ -95,7 +96,7 @@ test('a blackout darkens the screen but never fully blacks it', async ({ page })
   page.on('pageerror', (e) => errors.push(e.message));
 
   await startGame(page, 42);
-  await goDown(page); // leave the safe dorm
+  await goUp(page); // leave the safe dorm
   await page.evaluate(() => {
     const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
     if (!s) return;
@@ -133,12 +134,12 @@ test('the wanderer is avoidable — leaving the floor escapes it undamaged', asy
   page.on('pageerror', (e) => errors.push(e.message));
 
   await startGame(page, 42);
-  await goDown(page); // 99999
+  await goUp(page); // 2
   await page.evaluate(() => {
     const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
     if (!s) return;
     s.gameMinuteOfDay = 1320;
-    s.worldEvents.activeEvent = { type: 'wanderer', floor: 99999, message: 'test' };
+    s.worldEvents.activeEvent = { type: 'wanderer', floor: 2, message: 'test' };
   });
 
   await page.waitForFunction(() => {
@@ -150,7 +151,7 @@ test('the wanderer is avoidable — leaving the floor escapes it undamaged', asy
   await page.screenshot({ path: 'e2e/screenshots/11-wanderer.png' });
 
   const hpBefore = (await readState(page)).player.hp;
-  await goDown(page); // -> 99998, escape before it reaches us
+  await goUp(page); // -> 3, escape before it reaches us
   expect(await hasWanderer(page)).toBe(false); // gone with the floor
   const after = await readState(page);
   expect(after.player.hp).toBe(hpBefore); // never hit while escaping

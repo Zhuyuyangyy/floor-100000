@@ -9,51 +9,53 @@ import {
   tryChangeFloor,
 } from '../systems/FloorSystem';
 
+// Floors are numbered upward: the player starts at floor 1 in the slum and
+// climbs toward 100000. "+1" is up, "-1" is down.
 describe('tryChangeFloor', () => {
-  it('descends from 100000 to 99999 and resets to the entry position', () => {
+  it('ascends from 1 to 2 and resets to the entry position', () => {
     const s = createNewGame(1);
     s.player.x = 900;
-    const r = tryChangeFloor(s, -1);
-    expect(r).toEqual({ ok: true, from: 100000, to: 99999 });
-    expect(s.currentFloor).toBe(99999);
+    const r = tryChangeFloor(s, 1);
+    expect(r).toEqual({ ok: true, from: 1, to: 2 });
+    expect(s.currentFloor).toBe(2);
     expect(s.player.x).toBe(ENTRY_X);
   });
 
-  it('ascends from 99996 toward 100000', () => {
+  it('descends from 5 toward 1', () => {
     const s = createNewGame(1);
-    s.currentFloor = 99996;
-    expect(tryChangeFloor(s, 1)).toEqual({ ok: true, from: 99996, to: 99997 });
-    expect(s.currentFloor).toBe(99997);
+    s.currentFloor = 5;
+    expect(tryChangeFloor(s, -1)).toEqual({ ok: true, from: 5, to: 4 });
+    expect(s.currentFloor).toBe(4);
   });
 
-  it('can traverse the whole range down to 99996 and back to 100000', () => {
+  it('can traverse the whole range up to 5 and back to 1', () => {
     const s = createNewGame(1);
-    for (let f = 100000; f > 99996; f--) expect(tryChangeFloor(s, -1).ok).toBe(true);
-    expect(s.currentFloor).toBe(99996);
-    for (let f = 99996; f < 100000; f++) expect(tryChangeFloor(s, 1).ok).toBe(true);
-    expect(s.currentFloor).toBe(100000);
+    for (let f = 1; f < 5; f++) expect(tryChangeFloor(s, 1).ok).toBe(true);
+    expect(s.currentFloor).toBe(5);
+    for (let f = 5; f > 1; f--) expect(tryChangeFloor(s, -1).ok).toBe(true);
+    expect(s.currentFloor).toBe(1);
   });
 
-  it('blocks going above the top floor (failure/boundary)', () => {
+  it('blocks climbing above the top of the playable range (failure/boundary)', () => {
     const s = createNewGame(1);
+    s.currentFloor = 5;
     expect(tryChangeFloor(s, 1)).toEqual({ ok: false, reason: 'top' });
-    expect(s.currentFloor).toBe(100000);
+    expect(s.currentFloor).toBe(5);
   });
 
-  it('blocks going below the bottom floor (failure/boundary)', () => {
+  it('blocks descending below the bottom of the playable range (failure/boundary)', () => {
     const s = createNewGame(1);
-    s.currentFloor = 99996;
     expect(tryChangeFloor(s, -1)).toEqual({ ok: false, reason: 'bottom' });
-    expect(s.currentFloor).toBe(99996);
+    expect(s.currentFloor).toBe(1);
   });
 });
 
 describe('exit availability', () => {
-  it('top floor has no up exit; bottom floor has no down exit', () => {
-    expect(hasUpExit(100000)).toBe(false);
-    expect(hasDownExit(100000)).toBe(true);
-    expect(hasDownExit(99996)).toBe(false);
-    expect(hasUpExit(99996)).toBe(true);
+  it('the bottom floor has no down exit; the top has no up exit', () => {
+    expect(hasDownExit(1)).toBe(false);
+    expect(hasUpExit(1)).toBe(true);
+    expect(hasUpExit(5)).toBe(false);
+    expect(hasDownExit(5)).toBe(true);
   });
 });
 
@@ -73,7 +75,7 @@ describe('movePlayerX', () => {
 describe('currentInteractionZone', () => {
   it('detects standing next to an exit', () => {
     const s = createNewGame(1);
-    s.currentFloor = 99999; // has both up and down exits
+    s.currentFloor = 3; // has both up and down exits
     s.player.x = UP_EXIT_X;
     expect(currentInteractionZone(s)).toBe('up');
     s.player.x = DOWN_EXIT_X;
@@ -82,9 +84,9 @@ describe('currentInteractionZone', () => {
     expect(currentInteractionZone(s)).toBeNull();
   });
 
-  it('reports no up zone at the top floor even at the left end', () => {
+  it('reports no down zone at the bottom floor even at the right end', () => {
     const s = createNewGame(1);
-    s.player.x = UP_EXIT_X;
+    s.player.x = DOWN_EXIT_X;
     expect(currentInteractionZone(s)).toBeNull();
   });
 });

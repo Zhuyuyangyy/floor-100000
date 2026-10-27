@@ -113,7 +113,7 @@ describe('nightOverlayAlpha (lamp lighting)', () => {
   it('the lamp does not light other floors', () => {
     const s = createNewGame(1);
     s.player.homeUpgrades.push('lamp');
-    s.currentFloor = 99998;
+    s.currentFloor = 3;
     s.gameMinuteOfDay = 1320;
     expect(nightOverlayAlpha(s)).toBe(DARK_NIGHT_ALPHA);
   });

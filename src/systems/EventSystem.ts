@@ -1,14 +1,14 @@
 import { makeRng, deriveSeed } from '../core/rng';
 import { isNight } from './SurvivalSystem';
-import { PLAYABLE_FLOORS_V01 } from '../core/constants';
+import { PLAYABLE_FLOORS_V01, STARTING_FLOOR } from '../core/constants';
 import type { ActiveEvent, GameState } from '../core/gameTypes';
 
 // Seed-determined night events (docs/01_GDD.md §10, docs/03_TASKS.md#p0-07).
-// The safe dorm (100000) is never a wanderer/leak target, so returning home is
+// The safe dorm (the starting floor) is never a wanderer/leak target, so returning home is
 // always a valid escape and no event is an unavoidable-death or permanent-black.
 
 // Floors a wanderer/leak can hit — everything except the dorm.
-const EVENT_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f !== 100000);
+const EVENT_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f !== STARTING_FLOOR);
 
 // Deterministic: the same worldSeed + day always yields the same event.
 export function rollDayEvent(worldSeed: number, day: number): ActiveEvent {

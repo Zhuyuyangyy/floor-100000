@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
-import { absoluteMinute, advanceTime, AUTOSAVE_EVERY_GAME_MINUTES, deathCause, formatClock, sleep } from '../systems/SurvivalSystem';
+import {
+  absoluteMinute,
+  advanceTime,
+  AUTOSAVE_EVERY_GAME_MINUTES,
+  deathCause,
+  formatClock,
+  isLegacyVictory,
+  sleep,
+} from '../systems/SurvivalSystem';
 import { GAME_CONFIG } from '../core/config';
 
 // Drive the clock in small real-time steps (like the render loop).
@@ -91,8 +99,11 @@ describe('advanceTime day rollover', () => {
   });
 });
 
-describe('victory', () => {
-  it('wins on reaching day 8 at/after 06:00 with HP > 0', () => {
+// The v0.1 prototype ended the run on day 8. The frozen design replaces that
+// with reaching the summit (B8), so in a normal run day 8 is just another day —
+// the threshold survives only as the ?devwin=1 fixture.
+describe('legacy day-8 victory (dev fixture only)', () => {
+  it('does not win in a normal run when day 8 passes 06:00', () => {
     const s = createNewGame(1);
     s.day = 7;
     s.gameMinuteOfDay = 1200;
@@ -100,7 +111,19 @@ describe('victory', () => {
     expect(s.day).toBe(8);
     expect(s.status).toBe('playing');
     tick(s, 130_000); // past 06:00
-    expect(s.status).toBe('won');
+    expect(s.status).toBe('playing'); // no auto-win any more
+  });
+
+  it('still recognises the retired threshold when the fixture is on', () => {
+    const s = createNewGame(1);
+    s.day = 7;
+    s.gameMinuteOfDay = 1200;
+    expect(isLegacyVictory(s)).toBe(false);
+    s.day = 8;
+    s.gameMinuteOfDay = 359;
+    expect(isLegacyVictory(s)).toBe(false);
+    s.gameMinuteOfDay = 360; // 06:00
+    expect(isLegacyVictory(s)).toBe(true);
   });
 });
 
@@ -125,13 +148,13 @@ describe('sleep', () => {
     expect(s.player.energy).toBe(GAME_CONFIG.player.energyMax);
   });
 
-  it('wins when sleeping on the day-7 night', () => {
+  it('does not win when sleeping on the day-7 night', () => {
     const s = createNewGame(1);
     s.day = 7;
     s.gameMinuteOfDay = 1200;
     const r = sleep(s);
-    expect(r.ok && r.won).toBe(true);
-    expect(s.status).toBe('won');
+    expect(r.ok && r.won).toBe(false);
+    expect(s.status).toBe('playing');
     expect(s.day).toBe(8);
   });
 });

@@ -44,7 +44,7 @@ test('boots to the pixel title and Enter starts into the game scene', async ({ p
     const list = g?.scene.getScene('Game')?.children.list ?? [];
     return {
       player: list.some((o) => o.type === 'Sprite' && o.texture?.key === 'player'),
-      floor: list.some((o) => o.type === 'Text' && (o.text ?? '').includes('100000')),
+      floor: list.some((o) => o.type === 'Text' && /层/.test(o.text ?? '')),
     };
   });
   expect(rendered.player).toBe(true);

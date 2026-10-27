@@ -1,5 +1,6 @@
 import { GAME_CONFIG } from '../core/config';
 import { DAY_START_MINUTE, MINUTES_PER_DAY } from '../core/constants';
+import { devEntry } from '../core/devMode';
 import type { GameState } from '../core/gameTypes';
 
 // Time & survival rules (docs/01_GDD.md §5-6, config/game-balance.json).
@@ -56,8 +57,16 @@ function applyDecay(state: GameState, gameMinutes: number): void {
   }
 }
 
+// The retired v0.1 win threshold: reach day 8 at/after 06:00 still alive. The
+// frozen design replaces it with reaching the summit (B8), so production never
+// auto-wins on the calendar — only the ?devwin=1 fixture still honours this.
+export function isLegacyVictory(state: GameState): boolean {
+  const t = GAME_CONFIG.time;
+  return state.day >= t.victoryDay && state.gameMinuteOfDay >= t.victoryMinute;
+}
+
 // Advances the clock by a real-time delta, applies survival decay, and resolves
-// loss (HP 0) / victory (reach the victory day at/after 06:00). No-op once ended.
+// loss (HP 0). No-op once ended.
 export function advanceTime(state: GameState, deltaMs: number): TimeTick {
   if (state.status !== 'playing') return NONE;
 
@@ -82,8 +91,7 @@ export function advanceTime(state: GameState, deltaMs: number): TimeTick {
     state.status = 'lost';
     return { gameMinutes, dayChanged, died: true, won: false };
   }
-  const t = GAME_CONFIG.time;
-  if (state.day >= t.victoryDay && state.gameMinuteOfDay >= t.victoryMinute) {
+  if (devEntry().legacyWin && isLegacyVictory(state)) {
     state.status = 'won';
     return { gameMinutes, dayChanged, died: false, won: true };
   }
@@ -92,8 +100,9 @@ export function advanceTime(state: GameState, deltaMs: number): TimeTick {
 
 export type SleepResult = { ok: true; won: boolean; newDay: number } | { ok: false; reason: string };
 
-// Sleep in the dorm to pass the night: only from 20:00, advances to next 06:00,
-// restores energy, and wins if it reaches the victory day.
+// Sleep in the dorm to pass the night: only from 20:00, advances to next 06:00
+// and restores energy. The retired day-8 auto-win only applies under the
+// ?devwin=1 fixture.
 export function sleep(state: GameState): SleepResult {
   if (state.status !== 'playing') return { ok: false, reason: '游戏已结束' };
   if (state.gameMinuteOfDay < GAME_CONFIG.time.nightRiskStartMinute) {
@@ -103,7 +112,7 @@ export function sleep(state: GameState): SleepResult {
   state.gameMinuteOfDay = GAME_CONFIG.time.dayStartMinute;
   state.player.energy = GAME_CONFIG.player.energyMax;
   state.worldEvents.activeEvent = null; // fresh roll each day
-  const won = state.day >= GAME_CONFIG.time.victoryDay;
+  const won = devEntry().legacyWin && isLegacyVictory(state);
   if (won) state.status = 'won';
   return { ok: true, won, newDay: state.day };
 }

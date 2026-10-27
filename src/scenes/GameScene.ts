@@ -28,6 +28,7 @@ import { playSfx } from '../render/audio';
 import { buildPanel, createMarker, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
+import { corridorTint, drawCorridorRoom } from '../render/corridors';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
@@ -327,24 +328,35 @@ export class GameScene extends Phaser.Scene {
     this.floorObjects.push(wall, floor, g);
   }
 
+  // Floors 2-5 — corridors. They share the dorm's base (tiled wall, tiled floor,
+  // ceiling shadow, skirting) so the tower reads as one building, then take a
+  // per-floor tint and per-floor props: see src/render/corridors.ts.
   private drawCorridor(floor: number): void {
-    const wallColors: Record<number, number> = {
-      1: 0x2a2a33, 2: 0x243038, 3: 0x1e2a33, 4: 0x14181e, 5: 0x2e2a26,
-    };
-    const g = this.add.graphics();
-    g.fillStyle(wallColors[floor] ?? 0x22303a, 1);
-    g.fillRect(0, 0, FLOOR_WIDTH, FLOOR_HEIGHT - 48);
-    g.fillStyle(0x354650, 1);
-    g.fillRect(0, FLOOR_HEIGHT - 48, FLOOR_WIDTH, 48);
-    g.fillStyle(0x465865, 1);
-    g.fillRect(0, FLOOR_HEIGHT - 48, FLOOR_WIDTH, 2);
-    for (let i = 0; i <= ROOM_COUNT; i++) {
-      g.fillStyle(0x3a4c58, 1);
-      g.fillRect(i * ROOM_WIDTH - 2, 48, 4, FLOOR_HEIGHT - 96);
+    const wallH = FLOOR_HEIGHT - 48; // the floor band is 48px = 3 tiles
+    const tint = corridorTint(floor);
+
+    const wall = this.add.tileSprite(0, 8, FLOOR_WIDTH, wallH - 8, 'tile_wall').setOrigin(0, 0);
+    const floorBand = this.add.tileSprite(0, wallH, FLOOR_WIDTH, FLOOR_HEIGHT - wallH, 'tile_floor').setOrigin(0, 0);
+    this.floorObjects.push(wall, floorBand);
+
+    if (tint) {
+      this.floorObjects.push(this.add.rectangle(FLOOR_WIDTH / 2, 8 + (wallH - 8) / 2, FLOOR_WIDTH, wallH - 8, tint.color, tint.alpha));
     }
-    g.fillStyle(0xf4b66a, 0.22);
-    for (let r = 0; r < ROOM_COUNT; r++) g.fillRect(r * ROOM_WIDTH + 48, 76, 56, 44);
-    this.floorObjects.push(g);
+
+    const g = this.add.graphics();
+    // Ceiling shadow and the skirting where the wall meets the floor — the same
+    // two bands the dorm uses, so a floor change never looks like a different game.
+    g.fillStyle(0x0b0f12, 1);
+    g.fillRect(0, 0, FLOOR_WIDTH, 8);
+    g.fillRect(0, wallH - 3, FLOOR_WIDTH, 3);
+
+    // Props, room by room. Each theme decides its own dressing; the loop only
+    // supplies the room's position so nothing has to recompute the layout.
+    const props: Phaser.GameObjects.GameObject[] = [];
+    for (let r = 0; r < ROOM_COUNT; r++) {
+      drawCorridorRoom({ scene: this, g, floor, roomX: r * ROOM_WIDTH, floorY: wallH, room: r, objects: props });
+    }
+    this.floorObjects.push(g, ...props);
   }
 
   // The stairwells, drawn with the tile_stairs_* textures instead of a flat

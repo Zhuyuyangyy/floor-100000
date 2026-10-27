@@ -9,27 +9,8 @@ import { expect, test, type Page } from '@playwright/test';
 // until setItem throws, then asserts the warning reaches the screen — and that it
 // does not repeat every frame.
 
-interface State {
-  day: number;
-  gameMinuteOfDay: number;
-  player: { x: number; hp: number; thirst: number };
-}
-
-// Declared once here so the browser callbacks below can read the dev handles
-// without an inline cast. A cast inside page.evaluate/waitForFunction is not
-// always stripped before the callback is serialized, which shows up as an eval
-// parse error rather than as a type error.
-declare global {
-  interface Window {
-    __PHASER_GAME__?: {
-      scene: {
-        scenes: Array<{ children: { list: Array<{ type: string; text?: string; visible: boolean }> } }>;
-        getScenes: (r?: boolean) => Array<{ scene: { key: string } }>;
-      };
-    };
-    __PHASER_SESSION__?: { getState: () => State | null };
-  }
-}
+// The dev-handle types live in e2e/globals.d.ts, declared once for the whole
+// suite. Two specs augmenting Window separately is a TS2717 conflict.
 
 async function waitForScene(page: Page, key: string): Promise<void> {
   await page.waitForFunction(

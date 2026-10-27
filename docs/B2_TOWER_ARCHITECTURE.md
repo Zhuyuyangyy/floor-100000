@@ -35,7 +35,26 @@
 - HUD 不随世界缩放变形（`setScrollFactor(0)` + 独立 depth）
 - 四个单元格状态有色例图例（当前 / 已打通 / 已探索 / 未打通）
 
-### 2.1 与方案的偏差（均为实现期决策，记录在案）
+### 2.1 默认总览完整适配（验收补充修复）
+
+初版用 4px 行高，100 行 = 400px，超出 360px 视口 40px——塔底十个区段被裁掉，必须拖动才能看到。**「一眼看完整栋楼」是总览的核心职责，不是美术细节**，因此改为：
+
+- `OVERVIEW_ROW_H = 3`（100 行 = 300px），`CONTENT_TOP = 36`，内容区为 36..336
+- 顶部 0..36 与底部 336..360 两条固定带留给 HUD，内容不再被 HUD 覆盖
+- **1x 下 100 个区段全部可见，滚动范围为 0**；`scrollBy` 在 1x 恒返回 0
+- 每 10 个区段在左侧标一个楼层号锚点（1 / 10001 / … / 90001），既是阅读参照，也是「整栋楼在屏」的肉眼证据
+- 行内 2px 填充 + 1px 间隙，100 行可数，不会糊成同色块
+
+**点击精度**：3px 行无法可靠瞄准，因此没有把点击区域缩到不可用，而是：
+
+- **悬停读数**：指针在总览上移动时，顶部中央实时显示「区段 N · 楼层 X–Y · 阶层」，点击前即可确认目标
+- **键盘光标**：↑/↓ 逐区段移动并居中，Enter 下钻——精确路径
+- **二级下钻**：总览点击是「选区域」的粗手势，精度在区段视图的 1000 格网格里完成
+- 缩放后行高变为 3×zoom，1.5x 起点击即恢复精确
+
+`sectorHeight()` / `pickFloorAt()` / `floorCentreY()` 同样以 `CONTENT_TOP` 为基准，区段网格也避开顶部 HUD 带。
+
+### 2.2 与方案的偏差（均为实现期决策，记录在案）
 
 | 方案原文 | 实际实现 | 原因 |
 |---|---|---|
@@ -143,20 +162,38 @@ B2 **不实现完整终局系统**（属于 B8）。`EndScene` 的「won」分�
 | 楼层群渲染上千行对象拖垮帧率 | 高 | 单个 `Graphics` 重绘 1000 个 `fillRect`，仅在状态变化时执行；实测无可感知卡顿 |
 | 缩放导致像素模糊 / 抖动 | 高 | `pixelArt: true` 下最近邻放大；HUD 用 `setScrollFactor(0)` 独立于世界缩放 |
 | 视图切换丢失玩家状态 | 中 | 单例 + e2e 断言覆盖，未复现 |
-| `Scale.FIT` 与塔楼逻辑高度的坐标转换 | 中 | 显式镜像摄影机变换（见 §2.1），并用 `src/tests/towerNav.test.ts` 锁定 `viewTop` / 滚动边界 |
+| `Scale.FIT` 与塔楼逻辑高度的坐标转换 | 中 | 显式镜像摄影机变换（见 §2.2），并用 `src/tests/towerNav.test.ts` 锁定 `viewTop` / 滚动边界 |
 | 总览被误用为传送器 | 中 | `tryEnterSelected()` 是唯一出口；e2e 断言从第 1 层无法抵达第 100000 层 |
-| Phaser 键盘输入重复投递 | **高（实测复现）** | 同一 DOM keydown 会在同一帧内被投递三次（GHI-03 m9 已在菜单修复）。`TowerOverviewScene` 用同一套按帧去抖；**不能改用 `JustDown` 轮询**——Phaser 在 DOM 事件上同步排空键盘队列，两个帧之间完成的按键会先被 `onUp` 清掉 `_justDown`，导致按键整帧丢失 |
+| **1x 下看不完整栋塔楼** | **高（验收退回）** | 初版 4px 行高溢出视口 40px，塔底十段被裁。改为 3px 行高 + `CONTENT_TOP` 内缩，1x 滚动范围为 0；以悬停读数 + 键盘光标 + 二级下钻补回 3px 行的点击精度（见 §2.1） |
+| 区段标签串到其他层级 | 中（实测复现） | 标签可见性原本只在 `drawOverview()` 内设置，下钻后仍留在区段视图上。改为 `redraw()` 无条件设置 |
+| Phaser 键盘输入重复投递 | **高（实测复现）** | 同一 DOM keydown 会在同一帧内被投递三次（GHI-03 m9 已在菜单修复）。`TowerOverviewScene` / `GameScene` 用同一套按帧去抖；**不能改用 `JustDown` 轮询**——Phaser 在 DOM 事件上同步排空键盘队列，两个帧之间完成的按键会先被 `onUp` 清掉 `_justDown`，导致按键整帧丢失 |
 | 与既有 e2e 冲突 | 低 | 8 条失败全部源于下楼方向反转，改夹具后通过 |
+| 合成按键被同一帧去抖吞掉 | 中 | `npc.spec.ts` 两连发 Enter 曾依赖重复投递「碰巧」生效；去抖后需显式分隔，已在夹具中加间隔 |
+| 单次合成 E 键被丢弃 | 中 | `survival.spec.ts` 漏水用例偶发超时；改用与 `npc.spec.ts` 相同的重试模式 |
 
 ---
 
 ## 9. 验证证据
 
 - `npx tsc --noEmit -p tsconfig.json` — 通过
-- `npx vitest run` — 20 个文件 / 217 个用例通过
-- `npx playwright test` — 全量通过（含 `e2e/tower.spec.ts` 9 条）
+- `npx vitest run` — 20 个文件 / 223 个用例通过
+- `npx playwright test --workers=1` — 45/45 通过（含 `e2e/tower.spec.ts` 10 条）
 - `npm run build` — 生产构建通过
-- 真实浏览器截图：`e2e/screenshots/20-tower-overview.png`、`21-tower-sector.png`、`22-tower-floor.png`
+
+总览完整适配由断言而非目测保证：
+
+- `towerNav.test.ts`：`overviewHeight() <= VIEW_H`、1x 下 `scrollBy` 恒为 0、`viewTop(scroll) <= 0` 且底边覆盖 `overviewHeight()`、`CONTENT_TOP`/`OVERVIEW_ROW_H` 为整数
+- `e2e/tower.spec.ts`：`getView()` 断言行内覆盖 `top <= 0` 且 `top + height >= content`，并分别从第 3 层与第 95000 层两次开图验证
+- `e2e/tower.spec.ts`：`getCells()` 断言区段单元格着色（explored / current / locked），颜色语言可测而不靠截图
+
+真实浏览器截图（`e2e/screenshots/`，已 gitignore）：
+
+| 文件 | 内容 |
+|---|---|
+| `20-tower-overview.png` | 1x 总览，100 区段全在屏，当前在第 1 段 |
+| `23-tower-overview-high.png` | 1x 总览，玩家在第 95000 层（第 94 段），证明高位同样完整可见 |
+| `21-tower-sector.png` | 区段 0 的 1000 层网格，含图例与阶层构成 |
+| `22-tower-floor.png` | 楼层详情只读面板 |
 
 ---
 

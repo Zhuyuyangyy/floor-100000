@@ -62,6 +62,33 @@ async function readNav(page: Page): Promise<Nav> {
   }) as Promise<Nav>;
 }
 
+async function readAccess(page: Page): Promise<{ highestUnlocked: number; currentFloor: number }> {
+  return page.evaluate(() => {
+    const h = (window as unknown as { __PHASER_TOWER__?: { getAccess: () => { highestUnlocked: number; currentFloor: number } } }).__PHASER_TOWER__;
+    if (!h) throw new Error('no tower handle');
+    return h.getAccess();
+  }) as Promise<{ highestUnlocked: number; currentFloor: number }>;
+}
+
+// What the camera is actually showing, so a test can assert coverage of the
+// content instead of eyeballing a screenshot.
+async function readView(page: Page): Promise<{ top: number; height: number; content: number }> {
+  return page.evaluate(() => {
+    const h = (window as unknown as { __PHASER_TOWER__?: { getView: () => { top: number; height: number; content: number } } }).__PHASER_TOWER__;
+    if (!h) throw new Error('no tower handle');
+    return h.getView();
+  }) as Promise<{ top: number; height: number; content: number }>;
+}
+
+// The colour each cell of the sector in view is drawn in.
+async function readCells(page: Page): Promise<Array<{ floor: number; state: string }>> {
+  return page.evaluate(() => {
+    const h = (window as unknown as { __PHASER_TOWER__?: { getCells: () => Array<{ floor: number; state: string }> } }).__PHASER_TOWER__;
+    if (!h) throw new Error('no tower handle');
+    return h.getCells();
+  }) as Promise<Array<{ floor: number; state: string }>>;
+}
+
 async function hasVisibleText(page: Page, substr: string): Promise<boolean> {
   return page.evaluate((sub) => {
     const scenes = (window as unknown as { __PHASER_GAME__?: { scene: { scenes: Array<{ children: { list: Array<{ type: string; text?: string; visible: boolean }> } }> } } }).__PHASER_GAME__?.scene.scenes ?? [];
@@ -123,11 +150,33 @@ test('M opens the tower overview centred on the sector the player is in', async 
   expect(nav.cursor).toBe(0);
   expect(nav.floor).toBeNull();
   expect(nav.zoom).toBe(1);
+  // The whole tower is on screen at the default zoom: no drag needed to see the
+  // bottom, which is the point of the overview.
+  const view = await readView(page);
+  expect(view.top).toBeLessThanOrEqual(0);
+  expect(view.top + view.height).toBeGreaterThanOrEqual(view.content);
+  expect(view.content).toBeLessThanOrEqual(360); // 100 rows inside the canvas
   await page.screenshot({ path: 'e2e/screenshots/20-tower-overview.png' });
 
   expect(await hasVisibleText(page, '塔楼总览')).toBe(true);
   expect(await hasVisibleText(page, '当前 3 层')).toBe(true);
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+});
+
+// The overview must still fit the whole tower when the player is near the top of
+// it, not just when they start in sector 0.
+test('the whole tower is visible from any starting sector', async ({ page }) => {
+  await startGame(page, 42);
+  await parkAt(page, 95000, [95000]);
+  await page.keyboard.press('M');
+  await waitForScene(page, 'TowerOverview');
+
+  const nav = await readNav(page);
+  expect(nav.sector).toBe(94);
+  const view = await readView(page);
+  expect(view.top).toBeLessThanOrEqual(0);
+  expect(view.top + view.height).toBeGreaterThanOrEqual(view.content);
+  await page.screenshot({ path: 'e2e/screenshots/23-tower-overview-high.png' });
 });
 
 test('the overview drills down to a sector and a floor, and ESC walks back up', async ({ page }) => {
@@ -146,6 +195,17 @@ test('the overview drills down to a sector and a floor, and ESC walks back up', 
   expect(nav.sector).toBe(0);
   expect(nav.cursor).toBe(1);
   expect(await hasVisibleText(page, '1–1000 层')).toBe(true);
+  // The frontier the cells are coloured from: 1..3 unlocked, so cell 3 is the
+  // current floor and 1..2 read as explored.
+  expect((await readAccess(page)).highestUnlocked).toBe(3);
+  expect(Object.keys((await readState(page)).visitedFloors).map(Number).sort((a, b) => a - b)).toEqual([1, 2, 3]);
+  const cells = await readCells(page);
+  expect(cells.slice(0, 4)).toEqual([
+    { floor: 1, state: 'explored' },
+    { floor: 2, state: 'explored' },
+    { floor: 3, state: 'current' },
+    { floor: 4, state: 'locked' },
+  ]);
   await page.screenshot({ path: 'e2e/screenshots/21-tower-sector.png' });
 
   // sector -> floor detail for the cursor (floor 1)

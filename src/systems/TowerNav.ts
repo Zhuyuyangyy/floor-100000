@@ -11,8 +11,16 @@ import type { GameState } from '../core/gameTypes';
 
 export type NavLevel = 'overview' | 'sector' | 'floor';
 
-// Overview: one row per sector.
-export const OVERVIEW_ROW_H = 4;
+// Overview: one row per sector. The row pitch is 3px and the strip is inset
+// from the top of the viewport, so all 100 rows sit inside the 360px canvas at
+// the default 1x zoom with the fixed HUD bands clear of them — the tower is
+// meant to be taken in at a glance before zooming in, and 4px rows overflowed
+// by 40px, which cut the last ten sectors off behind a drag.
+//
+// Integer geometry matters: pixelArt rendering of fractional fillRects produces
+// uneven edges, so both the pitch and the inset stay whole numbers.
+export const OVERVIEW_ROW_H = 3;
+export const CONTENT_TOP = 36;
 // Sector view: 1000 floors in a grid, 20 across x 50 down.
 export const SECTOR_COLS = 20;
 export const SECTOR_ROWS = SECTOR_SIZE / SECTOR_COLS;
@@ -39,16 +47,20 @@ export interface TowerNavState {
   scroll: number;
 }
 
+// Bottom edge of the overview content in world coordinates. Used as the content
+// height for scroll clamping: the strip starts at CONTENT_TOP, not at 0, so the
+// reachable world range is CONTENT_TOP .. CONTENT_TOP + 100 rows.
 export function overviewHeight(): number {
-  return SECTOR_COUNT * OVERVIEW_ROW_H;
+  return CONTENT_TOP + SECTOR_COUNT * OVERVIEW_ROW_H;
 }
 
 export function sectorViewWidth(): number {
   return SECTOR_COLS * SECTOR_CELL;
 }
 
+// Same inset for the sector grid, so the fixed HUD never sits on cells either.
 export function sectorHeight(): number {
-  return SECTOR_ROWS * SECTOR_CELL;
+  return CONTENT_TOP + SECTOR_ROWS * SECTOR_CELL;
 }
 
 // What the player may legitimately enter: everything up to the highest floor
@@ -75,9 +87,11 @@ export function viewTop(scroll: number, zoom: number): number {
   return scroll + VIEW_H / 2 - VIEW_H / zoom / 2;
 }
 
-// Scroll that puts `worldY` in the middle of the viewport.
-export function scrollForCentre(worldY: number, zoom: number): number {
-  return worldY - VIEW_H / 2 + VIEW_H / zoom / 2;
+// Scroll that puts `worldY` in the middle of the viewport, so a scrolled-to
+// cursor keeps context on both sides instead of sitting flush against the top
+// edge. The zoom cancels out of the derivation, which is why this takes no zoom.
+export function scrollForCentre(worldY: number): number {
+  return worldY - VIEW_H / 2;
 }
 
 // Scroll bounds. The lower bound is negative above 1x (half the zoomed view
@@ -99,7 +113,7 @@ export function clampScroll(state: TowerNavState, scroll: number): number {
 
 // Scroll that centres a world y, clamped to the content.
 function centredOn(state: TowerNavState, worldY: number): number {
-  return clampScroll(state, scrollForCentre(worldY, state.zoom));
+  return clampScroll(state, scrollForCentre(worldY));
 }
 
 // Opens centred on the sector the player is standing in, so the current floor
@@ -127,18 +141,22 @@ export function scrollBy(state: TowerNavState, delta: number): number {
   return clampScroll(state, state.scroll + delta);
 }
 
-// Sector under a world-space y, or null outside the tower.
+// Sector under a world-space y, or null outside the strip. The strip is inset by
+// CONTENT_TOP, so the top HUD band and the bottom HUD band both fall outside it
+// and correctly pick nothing.
 export function pickSectorAt(state: TowerNavState, worldY: number): number | null {
   if (state.level !== 'overview') return null;
-  if (worldY < 0 || worldY >= overviewHeight()) return null;
-  const sector = Math.floor(worldY / OVERVIEW_ROW_H);
+  if (worldY < CONTENT_TOP || worldY >= overviewHeight()) return null;
+  const sector = Math.floor((worldY - CONTENT_TOP) / OVERVIEW_ROW_H);
   return sector >= 0 && sector < SECTOR_COUNT ? sector : null;
 }
 
 // Floor under a world-space (x, y) in the sector view, or null outside the grid.
+// `worldY` is relative to the grid's own top edge (CONTENT_TOP), matching how the
+// scene draws it.
 export function pickFloorAt(state: TowerNavState, worldX: number, worldY: number): number | null {
   if (state.level !== 'sector') return null;
-  if (worldX < 0 || worldY < 0 || worldX >= sectorViewWidth() || worldY >= sectorHeight()) return null;
+  if (worldX < 0 || worldY < 0 || worldX >= sectorViewWidth() || worldY >= sectorHeight() - CONTENT_TOP) return null;
   const col = Math.floor(worldX / SECTOR_CELL);
   const row = Math.floor(worldY / SECTOR_CELL);
   const { from } = sectorRange(state.sector);
@@ -146,15 +164,15 @@ export function pickFloorAt(state: TowerNavState, worldX: number, worldY: number
   return floor >= from && floor <= TOTAL_FLOORS ? floor : null;
 }
 
-// World y of a sector row's centre / a floor cell's centre.
+// World y of a sector row's centre.
 export function sectorCentreY(sector: number): number {
-  return sector * OVERVIEW_ROW_H + OVERVIEW_ROW_H / 2;
+  return CONTENT_TOP + sector * OVERVIEW_ROW_H + OVERVIEW_ROW_H / 2;
 }
 
 export function floorCentreY(floor: number): number {
   const { from } = sectorRange(sectorOf(floor));
   const row = Math.floor((floor - from) / SECTOR_COLS);
-  return row * SECTOR_CELL + SECTOR_CELL / 2;
+  return CONTENT_TOP + row * SECTOR_CELL + SECTOR_CELL / 2;
 }
 
 export function enterSector(sector: number): TowerNavState {

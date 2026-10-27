@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import {
   OVERVIEW_ROW_H,
+  CONTENT_TOP,
   SECTOR_CELL,
   SECTOR_COLS,
   ZOOM_MAX,
@@ -116,18 +117,53 @@ describe('level transitions', () => {
   });
 });
 
+// The overview's whole job is "see the entire tower at a glance, then zoom in".
+// That only holds if all 100 sectors fit inside the viewport at the default
+// zoom, with room left for the fixed HUD bands top and bottom.
+describe('the overview fits the whole tower', () => {
+  it('lays 100 sector rows out inside the viewport at 1x', () => {
+    expect(overviewHeight()).toBeLessThanOrEqual(VIEW_H);
+    // Every row is reachable: the strip starts below the top HUD band and ends
+    // above the bottom one.
+    expect(CONTENT_TOP).toBeGreaterThan(0);
+    expect(overviewHeight()).toBeLessThan(VIEW_H);
+  });
+
+  it('shows the bottom of the tower from the top of the viewport at 1x', () => {
+    const nav = openTower(accessOf(stateAt(1)));
+    const top = viewTop(nav.scroll, nav.zoom);
+    expect(nav.zoom).toBe(ZOOM_MIN);
+    expect(top).toBeLessThanOrEqual(0);
+    expect(top + VIEW_H / nav.zoom).toBeGreaterThanOrEqual(overviewHeight());
+  });
+
+  it('needs no scrolling at 1x to see the whole tower', () => {
+    const nav = openTower(accessOf(stateAt(1)));
+    expect(scrollBy(nav, 99999)).toBe(0);
+    expect(scrollBy(nav, -99999)).toBe(0);
+  });
+
+  it('keeps integer row geometry so pixelArt stays crisp', () => {
+    expect(Number.isInteger(OVERVIEW_ROW_H)).toBe(true);
+  });
+});
+
 describe('picking from screen coordinates', () => {
   it('maps overview y to the sector under the cursor', () => {
     const nav = openTower(accessOf(stateAt(1)));
-    expect(pickSectorAt(nav, 0)).toBe(0);
-    expect(pickSectorAt(nav, OVERVIEW_ROW_H * 3 + 1)).toBe(3);
+    expect(pickSectorAt(nav, CONTENT_TOP)).toBe(0);
+    expect(pickSectorAt(nav, CONTENT_TOP + OVERVIEW_ROW_H * 3 + 1)).toBe(3);
+    expect(pickSectorAt(nav, CONTENT_TOP + OVERVIEW_ROW_H * 99 + 1)).toBe(99);
+    // Outside the strip (top HUD band / bottom HUD band) there is nothing to pick.
+    expect(pickSectorAt(nav, CONTENT_TOP - 1)).toBeNull();
+    expect(pickSectorAt(nav, overviewHeight())).toBeNull();
     expect(pickSectorAt(nav, -10)).toBeNull();
-    expect(pickSectorAt(nav, overviewHeight() + 5)).toBeNull();
   });
 
   it('maps sector-view x/y to the floor under the cursor', () => {
     const nav = enterSector(0); // floors 1..1000
-    // Column 0, row 0 -> the first floor of the sector.
+    // Coordinates are relative to the grid's own top edge, so the fixed HUD band
+    // above the grid is never clickable.
     expect(pickFloorAt(nav, 1, 1)).toBe(1);
     // Column 1, row 0 -> the next floor along.
     expect(pickFloorAt(nav, SECTOR_CELL + 1, 1)).toBe(2);
@@ -135,12 +171,15 @@ describe('picking from screen coordinates', () => {
     expect(pickFloorAt(nav, 1, SECTOR_CELL + 1)).toBe(1 + SECTOR_COLS);
     expect(pickFloorAt(nav, -5, 5)).toBeNull();
     expect(pickFloorAt(nav, sectorViewWidth() + 5, 5)).toBeNull();
+    expect(pickFloorAt(nav, 5, -5)).toBeNull();
   });
 
   it('picks the last floor of a sector exactly at its far corner', () => {
     const nav = enterSector(99); // floors 99001..100000
     const last = sectorViewWidth() - 1;
-    expect(pickFloorAt(nav, last, sectorHeight() - 1)).toBe(TOTAL_FLOORS);
+    expect(pickFloorAt(nav, last, sectorHeight() - CONTENT_TOP - 1)).toBe(TOTAL_FLOORS);
+    // One past the bottom row is outside the grid, not the last floor.
+    expect(pickFloorAt(nav, last, sectorHeight() - CONTENT_TOP)).toBeNull();
   });
 });
 
@@ -153,11 +192,16 @@ describe('zoom and scroll', () => {
     expect(nav.zoom).toBe(ZOOM_MIN);
   });
 
-  it('clamps overview scroll to the content, so it cannot be dragged off screen', () => {
+  it('cannot scroll the overview at 1x, because it all fits', () => {
     const nav = openTower(accessOf(stateAt(1)));
     expect(scrollBy(nav, -9999)).toBe(0);
-    // At 1x the whole 400px tower minus the 360px viewport.
-    expect(scrollBy(nav, 99999)).toBe(40);
+    expect(scrollBy(nav, 99999)).toBe(0);
+  });
+
+  it('opens scroll range once zoomed past the fit', () => {
+    const zoomed = zoomBy(openTower(accessOf(stateAt(1))), 1); // 1.5x
+    expect(scrollBy(zoomed, -9999)).toBeLessThan(0);
+    expect(scrollBy(zoomed, 99999)).toBeGreaterThan(0);
   });
 
   it('keeps the very top of the tower reachable when zoomed in', () => {
@@ -170,8 +214,12 @@ describe('zoom and scroll', () => {
   });
 
   it('centres the view on a world y', () => {
-    expect(viewTop(scrollForCentre(200, 1), 1)).toBe(200);
-    expect(viewTop(scrollForCentre(200, 2), 2)).toBe(200);
+    // The target lands mid-viewport, not flush against the top edge, so a
+    // scrolled-to cursor keeps context on both sides.
+    const top = viewTop(scrollForCentre(200), 1);
+    expect(top + VIEW_H / 2).toBe(200);
+    const zoomed = viewTop(scrollForCentre(200), 2);
+    expect(zoomed + VIEW_H / 2 / 2).toBe(200);
   });
 });
 
@@ -181,16 +229,31 @@ describe('keyboard cursor', () => {
     expect(openTower(accessOf(stateAt(TOTAL_FLOORS))).cursor).toBe(99);
   });
 
-  it('moves the overview cursor within the tower and re-centres on it', () => {
+  it('moves the overview cursor within the tower', () => {
     let nav = nudgeSector(openTower(accessOf(stateAt(1))), 3);
     expect(nav.cursor).toBe(3);
     expect(nav.sector).toBe(3);
-    expect(viewTop(nav.scroll, nav.zoom)).toBeCloseTo(sectorCentreY(3), 5);
+    // At 1x the whole tower is on screen, so there is nothing to scroll.
+    expect(nav.scroll).toBe(0);
     // Clamped at both ends.
     for (let i = 0; i < 20; i++) nav = nudgeSector(nav, -1);
     expect(nav.cursor).toBe(0);
     for (let i = 0; i < 200; i++) nav = nudgeSector(nav, 1);
     expect(nav.cursor).toBe(99);
+  });
+
+  it('re-centres on the cursor once zoomed in', () => {
+    // 1.5x: the strip is taller than the viewport, so the cursor has to be
+    // scrolled to or it would be off screen. Sector 50 is far enough from either
+    // end that the clamp does not interfere.
+    let nav = zoomBy(openTower(accessOf(stateAt(1))), 1);
+    for (let i = 0; i < 50; i++) nav = nudgeSector(nav, 1);
+    expect(nav.cursor).toBe(50);
+    // Mid-viewport, with context above and below.
+    const top = viewTop(nav.scroll, nav.zoom);
+    expect(top + VIEW_H / nav.zoom / 2).toBeCloseTo(sectorCentreY(50), 5);
+    expect(top).toBeLessThan(sectorCentreY(50));
+    expect(top + VIEW_H / nav.zoom).toBeGreaterThan(sectorCentreY(50));
   });
 
   it('moves the sector cursor across and down the floor grid', () => {

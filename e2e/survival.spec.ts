@@ -8,6 +8,7 @@ interface State {
   status: string;
   day: number;
   gameMinuteOfDay: number;
+  currentFloor: number;
   player: { x: number; hp: number; thirst: number; hunger: number; energy: number; inventory: { slots: unknown[] } };
 }
 
@@ -136,20 +137,20 @@ test('a leak spoils the floor\'s ground supplies and they recover when it clears
   // Ascend to 3, the only floor with loose ground supplies (battery at
   // x=160). Teleporting to the stairs is enough — the zone check reads
   // state.player.x directly.
+  // The E press is retried: Phaser's frame-based input occasionally drops a
+  // single synthetic keypress, which would otherwise time this test out at
+  // random (the same reason npc.spec.ts and events.spec.ts use pressEUntil).
   for (const target of [2, 3]) {
-    await page.evaluate(() => {
-      const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { player: { x: number } } | null } }).__PHASER_SESSION__?.getState();
-      if (s) s.player.x = 40; // UP_EXIT_X
-    });
-    await page.keyboard.press('E');
-    await page.waitForFunction(
-      (t) => {
-        const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { currentFloor: number } | null } }).__PHASER_SESSION__?.getState();
-        return !!s && s.currentFloor === t;
-      },
-      target,
-      { timeout: 10_000 },
-    );
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if ((await readState(page)).currentFloor === target) break;
+      await page.evaluate(() => {
+        const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { player: { x: number } } | null } }).__PHASER_SESSION__?.getState();
+        if (s) s.player.x = 40; // UP_EXIT_X
+      });
+      await page.keyboard.press('E');
+      await page.waitForTimeout(250);
+    }
+    expect((await readState(page)).currentFloor).toBe(target);
   }
 
   const setEvent = (type: 'leak' | null): Promise<void> =>

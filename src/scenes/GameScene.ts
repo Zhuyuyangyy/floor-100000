@@ -25,7 +25,7 @@ import { absoluteMinute, advanceTime, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, 
 import { ensureNightEvent } from '../systems/EventSystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
-import { buildPanel, createMarker, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
+import { applyPanelDepth, buildPanel, createMarker, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
@@ -523,21 +523,25 @@ export class GameScene extends Phaser.Scene {
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
-    this.invObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green'));
+    this.invObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', PANEL_DEPTH.game.inventory));
 
     const title = this.add.text(cx, top + 18, '背包', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
     this.invObjects.push(title);
 
-    // One row per slot: 16x16 icon + label. Row pitch is 20px so a full-size
-    // icon fits without scaling (scaling would blur the pixels).
+    // One row per slot: 16x16 icon in a metal slot frame. Row pitch is 20px so a
+    // full-size icon fits without scaling (scaling would blur the pixels).
     const startY = top + 46;
     for (let i = 0; i < INVENTORY_SLOTS; i++) {
       const rowY = startY + i * INV_ROW_PITCH;
-      const icon = this.add.image(left + 30, rowY + 10, '').setOrigin(0, 0.5);
+      // The frame is drawn first so the icon sits inside it, and it is pushed into
+      // invObjects like everything else so it hides with the panel. It stays
+      // visible on empty rows: an empty slot is a slot the player can still fill.
+      const frame = this.add.image(left + 38, rowY + 10, 'ui-slot').setOrigin(0.5);
+      const icon = this.add.image(left + 30, rowY + 10, 'blank').setOrigin(0, 0.5);
       const t = this.add.text(left + 52, rowY + 10, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }).setOrigin(0, 0.5);
       this.invSlotIcons.push(icon);
       this.invSlotTexts.push(t);
-      this.invObjects.push(icon, t);
+      this.invObjects.push(frame, icon, t);
     }
 
     this.tooltipText = this.add.text(left + 22, top + 288, '', { fontFamily: 'monospace', fontSize: '11px', color: '#f4b66a' });
@@ -546,7 +550,8 @@ export class GameScene extends Phaser.Scene {
     const footer = this.add.text(cx, top + panelH - 16, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
     this.invObjects.push(footer, this.invMarker);
 
-    for (const o of this.invObjects) o.setScrollFactor(0).setDepth(200).setVisible(false);
+    applyPanelDepth(this.invObjects, PANEL_DEPTH.game.inventory);
+    for (const o of this.invObjects) o.setVisible(false);
   }
 
   private refreshInventory(): void {
@@ -627,13 +632,13 @@ export class GameScene extends Phaser.Scene {
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
-    this.craftObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow'));
+    this.craftObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.craft));
     const title = this.add.text(cx, top + 18, '工作台 · 制作', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
     this.craftObjects.push(title);
 
     for (let i = 0; i < 4; i++) {
       const rowY = top + 48 + i * CRAFT_ROW_PITCH;
-      const icon = this.add.image(left + 30, rowY + 7, '').setOrigin(0, 0.5);
+      const icon = this.add.image(left + 30, rowY + 7, 'blank').setOrigin(0, 0.5);
       const t = this.add.text(left + 52, rowY + 7, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }).setOrigin(0, 0.5);
       this.craftEntryIcons.push(icon);
       this.craftEntryTexts.push(t);
@@ -642,7 +647,8 @@ export class GameScene extends Phaser.Scene {
     const footer = this.add.text(cx, top + panelH - 16, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
     this.craftObjects.push(footer, this.craftMarker);
 
-    for (const o of this.craftObjects) o.setScrollFactor(0).setDepth(210).setVisible(false);
+    applyPanelDepth(this.craftObjects, PANEL_DEPTH.game.craft);
+    for (const o of this.craftObjects) o.setVisible(false);
   }
 
   private craftEntries(): Array<{ kind: 'recipe' | 'purify'; id?: UpgradeId }> {
@@ -700,7 +706,7 @@ export class GameScene extends Phaser.Scene {
     const cy = height / 2;
     const top = cy - panelH / 2;
 
-    this.pauseObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow'));
+    this.pauseObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.pause));
     const title = this.add.text(cx, top + 20, '已暂停', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
     const controls = this.add.text(cx, top + 50, 'A/D 移动 · E 交互 · I 背包 · C 制作', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
     this.pauseObjects.push(title, controls, this.pauseMarker);
@@ -711,7 +717,8 @@ export class GameScene extends Phaser.Scene {
       this.pauseObjects.push(t);
     });
 
-    for (const o of this.pauseObjects) o.setScrollFactor(0).setDepth(230).setVisible(false);
+    applyPanelDepth(this.pauseObjects, PANEL_DEPTH.game.pause);
+    for (const o of this.pauseObjects) o.setVisible(false);
   }
 
   private refreshPause(): void {
@@ -816,7 +823,7 @@ export class GameScene extends Phaser.Scene {
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
-    this.dialogueObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green'));
+    this.dialogueObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', PANEL_DEPTH.game.dialogue));
     // Create with placeholder content so each text's canvas/frame exists up front
     // (setText on a never-rendered empty text throws in Phaser 4).
     this.dialogueTitle = this.add.text(cx, top + 20, '对话', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
@@ -825,7 +832,7 @@ export class GameScene extends Phaser.Scene {
 
     for (let i = 0; i < 4; i++) {
       const rowY = top + 112 + i * 26;
-      const icon = this.add.image(left + 30, rowY + 7, '').setOrigin(0, 0.5);
+      const icon = this.add.image(left + 30, rowY + 7, 'blank').setOrigin(0, 0.5);
       const t = this.add.text(left + 48, rowY + 7, '……', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }).setOrigin(0, 0.5);
       this.dialogueOptionIcons.push(icon);
       this.dialogueOptions.push(t);
@@ -834,7 +841,8 @@ export class GameScene extends Phaser.Scene {
     const footer = this.add.text(cx, top + panelH - 14, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
     this.dialogueObjects.push(footer, this.dialogueMarker);
 
-    for (const o of this.dialogueObjects) o.setScrollFactor(0).setDepth(220).setVisible(false);
+    applyPanelDepth(this.dialogueObjects, PANEL_DEPTH.game.dialogue);
+    for (const o of this.dialogueObjects) o.setVisible(false);
   }
 
   // Label + icon key per dialogue option. The icon is the item the player

@@ -1,7 +1,4 @@
 import Phaser from 'phaser';
-import { ITEM_IDS } from '../data/items';
-import type { ItemId } from '../core/gameTypes';
-import { itemIconKey } from './itemIcons';
 
 // Procedural pixel-art factory for 《第100000层：末日宿舍》.
 //
@@ -28,7 +25,6 @@ const WOOD_DARK = 0x54391f;
 const METAL = 0x7a8288;
 const METAL_LIGHT = 0x9aa0a6;
 const WATER = 0x3a86a8;
-const GLASS = 0xbfe6f0;
 
 // ── colour maths (pure, 24-bit) ───────────────────────────────────────────────
 // Halve every channel without cross-channel bleed (mask off each byte's low bit first).
@@ -362,272 +358,20 @@ function drawFurnShelf(g: Phaser.GameObjects.Graphics): void {
   g.fillRect(1, 16, 14, 1);
 }
 
-// ── 16x16 item icons (transparent background) ──────────────────────────────────
-function drawIconCleanWater(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(COLOR.lamp, 1);
-  g.fillRect(6, 0, 4, 2); // cap
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(5, 2, 6, 13); // bottle outline
-  g.fillStyle(GLASS, 1);
-  g.fillRect(6, 3, 4, 11); // glass
-  g.fillStyle(WATER, 1);
-  g.fillRect(6, 7, 4, 7); // clean water
-  g.fillStyle(lighten(WATER, 0.35), 1);
-  g.fillRect(6, 7, 4, 1); // surface
-  g.fillStyle(COLOR.cream, 0.6);
-  g.fillRect(7, 4, 1, 3); // shine
-}
-
-function drawIconDirtyWater(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(0x6a6a5a, 1);
-  g.fillRect(6, 0, 4, 2); // dull cap
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(5, 2, 6, 13); // bottle outline
-  g.fillStyle(0x9a9a80, 1);
-  g.fillRect(6, 3, 4, 11); // murky glass
-  g.fillStyle(0x5a5a32, 1);
-  g.fillRect(6, 7, 4, 7); // dirty water
-  g.fillStyle(0x33331c, 1);
-  g.fillRect(7, 9, 1, 1); // grime
-  g.fillRect(9, 11, 1, 1);
-  g.fillStyle(COLOR.cream, 0.6);
-  g.fillRect(7, 4, 1, 3); // shine
-}
-
-function drawIconRationPack(g: Phaser.GameObjects.Graphics): void {
-  const foil = 0x8a6a3a;
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(2, 4, 12, 9); // pouch outline
-  g.fillStyle(foil, 1);
-  g.fillRect(3, 5, 10, 7); // pouch body
-  g.fillStyle(lighten(foil, 0.22), 1);
-  g.fillRect(3, 5, 10, 1); // crimp
-  g.fillStyle(darken(foil), 1);
-  g.fillRect(3, 11, 10, 1);
-  g.fillRect(2, 4, 1, 9); // side crimps
-  g.fillRect(13, 4, 1, 9);
-  g.fillStyle(COLOR.cream, 1);
-  g.fillRect(5, 7, 6, 2); // label
-  g.fillStyle(COLOR.danger, 1);
-  g.fillRect(6, 7, 1, 2);
-  g.fillRect(8, 7, 1, 2);
-}
-
-function drawIconBread(g: Phaser.GameObjects.Graphics): void {
-  const crust = 0xb5855a;
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(2, 6, 12, 8); // outline
-  g.fillStyle(crust, 1);
-  g.fillRect(3, 7, 10, 6); // loaf
-  g.fillStyle(lighten(crust, 0.2), 1);
-  g.fillRect(3, 7, 10, 1); // top crust highlight
-  g.fillStyle(darken(crust), 1);
-  g.fillRect(3, 12, 10, 1); // base shadow
-  g.fillRect(5, 8, 1, 3); // score marks
-  g.fillRect(8, 8, 1, 3);
-  g.fillRect(11, 8, 1, 2);
-}
-
-function drawIconBattery(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(METAL_LIGHT, 1);
-  g.fillRect(6, 1, 4, 1); // terminal tip
-  g.fillStyle(COLOR.lamp, 1);
-  g.fillRect(6, 2, 4, 2); // + terminal
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(4, 4, 8, 11); // body outline
-  g.fillStyle(0x2a2e34, 1);
-  g.fillRect(5, 5, 6, 9); // body
-  g.fillStyle(COLOR.safe, 1);
-  g.fillRect(5, 8, 6, 3); // charge band
-  g.fillStyle(COLOR.cream, 1);
-  g.fillRect(8, 6, 1, 1); // lightning bolt
-  g.fillRect(7, 7, 1, 1);
-  g.fillRect(8, 7, 1, 1);
-  g.fillRect(7, 8, 2, 1);
-}
-
-function drawIconScrapMetal(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(2, 9, 7, 5); // plate A outline
-  g.fillTriangle(2, 9, 9, 9, 9, 4);
-  g.fillRect(9, 5, 5, 9); // plate B outline
-  g.fillStyle(METAL, 1);
-  g.fillRect(3, 10, 5, 3); // plate A body
-  g.fillTriangle(3, 10, 8, 10, 8, 6); // angled top edge
-  g.fillStyle(0x8a9298, 1);
-  g.fillRect(10, 6, 3, 7); // plate B body
-  g.fillStyle(lighten(METAL, 0.4), 1);
-  g.fillRect(4, 11, 1, 1); // rivets
-  g.fillRect(6, 11, 1, 1);
-  g.fillStyle(darken(0x8a9298), 1);
-  g.fillRect(11, 8, 1, 1);
-  g.fillRect(11, 10, 1, 1);
-}
-
-function drawIconWood(g: Phaser.GameObjects.Graphics): void {
-  const plank = 0x8a5f36;
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(1, 5, 14, 7); // outline
-  g.fillStyle(plank, 1);
-  g.fillRect(2, 6, 12, 5); // plank
-  g.fillStyle(lighten(plank, 0.15), 1);
-  g.fillRect(2, 6, 12, 1); // top highlight
-  g.fillStyle(darken(plank), 1);
-  g.fillRect(2, 8, 12, 1); // grain
-  g.fillRect(4, 10, 3, 1);
-  g.fillRect(9, 10, 4, 1);
-  g.fillRect(2, 6, 2, 5); // end grain
-}
-
-function drawIconCloth(g: Phaser.GameObjects.Graphics): void {
-  const cloth = 0x5f7d74;
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(3, 5, 10, 7); // outline
-  g.fillStyle(cloth, 1);
-  g.fillRect(4, 6, 8, 5); // cloth
-  g.fillStyle(lighten(cloth, 0.2), 1);
-  g.fillRect(4, 6, 8, 1); // fold highlight
-  g.fillStyle(darken(cloth), 1);
-  g.fillRect(4, 10, 8, 1); // fold shadow
-  g.fillStyle(COLOR.cream, 1);
-  g.fillRect(5, 8, 1, 1); // stitch dashes
-  g.fillRect(7, 8, 1, 1);
-  g.fillRect(9, 8, 1, 1);
-  g.fillRect(11, 8, 1, 1);
-}
-
-function drawIconTape(g: Phaser.GameObjects.Graphics): void {
-  const tape = 0xb8a878;
-  g.fillStyle(COLOR.building, 1);
-  g.fillCircle(8, 8, 6); // outer rim
-  g.fillStyle(tape, 1);
-  g.fillCircle(8, 8, 5); // tape roll
-  g.fillStyle(COLOR.building, 1);
-  g.fillCircle(8, 8, 2); // hollow core
-  g.fillStyle(tape, 1);
-  g.fillRect(12, 10, 3, 2); // loose end
-  g.fillStyle(lighten(tape, 0.3), 1);
-  g.fillRect(5, 5, 3, 1); // highlight
-}
-
-function drawIconFilter(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(3, 3, 10, 11); // outline
-  g.fillStyle(COLOR.cream, 1);
-  g.fillRect(4, 4, 8, 9); // filter body
-  g.fillStyle(darken(COLOR.cream), 1);
-  g.fillRect(4, 6, 8, 1); // pleats
-  g.fillRect(4, 8, 8, 1);
-  g.fillRect(4, 10, 8, 1);
-  g.fillStyle(METAL_LIGHT, 1);
-  g.fillRect(3, 2, 10, 2); // top end cap
-  g.fillRect(3, 13, 10, 2); // bottom end cap
-  g.fillStyle(COLOR.safe, 1);
-  g.fillRect(7, 1, 2, 1); // flow nub
-}
-
-function drawIconWire(g: Phaser.GameObjects.Graphics): void {
-  const copper = 0xb5651d;
-  g.fillStyle(copper, 1);
-  g.fillRect(3, 10, 10, 2); // bottom run
-  g.fillRect(3, 6, 2, 2); // left riser
-  g.fillRect(3, 4, 8, 2); // top run
-  g.fillRect(11, 6, 2, 2); // right riser
-  g.fillStyle(lighten(copper, 0.25), 1);
-  g.fillRect(3, 10, 10, 1); // highlight
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(1, 9, 2, 3); // plug ends
-  g.fillRect(13, 5, 2, 3);
-}
-
-function drawIconMedkit(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(6, 3, 4, 2); // handle
-  g.fillRect(7, 2, 2, 1);
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(2, 5, 12, 9); // box outline
-  g.fillStyle(COLOR.cream, 1);
-  g.fillRect(3, 6, 10, 7); // box
-  g.fillStyle(COLOR.danger, 1);
-  g.fillRect(7, 7, 2, 5); // red cross (vertical)
-  g.fillRect(5, 9, 6, 2); // red cross (horizontal)
-  g.fillStyle(darken(COLOR.cream), 1);
-  g.fillRect(3, 12, 10, 1); // bottom shade
-}
-
-function drawIconCrowbar(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(COLOR.danger, 1);
-  g.fillRect(3, 12, 3, 2); // handle end
-  g.fillRect(5, 10, 2, 2); // ascending shaft
-  g.fillRect(7, 8, 2, 2);
-  g.fillRect(9, 6, 2, 2);
-  g.fillRect(11, 4, 2, 2);
-  g.fillStyle(darken(COLOR.danger), 1);
-  g.fillRect(5, 10, 2, 1); // grip wraps
-  g.fillRect(7, 8, 2, 1);
-  g.fillStyle(METAL_LIGHT, 1);
-  g.fillRect(12, 2, 2, 2); // chisel tip
-  g.fillStyle(COLOR.danger, 1);
-  g.fillRect(2, 12, 1, 3); // hook
-  g.fillRect(3, 14, 2, 1);
-}
-
-function drawIconFuse(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(4, 5, 8, 7); // outline
-  g.fillStyle(METAL_LIGHT, 1);
-  g.fillRect(3, 5, 2, 7); // end caps
-  g.fillRect(11, 5, 2, 7);
-  g.fillStyle(0xd8c8a8, 1);
-  g.fillRect(5, 6, 6, 5); // glass body
-  g.fillStyle(COLOR.lamp, 1);
-  g.fillRect(5, 8, 6, 2); // colour band
-  g.fillStyle(lighten(0xd8c8a8, 0.3), 1);
-  g.fillRect(6, 6, 1, 4); // shine
-}
-
-function drawIconFlashlight(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(3, 6, 8, 5); // body outline
-  g.fillStyle(0x2a2e34, 1);
-  g.fillRect(4, 7, 6, 3); // body
-  g.fillStyle(METAL_LIGHT, 1);
-  g.fillRect(2, 7, 2, 3); // tail cap
-  g.fillStyle(COLOR.lamp, 1);
-  g.fillRect(10, 6, 2, 5); // lamp head
-  g.fillStyle(lighten(COLOR.lamp, 0.4), 1);
-  g.fillRect(12, 7, 1, 3); // lens
-  g.fillStyle(METAL_LIGHT, 1);
-  g.fillRect(6, 9, 2, 1); // switch
-  g.fillStyle(COLOR.lamp, 0.3);
-  g.fillTriangle(12, 7, 12, 10, 15, 8); // beam
-}
-
-// ── public entry point ─────────────────────────────────────────────────────────
-// One drawer per item, keyed by ItemId. The Record type forces every ItemId to
-// have an icon, so adding an item without art is a compile error rather than a
-// silently missing texture.
-const ICON_DRAWERS: Record<ItemId, DrawFn> = {
-  clean_water: drawIconCleanWater,
-  dirty_water: drawIconDirtyWater,
-  ration_pack: drawIconRationPack,
-  bread: drawIconBread,
-  battery: drawIconBattery,
-  scrap_metal: drawIconScrapMetal,
-  wood: drawIconWood,
-  cloth: drawIconCloth,
-  tape: drawIconTape,
-  filter: drawIconFilter,
-  wire: drawIconWire,
-  medkit: drawIconMedkit,
-  crowbar: drawIconCrowbar,
-  fuse: drawIconFuse,
-  flashlight: drawIconFlashlight,
-};
-
 // Bakes every texture the game references. Call once from a Boot-style scene's create().
 // Regenerating a key simply overwrites the existing texture.
+//
+// The 15 item icons are deliberately NOT baked here: they are loaded from the
+// art pack under their own item ids (see BootScene and render/artpack.ts).
+// Baking over them would throw the real art away.
 export function generateAllPixelArt(scene: Phaser.Scene): void {
+  // A transparent placeholder for the icon slots whose texture is chosen later
+  // (inventory rows, craft rows, dialogue trade rows). Phaser 4 will not render an
+  // Image that was created with an empty texture key, even after setTexture()
+  // swaps in a real one — the object stays permanently invisible. So each of
+  // those slots needs a real, if invisible, texture from the moment it is built.
+  bake(scene, 'blank', 1, 1, () => {});
+
   // figures (the game already references these four keys)
   bake(scene, 'player', 16, 24, (g) => drawHumanoid(g, COLOR.safe, COLOR.cream, COLOR.building));
   bake(scene, 'npc_alin', 16, 24, (g) => drawHumanoid(g, 0x5a8ab5, COLOR.cream, COLOR.building));
@@ -650,7 +394,4 @@ export function generateAllPixelArt(scene: Phaser.Scene): void {
   bake(scene, 'furn_watertank', 16, 24, drawFurnWaterTank);
   bake(scene, 'furn_fusebox', 16, 16, drawFurnFuseBox);
   bake(scene, 'furn_shelf', 16, 24, drawFurnShelf);
-
-  // 16x16 item icons — baked under each item's own id (see ICON_DRAWERS).
-  for (const id of ITEM_IDS) bake(scene, itemIconKey(id), 16, 16, ICON_DRAWERS[id]);
 }

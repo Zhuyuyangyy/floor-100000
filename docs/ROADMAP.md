@@ -53,7 +53,7 @@
 | 阶段 | 名称 | 一句话目标 | 里程碑 | 状态 |
 |---|---|---|---|---|
 | B2 | 塔楼世界与导航 | 世界结构成立：从第 1 层开始，十万层可查看、可规划、不可乱传 | M1 | ✅ 已实现，待人工验收 |
-| B3 | 首个完整生存章节 | 第 1–5 层能独立玩完一段完整生存循环，且**好玩** | M1 | 🔵 进行中（B3-00/01/02/02.1 已完成，待人工验收） |
+| B3 | 首个完整生存章节 | 第 1–5 层能独立玩完一段完整生存循环，且**好玩** | M1 | 🔵 进行中（B3-00/01/02/02.1/04 已完成，待人工验收） |
 | B4 | 十万层世界生成 | 100 个区段可复现、按需生成、性能可控 | M2 | ⬜ 未开始 |
 | B5 | 资源经济与基地建设 | 同一物资同时具备生存价值与经济价值 | M2 | ⬜ 未开始 |
 | B6 | NPC 与关系网络 | 居民有身份、需求和记忆，玩家行为改变关系 | M2 | ⬜ 未开始 |
@@ -128,6 +128,7 @@ B2 的世界结构与导航。
 | B3-01 | 材料确定性、废金属专属、死亡升级、不可获得物品、饮水经济、交易守恒、睡眠规则、静默存档失败（D9） | [`B3-01_TASK_MAPPING.md`](B3-01_TASK_MAPPING.md) |
 | B3-02 | **完整生存旅程闭环验证**：真实行走、无传送、无状态伪造、无时钟直写 | [`B3-02_JOURNEY_VERIFICATION.md`](B3-02_JOURNEY_VERIFICATION.md) |
 | B3-02.1 | 背包满常驻提示、楼层进入即记录访问（§4.2 / §4.3） | [`B3-02.1_FIX_REPORT.md`](B3-02.1_FIX_REPORT.md) |
+| B3-04 | 美术包切片与 UI 接入（物品图标 / 面板框 / 物品槽 / 结束横幅） | [`ARTPACK_INTEGRATION.md`](ARTPACK_INTEGRATION.md) |
 
 ### 本轮遗留发现（不阻断旅程，待人工定夺）
 
@@ -370,5 +371,6 @@ B2–B9 全部完成。
 | [`B3-01_TASK_MAPPING.md`](B3-01_TASK_MAPPING.md) | B3-01 审计发现 → 任务逐项映射 |
 | [`B3-02_JOURNEY_VERIFICATION.md`](B3-02_JOURNEY_VERIFICATION.md) | B3-02 完整旅程闭环证据 |
 | [`B3-02.1_FIX_REPORT.md`](B3-02.1_FIX_REPORT.md) | 背包满常驻提示、楼层访问记录 |
+| [`ARTPACK_INTEGRATION.md`](ARTPACK_INTEGRATION.md) | 美术包切片与 UI 接入（含两个 Phaser 4 渲染陷阱） |
 | [`B2_TOWER_ARCHITECTURE.md`](B2_TOWER_ARCHITECTURE.md) | B2 塔楼架构与实现记录 |
 | [`COMPONENT_INVENTORY.md`](COMPONENT_INVENTORY.md) | UI 组件清单（供外部美术/UI 协作） |

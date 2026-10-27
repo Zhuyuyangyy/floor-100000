@@ -2,9 +2,19 @@ import Phaser from 'phaser';
 import { getGame, startNewGame } from '../core/session';
 import { deathCause } from '../systems/SurvivalSystem';
 import { clearSave } from '../systems/SaveSystem';
+import { ART_BANNER_WIN_KEY, ART_BANNER_LOSE_KEY } from '../render/artpack';
 
 // End screen (docs/01_GDD.md §5): win at day 8 06:00, or loss on HP 0, with the
 // cause and days survived, and a keyboard restart into a fresh run.
+//
+// The art pack's two message banners carry the outcome: a green check for having
+// survived, a red skull for not. Their icon sits in the left third, so the text
+// is centred on the remaining two thirds rather than on the banner — centring it
+// on the banner would run the headline straight through the icon.
+const BANNER_W = 440;
+const BANNER_H = 128;
+const BANNER_TEXT_X = 386;
+
 export class EndScene extends Phaser.Scene {
   constructor() {
     super({ key: 'End' });
@@ -18,9 +28,13 @@ export class EndScene extends Phaser.Scene {
     this.add.rectangle(width / 2, height / 2, width, height, won ? 0x14301f : 0x2a1414);
 
     this.add
-      .text(width / 2, 108, won ? '你活了下来' : '你没能活下来', {
+      .image(width / 2, 140, won ? ART_BANNER_WIN_KEY : ART_BANNER_LOSE_KEY)
+      .setDisplaySize(BANNER_W, BANNER_H);
+
+    this.add
+      .text(BANNER_TEXT_X, 112, won ? '你活了下来' : '你没能活下来', {
         fontFamily: 'monospace',
-        fontSize: '36px',
+        fontSize: '32px',
         color: won ? '#77c6a4' : '#e56d63',
         stroke: '#0b0f12',
         strokeThickness: 6,
@@ -30,8 +44,8 @@ export class EndScene extends Phaser.Scene {
     const reason = won
       ? `在第 ${state.day} 天 06:00 撑到了撤离评估点`
       : `死因：${deathCause(state)}`;
-    this.add.text(width / 2, 168, reason, { fontFamily: 'monospace', fontSize: '16px', color: '#ece8d8' }).setOrigin(0.5);
-    this.add.text(width / 2, 200, `存活 ${state.day} 天`, { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
+    this.add.text(BANNER_TEXT_X, 150, reason, { fontFamily: 'monospace', fontSize: '15px', color: '#ece8d8' }).setOrigin(0.5);
+    this.add.text(BANNER_TEXT_X, 176, `存活 ${state.day} 天`, { fontFamily: 'monospace', fontSize: '15px', color: '#f4b66a' }).setOrigin(0.5);
 
     this.add
       .text(width / 2, 282, '按 回车 重新开始', { fontFamily: 'monospace', fontSize: '16px', color: '#77c6a4' })

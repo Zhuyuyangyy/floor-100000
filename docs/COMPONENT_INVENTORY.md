@@ -34,17 +34,19 @@
 | `hintText` | 底部操作提示行 |
 | `nightOverlay` | 名为 `night-overlay` 的全屏矩形，夜间/停电压暗 |
 | `upgradeBoard` | 宿舍已建升级列表 |
+### 2.2 面板（均为 `buildPanel()` 框 + 深色填充，`src/render/panels.ts`）
 
-### 2.2 面板（均为 `buildPanel()` 九段线框 + 深色填充，`src/render/panels.ts`）
+框由 8 块普通 Image 拼成，不是 NineSlice——原因见 §5.2。深度不变量由 `src/tests/panels.test.ts` 守着。
 
 | 面板 | 打开键 | 内容 |
 |---|---|---|
-| 背包 `inventory` | `I` | 12 格、图标 + 名称 + 数量、底部 tooltip、方向键选择 / Enter 使用 |
+| 背包 `inventory` | `I` | 12 格、每格一个金属槽框 + 图标 + 名称 + 数量、底部 tooltip、方向键选择 / Enter 使用 |
 | 制作 `crafting` | `C`（仅第 1 层工作台） | 3 条配方 + 净水动作，显示 `[可制作]`/`[已建]`/`[材料不足]` |
 | 暂停 `pause` | `ESC` | 继续游戏 / 塔楼地图 / 重新开始 / 返回标题 |
 | 对话 `dialogue` | `E`（NPC 旁） | 问候 / 询问 / 交易 / 退出，交易子菜单 |
 | 帮助 `help` | 菜单内 | 操作说明 + 目标 |
 | 楼层详情 | 地图内 | 阶层 / 资源·危险·管控 / 探索状态 / 通行状态 / **货物概要** |
+| 结束画面 | 自动 | 美术包横幅（成功=绿勾 / 失败=红骷髅）+ 标题、死因、存活天数、重开提示 |
 
 ### 2.3 塔楼地图（`TowerOverviewScene`）
 
@@ -103,16 +105,25 @@
 
 ## 五、美术组件
 
-### 5.1 程序化贴图（`src/render/pixelArt.ts`，`generateAllPixelArt` 烘焙，共 17 个 key）
+### 5.1 程序化贴图（`src/render/pixelArt.ts`，`generateAllPixelArt` 烘焙）
 
 - 人物（16×24）：`player` `npc_alin` `npc_xiaozhou` `wanderer`
 - 地块（16×16）：`tile_wall` `tile_floor` `tile_door` `tile_window` `tile_stairs_up` `tile_stairs_down`
 - 家具：`furn_bed`(32×16) `furn_cabinet` `furn_crate` `furn_workbench`(32×16) `furn_watertank` `furn_fusebox` `furn_shelf`
-- 15 个物品图标由 `src/render/itemIcons.ts` 按 `ItemId` 索引（`ICON_DRAWERS` 是 `Record<ItemId, DrawFn>`，漏图标会编译报错）
+- `blank`（1×1 全透明）：图标槽的占位贴图。**不能**用 `add.image(x, y, '')` 建图标槽——Phaser 4 里这样建出来的对象即使之后 `setTexture()` 换成真贴图也永远不会渲染。
+- **15 个物品图标不再是程序化绘制**，改为从美术包加载（见 §5.2）。映射在 `src/render/artpack.ts` 的 `ITEM_ICON_FILES`，是 `Record<ItemId, string>`，漏一个编译报错；`src/tests/itemIcons.test.ts` 另外校验每个文件真实存在且是 16×16。
 
-### 5.2 授权素材（`public/assets/ui/`，Kenney CC0 1.0）
+### 5.2 美术包素材（`public/assets/`，由 `tools/build-artpack.mjs` 从设计图切片生成）
 
-`panel-green.png` `panel-yellow.png`（九段线框）、`marker.png`（选择箭头）。记录在 `THIRD_PARTY_NOTICES.md`。
+| 位置 | 内容 |
+|---|---|
+| `assets/artpack/item-<ItemId>.png` | 15 个物品图标，16×16（源图 ~250px，用面积平均降采样，最近邻会只取十五分之一变成噪点） |
+| `assets/ui/frame-<green|yellow>-<tl/tr/bl/br/top/bottom/left/right>.png` | 面板框的 8 块拼图 |
+| `assets/ui/slot.png` | 背包物品槽框，22×22 |
+| `assets/artpack/banner-win.png` `banner-lose.png` | 结束画面的成功/失败横幅 |
+| `assets/ui/marker.png` | 选择箭头（Kenney CC0 1.0，见 `THIRD_PARTY_NOTICES.md`） |
+
+**面板框为什么是 8 块 Image 而不是 NineSlice**：Phaser 4 里 NineSlice 在比普通 Image 更晚的通道合成，与 depth 无关——框在 depth 195、图标在 200，图标会被框的不透明中心吃掉；把框降到 -100 图标就回来了。所以改成 4 个原尺寸角 + 4 个可拉伸边。`src/tests/panels.test.ts` 守着这条不变量。
 
 ### 5.3 走廊主题（`src/render/corridors.ts`）
 
@@ -128,14 +139,16 @@
 
 | 层 | 文件数 | 用例数 |
 |---|---|---|
-| 单元（`src/tests/`） | 21 | **244** |
-| E2E（`e2e/`） | 11 | **50** |
+| 单元（`src/tests/`） | 22 | **268** |
+| E2E（`e2e/`） | 15 | **54** |
 
 关键测试文件：
 - `survivalBalance.test.ts`（21）— 材料确定性、三升级可共建、背包约束、无孤儿物品、交易守恒、净水器批量、升级生效、睡眠规则、七日预算
 - `towerNav.test.ts`（35）— 三层导航状态机
 - `tower.test.ts`（17）— 阶层/区段/通行判定
 - `save.test.ts`（31）— 存档校验与兼容
+- `itemIcons.test.ts`（9）— 图标键恒等 + 美术包每个图标文件存在且为 16×16 + 无孤儿文件
+- `panels.test.ts`（4）— 面板框/填充深度必须低于所有面板内容（防图标被静默吞掉）
 - `survivalLoop.spec.ts`（4）— 真实浏览器走遍五层：搜集→建造→交易守恒→睡觉→夜色三档
 - `tower.spec.ts`（10）— 地图导航 / 高亮 / 禁传送 / 状态保留
 - `art.spec.ts`（1）— 五层美术回归截图
@@ -152,13 +165,14 @@
 | 派系 / 阶级 / 权力 | 未做（B7） |
 | 四条终局 | 未做（B8）；生产逻辑中无胜利条件，`EndScene` 胜利分支仅 `?devwin=1` 可达且文案是已作废的第 8 天叙事 |
 | **D7 装饰道具与可交互对象不一致** | **待修**：第 4 层 5 电箱/5 水箱仅 2 可交互；第 5 层 4 柜台仅 1 可交互且**无贴图** |
-| **D8 EndScene 胜利文案** | 待修 |
-| **D9 存档失败静默** | 待修（`saveToStorage` 返回 false 无提示） |
+| **D8 EndScene 胜利文案** | 待修（横幅已换成美术包，文案仍未改） |
+| **D9 存档失败静默** | ✅ 已修（B3-01） |
 | `unlockedDoors` / `localEvents` | `FloorVisit` 字段被校验但从未写入 |
 | `maxMajorEventsPerDay` | 配置项存在但无任何系统读取 |
 | `batteryState` | 起始手电标记 `low`，无任何读取点（电池永不消耗） |
 | 第 4 层描述「漆黑区域」 | 未实现按楼层黑暗，仅区分宿舍/非宿舍 |
-| B3-02 完整章节试玩 | 未开始 |
+| B3-02 完整章节试玩 | ✅ 已完成并验收（`docs/B3-02_JOURNEY_VERIFICATION.md`） |
+| 美术包中其余素材（角色 / 建筑 / 怪物 / 家具） | 已切片到 `F:/new/sliced/`，尚未接入游戏。家具映射最值得做：宿舍与容器现在仍是程序化贴图 |
 
 ---
 

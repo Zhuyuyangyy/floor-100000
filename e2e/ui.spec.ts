@@ -61,14 +61,16 @@ async function hasMarkerSprite(page: Page): Promise<boolean> {
   });
 }
 
-// Texture keys of every nine-slice frame currently on screen.
+// Texture keys of every panel frame piece currently on screen. The frame is eight
+// plain Images rather than a NineSlice (see the note in render/panels.ts), so the
+// corner pieces are what to look for — they only exist if a frame was built.
 async function panelFrames(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const scenes = (window as unknown as { __PHASER_GAME__?: { scene: { scenes: Array<{ children: { list: Array<{ type: string; texture?: { key?: string } }> } }> } } }).__PHASER_GAME__?.scene.scenes ?? [];
     const keys: string[] = [];
     for (const sc of scenes) {
       for (const o of sc.children.list ?? []) {
-        if (o.type === 'NineSlice' && o.texture?.key) keys.push(o.texture.key);
+        if (o.type === 'Image' && o.texture?.key?.startsWith('ui-frame-')) keys.push(o.texture.key);
       }
     }
     return keys;
@@ -297,14 +299,14 @@ test('the inventory panel is framed with the licensed pixel texture', async ({ p
   await startGame(page, 42);
   await page.keyboard.press('I');
   await page.waitForTimeout(250);
-  expect((await panelFrames(page)).some((k) => k.startsWith('ui-panel-'))).toBe(true);
+  expect((await panelFrames(page)).length).toBeGreaterThan(0);
 });
 
 test('the pause panel is framed with the licensed pixel texture', async ({ page }) => {
   await startGame(page, 42);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(250);
-  expect((await panelFrames(page)).some((k) => k.startsWith('ui-panel-'))).toBe(true);
+  expect((await panelFrames(page)).length).toBeGreaterThan(0);
 });
 
 // GHI-04 follow-up: the panel builders only ever push into their class-field

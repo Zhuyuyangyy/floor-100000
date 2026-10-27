@@ -32,7 +32,7 @@ import { getFloorTemplate, type FloorTemplate } from '../data/floorTemplates';
 import { getItem } from '../data/items';
 import { saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
-import { buildPanel, type PanelObject } from '../render/panels';
+import { applyPanelDepth, buildPanel, PANEL_DEPTH, type PanelObject } from '../render/panels';
 import type { GameState } from '../core/gameTypes';
 
 // TowerOverviewScene — the three-level map (docs/B2_TOWER_ARCHITECTURE.md):
@@ -278,7 +278,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     const left = cx - w / 2;
     const top = cy - h / 2;
 
-    this.detailObjects.push(...buildPanel(this, cx, cy, w, h, 'yellow'));
+    this.detailObjects.push(...buildPanel(this, cx, cy, w, h, 'yellow', PANEL_DEPTH.tower.detail));
     this.detailTitle = this.add
       .text(cx, top + 22, '', { fontFamily: 'monospace', fontSize: `${TYPE_TITLE}px`, color: '#f4b66a' })
       .setOrigin(0.5);
@@ -290,7 +290,8 @@ export class TowerOverviewScene extends Phaser.Scene {
       .text(cx, top + h - 20, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#77c6a4' })
       .setOrigin(0.5);
     this.detailObjects.push(this.detailTitle, ...this.detailRows, this.detailAction);
-    for (const o of this.detailObjects) o.setScrollFactor(0).setDepth(200).setVisible(false);
+    applyPanelDepth(this.detailObjects, PANEL_DEPTH.tower.detail);
+    for (const o of this.detailObjects) o.setVisible(false);
   }
 
   private redraw(): void {

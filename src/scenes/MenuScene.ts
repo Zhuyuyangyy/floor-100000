@@ -3,7 +3,7 @@ import { startNewGame, tryContinue } from '../core/session';
 import { devEntry } from '../core/devMode';
 import { clearSave, hasSave } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
-import { buildPanel, createMarker, placeMarker, type PanelObject } from '../render/panels';
+import { applyPanelDepth, buildPanel, createMarker, PANEL_DEPTH, placeMarker, type PanelObject } from '../render/panels';
 
 // Title screen: a keyboard-navigable option list — 开始新游戏 / 继续游戏 (when a
 // save exists) / 操作说明. ↑/↓ to move, Enter to choose (docs/03_TASKS.md#p0-08).
@@ -180,13 +180,14 @@ export class MenuScene extends Phaser.Scene {
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
-    this.helpObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green'));
+    this.helpObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', PANEL_DEPTH.menu.help));
     const title = this.add.text(cx, top + 20, '操作说明', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
     const lines = ['A/D 或 ←/→ 移动', 'E 交互（开箱 / 对话 / 上下楼 / 睡觉）', 'I 背包 · C 制作 · M 塔楼地图 · ESC 暂停', '目标：从第 1 层爬到第 100000 层的统治核心'];
     const texts = lines.map((line, i) => this.add.text(left + 24, top + 58 + i * 26, line, { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }));
     const footer = this.add.text(cx, top + panelH - 18, '按 Enter / ESC 关闭', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
     this.helpObjects.push(title, ...texts, footer);
-    for (const o of this.helpObjects) o.setScrollFactor(0).setDepth(300).setVisible(false);
+    applyPanelDepth(this.helpObjects, PANEL_DEPTH.menu.help);
+    for (const o of this.helpObjects) o.setVisible(false);
   }
 
   private toggleHelp(): void {

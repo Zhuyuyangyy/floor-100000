@@ -65,14 +65,19 @@ describe('craft', () => {
 });
 
 describe('purifyWater', () => {
-  it('converts one dirty water to clean water when the purifier is built', () => {
+  // B3-01: batch rather than one bottle at a time. The audit found 小周 trades
+  // 1 脏水 for 1 净水 for free and repeatedly, so a single-bottle purifier was
+  // strictly redundant. Converting the whole carry is the thing the NPC will not
+  // do, which is what makes the upgrade worth its materials.
+  it('converts the whole carry of dirty water in one use', () => {
     const s = createNewGame(1);
     s.player.homeUpgrades.push('purifier');
-    give(s, [['dirty_water', 2]]);
+    give(s, [['dirty_water', 3]]);
     const cleanBefore = countItem(s.player.inventory, 'clean_water');
-    expect(purifyWater(s).ok).toBe(true);
-    expect(countItem(s.player.inventory, 'dirty_water')).toBe(1);
-    expect(countItem(s.player.inventory, 'clean_water')).toBe(cleanBefore + 1);
+    const r = purifyWater(s);
+    expect(r.ok).toBe(true);
+    expect(countItem(s.player.inventory, 'dirty_water')).toBe(0);
+    expect(countItem(s.player.inventory, 'clean_water')).toBe(cleanBefore + 3);
   });
 
   it('refuses without the purifier', () => {

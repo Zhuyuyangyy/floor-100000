@@ -93,8 +93,12 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         label: '木箱',
         x: 480,
         loot: [
-          { itemId: 'wood', min: 1, max: 3, probability: 0.8 },
-          { itemId: 'tape', min: 1, max: 2, probability: 0.5 },
+          // Guaranteed: 加固门 needs wood x2 and tape x1, and this crate is the
+          // only source of either. When both were probability rolls the upgrade
+          // was unbuildable on roughly 73% of seeds, which breaks the frozen
+          // design's "no soft-lock" rule (GAME_DESIGN_LOCK.md §5).
+          { itemId: 'wood', min: 2, max: 2, probability: 1, guaranteed: true },
+          { itemId: 'tape', min: 1, max: 1, probability: 1, guaranteed: true },
         ],
       },
       {
@@ -102,8 +106,18 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         label: '铁箱',
         x: 800,
         loot: [
-          { itemId: 'scrap_metal', min: 2, max: 2, probability: 1, guaranteed: true },
+          // Exactly lamp(1) + purifier(2), with no slack. Scarcity is meant to
+          // be a real constraint here, but it must not be a false choice: the
+          // purifier decides whether the player has water at all, so capping
+          // scrap below the two costs made them mutually exclusive rather than
+          // competing. Spending scrap on 阿林's wire offer still costs an
+          // upgrade — see survivalBalance.test.ts.
+          { itemId: 'scrap_metal', min: 3, max: 3, probability: 1, guaranteed: true },
           { itemId: 'battery', min: 1, max: 2, probability: 0.6 },
+          // A pry bar in the metal store. No recipe needs it, so guaranteeing it
+          // costs no balance — it exists so the item is tradeable rather than
+          // being a defined-but-unobtainable entry in the item table.
+          { itemId: 'crowbar', min: 1, max: 1, probability: 1, guaranteed: true },
         ],
       },
     ],
@@ -124,14 +138,21 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         loot: [
           { itemId: 'fuse', min: 1, max: 1, probability: 1, guaranteed: true },
           { itemId: 'filter', min: 1, max: 1, probability: 1, guaranteed: true },
-          { itemId: 'wire', min: 1, max: 1, probability: 1, guaranteed: true },
+          // Two, so lamp and purifier can both be wired without spending the
+          // world's entire scrap supply on 阿林's conversion.
+          { itemId: 'wire', min: 2, max: 2, probability: 1, guaranteed: true },
         ],
       },
       {
         id: 'water_tank',
         label: '储水罐',
         x: 240,
-        loot: [{ itemId: 'dirty_water', min: 4, max: 4, probability: 1, guaranteed: true }],
+        loot: [
+          // Six, up from four: sleeping now charges the night's metabolism, so
+          // the water budget has to cover 24 hours a day rather than only the
+          // waking ones. See REST_METABOLISM in SurvivalSystem.
+          { itemId: 'dirty_water', min: 6, max: 6, probability: 1, guaranteed: true },
+        ],
       },
     ],
     ground: [],
@@ -147,14 +168,19 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         x: 480,
         loot: [
           { itemId: 'ration_pack', min: 3, max: 3, probability: 1, guaranteed: true },
-          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'dirty_water', min: 2, max: 2, probability: 1, guaranteed: true },
         ],
       },
       {
         id: 'pantry',
         label: '补给架',
         x: 1120,
-        loot: [{ itemId: 'bread', min: 4, max: 4, probability: 1, guaranteed: true }],
+        loot: [
+          { itemId: 'bread', min: 4, max: 4, probability: 1, guaranteed: true },
+          // A canteen first-aid box. Probabilistic on purpose: the medkit is a
+          // bonus, not a progression gate, so it is allowed to be a lucky find.
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.5 },
+        ],
       },
     ],
     ground: [{ itemId: 'bread', quantity: 1, x: 160 }],

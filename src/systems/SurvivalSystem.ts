@@ -98,19 +98,53 @@ export function advanceTime(state: GameState, deltaMs: number): TimeTick {
   return { gameMinutes, dayChanged, died: false, won: false };
 }
 
+// The minutes a given sleep actually skips: from now (or from the 20:00 gate,
+// whichever is later) to 06:00 the next day. Sleeping at 02:00 skips a shorter
+// night than sleeping at 20:00 — the extra awake hours were already charged at
+// the waking rate by advanceTime, so staying out still costs more in total.
+export function sleepNightMinutes(minuteOfDay: number): number {
+  const from = Math.max(minuteOfDay, GAME_CONFIG.time.nightRiskStartMinute);
+  return MINUTES_PER_DAY - from + GAME_CONFIG.time.dayStartMinute;
+}
+
+// Resting metabolises at half the waking rate. Sleeping is therefore not a free
+// time skip — the audit found the rule was implicit and untested, with sleep
+// applying no hunger or thirst at all. Charging the night at a named rate makes
+// "go home before dark" a real decision: resting is cheaper than staying awake
+// and it keeps the wanderer off you, but it is not zero.
+export const REST_METABOLISM = 0.5;
+
+// The night's bill. Energy is deliberately NOT charged: recovering it is the
+// whole point of going to bed, and billing it here would undo the restore on the
+// line above.
+function applyRestDecay(state: GameState, hours: number): void {
+  const p = state.player;
+  const cfg = GAME_CONFIG.player;
+  const rest = REST_METABOLISM;
+  p.hunger = clamp(p.hunger - cfg.hungerLossPerGameHour * rest * hours, 0, cfg.hungerMax);
+  p.thirst = clamp(p.thirst - cfg.thirstLossPerGameHour * rest * hours, 0, cfg.thirstMax);
+  if (p.hunger <= 0 || p.thirst <= 0) {
+    p.hp = clamp(p.hp - HP_STARVE_LOSS_PER_HOUR * rest * hours, 0, cfg.hpMax);
+  }
+}
+
 export type SleepResult = { ok: true; won: boolean; newDay: number } | { ok: false; reason: string };
 
-// Sleep in the dorm to pass the night: only from 20:00, advances to next 06:00
-// and restores energy. The retired day-8 auto-win only applies under the
-// ?devwin=1 fixture.
+// Sleep in the dorm to pass the night: only from 20:00, advances to next 06:00,
+// restores energy, and charges the skipped night's hunger and thirst at the
+// resting rate. The retired day-8 auto-win only applies under ?devwin=1.
 export function sleep(state: GameState): SleepResult {
   if (state.status !== 'playing') return { ok: false, reason: '游戏已结束' };
   if (state.gameMinuteOfDay < GAME_CONFIG.time.nightRiskStartMinute) {
     return { ok: false, reason: '还太早，无法入睡（20:00 后）' };
   }
+  const nightHours = sleepNightMinutes(state.gameMinuteOfDay) / 60;
   state.day += 1;
   state.gameMinuteOfDay = GAME_CONFIG.time.dayStartMinute;
   state.player.energy = GAME_CONFIG.player.energyMax;
+  // Charged after the clock moves, so a player who wakes up starving sees it
+  // immediately rather than a minute later.
+  applyRestDecay(state, nightHours);
   state.worldEvents.activeEvent = null; // fresh roll each day
   const won = devEntry().legacyWin && isLegacyVictory(state);
   if (won) state.status = 'won';

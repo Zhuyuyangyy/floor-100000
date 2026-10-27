@@ -186,6 +186,9 @@ test('the purifier converts dirty water to clean water', async ({ page }) => {
     cleanBefore,
     { timeout: 5000 },
   );
-  expect(await count(page, 'dirty_water')).toBe(1);
+  expect(await count(page, 'dirty_water')).toBe(0);
+  // B3-01: the purifier converts the whole carry, not one bottle, so both dirty
+  // waters are gone and two clean ones arrived.
+  expect(await count(page, 'clean_water')).toBe(cleanBefore + 2);
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });

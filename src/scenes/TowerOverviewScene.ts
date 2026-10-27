@@ -27,7 +27,8 @@ import {
   type TowerNavState,
 } from '../systems/TowerNav';
 import { SECTOR_COUNT, SECTOR_SIZE, TIERS, describeFloor, describeSector, sectorOf, sectorRange, type TierId } from '../core/tower';
-import { getFloorTemplate } from '../data/floorTemplates';
+import { getFloorTemplate, type FloorTemplate } from '../data/floorTemplates';
+import { getItem } from '../data/items';
 import { saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { buildPanel, type PanelObject } from '../render/panels';
@@ -269,8 +270,8 @@ export class TowerOverviewScene extends Phaser.Scene {
   }
 
   private buildDetailPanel(): void {
-    const w = 420;
-    const h = 150;
+    const w = 460;
+    const h = 178;
     const cx = DESIGN_WIDTH / 2;
     const cy = DESIGN_HEIGHT / 2;
     const left = cx - w / 2;
@@ -281,7 +282,7 @@ export class TowerOverviewScene extends Phaser.Scene {
       .text(cx, top + 22, '', { fontFamily: 'monospace', fontSize: `${TYPE_TITLE}px`, color: '#f4b66a' })
       .setOrigin(0.5);
     this.detailRows = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 5; i++) {
       this.detailRows.push(this.add.text(left + 26, top + 54 + i * 20, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#ece8d8' }));
     }
     this.detailAction = this.add
@@ -534,6 +535,25 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.legendText.setText(LEGEND.map((l) => l.label).join('  '));
   }
 
+  // "货箱：木材·胶带" style summary of what a floor holds, read from the floor's
+  // template so it stays true as the loot tables change. Containers the player
+  // has already emptied are marked, which is what makes a return trip worth
+  // planning rather than repeating.
+  private floorContents(floor: number, template: FloorTemplate | undefined): string {
+    if (!template) return '内容：未生成（B4 程序化楼层）';
+    const parts: string[] = [];
+    for (const c of template.containers) {
+      const looted = this.state.visitedFloors[floor]?.openedContainers.includes(c.id) ?? false;
+      const names = c.loot.map((l) => getItem(l.itemId).displayName);
+      const unique = [...new Set(names)];
+      parts.push(`${c.label}${looted ? '(已取)' : ''}：${unique.join('·') || '空'}`);
+    }
+    if (template.ground.length > 0) {
+      parts.push(`地面：${[...new Set(template.ground.map((g) => getItem(g.itemId).displayName))].join('·')}`);
+    }
+    return parts.length > 0 ? parts.join('　') : '内容：空';
+  }
+
   private refreshDetail(): void {
     const floor = this.nav.floor;
     const show = this.nav.level === 'floor' && floor !== null;
@@ -552,6 +572,11 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.detailRows[2].setText(`状态：${explored ? '已探索' : '未探索'}${floor === this.state.currentFloor ? ' · 当前所在' : ''}`);
     const enterable = tryEnterSelected(this.nav, this.access);
     this.detailRows[3].setText(enterable.ok ? '通行：已打通' : '通行：未打通');
+    // What is actually on the floor. The audit found the player had no reason to
+    // explore anything in particular — the map named a floor but never said what
+    // was there, so every trip was a guess. Naming the containers and the loot
+    // they hold turns "go and look" into "go and get the filter".
+    this.detailRows[4].setText(this.floorContents(floor, template));
     this.detailAction.setText(enterable.ok ? '按 Enter 进入' : '需先通过实际通路抵达').setColor(enterable.ok ? '#77c6a4' : '#e0705a');
   }
 

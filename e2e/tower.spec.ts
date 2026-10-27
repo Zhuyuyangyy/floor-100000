@@ -220,6 +220,9 @@ test('the overview drills down to a sector and a floor, and ESC walks back up', 
   expect(nav.level).toBe('floor');
   expect(nav.floor).toBe(1);
   expect(await hasVisibleText(page, '第 1 层 · 玩家宿舍')).toBe(true);
+  // B3-01: the detail panel now says what is actually on the floor, so a trip is
+  // a plan rather than a guess.
+  expect(await hasVisibleText(page, '储物柜：净水·布料')).toBe(true);
   await page.screenshot({ path: 'e2e/screenshots/22-tower-floor.png' });
 
   // ESC walks back up one level at a time, keeping the sector in view.

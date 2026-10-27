@@ -3,12 +3,13 @@ import { createNewGame } from '../core/gameState';
 import {
   OVERVIEW_ROW_H,
   CONTENT_TOP,
+  HUD_BOTTOM,
   SECTOR_CELL,
-  SECTOR_COLS,
   ZOOM_MAX,
   ZOOM_MIN,
   accessOf,
   enterFloor,
+  floorCentreY,
   enterSector,
   navBack,
   nudgeFloor,
@@ -27,7 +28,7 @@ import {
   VIEW_H,
   zoomBy,
 } from '../systems/TowerNav';
-import { TOTAL_FLOORS } from '../core/tower';
+import { SECTOR_COUNT, TOTAL_FLOORS, sectorRange } from '../core/tower';
 import type { GameState } from '../core/gameTypes';
 
 function stateAt(floor: number, visited: number[] = []): GameState {
@@ -148,12 +149,49 @@ describe('the overview fits the whole tower', () => {
   });
 });
 
+describe('the tower reads the right way up', () => {
+  // A tower's base is at the bottom. Floor 1 is the slum the player starts in and
+  // floor 100000 is the summit, so the overview must draw sector 0 low and sector
+  // 99 high — otherwise the map shows the base at the top and the goal at the
+  // bottom, which is the tower upside down.
+  it('puts the lowest sector at the bottom of the strip', () => {
+    const low = sectorCentreY(0);
+    const high = sectorCentreY(SECTOR_COUNT - 1);
+    expect(low).toBeGreaterThan(high);
+  });
+
+  it('maps a low screen position to a low sector and a high one to a high sector', () => {
+    const nav = openTower(accessOf(stateAt(1)));
+    const bottom = pickSectorAt(nav, overviewHeight() - 1);
+    const top = pickSectorAt(nav, CONTENT_TOP);
+    expect(bottom).toBe(0); // floor 1 sits at the base
+    expect(top).toBe(SECTOR_COUNT - 1); // floor 100000 sits at the summit
+  });
+
+  it('is symmetric: every sector round-trips through pick and centre', () => {
+    const nav = openTower(accessOf(stateAt(1)));
+    for (let s = 0; s < SECTOR_COUNT; s++) {
+      expect(pickSectorAt(nav, sectorCentreY(s))).toBe(s);
+    }
+  });
+
+  it('the sector grid also runs upward: the first floor of a sector is at the bottom', () => {
+    const nav = enterSector(0); // floors 1..1000
+    const { from, to } = sectorRange(0);
+    expect(floorCentreY(from)).toBeGreaterThan(floorCentreY(to));
+    expect(pickFloorAt(nav, 1, sectorHeight() - CONTENT_TOP - 1)).toBe(from);
+    expect(pickFloorAt(nav, sectorViewWidth() - 1, 1)).toBe(to);
+  });
+});
+
 describe('picking from screen coordinates', () => {
   it('maps overview y to the sector under the cursor', () => {
     const nav = openTower(accessOf(stateAt(1)));
-    expect(pickSectorAt(nav, CONTENT_TOP)).toBe(0);
-    expect(pickSectorAt(nav, CONTENT_TOP + OVERVIEW_ROW_H * 3 + 1)).toBe(3);
-    expect(pickSectorAt(nav, CONTENT_TOP + OVERVIEW_ROW_H * 99 + 1)).toBe(99);
+    // The strip runs bottom-to-top: the top row is the summit, the bottom row is
+    // the slum the player starts in.
+    expect(pickSectorAt(nav, CONTENT_TOP)).toBe(SECTOR_COUNT - 1);
+    expect(pickSectorAt(nav, CONTENT_TOP + OVERVIEW_ROW_H * 3 + 1)).toBe(SECTOR_COUNT - 4);
+    expect(pickSectorAt(nav, CONTENT_TOP + OVERVIEW_ROW_H * 99 + 1)).toBe(0);
     // Outside the strip (top HUD band / bottom HUD band) there is nothing to pick.
     expect(pickSectorAt(nav, CONTENT_TOP - 1)).toBeNull();
     expect(pickSectorAt(nav, overviewHeight())).toBeNull();
@@ -164,22 +202,25 @@ describe('picking from screen coordinates', () => {
     const nav = enterSector(0); // floors 1..1000
     // Coordinates are relative to the grid's own top edge, so the fixed HUD band
     // above the grid is never clickable.
-    expect(pickFloorAt(nav, 1, 1)).toBe(1);
+    // Rows stack from the bottom and read left to right, so the top-left cell is
+    // the 981st floor of the sector and the bottom-left is its first.
+    expect(pickFloorAt(nav, 1, 1)).toBe(981);
     // Column 1, row 0 -> the next floor along.
-    expect(pickFloorAt(nav, SECTOR_CELL + 1, 1)).toBe(2);
-    // Row 1 -> one full column further down.
-    expect(pickFloorAt(nav, 1, SECTOR_CELL + 1)).toBe(1 + SECTOR_COLS);
+    expect(pickFloorAt(nav, SECTOR_CELL + 1, 1)).toBe(982);
+    // The top-right cell is the sector's highest floor.
+    expect(pickFloorAt(nav, sectorViewWidth() - 1, 1)).toBe(1000);
+    // One row down -> a full column of 20 lower.
+    expect(pickFloorAt(nav, 1, SECTOR_CELL + 1)).toBe(961);
     expect(pickFloorAt(nav, -5, 5)).toBeNull();
     expect(pickFloorAt(nav, sectorViewWidth() + 5, 5)).toBeNull();
     expect(pickFloorAt(nav, 5, -5)).toBeNull();
   });
 
-  it('picks the last floor of a sector exactly at its far corner', () => {
+  it('picks the first floor of a sector exactly at its near corner', () => {
     const nav = enterSector(99); // floors 99001..100000
-    const last = sectorViewWidth() - 1;
-    expect(pickFloorAt(nav, last, sectorHeight() - CONTENT_TOP - 1)).toBe(TOTAL_FLOORS);
-    // One past the bottom row is outside the grid, not the last floor.
-    expect(pickFloorAt(nav, last, sectorHeight() - CONTENT_TOP)).toBeNull();
+    expect(pickFloorAt(nav, 1, sectorHeight() - CONTENT_TOP - 1)).toBe(99001);
+    // One past the bottom row is outside the grid, not the first floor.
+    expect(pickFloorAt(nav, 1, sectorHeight() - CONTENT_TOP)).toBeNull();
   });
 });
 
@@ -204,13 +245,34 @@ describe('zoom and scroll', () => {
     expect(scrollBy(zoomed, 99999)).toBeGreaterThan(0);
   });
 
-  it('keeps the very top of the tower reachable when zoomed in', () => {
-    const zoomed = zoomBy(openTower(accessOf(stateAt(1))), 1); // 1.5x
-    // The lower bound goes negative so viewTop() still lands on world y 0.
-    expect(viewTop(scrollBy(zoomed, -9999), zoomed.zoom)).toBe(0);
-    // And the bottom of the view lands exactly on the bottom of the tower.
-    const bottom = viewTop(scrollBy(zoomed, 99999), zoomed.zoom) + VIEW_H / zoomed.zoom;
-    expect(bottom).toBeCloseTo(overviewHeight(), 5);
+  it('never parks the tower under the fixed HUD, at any zoom', () => {
+    // The real invariant. The old bounds were computed against the whole 360px
+    // viewport, so at 1.5x the strip's top row landed at screen 0 — underneath the
+    // title — and its bottom row underneath the control hint.
+    for (const steps of [1, 3, 6, 10]) {
+      let nav = openTower(accessOf(stateAt(1)));
+      for (let i = 0; i < steps; i++) nav = zoomBy(nav, 1);
+      const z = nav.zoom;
+
+      const atMin = scrollBy(nav, -99999);
+      const atMax = scrollBy(nav, 99999);
+      // Screen position of the content's top and bottom edges.
+      const topScreen = (CONTENT_TOP - viewTop(atMin, z)) * z;
+      const bottomScreen = (overviewHeight() - viewTop(atMax, z)) * z;
+      // The strip starts at or below the top HUD band...
+      expect(topScreen, `zoom ${z}`).toBeGreaterThanOrEqual(CONTENT_TOP - 0.001);
+      // ...and ends at or above the bottom one.
+      expect(bottomScreen, `zoom ${z}`).toBeLessThanOrEqual(VIEW_H - HUD_BOTTOM + 0.001);
+    }
+  });
+
+  it('the sector grid keeps its lowest rows clear of the hint too', () => {
+    // The bug this bounds change fixes: floor 1's cell landed at screen 348, under
+    // the control hint at 336, because the clamp allowed a scroll that put it there.
+    const nav = enterSector(0); // floors 1..1000, cursor on floor 1
+    const atMax = scrollBy(nav, 99999);
+    const floorOneScreen = (floorCentreY(1) - viewTop(atMax, nav.zoom)) * nav.zoom;
+    expect(floorOneScreen).toBeLessThanOrEqual(VIEW_H - HUD_BOTTOM);
   });
 
   it('centres the view on a world y', () => {

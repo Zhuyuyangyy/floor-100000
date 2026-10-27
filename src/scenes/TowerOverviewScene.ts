@@ -7,6 +7,7 @@ import {
   CONTENT_TOP,
   SECTOR_CELL,
   SECTOR_COLS,
+  SECTOR_ROWS,
   ZOOM_MIN,
   accessOf,
   clampScroll,
@@ -317,11 +318,19 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.refreshDetail();
   }
 
+  // The tower is drawn the way it stands: sector 0 (floor 1, the slum) at the
+  // BOTTOM of the strip and sector 99 (floor 100000, the summit) at the TOP.
+  // Everything here measures its row from the bottom, so `rowY(sector)` is the
+  // single place the flip lives.
+  private rowY(sector: number): number {
+    return CONTENT_TOP + (SECTOR_COUNT - 1 - sector) * OVERVIEW_ROW_H;
+  }
+
   private drawOverview(): void {
     const g = this.gridGfx;
     const currentSector = sectorOf(this.state.currentFloor);
     for (let s = 0; s < SECTOR_COUNT; s++) {
-      const y = CONTENT_TOP + s * OVERVIEW_ROW_H;
+      const y = this.rowY(s);
       const summary = describeSector(s);
       const visited = this.isSectorVisited(s);
       g.fillStyle(tierColor(summary.tiers[0].tier), 1);
@@ -337,24 +346,24 @@ export class TowerOverviewScene extends Phaser.Scene {
     }
 
     // Current sector: the one thing that must always be visible and legible.
-    const cy = CONTENT_TOP + currentSector * OVERVIEW_ROW_H;
+    const cy = this.rowY(currentSector);
     this.currentGfx.fillStyle(COLOR_CURRENT, 1);
     this.currentGfx.fillRect(STRIP_X, cy, STRIP_W, OVERVIEW_ROW_H);
     this.currentGfx.lineStyle(1, 0x0b0f12, 1);
     this.currentGfx.strokeRect(STRIP_X - 0.5, cy - 0.5, STRIP_W + 1, OVERVIEW_ROW_H + 1);
 
     // Keyboard cursor.
-    const ky = CONTENT_TOP + this.nav.cursor * OVERVIEW_ROW_H;
+    const ky = this.rowY(this.nav.cursor);
     this.cursorGfx.lineStyle(1, COLOR_CURSOR, 1);
     this.cursorGfx.strokeRect(STRIP_X - 3, ky - 1, STRIP_W + 6, OVERVIEW_ROW_H + 2);
 
     // The two ends of the climb. The summit in particular has to be marked: it
     // is the goal the whole tower is arranged around, and at 3px a row the last
-    // sector is otherwise indistinguishable from the nine above it — it is not
+    // sector is otherwise indistinguishable from the nine below it — it is not
     // even in the every-tenth label set. Drawn after the current-sector marker so
     // they stay visible when the player is standing on one of them.
-    const startY = CONTENT_TOP;
-    const endY = CONTENT_TOP + (SECTOR_COUNT - 1) * OVERVIEW_ROW_H;
+    const startY = this.rowY(0); // the slum, at the base
+    const endY = this.rowY(SECTOR_COUNT - 1); // the summit, at the top
     this.currentGfx.fillStyle(COLOR_START, 1);
     this.currentGfx.fillRect(STRIP_X + STRIP_W - 12, startY, 12, OVERVIEW_ROW_H);
     this.currentGfx.fillStyle(COLOR_SUMMIT, 1);
@@ -374,8 +383,8 @@ export class TowerOverviewScene extends Phaser.Scene {
   // own text, and the summit is the one thing a player must be able to find
   // without counting rows.
   private drawEndpoints(): void {
-    this.endpointLabels[0].setPosition(STRIP_X + STRIP_W + 10, CONTENT_TOP - 1);
-    this.endpointLabels[1].setPosition(STRIP_X + STRIP_W + 10, CONTENT_TOP + (SECTOR_COUNT - 1) * OVERVIEW_ROW_H - 5);
+    this.endpointLabels[0].setPosition(STRIP_X + STRIP_W + 10, this.rowY(0) - 1);
+    this.endpointLabels[1].setPosition(STRIP_X + STRIP_W + 10, this.rowY(SECTOR_COUNT - 1) - 5);
   }
 
   private drawTierBands(): void {
@@ -383,7 +392,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     // A boundary line at each tier's first sector, so the colour gradient reads
     // as a class hierarchy rather than decoration.
     for (const tier of TIERS) {
-      const y = CONTENT_TOP + Math.floor((tier.minFloor - 1) / SECTOR_SIZE) * OVERVIEW_ROW_H;
+      const y = this.rowY(Math.floor((tier.minFloor - 1) / SECTOR_SIZE));
       g.lineStyle(1, 0x9aa6b4, 0.9);
       g.lineBetween(STRIP_X - 12, y, STRIP_X + STRIP_W + 12, y);
     }
@@ -396,7 +405,9 @@ export class TowerOverviewScene extends Phaser.Scene {
   // the other two levels.
   private drawSectorLabels(): void {
     this.sectorLabels.forEach((label, i) => {
-      label.setPosition(STRIP_X - 14, CONTENT_TOP + i * 10 * OVERVIEW_ROW_H);
+      // Label i names sector i*10, which now sits at rowY(i*10) — low on the
+      // strip for low sectors, high for high ones.
+      label.setPosition(STRIP_X - 14, this.rowY(i * 10));
     });
   }
 
@@ -408,12 +419,17 @@ export class TowerOverviewScene extends Phaser.Scene {
     // fixed HUD never sits on top of the cells.
     const originX = GRID_X;
     const originY = CONTENT_TOP;
+    // Rows stack from the bottom of the sector, and within a row floors read left
+    // to right — the same way up the tower reads. `cellY` is the single place the
+    // flip lives, matching pickFloorAt().
+    const cellY = (floor: number): number => {
+      const rowFromBottom = Math.floor((floor - from) / SECTOR_COLS);
+      return originY + (SECTOR_ROWS - 1 - rowFromBottom) * SECTOR_CELL;
+    };
     for (let floor = from; floor <= to; floor++) {
-      const offset = floor - from;
-      const col = offset % SECTOR_COLS;
-      const row = Math.floor(offset / SECTOR_COLS);
+      const col = (floor - from) % SECTOR_COLS;
       const x = originX + col * SECTOR_CELL;
-      const y = originY + row * SECTOR_CELL;
+      const y = cellY(floor);
       if (floor <= highest) {
         g.fillStyle(this.state.visitedFloors[floor] ? COLOR_EXPLORED : COLOR_UNLOCKED, 1);
       } else {
@@ -424,10 +440,10 @@ export class TowerOverviewScene extends Phaser.Scene {
 
     // Current floor marker: filled, so it reads at a glance rather than only as
     // an outline lost among 1000 cells.
-    const offsetCur = this.state.currentFloor - from;
-    if (offsetCur >= 0 && this.state.currentFloor <= to) {
-      const cx = originX + (offsetCur % SECTOR_COLS) * SECTOR_CELL;
-      const cy2 = originY + Math.floor(offsetCur / SECTOR_COLS) * SECTOR_CELL;
+    if (this.state.currentFloor >= from && this.state.currentFloor <= to) {
+      const col = (this.state.currentFloor - from) % SECTOR_COLS;
+      const cx = originX + col * SECTOR_CELL;
+      const cy2 = cellY(this.state.currentFloor);
       this.currentGfx.fillStyle(COLOR_CURRENT, 1);
       this.currentGfx.fillRect(cx, cy2, SECTOR_CELL - 1, SECTOR_CELL - 1);
       this.currentGfx.lineStyle(1, 0x0b0f12, 1);
@@ -435,9 +451,9 @@ export class TowerOverviewScene extends Phaser.Scene {
     }
 
     // Keyboard cursor.
-    const offsetCur2 = this.nav.cursor - from;
-    const kx = originX + (offsetCur2 % SECTOR_COLS) * SECTOR_CELL;
-    const ky = originY + Math.floor(offsetCur2 / SECTOR_COLS) * SECTOR_CELL;
+    const cursorCol = (this.nav.cursor - from) % SECTOR_COLS;
+    const kx = originX + cursorCol * SECTOR_CELL;
+    const ky = cellY(this.nav.cursor);
     this.cursorGfx.lineStyle(2, COLOR_CURSOR, 1);
     this.cursorGfx.strokeRect(kx - 2, ky - 2, SECTOR_CELL + 3, SECTOR_CELL + 3);
   }

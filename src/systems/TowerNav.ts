@@ -27,6 +27,12 @@ export const SECTOR_ROWS = SECTOR_SIZE / SECTOR_COLS;
 export const SECTOR_CELL = 12;
 
 export const VIEW_H = 360;
+// The fixed HUD occupies CONTENT_TOP at the top of the viewport and HUD_BOTTOM at
+// the bottom. Scroll bounds are computed against the usable band between them.
+// Without this the sector grid could be scrolled only to where its lowest rows sat
+// under the control hint — and the lowest rows are exactly where the player's
+// current floor lives.
+export const HUD_BOTTOM = 24;
 export const ZOOM_MIN = 1;
 export const ZOOM_MAX = 6;
 const ZOOM_STEP = 0.5;
@@ -94,13 +100,23 @@ export function scrollForCentre(worldY: number): number {
   return worldY - VIEW_H / 2;
 }
 
-// Scroll bounds. The lower bound is negative above 1x (half the zoomed view
-// hangs above the anchor), which is what lets the very top of the tower stay
-// reachable when zoomed in.
+// Scroll bounds, derived from where the usable band actually is.
+//
+// Phaser centres the view on scrollY + VIEW_H/2 and shows VIEW_H/zoom world
+// units, so screen position S maps to world `viewTop + S/zoom`. Requiring the
+// content's top edge to sit at or below the top HUD band, and its bottom edge at
+// or above the bottom one, gives:
+//
+//   min = CONTENT_TOP - VIEW_H/2 + (VIEW_H/2 - CONTENT_TOP)/zoom
+//   max = content    - VIEW_H/2 - (VIEW_H/2 - HUD_BOTTOM)/zoom
+//
+// At 1x on the overview both collapse to 0, which is why the whole tower fits
+// with nothing to scroll.
 function scrollBounds(contentHeightValue: number, zoom: number): { min: number; max: number } {
+  const half = VIEW_H / 2;
   return {
-    min: VIEW_H / zoom / 2 - VIEW_H / 2,
-    max: contentHeightValue - VIEW_H / 2 - VIEW_H / zoom / 2,
+    min: CONTENT_TOP - half + (half - CONTENT_TOP) / zoom,
+    max: contentHeightValue - half - (half - HUD_BOTTOM) / zoom,
   };
 }
 
@@ -144,35 +160,45 @@ export function scrollBy(state: TowerNavState, delta: number): number {
 // Sector under a world-space y, or null outside the strip. The strip is inset by
 // CONTENT_TOP, so the top HUD band and the bottom HUD band both fall outside it
 // and correctly pick nothing.
+//
+// The tower is drawn the way a tower stands: sector 0 (floor 1, the slum) at the
+// BOTTOM of the strip and sector 99 (floor 100000, the summit) at the TOP. So a
+// low screen y maps to a high sector, and the row index is flipped.
 export function pickSectorAt(state: TowerNavState, worldY: number): number | null {
   if (state.level !== 'overview') return null;
   if (worldY < CONTENT_TOP || worldY >= overviewHeight()) return null;
-  const sector = Math.floor((worldY - CONTENT_TOP) / OVERVIEW_ROW_H);
+  const row = Math.floor((worldY - CONTENT_TOP) / OVERVIEW_ROW_H);
+  const sector = SECTOR_COUNT - 1 - row;
   return sector >= 0 && sector < SECTOR_COUNT ? sector : null;
 }
 
 // Floor under a world-space (x, y) in the sector view, or null outside the grid.
 // `worldY` is relative to the grid's own top edge (CONTENT_TOP), matching how the
-// scene draws it.
+// scene draws it. Like the overview, the grid runs upward: rows stack from the
+// bottom, and within a row floors still read left to right, so the sector's
+// lowest floor is the bottom-left cell and its highest is the top-right one.
 export function pickFloorAt(state: TowerNavState, worldX: number, worldY: number): number | null {
   if (state.level !== 'sector') return null;
   if (worldX < 0 || worldY < 0 || worldX >= sectorViewWidth() || worldY >= sectorHeight() - CONTENT_TOP) return null;
   const col = Math.floor(worldX / SECTOR_CELL);
-  const row = Math.floor(worldY / SECTOR_CELL);
+  const rowFromTop = Math.floor(worldY / SECTOR_CELL);
+  const rowFromBottom = SECTOR_ROWS - 1 - rowFromTop;
   const { from } = sectorRange(state.sector);
-  const floor = from + row * SECTOR_COLS + col;
+  const floor = from + rowFromBottom * SECTOR_COLS + col;
   return floor >= from && floor <= TOTAL_FLOORS ? floor : null;
 }
 
-// World y of a sector row's centre.
+// World y of a sector row's centre, measured from the bottom of the tower.
 export function sectorCentreY(sector: number): number {
-  return CONTENT_TOP + sector * OVERVIEW_ROW_H + OVERVIEW_ROW_H / 2;
+  return CONTENT_TOP + (SECTOR_COUNT - 1 - sector) * OVERVIEW_ROW_H + OVERVIEW_ROW_H / 2;
 }
 
+// World y of a floor cell's centre, measured from the bottom of its sector.
 export function floorCentreY(floor: number): number {
   const { from } = sectorRange(sectorOf(floor));
-  const row = Math.floor((floor - from) / SECTOR_COLS);
-  return CONTENT_TOP + row * SECTOR_CELL + SECTOR_CELL / 2;
+  const rowFromBottom = Math.floor((floor - from) / SECTOR_COLS);
+  const rowFromTop = SECTOR_ROWS - 1 - rowFromBottom;
+  return CONTENT_TOP + rowFromTop * SECTOR_CELL + SECTOR_CELL / 2;
 }
 
 export function enterSector(sector: number): TowerNavState {

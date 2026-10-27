@@ -23,7 +23,7 @@ import { countItem, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
 import { absoluteMinute, advanceTime, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, isNight, sleep } from '../systems/SurvivalSystem';
 import { ensureNightEvent } from '../systems/EventSystem';
-import { clearSave, saveToStorage } from '../systems/SaveSystem';
+import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { buildPanel, createMarker, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import { itemIconKey } from '../render/itemIcons';
@@ -131,6 +131,10 @@ export class GameScene extends Phaser.Scene {
   private pauseMarker!: Phaser.GameObjects.Image;
   private pauseSelected = 0;
   private lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
+  // B3-01 D9: last save-failure count we already warned about. Survives a scene
+  // restart on purpose — the page's storage is still broken after 重新开始, so
+  // warning again would be right, and the counter has not moved.
+  private lastSaveFailures = 0;
   private lastActiveEvent: ActiveEvent | null = null;
   // Per-frame input guard (GHI-03 m9). Phaser can deliver one DOM keydown
   // several times inside a single frame when several keys land in the same queue
@@ -1155,6 +1159,16 @@ export class GameScene extends Phaser.Scene {
   override update(_time: number, delta: number): void {
     if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen) return;
     const state = getGame();
+
+    // B3-01 D9: a rejected write used to be silent, so a full disk or a private
+    // window lost the run without a word. The count only grows, so comparing it
+    // against what we last saw turns any failed save — autosave, craft, trade,
+    // sleep, floor change — into exactly one warning.
+    const failures = saveFailureCount();
+    if (failures > this.lastSaveFailures) {
+      this.lastSaveFailures = failures;
+      this.flash('存档失败：进度不会被保留（浏览器存储不可用）');
+    }
 
     let dir = 0;
     if (this.cursors?.left.isDown || this.wasd?.left.isDown) dir -= 1;

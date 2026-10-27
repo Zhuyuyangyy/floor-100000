@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { SCHEMA_VERSION } from '../core/constants';
 import { GAME_CONFIG } from '../core/config';
-import { deserialize, saveToStorage, serialize, validateGameState } from '../systems/SaveSystem';
+import { deserialize, saveFailureCount, saveToStorage, serialize, validateGameState } from '../systems/SaveSystem';
 import { getFloorView } from '../systems/LootSystem';
 import { tryContinue } from '../core/session';
 import type { GameState } from '../core/gameTypes';
@@ -278,6 +278,51 @@ describe('saveToStorage never throws (GHI-03 m5)', () => {
 
   it('reports success when the write lands', () => {
     expect(saveToStorage(createNewGame(1), fakeStorage(false))).toBe(true);
+  });
+});
+
+// B3-01 D9: every call site ignored the boolean, so a rejected write was silent
+// and the player lost the run without being told. The count is what makes the
+// failure visible — the scene polls it and warns when it grows.
+describe('a rejected write is counted, not just returned (B3-01 D9)', () => {
+  function fakeStorage(fail: boolean): Storage {
+    let stored: string | null = null;
+    return {
+      length: stored === null ? 0 : 1,
+      clear: () => {
+        stored = null;
+      },
+      getItem: () => stored,
+      key: () => null,
+      removeItem: () => {
+        stored = null;
+      },
+      setItem: (_k: string, v: string) => {
+        if (fail) throw new Error('QuotaExceededError');
+        stored = v;
+      },
+    };
+  }
+
+  it('counts each rejected write and none of the accepted ones', () => {
+    const before = saveFailureCount();
+    expect(saveToStorage(createNewGame(1), fakeStorage(false))).toBe(true);
+    expect(saveFailureCount()).toBe(before);
+
+    expect(saveToStorage(createNewGame(1), fakeStorage(true))).toBe(false);
+    expect(saveFailureCount()).toBe(before + 1);
+
+    expect(saveToStorage(createNewGame(1), fakeStorage(true))).toBe(false);
+    expect(saveFailureCount()).toBe(before + 2);
+  });
+
+  it('starts at zero for a fresh page, so a clean run never warns', () => {
+    // The count is per page load: it exists to notice a *new* failure, not to
+    // nag about one the player has already been told about.
+    expect(saveFailureCount()).toBeGreaterThanOrEqual(0);
+    const before = saveFailureCount();
+    saveToStorage(createNewGame(1), fakeStorage(false));
+    expect(saveFailureCount()).toBe(before);
   });
 });
 

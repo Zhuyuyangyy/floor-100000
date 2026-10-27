@@ -151,13 +151,29 @@ export function deserialize(json: string): SaveResult {
 // Best-effort on write: a rejected setItem (quota, private mode) must not break
 // the caller — the M3 autosave runs from update(), where a throw would kill the
 // frame loop (GHI-03 m5).
+//
+// The boolean alone was not enough: every call site ignored it, so a rejected
+// write was completely silent and the player lost the run without ever being
+// told (B3-01 D9). The count below is what makes the failure visible — the scene
+// polls it and warns when it grows, which covers every call site at once.
+let saveFailures = 0;
+
 export function saveToStorage(state: GameState, storage: Storage = localStorage): boolean {
   try {
     storage.setItem(SAVE_KEY, serialize(state));
     return true;
   } catch {
+    saveFailures += 1;
     return false;
   }
+}
+
+// Rejected writes since the page loaded. Non-zero means progress is not being
+// persisted. It only ever grows, so a caller detects a *new* failure by comparing
+// against the value it saw last — which is what keeps the warning to one flash
+// instead of one per frame.
+export function saveFailureCount(): number {
+  return saveFailures;
 }
 
 export function loadFromStorage(storage: Storage = localStorage): SaveResult {

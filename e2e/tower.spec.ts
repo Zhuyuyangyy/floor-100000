@@ -160,6 +160,12 @@ test('M opens the tower overview centred on the sector the player is in', async 
 
   expect(await hasVisibleText(page, '塔楼总览')).toBe(true);
   expect(await hasVisibleText(page, '当前 3 层')).toBe(true);
+  // All three reference points are on screen: the start, where the player is,
+  // and the summit they are climbing toward. The summit used to be unmarked — at
+  // 3px a row the last sector is indistinguishable from the nine above it, and it
+  // is not even in the every-tenth label set.
+  expect(await hasVisibleText(page, '起点 第1层')).toBe(true);
+  expect(await hasVisibleText(page, '终点 第100000层')).toBe(true);
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
 

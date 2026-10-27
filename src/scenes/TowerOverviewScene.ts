@@ -77,6 +77,11 @@ const COLOR_CURRENT = 0xf4b66a;
 const COLOR_EXPLORED = 0x63c9a4;
 const COLOR_CURSOR = 0xece8d8;
 const COLOR_BG = 0x0b0f12;
+// The two ends of the climb. Both are deliberately unlike COLOR_CURRENT: the
+// player has to be able to tell "where I am" from "where I started" and "where
+// I am going" at a glance.
+const COLOR_START = 0x77c6a4;
+const COLOR_SUMMIT = 0xd8a8e8;
 
 const LEGEND = [
   { color: COLOR_CURRENT, label: '当前' },
@@ -112,6 +117,7 @@ export class TowerOverviewScene extends Phaser.Scene {
   private legendText!: Phaser.GameObjects.Text;
   private tierText!: Phaser.GameObjects.Text;
   private sectorLabels: Phaser.GameObjects.Text[] = [];
+  private endpointLabels: Phaser.GameObjects.Text[] = [];
   private messageText!: Phaser.GameObjects.Text;
 
   private detailObjects: PanelObject[] = [];
@@ -159,7 +165,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.cursorGfx = this.add.graphics();
 
     this.buildHud();
-    this.buildSectorLabels();
+    this.buildOverviewAnnotations();
     this.buildDetailPanel();
     this.bindInput();
     this.redraw();
@@ -237,10 +243,11 @@ export class TowerOverviewScene extends Phaser.Scene {
       .setVisible(false);
   }
 
-  // Sector-number anchors down the left of the strip. Created once and only
-  // repositioned afterwards: drawOverview() runs on every input, and calling
-  // add.text() there would leak a fresh set of objects per keypress.
-  private buildSectorLabels(): void {
+  // Sector-number anchors down the left of the strip, and the 起点/终点 tags in
+  // the right margin. Created once and only repositioned afterwards:
+  // drawOverview() runs on every input, and calling add.text() there would leak a
+  // fresh set of objects per keypress.
+  private buildOverviewAnnotations(): void {
     for (let s = 0; s < SECTOR_COUNT; s += 10) {
       this.sectorLabels.push(
         this.add
@@ -249,6 +256,16 @@ export class TowerOverviewScene extends Phaser.Scene {
           .setDepth(5),
       );
     }
+    this.endpointLabels = [
+      this.add
+        .text(0, 0, '起点 第1层', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#77c6a4', backgroundColor: '#0b0f12cc', padding: { x: 2, y: 1 } })
+        .setOrigin(0, 0)
+        .setDepth(5),
+      this.add
+        .text(0, 0, '终点 第100000层', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#d8a8e8', backgroundColor: '#0b0f12cc', padding: { x: 2, y: 1 } })
+        .setOrigin(0, 0)
+        .setDepth(5),
+    ];
   }
 
   private buildDetailPanel(): void {
@@ -288,10 +305,12 @@ export class TowerOverviewScene extends Phaser.Scene {
     if (this.nav.level === 'overview') this.drawOverview();
     else this.drawSectorGrid(); // the floor level keeps the grid behind the panel
 
-    // Set unconditionally, not from inside drawOverview(): the sector labels are
-    // the overview's anchors, and only hiding them from here keeps them from
-    // lingering over the sector grid after a drill-down.
-    for (const label of this.sectorLabels) label.setVisible(this.nav.level === 'overview');
+    // Set unconditionally, not from inside drawOverview(): the sector labels and
+    // the endpoint tags are the overview's anchors, and only hiding them from here
+    // keeps them from lingering over the sector grid after a drill-down.
+    const onOverview = this.nav.level === 'overview';
+    for (const label of this.sectorLabels) label.setVisible(onOverview);
+    for (const label of this.endpointLabels) label.setVisible(onOverview);
 
     this.refreshHud();
     this.refreshDetail();
@@ -328,8 +347,34 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.cursorGfx.lineStyle(1, COLOR_CURSOR, 1);
     this.cursorGfx.strokeRect(STRIP_X - 3, ky - 1, STRIP_W + 6, OVERVIEW_ROW_H + 2);
 
+    // The two ends of the climb. The summit in particular has to be marked: it
+    // is the goal the whole tower is arranged around, and at 3px a row the last
+    // sector is otherwise indistinguishable from the nine above it — it is not
+    // even in the every-tenth label set. Drawn after the current-sector marker so
+    // they stay visible when the player is standing on one of them.
+    const startY = CONTENT_TOP;
+    const endY = CONTENT_TOP + (SECTOR_COUNT - 1) * OVERVIEW_ROW_H;
+    this.currentGfx.fillStyle(COLOR_START, 1);
+    this.currentGfx.fillRect(STRIP_X + STRIP_W - 12, startY, 12, OVERVIEW_ROW_H);
+    this.currentGfx.fillStyle(COLOR_SUMMIT, 1);
+    this.currentGfx.fillRect(STRIP_X + STRIP_W - 12, endY, 12, OVERVIEW_ROW_H);
+    // Ticks reaching into the right margin, where the labels sit.
+    this.currentGfx.fillStyle(COLOR_START, 1);
+    this.currentGfx.fillRect(STRIP_X + STRIP_W, startY + 1, 6, 1);
+    this.currentGfx.fillStyle(COLOR_SUMMIT, 1);
+    this.currentGfx.fillRect(STRIP_X + STRIP_W, endY + 1, 6, 1);
+
     this.drawTierBands();
     this.drawSectorLabels();
+    this.drawEndpoints();
+  }
+
+  // 起点 / 终点 tags in the right margin. At 3px a row neither end can carry its
+  // own text, and the summit is the one thing a player must be able to find
+  // without counting rows.
+  private drawEndpoints(): void {
+    this.endpointLabels[0].setPosition(STRIP_X + STRIP_W + 10, CONTENT_TOP - 1);
+    this.endpointLabels[1].setPosition(STRIP_X + STRIP_W + 10, CONTENT_TOP + (SECTOR_COUNT - 1) * OVERVIEW_ROW_H - 5);
   }
 
   private drawTierBands(): void {

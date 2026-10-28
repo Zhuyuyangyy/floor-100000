@@ -128,7 +128,7 @@ B2 的世界结构与导航。
 | B3-01 | 材料确定性、废金属专属、死亡升级、不可获得物品、饮水经济、交易守恒、睡眠规则、静默存档失败（D9） | [`B3-01_TASK_MAPPING.md`](B3-01_TASK_MAPPING.md) |
 | B3-02 | **完整生存旅程闭环验证**：真实行走、无传送、无状态伪造、无时钟直写 | [`B3-02_JOURNEY_VERIFICATION.md`](B3-02_JOURNEY_VERIFICATION.md) |
 | B3-02.1 | 背包满常驻提示、楼层进入即记录访问（§4.2 / §4.3） | [`B3-02.1_FIX_REPORT.md`](B3-02.1_FIX_REPORT.md) |
-| B3-04 | 美术包切片与 UI 接入（物品图标 / 面板框 / 物品槽 / 结束横幅） | [`ARTPACK_INTEGRATION.md`](ARTPACK_INTEGRATION.md) |
+| B3-04 | 美术包切片与 UI 接入（物品图标 / 面板框 / 物品槽 / 结束横幅 / 家具） | [`ARTPACK_INTEGRATION.md`](ARTPACK_INTEGRATION.md) |
 
 ### 本轮遗留发现（不阻断旅程，待人工定夺）
 

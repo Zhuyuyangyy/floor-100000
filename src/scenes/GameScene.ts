@@ -395,21 +395,18 @@ export class GameScene extends Phaser.Scene {
   private buildContainers(): void {
     for (const c of this.floorView.containers) {
       const y = FLOOR_HEIGHT - 64;
-      const label = this.add.text(c.x, y - 26, c.label, { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
       const key = containerTextureKey(c.id);
-      // Texture where a matching asset exists, Graphics box otherwise — never a
-      // lookalike. The interaction box is unchanged either way: hit detection
-      // still goes through c.x and INTERACT_DISTANCE.
-      const box: Phaser.GameObjects.Graphics | Phaser.GameObjects.Image = key
-        ? this.add.image(c.x, y - 4, key).setOrigin(0.5, 1)
-        : this.add.graphics();
-      if (!key) {
-        const g = box as Phaser.GameObjects.Graphics;
-        g.fillStyle(0x4a3a2a, 1);
-        g.fillRect(c.x - 14, y - 16, 28, 32);
-        g.lineStyle(2, 0xf4b66a, 1);
-        g.strokeRect(c.x - 14, y - 16, 28, 32);
-      }
+      // Every container has art now, so the Graphics fallback is gone: a missing
+      // key would be an invisible container, not a plain one. The interaction box
+      // is unchanged either way — hit detection still goes through c.x and
+      // INTERACT_DISTANCE.
+      const box = this.add.image(c.x, y - 4, key ?? '').setOrigin(0.5, 1);
+      // The props are ~80px tall now rather than 16-32, so the label has to sit
+      // above the prop instead of at a fixed offset from the floor line — at the
+      // old spot it would be printed straight across the middle of the crate.
+      const label = this.add
+        .text(c.x, y - 4 - box.displayHeight - 8, c.label, { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' })
+        .setOrigin(0.5);
       this.containerObjs.set(c.id, { box, label });
       this.floorObjects.push(box, label);
       this.setContainerEmptyVisual(c.id, c.items.length === 0);
@@ -445,9 +442,8 @@ export class GameScene extends Phaser.Scene {
 
   private drawBed(): void {
     const y = FLOOR_HEIGHT - 64;
-    // furn_bed is 32x16; origin (0.5, 1) puts its base on the floor line.
     const bed = this.add.image(BED_X, y + 4, 'furn_bed').setOrigin(0.5, 1);
-    const bedLabel = this.add.text(BED_X, y - 24, '床（睡觉）', { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
+    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
     this.floorObjects.push(bed, bedLabel);
   }
 
@@ -609,9 +605,8 @@ export class GameScene extends Phaser.Scene {
 
   private drawWorkbench(): void {
     const y = FLOOR_HEIGHT - 64;
-    // furn_workbench is 32x16; origin (0.5, 1) puts its base on the floor line.
     const bench = this.add.image(CRAFT_X, y + 4, 'furn_workbench').setOrigin(0.5, 1);
-    const benchLabel = this.add.text(CRAFT_X, y - 26, '工作台', { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
+    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
     this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
     this.floorObjects.push(bench, benchLabel, this.upgradeBoard);
     this.refreshUpgradeBoard();

@@ -109,15 +109,17 @@
 
 - 人物（16×24）：`player` `npc_alin` `npc_xiaozhou` `wanderer`
 - 地块（16×16）：`tile_wall` `tile_floor` `tile_door` `tile_window` `tile_stairs_up` `tile_stairs_down`
-- 家具：`furn_bed`(32×16) `furn_cabinet` `furn_crate` `furn_workbench`(32×16) `furn_watertank` `furn_fusebox` `furn_shelf`
 - `blank`（1×1 全透明）：图标槽的占位贴图。**不能**用 `add.image(x, y, '')` 建图标槽——Phaser 4 里这样建出来的对象即使之后 `setTexture()` 换成真贴图也永远不会渲染。
-- **15 个物品图标不再是程序化绘制**，改为从美术包加载（见 §5.2）。映射在 `src/render/artpack.ts` 的 `ITEM_ICON_FILES`，是 `Record<ItemId, string>`，漏一个编译报错；`src/tests/itemIcons.test.ts` 另外校验每个文件真实存在且是 16×16。
+- **物品图标和家具贴图不再是程序化绘制**，改为从美术包加载（见 §5.2）。
+
+> `src/tests/textureKeys.test.ts` 扫源码里所有贴图键，和「烘焙的 + 加载的」取差集。Phaser 对不存在的键是静默回退成绿色占位框，这个测试是唯一的防线。
 
 ### 5.2 美术包素材（`public/assets/`，由 `tools/build-artpack.mjs` 从设计图切片生成）
 
 | 位置 | 内容 |
 |---|---|
 | `assets/artpack/item-<ItemId>.png` | 15 个物品图标，16×16（源图 ~250px，用面积平均降采样，最近邻会只取十五分之一变成噪点） |
+| `assets/artpack/furn-<key>.png` | 9 个家具贴图，统一 80px 高（原生 100–220px 会超出墙面可用高度，且高低不齐像贴纸） |
 | `assets/ui/frame-<green|yellow>-<tl/tr/bl/br/top/bottom/left/right>.png` | 面板框的 8 块拼图 |
 | `assets/ui/slot.png` | 背包物品槽框，22×22 |
 | `assets/artpack/banner-win.png` `banner-lose.png` | 结束画面的成功/失败横幅 |
@@ -139,7 +141,7 @@
 
 | 层 | 文件数 | 用例数 |
 |---|---|---|
-| 单元（`src/tests/`） | 22 | **268** |
+| 单元（`src/tests/`） | 23 | **276** |
 | E2E（`e2e/`） | 15 | **54** |
 
 关键测试文件：
@@ -148,6 +150,8 @@
 - `tower.test.ts`（17）— 阶层/区段/通行判定
 - `save.test.ts`（31）— 存档校验与兼容
 - `itemIcons.test.ts`（9）— 图标键恒等 + 美术包每个图标文件存在且为 16×16 + 无孤儿文件
+- `furniture.test.ts`（8）— 容器→家具全表覆盖（无缺口）+ 每个家具文件存在
+- `textureKeys.test.ts`（5）— 扫源码所有贴图键，防静默回退成绿色占位框
 - `panels.test.ts`（4）— 面板框/填充深度必须低于所有面板内容（防图标被静默吞掉）
 - `survivalLoop.spec.ts`（4）— 真实浏览器走遍五层：搜集→建造→交易守恒→睡觉→夜色三档
 - `tower.spec.ts`（10）— 地图导航 / 高亮 / 禁传送 / 状态保留
@@ -172,7 +176,7 @@
 | `batteryState` | 起始手电标记 `low`，无任何读取点（电池永不消耗） |
 | 第 4 层描述「漆黑区域」 | 未实现按楼层黑暗，仅区分宿舍/非宿舍 |
 | B3-02 完整章节试玩 | ✅ 已完成并验收（`docs/B3-02_JOURNEY_VERIFICATION.md`） |
-| 美术包中其余素材（角色 / 建筑 / 怪物 / 家具） | 已切片到 `F:/new/sliced/`，尚未接入游戏。家具映射最值得做：宿舍与容器现在仍是程序化贴图 |
+| 美术包中其余素材（角色 / 建筑 / 怪物） | 已切片到 `F:/new/sliced/`，尚未接入游戏。角色最值得做：玩家和两个 NPC 现在还是 16×24 程序化剪影 |
 
 ---
 

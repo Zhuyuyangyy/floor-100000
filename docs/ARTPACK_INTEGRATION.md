@@ -120,7 +120,11 @@
 | `tools/build-artpack.mjs` | **新增** 从切片生成运行期资产 |
 | `src/render/artpack.ts` | **新增** `ITEM_ICON_FILES` 显式映射 + 贴图键常量 |
 | `src/render/panels.ts` | 面板框改为 8 块 Image；`PANEL_DEPTH` / 偏移量 / `applyPanelDepth` |
-| `src/render/pixelArt.ts` | 删除 15 个死掉的手绘图标抽屉（-266 行）；新增 `blank` 占位贴图 |
+| `src/render/pixelArt.ts` | 删除 15 个死掉的手绘图标抽屉 + 7 个家具抽屉（656→219 行）；新增 `blank` 占位贴图 |
+| `src/render/furniture.ts` | 键表从 7 个扩到 9 个（木箱/铁箱分开、新增餐台），不再有 null 缺口 |
+| `src/render/corridors.ts` | 旧 `furn_crate` 键改为 `furn_crate_wood`；箱堆间距从贴图取实际高度 |
+| `src/tests/furniture.test.ts` | 改为断言全表覆盖 + 每个家具文件真实存在 |
+| `src/tests/textureKeys.test.ts` | **新增** 扫源码所有贴图键，防静默绿框 |
 | `src/render/itemIcons.ts` | 注释更新（图标改为从美术包加载） |
 | `src/scenes/BootScene.ts` | 加载美术包资产 |
 | `src/scenes/GameScene.ts` | 三个图标槽改用 `blank`；背包加槽框；面板深度改用常量 |
@@ -133,8 +137,44 @@
 
 ---
 
-## 7. 下一步（未做）
+## 7. 家具接入（第二轮）
 
-家具是最值得接的一批：`F:/new/sliced/furn/` 已切好 47 个，其中床/衣柜/工作台/净水设备/水箱/配电箱/木箱/货架都能直接对上游戏现有的 7 个 `furn_*` 键。但源图是 100–210px，游戏家具现在只有 16–32px，接入需要同时调整容器摆放与交互距离，属于世界表现而不只是 UI，单独一轮做。
+七个程序化家具贴图全部换成美术包道具，`pixelArt.ts` 因此从 656 行降到 219 行。
 
-角色（171）、建筑（62）、怪物（63）同理。
+| 容器 | 源切片 | 说明 |
+|---|---|---|
+| `furn_bed` | furn-00 | 床 |
+| `furn_cabinet` | furn-03 | 衣柜（储物柜） |
+| `furn_crate_wood` | furn-25 | 木箱 |
+| `furn_crate_metal` | furn-26 | 铁箱 |
+| `furn_workbench` | furn-09 | 工作台 |
+| `furn_watertank` | furn-12 | 储水罐 |
+| `furn_fusebox` | furn-14 | 配电箱 |
+| `furn_shelf` | furn-21 | 货架 |
+| `furn_counter` | furn-19 | 餐台（带凳子的食堂长桌） |
+
+**道具统一缩放到 80px 高**，不用原生 100–220px：228px 的衣柜会超出墙面可用高度（走廊代码里壁灯就站在 `floorY-150`），而且一个道具是另一个两倍高会像贴纸。80px 让每个道具都留在那个高度带内，细节也还认得出来。
+
+**木箱和铁箱不再共用一张贴图。** 它们本来共用一个 16×16 的程序化木箱，现在一个用木箱图一个用军用箱图——分清它们是第 3 层读得懂「这是个地方」的一半。
+
+**餐台不再是缺口。** 它原来没有对应贴图，靠一个 Graphics 方块兜底；现在有真图了，所以 `containerTextureKey` 不再返回 null，兜底分支整个删掉。漏一个键的后果从「看起来朴素」变成「完全看不见」，所以 `furniture.test.ts` 改成断言全表覆盖而不是允许缺口。
+
+### 接入时又踩到一个坑，值得一个测试
+
+`corridors.ts` 还在用旧的 `'furn_crate'` 键。键已经不存在了，而 **Phaser 对不存在的贴图键是静默回退成 `__MISSING` 绿色占位框，一声不响**——于是第 3 层货架旁站着两个绿色矩形，跑完全套测试没有一个失败。
+
+`src/tests/textureKeys.test.ts` 守着这条：用 Recording stub 跑一遍 `generateAllPixelArt` 拿到所有烘焙键，加上 BootScene 加载的键，再用正则扫源码里所有 `add.image / add.sprite / add.tileSprite / add.nineslice / setTexture / load.image / textures.get` 调用的贴图参数，两边必须一致。反方向也查：烘焙了但没人用的键是构建里的死重量。
+
+已实测有效：把 `furn_crate_wood` 改回 `furn_crate`，测试立刻报 `furn_crate (render\corridors.ts)`。
+
+顺带修了箱堆的堆叠间距——原来按 16px 瓦片写死，新箱子高 80px，改成从贴图取实际高度。
+
+---
+
+## 8. 验证
+
+家具接入后的全量结果见提交说明。浏览器实拍确认：第 1 层工作台是真工具墙；第 3 层木箱与铁箱分明、箱堆贴合无缝隙、货架旁无绿色占位框。
+
+## 9. 下一步（未做）
+
+角色（171）、建筑（62）、怪物（63）三个切片集还没接入。角色最值得做——玩家和两个 NPC 现在还是 16×24 的程序化剪影，而 `03_主角与NPC角色组` 里 171 个切片应该正好覆盖。建筑和怪物属于世界填充，可以等 B4。

@@ -112,10 +112,14 @@ function drawStorage(ctx: CorridorContext): void {
   const shelfX = roomX + 58;
   ctx.objects.push(ctx.scene.add.image(shelfX, floorY, 'furn_shelf').setOrigin(0.5, 1));
 
-  // Crate stack beside it, height varying per room.
+  // Crate stack beside it, height varying per room. The crates are 80px tall now
+  // (the art pack's props are scaled to a common standing height), so the stack
+  // pitch has to come from the texture rather than the old 16px tile — stacking
+  // at 16px would leave the crates floating apart with gaps between them.
   const stack = 2 + variant(ctx.floor, room, 2);
+  const crateH = ctx.scene.textures.get('furn_crate_wood').getSourceImage().height;
   for (let i = 0; i < stack; i++) {
-    ctx.objects.push(ctx.scene.add.image(roomX + 100, floorY - i * 16, 'furn_crate').setOrigin(0.5, 1));
+    ctx.objects.push(ctx.scene.add.image(roomX + 100, floorY - i * crateH, 'furn_crate_wood').setOrigin(0.5, 1));
   }
 
   // One crate on its side, as if someone left in a hurry.

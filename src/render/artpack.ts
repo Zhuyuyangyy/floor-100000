@@ -1,3 +1,4 @@
+import type { FurnitureKey } from './furniture';
 import type { ItemId } from '../core/gameTypes';
 
 // Which file in public/assets/artpack holds each item's icon.
@@ -30,3 +31,22 @@ export const ITEM_ICON_FILES: Record<ItemId, string> = {
 export const ART_SLOT_KEY = 'ui-slot';
 export const ART_BANNER_WIN_KEY = 'art-banner-win';
 export const ART_BANNER_LOSE_KEY = 'art-banner-lose';
+
+// Which file holds each furniture texture. The seven procedural drawers in
+// pixelArt.ts used to own these; they are gone now, so this is the only list.
+//
+// Every prop is scaled to a common standing height by tools/build-artpack.mjs
+// rather than used at its native 100-220px — a 228px wardrobe would run off the
+// top of a wall whose usable band is ~150px, and a scene where one prop is twice
+// the height of the next reads as pasted stickers.
+export const FURNITURE_FILES: Record<FurnitureKey, string> = {
+  furn_bed: 'furn-bed.png',
+  furn_cabinet: 'furn-cabinet.png',
+  furn_crate_wood: 'furn-crate_wood.png',
+  furn_crate_metal: 'furn-crate_metal.png',
+  furn_workbench: 'furn-workbench.png',
+  furn_watertank: 'furn-watertank.png',
+  furn_fusebox: 'furn-fusebox.png',
+  furn_shelf: 'furn-shelf.png',
+  furn_counter: 'furn-counter.png',
+};

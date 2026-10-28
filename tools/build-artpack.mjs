@@ -35,12 +35,12 @@ const ITEM_IDS = [
 ];
 const ICON_SIZE = 16;
 
-function boxDownscale(img, size) {
-  const out = Buffer.alloc(size * size * 4);
-  const bw = img.width / size;
-  const bh = img.height / size;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
+function boxDownscale(img, outW, outH) {
+  const out = Buffer.alloc(outW * outH * 4);
+  const bw = img.width / outW;
+  const bh = img.height / outH;
+  for (let y = 0; y < outH; y++) {
+    for (let x = 0; x < outW; x++) {
       let r = 0;
       let g = 0;
       let b = 0;
@@ -58,7 +58,7 @@ function boxDownscale(img, size) {
           n++;
         }
       }
-      const d = (y * size + x) * 4;
+      const d = (y * outW + x) * 4;
       out[d] = Math.round(r / n);
       out[d + 1] = Math.round(g / n);
       out[d + 2] = Math.round(b / n);
@@ -67,13 +67,13 @@ function boxDownscale(img, size) {
       out[d + 3] = a / n > 128 ? 255 : 0;
     }
   }
-  return { width: size, height: size, channels: 4, pixels: out };
+  return { width: outW, height: outH, channels: 4, pixels: out };
 }
 
 const iconPreviews = [];
 ITEM_IDS.forEach((id, i) => {
   const src = decodePng(readFileSync(join(SLICED, 'icons', `icon-${String(i).padStart(2, '0')}.png`)));
-  const small = boxDownscale(src, ICON_SIZE);
+  const small = boxDownscale(src, ICON_SIZE, ICON_SIZE);
   writeFileSync(join(OUT, 'artpack', `item-${id}.png`), encodePng(small));
   iconPreviews.push({ id, img: small });
 });
@@ -127,7 +127,7 @@ console.log(`panel frame: ${PW}x${PH} -> 8 pieces, slice ${SLICE}, edge ${EDGE}`
 
 // ── 3. inventory slot ──────────────────────────────────────────────────────
 const slotSrc = decodePng(readFileSync(join(SLICED, 'hud', 'hud-27.png')));
-const slot = boxDownscale(slotSrc, 22);
+const slot = boxDownscale(slotSrc, 22, 22);
 writeFileSync(join(OUT, 'ui', 'slot.png'), encodePng(slot));
 console.log(`slot: ${slot.width}x${slot.height}`);
 
@@ -137,6 +137,36 @@ for (const [id, file] of [['win', 'ui-54'], ['lose', 'ui-55']]) {
   const src = decodePng(readFileSync(join(SLICED, 'ui', `${file}.png`)));
   writeFileSync(join(OUT, 'artpack', `banner-${id}.png`), encodePng(crop(src, 0, 0, src.width, src.height)));
   console.log(`banner-${id}: ${src.width}x${src.height}`);
+}
+
+// ── 5. furniture ───────────────────────────────────────────────────────────
+// The seven procedural furniture textures are replaced by the art pack's props.
+// Each is scaled to a common standing height rather than left at its native
+// 100-220px: a 228px wardrobe against a wall whose usable band is ~150px would
+// run off the top, and a scene where one prop is twice the height of the next
+// reads as pasted stickers. 80px keeps every prop inside the band the corridor
+// code already uses for its own props (a wall lamp stands at floorY-150) while
+// leaving the detail legible.
+const FURNITURE_HEIGHT = 80;
+const FURNITURE = {
+  bed: 0,
+  cabinet: 3,
+  crate_wood: 25,
+  crate_metal: 26,
+  workbench: 9,
+  watertank: 12,
+  fusebox: 14,
+  shelf: 21,
+  counter: 19,
+};
+mkdirSync(join(OUT, 'artpack'), { recursive: true });
+for (const [key, id] of Object.entries(FURNITURE)) {
+  const src = decodePng(readFileSync(join(SLICED, 'furn', `furn-${String(id).padStart(2, '0')}.png`)));
+  const h = FURNITURE_HEIGHT;
+  const w = Math.max(1, Math.round((src.width * h) / src.height));
+  const scaled = boxDownscale(src, w, h);
+  writeFileSync(join(OUT, 'artpack', `furn-${key}.png`), encodePng(scaled));
+  console.log(`furn-${key}: ${src.width}x${src.height} -> ${w}x${h}`);
 }
 
 // ── preview sheet ──────────────────────────────────────────────────────────

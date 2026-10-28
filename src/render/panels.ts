@@ -93,21 +93,22 @@ export function buildPanel(
 ): PanelObject[] {
   const left = cx - w / 2;
   const top = cy - h / 2;
-  const key = (part: string) => `ui-frame-${accent}-${part}`;
 
   const fill = scene.add.rectangle(cx, cy, w, h, PANEL_FILL, PANEL_FILL_ALPHA).setDepth(depth + PANEL_FILL_OFFSET);
 
   // Corners sit at their natural size; edges stretch to fill the gap between
-  // them. Origin (0,0) everywhere so each piece is placed by its top-left.
+  // them. Origin (0,0) everywhere so each piece is placed by its top-left. The
+  // keys are spelled out rather than built by a helper: a helper's calls read
+  // like texture lookups, which defeats the source scan in textureKeys.test.ts.
   const frame: Phaser.GameObjects.Image[] = [
-    scene.add.image(left, top, key('tl')).setOrigin(0, 0),
-    scene.add.image(left + w - PANEL_SLICE, top, key('tr')).setOrigin(0, 0),
-    scene.add.image(left, top + h - PANEL_SLICE, key('bl')).setOrigin(0, 0),
-    scene.add.image(left + w - PANEL_SLICE, top + h - PANEL_SLICE, key('br')).setOrigin(0, 0),
-    scene.add.image(left + PANEL_SLICE, top, key('top')).setOrigin(0, 0).setDisplaySize(w - PANEL_SLICE * 2, PANEL_SLICE),
-    scene.add.image(left + PANEL_SLICE, top + h - PANEL_SLICE, key('bottom')).setOrigin(0, 0).setDisplaySize(w - PANEL_SLICE * 2, PANEL_SLICE),
-    scene.add.image(left, top + PANEL_SLICE, key('left')).setOrigin(0, 0).setDisplaySize(PANEL_SLICE, h - PANEL_SLICE * 2),
-    scene.add.image(left + w - PANEL_SLICE, top + PANEL_SLICE, key('right')).setOrigin(0, 0).setDisplaySize(PANEL_SLICE, h - PANEL_SLICE * 2),
+    scene.add.image(left, top, `ui-frame-${accent}-tl`).setOrigin(0, 0),
+    scene.add.image(left + w - PANEL_SLICE, top, `ui-frame-${accent}-tr`).setOrigin(0, 0),
+    scene.add.image(left, top + h - PANEL_SLICE, `ui-frame-${accent}-bl`).setOrigin(0, 0),
+    scene.add.image(left + w - PANEL_SLICE, top + h - PANEL_SLICE, `ui-frame-${accent}-br`).setOrigin(0, 0),
+    scene.add.image(left + PANEL_SLICE, top, `ui-frame-${accent}-top`).setOrigin(0, 0).setDisplaySize(w - PANEL_SLICE * 2, PANEL_SLICE),
+    scene.add.image(left + PANEL_SLICE, top + h - PANEL_SLICE, `ui-frame-${accent}-bottom`).setOrigin(0, 0).setDisplaySize(w - PANEL_SLICE * 2, PANEL_SLICE),
+    scene.add.image(left, top + PANEL_SLICE, `ui-frame-${accent}-left`).setOrigin(0, 0).setDisplaySize(PANEL_SLICE, h - PANEL_SLICE * 2),
+    scene.add.image(left + w - PANEL_SLICE, top + PANEL_SLICE, `ui-frame-${accent}-right`).setOrigin(0, 0).setDisplaySize(PANEL_SLICE, h - PANEL_SLICE * 2),
   ];
   for (const o of frame) o.setDepth(depth + PANEL_FRAME_OFFSET);
 

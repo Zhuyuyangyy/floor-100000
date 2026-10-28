@@ -58,6 +58,21 @@ export const PANEL_DEPTH = {
   tower: { detail: 200 },
 } as const;
 
+// Depth for the HUD's standing feedback: the flash, the bag-full warning and the
+// hint line. All three live in the top band of the screen, which is exactly where
+// every panel in PANEL_DEPTH.game is drawn, so they have to clear the deepest one
+// or a panel's opaque fill swallows them.
+//
+// They did not. feedbackText sat at 120 while pause sits at 230, so the B3-03
+// action costs and the B3-05.2 purify count were off-screen for the whole time the
+// player was acting, and bagFullWarning's "the warning survives opening the
+// inventory" passed on a GameObject.visible flag rather than on pixels (B3-05 §6).
+//
+// panels.test.ts asserts this against PANEL_DEPTH, because the failure is silent
+// in both directions: nothing errors, and a test that reads the object instead of
+// the canvas still goes green.
+export const HUD_FEEDBACK_DEPTH = 300;
+
 // The uniform pass every panel's object list goes through: park it in screen
 // space at `depth`. The frame and fill are skipped, because buildPanel already
 // put them just below it.

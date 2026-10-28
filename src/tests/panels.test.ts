@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PANEL_DEPTH, PANEL_FILL_OFFSET, PANEL_FRAME_OFFSET } from '../render/panels';
+import { HUD_FEEDBACK_DEPTH, PANEL_DEPTH, PANEL_FILL_OFFSET, PANEL_FRAME_OFFSET } from '../render/panels';
 
 // The panels inside one scene are drawn at different content depths so a modal
 // lands above whatever is already open, and each panel's frame and fill sit a
@@ -31,12 +31,26 @@ describe('panel depth ordering', () => {
     }
   });
 
-  it('still leaves the frame and fill above the HUD', () => {
-    // Below 120 the HUD (clock, stat bars, feedback line, control hint) would
-    // bleed through the panel's border.
+  it('still leaves the frame and fill above the static HUD', () => {
+    // Below 101 the static HUD (clock, stat bars, their labels) would bleed
+    // through the panel's border. Only the static HUD: the feedback line and the
+    // hint sit above the panels on purpose — see the next test.
     for (const [scene, panels] of Object.entries(PANEL_DEPTH)) {
-      expect(Math.min(...Object.values(panels)) + PANEL_FILL_OFFSET, `${scene} fill`).toBeGreaterThan(120);
+      expect(Math.min(...Object.values(panels)) + PANEL_FILL_OFFSET, `${scene} fill`).toBeGreaterThan(101);
     }
+  });
+
+  it('puts the HUD feedback above every panel it can be hidden behind', () => {
+    // B3-05 §6: the flash, the bag-full warning and the hint line all sit in the
+    // top band, which is exactly where every game panel is drawn. They sat at
+    // 100-120, under all four panels, so the B3-03 action costs and the B3-05.2
+    // purify count were off-screen for the whole time the player was acting — and
+    // bagFullWarning.spec.ts's "the warning survives opening the inventory" still
+    // passed, because it reads GameObject.visible rather than the canvas.
+    //
+    // e2e/hudFeedback.spec.ts is the test that actually proves the rendering; this
+    // one keeps the constant honest so a new panel cannot quietly swallow them.
+    expect(HUD_FEEDBACK_DEPTH).toBeGreaterThan(Math.max(...Object.values(PANEL_DEPTH.game)));
   });
 
   it('spreads the panels of one scene far enough apart to act as modals', () => {

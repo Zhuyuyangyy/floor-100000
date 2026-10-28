@@ -99,9 +99,9 @@ this.flash(`净化了 ${result.converted} 瓶净水（-${ACTION_COSTS.craft} 分
 | 命令 | 结果 |
 |---|---|
 | `npx tsc --noEmit` | 通过 |
-| `npx vitest run` | 23 文件 / **290 passed**（原 286：新增 5、删除 1） |
-| `npx playwright test --workers=1` | **57 passed**（7.5m，原 57 passed + 2 failed 修复后同数） |
-| `npm run build` | 通过，1,453.33 kB（gzip 383.55 kB） |
+| `npx vitest run` | 23 文件 / **291 passed**（原 286：+6 −1） |
+| `npx playwright test --workers=1` | **59 passed**（7.5m，原 57 + 2 条新增 HUD 测试） |
+| `npm run build` | 通过，1,453.34 kB（gzip 383.56 kB） |
 
 **未改变玩法数值**：两个修复都只改「什么时候算成功」和「文案报什么数」，没有动任何掉落、时耗、衰减或配方。
 
@@ -125,9 +125,14 @@ this.flash(`净化了 ${result.converted} 瓶净水（-${ACTION_COSTS.craft} 分
 | 文件 | 改动 |
 |---|---|
 | `src/systems/InventorySystem.ts` | `useConsumable` 满值拒绝；新增导出 `STAT_LABEL` |
-| `src/scenes/GameScene.ts` | 删本地 `STAT_LABEL` 改为 import；净化 flash 用 `result.converted` |
+| `src/scenes/GameScene.ts` | 删本地 `STAT_LABEL` 改为 import；净化 flash 用 `result.converted`；三个 HUD 反馈对象改用 `HUD_FEEDBACK_DEPTH`；使用道具的 flash 取整 |
+| `src/render/panels.ts` | 新增导出 `HUD_FEEDBACK_DEPTH = 300` |
 | `src/tests/inventorySystem.test.ts` | +5 条测试，删 1 条过时边界测试 |
+| `src/tests/panels.test.ts` | +1 条 HUD/面板深度不变量；修正过时注释 |
 | `e2e/crafting.spec.ts` | 净化测试加 flash 数量断言 + 截图 |
+| `e2e/bagFullWarning.spec.ts` | 腾格子改走工作台制作；新增喝满不腾格子的回归断言 |
+| `e2e/survivalJourney.spec.ts` | 三瓶水分散到路上喝 |
+| `e2e/hudFeedback.spec.ts` | **新增**：像素差分证明 flash 压在面板上 + 三对象深度不变量 + flash 无小数点 |
 | `docs/M1_PLAYTEST.md` | §5 两个 bug 标记已修 |
 | `docs/ROADMAP.md`、`docs/03_TASKS.md` | B3-05.1 / B3-05.2 标记已修 |
 
@@ -139,24 +144,39 @@ M1 试玩提出的另外三项仍未处理，均不阻断：§4.5 第 2 层货�
 
 ---
 
-## 6. 顺带发现（未修，需项目负责人定夺）：HUD 反馈被面板盖住
+## 6. 顺带发现并修掉：HUD 反馈被面板盖住
 
 给 B3-05.2 拍证据截图时发现：**制作面板开着的时候，flash 根本不在画面上**。
 
-证据：[`b3-05-2-purify-flash.png`](../e2e/screenshots/b3-05-2-purify-flash.png)。flash 的文案是「净化了 2 瓶净水（-30 分钟）」（测试读到了 `feedbackText.text`，断言通过），但截图里制作面板上方什么都没有。
+证据（修复前）：[`b3-05-2-purify-flash.png`](../e2e/screenshots/b3-05-2-purify-flash.png)。flash 的文案是「净化了 2 瓶净水（-30 分钟）」（测试读到了 `feedbackText.text`，断言通过），但截图里制作面板上方什么都没有。
 
-已知的结构性原因：`feedbackText` 深度 120，而 `PANEL_DEPTH.game` 最深是 `pause: 230`。制作面板 460×300 居中，跨度 y=30..330，flash 在 y=60——正好在面板矩形内部。
+结构性原因：`feedbackText` 深度 120，而 `PANEL_DEPTH.game` 最深是 `pause: 230`。三个反馈对象全在面板之下——
 
-**为什么这条要紧**：它让三个「已验证」的反馈实际不可见——
-
-| 反馈 | 深度 | 被谁盖 |
+| 反馈 | 原深度 | 去处 |
 |---|---|---|
-| flash（行动时耗、获得物、制作、交易、净化） | 120 | 所有面板 |
-| 背包已满常驻警告 | 120 | 所有面板 |
-| hint 行（按 E 打开 X / 上楼 / 睡觉） | 100 | 所有面板 |
+| flash（行动时耗、获得物、制作、交易、净化） | 120 | `HUD_FEEDBACK_DEPTH` |
+| 背包已满常驻警告 | 120 | `HUD_FEEDBACK_DEPTH` |
+| hint 行（按 E 打开 X / 上楼 / 睡觉） | 100 | `HUD_FEEDBACK_DEPTH` |
 
-而且 `bagFullWarning.spec.ts:155` 有一条断言是「打开背包后警告仍在」——它**通过**，但 `hasVisibleText` 读的是 GameObject 的 `visible` 属性，不是渲染结果。B3-02.1 的代码注释还专门写了「满包在背包面板开着时最要紧，那正是玩家找东西花的时候」，而那一刻它恰好被面板盖住。这正是 `CLAUDE.md` 质量门槛里「测试通过不等于玩法成立」的原型案例。
+**为什么这条要紧**：它让三个「已验证」的反馈实际不可见，而且 `bagFullWarning.spec.ts:155` 有一条断言是「打开背包后警告仍在」——它**通过**，但 `hasVisibleText` 读的是 GameObject 的 `visible` 属性，不是渲染结果。B3-02.1 的代码注释还专门写了「满包在背包面板开着时最要紧，那正是玩家找东西花的时候」，而那一刻它恰好被面板盖住。这正是 `CLAUDE.md` 质量门槛里「测试通过不等于玩法成立」的原型案例。
 
-一个反证让我没直接下手：同一张截图里，深度 100/101 的时钟和状态条是可见的（时钟在 y=12，制造面板顶部在 y=30，所以它在面板上方；但状态条 y=40..85 应该被盖住却仍可见）。**Phaser 4 的合成顺序不完全遵循 depth**（`ARTPACK_INTEGRATION.md` §4.2 已经为 NineSlice 记过一条同类陷阱），所以我没有可靠的静态推理，只有「flash 不在画面上」这一条实测。
+### 修法
 
-**最小修复提案（未实施）**：把 `feedbackText` / `bagFullText` / `hintText` 的深度抬到 300 以上（高于最深的 `pause: 230`），不动任何布局。但这是 HUD 层次决策，属于项目负责人主导的 UI 范围，所以只报告不动手。要我做的话说一声。
+`src/render/panels.ts` 新增 `HUD_FEEDBACK_DEPTH = 300`，与 `PANEL_DEPTH` 放在一起——两者是耦合的，一个抬高另一个就必须知道。三个对象改用该常数，**布局一点没动**。静态 HUD（时钟、状态条）留在 100/101，因为 `panels.test.ts` 里「面板填充要在 HUD 之上」那条保护的是它们，目的是 HUD 不穿透面板边框。
+
+### 测试
+
+新增 `e2e/hudFeedback.spec.ts`，关键是**用像素而不是对象属性**证明：
+
+1. `the flash renders on top of an open panel` — 同一块画布区域，flash 亮着拍一张、过期后拍一张，断言两张**不相等**。修复前两次截图字节完全相同（`Buffer.equals` 为 true），这就是遮挡的实证；修复后不同。这条同时守住 B3-03 的行动时耗和 B3-05.2 的净化瓶数——它们本来就「已验证」，只是玩家看不见。
+2. `all three HUD feedback objects clear the deepest panel` — 读三个对象的 depth，断言彼此相等且大于 230（最深的 `pause`）。像素证明只覆盖 flash，这条让三个都在覆盖范围内。
+
+`panels.test.ts` 同步加了一条同向的不变量：`HUD_FEEDBACK_DEPTH` 必须大于 `PANEL_DEPTH.game` 的每一项，并修正了原测试的注释（它写「HUD 在 120 以下」，对反馈线已不成立）。
+
+### 6.1 拍照时又带出第三个 bug：flash 小数满天飞
+
+修复后的第一张截图显示的是 **「使用 净水 · 水分 +20.114303979999917」**。`onUse` 直接把 `result.amount`（`stat - before`，一个浮点）拼进字符串。已改为 `Math.round(...)`。
+
+同一条测试加了两行断言守住它：flash 必须含「水分」且**不含小数点**。这个通道里没有任何文案理应带小数点——掉落数量和分钟成本都是整数——所以小数点的出现就是 bug。修复后截图是干净的「水分 +20」。
+
+**为什么这三个 bug 会藏这么久**：它们全都在「玩家正在操作的那一刻」发生，而那一刻之前唯一的验证方式是读对象属性。读属性永远为绿，看画布才红。

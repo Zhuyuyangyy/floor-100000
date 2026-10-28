@@ -25,7 +25,7 @@ import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES,
 import { ensureNightEvent } from '../systems/EventSystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
-import { applyPanelDepth, buildPanel, createMarker, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
+import { applyPanelDepth, buildPanel, createMarker, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
@@ -466,7 +466,7 @@ export class GameScene extends Phaser.Scene {
     // FLOOR_WIDTH/2 (=640) sat half outside the 640px canvas.
     this.feedbackText = this.add
       .text(DESIGN_WIDTH / 2, 60, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#f4b66a', backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } })
-      .setOrigin(0.5).setScrollFactor(0).setDepth(120);
+      .setOrigin(0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // Red rather than amber: this is a standing blocker, not news. It sits below
     // the flash so both can be on screen at once without overlapping.
@@ -477,11 +477,11 @@ export class GameScene extends Phaser.Scene {
         `背包已满 · 使用、制作或交易腾出格子，否则搜刮会留在原处`,
         { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#e8907c', backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } },
       )
-      .setOrigin(0.5).setScrollFactor(0).setDepth(120).setVisible(false);
+      .setOrigin(0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
 
     this.hintText = this.add
       .text(12, DESIGN_HEIGHT - 22, 'A/D 或 ←/→ 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
-      .setScrollFactor(0).setDepth(100);
+      .setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
   }
 
   private refreshClock(): void {
@@ -1085,7 +1085,7 @@ export class GameScene extends Phaser.Scene {
         saveToStorage(getGame());
         this.refreshInventory();
         this.refreshStats();
-        this.flash(`使用 ${getItem(stack.itemId).displayName} · ${STAT_LABEL[result.stat!]} +${result.amount}`);
+        this.flash(`使用 ${getItem(stack.itemId).displayName} · ${STAT_LABEL[result.stat!]} +${Math.round(result.amount!)}`);
       } else {
         this.flash(result.reason ?? '无法使用');
       }

@@ -93,7 +93,18 @@ export const STAT_MAX: Record<StatKey, number> = {
   energy: GAME_CONFIG.player.energyMax,
 };
 
+// Display names for the four stats, next to their maxima because both are stat
+// metadata and the refusal reason below has to name which stat is full.
+export const STAT_LABEL: Record<StatKey, string> = { hp: '生命', hunger: '饱食', thirst: '水分', energy: '精力' };
+
 // Uses one consumable, applying its clamped effect (never overflows a stat).
+//
+// Refuses outright when the target stat is already at max. Before this the item
+// was consumed anyway, so the M1 playtest's "top up before the walk" burned three
+// bottles for +20 thirst — 70 points, about 1.2 days of survival in a chapter
+// whose entire water margin is 0.7 days (B3-05.1). A partial clamp is still
+// allowed: 85 + 30 -> 100 wastes 10 points, but the player asked for it and the
+// flash reports the real gain, so only a wholly wasted item is refused.
 export function useConsumable(state: GameState, itemId: ItemId): UseResult {
   const item = getItem(itemId);
   if (item.category !== 'consumable' || !item.effect) {
@@ -105,6 +116,9 @@ export function useConsumable(state: GameState, itemId: ItemId): UseResult {
   const p = state.player;
   const max = STAT_MAX[item.effect.stat];
   const before = p[item.effect.stat];
+  if (before >= max) {
+    return { ok: false, reason: `${item.displayName}现在不需要（${STAT_LABEL[item.effect.stat]}已满）` };
+  }
   p[item.effect.stat] = Math.min(max, before + item.effect.amount);
   removeItem(state.player.inventory, itemId, 1);
   return {

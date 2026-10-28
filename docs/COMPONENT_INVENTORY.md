@@ -67,7 +67,7 @@
 | 时间与生存 | `src/systems/SurvivalSystem.ts` | `advanceTime` / `sleep` / `sleepNightMinutes` / `REST_METABOLISM` / `applyRestDecay` / `isLegacyVictory` / `deathCause` / `isNight` |
 | 楼层切换 | `src/systems/FloorSystem.ts` | `hasUpExit` / `hasDownExit` / `tryChangeFloor` / `currentInteractionZone` / `movePlayerX` |
 | 搜刮 | `src/systems/LootSystem.ts` | `getFloorView` / `lootContainer` / `lootGround` |
-| 背包 | `src/systems/InventorySystem.ts` | `addItem` / `removeItem` / `countItem` / `useConsumable` / `canFit` |
+| 背包 | `src/systems/InventorySystem.ts` | `addItem` / `removeItem` / `countItem` / `isBagFull` / `useConsumable` / `STAT_MAX` / `STAT_LABEL` |
 | 制作 | `src/systems/CraftingSystem.ts` | `canCraft` / `craft` / `hasUpgrade` / `purifyWater` / `nightOverlayAlpha` |
 | 交易 | `src/systems/TradeSystem.ts` | `trade` / `canFit` |
 | 夜间事件 | `src/systems/EventSystem.ts` | `ensureNightEvent` / `rollDayEvent` / `EVENT_FLOORS` |

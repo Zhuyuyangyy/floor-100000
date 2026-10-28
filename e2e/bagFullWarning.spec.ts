@@ -16,6 +16,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const UP_EXIT_X = 40;
 const DOWN_EXIT_X = 1240;
+const CRAFT_X = 480; // dorm workbench on floor 1
 // The standing warning, deliberately not the substring the 1.6s flash uses
 // ('背包已满，剩余留在容器') — otherwise a stale flash would satisfy this.
 const BAG_FULL = '否则搜刮会留在原处';
@@ -154,31 +155,52 @@ test.describe('B3-02.1 bag-full feedback', () => {
     await page.waitForTimeout(400);
     expect(await hasVisibleText(page, BAG_FULL)).toBe(true);
 
-    // Spending one consumable frees a slot, and the warning clears itself. The
-    // panel is still open, so this is the player using what they are looking at.
-    // Spending frees the slot — but only once a stack empties, so drinking one of
-    // three bottles is not enough. This is the player spending what they are
-    // looking at until the bag has room again.
+    // B3-05.1: drinking used to be the way out. Three presses emptied the stack,
+    // freed the slot and cleared the warning — which also meant a player could
+    // burn a day of water just to make room. At full thirst the bottle now stays
+    // in the bag, so that route is closed on purpose. How many of the three go
+    // down depends on how much thirst the walk cost, so this asserts only the
+    // invariant: the stack cannot be drained by mashing the key, so no slot frees
+    // and the warning stays up.
     for (let i = 0; i < 3; i++) {
       await page.keyboard.press('Enter'); // slot 0 is 净水 x3
       await page.waitForTimeout(260);
     }
-    const spent = await readState(page);
-    expect(await count(page, 'clean_water')).toBe(0);
-    expect(spent.player.inventory.slots.length).toBe(full.player.inventory.slots.length - 1);
+    const drank = await readState(page);
+    expect(await count(page, 'clean_water')).toBeGreaterThanOrEqual(1);
+    expect(drank.player.inventory.slots.length).toBe(full.player.inventory.slots.length);
+    expect(await hasVisibleText(page, BAG_FULL)).toBe(true);
     await page.keyboard.press('I');
-    await waitForFlag(page, BAG_FULL, false);
 
-    // And it is not a one-shot latch: filling the slot again brings it back.
-    // Floor 1's cabinet hands out a guaranteed bottle of water and the bottle
-    // just drank left its slot empty, so this is a deterministic refill — and it
-    // also fires the 1.6s "剩余留在容器" flash, which must not satisfy the marker
-    // above on its own.
+    // The route the game actually offers is the workbench: crafting spends whole
+    // stacks, which is what frees slots. The lamp's battery, wire and scrap are
+    // all in the bag, so walk home and build it.
     await takeStairs(page, 'down', 3);
     await takeStairs(page, 'down', 2);
     await takeStairs(page, 'down', 1);
-    await openContainer(page, 1, 'cabinet', 160);
+    await walkTo(page, CRAFT_X);
+    await page.keyboard.press('C');
+    await page.waitForTimeout(320);
+    await page.keyboard.press('Enter'); // 照明灯 is entry 0
+    await page.waitForTimeout(400);
+    await page.keyboard.press('C');
+    await page.waitForTimeout(200);
+
+    const spent = await readState(page);
+    expect(spent.player.homeUpgrades).toContain('lamp');
+    expect(spent.player.inventory.slots.length).toBeLessThan(full.player.inventory.slots.length);
+    await waitForFlag(page, BAG_FULL, false);
+
+    // And it is not a one-shot latch: filling the free slot again brings it back.
+    // The loose cloth on floor 3 (x=1120) was never walked over — the route took
+    // the up exit at x=40 — and it survived the descent because the bag was full
+    // when the player passed it. A guaranteed stack, so the refill is
+    // deterministic rather than a probability roll like floor 2's shelf.
+    await takeStairs(page, 'up', 2);
+    await takeStairs(page, 'up', 3);
+    await walkTo(page, 1120); // picked up on contact
     const refilled = await readState(page);
+    expect(await count(page, 'cloth')).toBeGreaterThanOrEqual(1);
     expect(refilled.player.inventory.slots.length).toBe(refilled.player.inventory.slotCount);
     await waitForFlag(page, BAG_FULL, true);
 

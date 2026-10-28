@@ -176,6 +176,33 @@ test('the purifier converts dirty water to clean water', async ({ page }) => {
     await page.waitForTimeout(120);
   }
   await page.keyboard.press('Enter');
+  // The flash lives for 1.6s, so read it before the state assertions — several
+  // round trips later it is gone.
+  await page.waitForTimeout(200);
+
+  // B3-05.2: the flash used to say 「净化了 1 瓶净水」 whatever the real count was,
+  // because the string was hardcoded while purifyWater() converted the whole carry
+  // and returned `converted`. A player who purified six bottles was told they got
+  // one, and would plan the day's water around the wrong number.
+  //
+  // NOTE: this asserts the message, not that the player can see it. The craft panel
+  // is open here and the flash does not render on top of it — see the occlusion
+  // finding in docs/B3-05_BUGFIX.md §5. Reading `text` off the object is not proof
+  // of visibility, which is the same trap `bagFullWarning.spec.ts` falls into.
+  const shown = await page.evaluate(() => {
+    const g = (window as unknown as {
+      __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean; y: number }> } } | null } };
+    }).__PHASER_GAME__;
+    for (const o of g?.scene.getScene('Game')?.children.list ?? []) {
+      if (o.type === 'Text' && o.visible && Math.abs(o.y - 60) < 2) return o.text ?? '';
+    }
+    return '';
+  });
+  expect(shown, 'the flash must name how many bottles were purified').toContain('2 瓶');
+  expect(shown).not.toContain('1 瓶');
+  // Evidence of the conversion itself (purifier built, 脏水 exhausted), not of the
+  // flash — which the open panel covers.
+  await page.screenshot({ path: 'e2e/screenshots/b3-05-2-purify-flash.png' });
 
   await page.waitForFunction(
     (before) => {
@@ -190,5 +217,6 @@ test('the purifier converts dirty water to clean water', async ({ page }) => {
   // B3-01: the purifier converts the whole carry, not one bottle, so both dirty
   // waters are gone and two clean ones arrived.
   expect(await count(page, 'clean_water')).toBe(cleanBefore + 2);
+
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });

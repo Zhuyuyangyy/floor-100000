@@ -100,24 +100,26 @@ test.describe('B3-02 full survival journey', () => {
     throw new Error(`could not open ${floor}/${id}`);
   }
 
-  // Drink the whole starting water ration through the real inventory panel.
+  // Drink one bottle through the real inventory panel.
   //
   // This is not test convenience — it is what the journey forces. Looting floors
   // 3, 4 and 5 yields twelve distinct item types, and the bag holds twelve slots,
-  // so a player who sets out with three bottles of water still in the bag loses
-  // the last container's loot to a silent overflow. Topping up before a long walk
-  // is also exactly what a survival player does, and it exercises the consumable
-  // path the loop depends on.
-  async function drinkStartingWater(page: Page): Promise<void> {
+  // so the route runs one stack from an overflow the whole way.
+  //
+  // B3-05.1 split the old single gulp into three calls. A capped stat used to
+  // consume the bottle anyway, so three presses at the start emptied the stack in
+  // one go; now the second and third are refused, and the ration can only be
+  // finished by spreading it across the walk — which is also what a player does.
+  // Draining the stack is what frees the slot the floor-3 cloth needs on the way
+  // home, so the calls sit at the start, after floor 3 and on floor 5.
+  async function drinkOneBottle(page: Page): Promise<void> {
+    if (await count(page, 'clean_water') < 1) return;
     await page.keyboard.press('I');
     await page.waitForTimeout(250);
-    for (let i = 0; i < 3; i++) {
-      await page.keyboard.press('Enter'); // slot 0 is 净水
-      await page.waitForTimeout(220);
-    }
+    await page.keyboard.press('Enter'); // 净水 is slot 0 for as long as any remain
+    await page.waitForTimeout(240);
     await page.keyboard.press('I'); // close
     await page.waitForTimeout(200);
-    expect(await count(page, 'clean_water')).toBe(0);
   }
 
   // Walk to a stairwell and take it. The floor change is the game's own logic.
@@ -163,8 +165,8 @@ test.describe('B3-02 full survival journey', () => {
     await page.screenshot({ path: 'e2e/screenshots/40-journey-1-wake.png' });
 
     // Top up before the walk, so the bag has room for what the tower holds.
-    await drinkStartingWater(page);
-    expect((await readState(page)).player.thirst).toBeGreaterThan(99); // capped, minus a frame
+    await drinkOneBottle(page);
+    expect((await readState(page)).player.thirst).toBeGreaterThan(95); // capped, minus a frame
 
     // ── 2. climb ────────────────────────────────────────────────────────
     await takeStairs(page, 'up', 2);
@@ -177,6 +179,8 @@ test.describe('B3-02 full survival journey', () => {
     await openContainer(page, 3, 'crate_wood', 480);
     expect(await count(page, 'wood')).toBe(2);
     expect(await count(page, 'tape')).toBe(1);
+    // Second bottle: thirst has decayed over the walk, so this one lands for real.
+    await drinkOneBottle(page);
     // The loose battery at x=160 is picked up by walking over it, on the way out.
     await takeStairs(page, 'up', 4);
     expect(await count(page, 'battery')).toBeGreaterThanOrEqual(1);
@@ -197,6 +201,10 @@ test.describe('B3-02 full survival journey', () => {
     const top = await readState(page);
     expect(top.currentFloor).toBe(5);
     expect(top.visitedFloors[5].openedContainers).toEqual(['counter']);
+    // Third and last bottle, which empties the stack and frees its slot — the slot
+    // the floor-3 cloth needs on the way home.
+    await drinkOneBottle(page);
+    expect(await count(page, 'clean_water')).toBe(0);
     await page.screenshot({ path: 'e2e/screenshots/44-journey-5-floor5.png' });
 
     // ── 3. come home ────────────────────────────────────────────────────

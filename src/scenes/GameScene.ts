@@ -19,7 +19,7 @@ import {
 } from '../core/constants';
 import { currentInteractionZone, floorName, hasDownExit, hasUpExit, movePlayerX, tryChangeFloor } from '../systems/FloorSystem';
 import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
-import { countItem, isBagFull, useConsumable } from '../systems/InventorySystem';
+import { countItem, isBagFull, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
 import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, isNight, sleep, spendTime } from '../systems/SurvivalSystem';
 import { ensureNightEvent } from '../systems/EventSystem';
@@ -33,9 +33,8 @@ import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
 import { trade } from '../systems/TradeSystem';
-import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId, StatKey } from '../core/gameTypes';
+import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId } from '../core/gameTypes';
 
-const STAT_LABEL: Record<StatKey, string> = { hp: '生命', hunger: '饱食', thirst: '水分', energy: '精力' };
 const INVENTORY_SLOTS = 12;
 // Row pitch for the inventory list: 20px fits a full-size 16x16 icon with a 2px
 // gap either side, and keeps every offset an integer (no scaling, no blur).
@@ -785,7 +784,11 @@ export class GameScene extends Phaser.Scene {
         this.refreshCraft();
         this.refreshInventory();
         playSfx('craft');
-        this.flash(`净化了 1 瓶净水（-${ACTION_COSTS.craft} 分钟）`);
+        // B3-05.2: this used to read 「净化了 1 瓶净水」 whatever the real count was,
+        // while purifyWater() converts the whole carry and reports it in
+        // `converted`. A player who purified six bottles was told they got one and
+        // would plan the day's water around the wrong number.
+        this.flash(`净化了 ${result.converted} 瓶净水（-${ACTION_COSTS.craft} 分钟）`);
         this.chargeTime(ACTION_COSTS.craft);
       } else {
         this.flash(result.reason);

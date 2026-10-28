@@ -107,14 +107,6 @@ describe('useConsumable', () => {
     expect(r.stat).toBe('hp');
   });
 
-  it('never overflows a stat (boundary)', () => {
-    const s = createNewGame(1);
-    s.player.thirst = 100;
-    const r = useConsumable(s, 'clean_water');
-    expect(s.player.thirst).toBe(100);
-    expect(r.amount).toBe(0);
-  });
-
   it('rejects non-consumables (failure path)', () => {
     const s = createNewGame(1);
     addItem(s.player.inventory, 'wood', 1);
@@ -126,5 +118,66 @@ describe('useConsumable', () => {
     const r = useConsumable(s, 'medkit');
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('没有');
+  });
+});
+
+// B3-05.1: a capped stat used to still consume the item. The M1 playtest drank
+// three bottles at 80 thirst and gained 20 points — the first bottle was clamped
+// from +30 to +10, the next two did nothing — burning 70 thirst points, about 1.2
+// days of survival in a chapter whose whole water margin is 0.7 days. The item
+// now stays in the bag when it would achieve nothing.
+describe('useConsumable refuses a wasted item (B3-05.1)', () => {
+  it('does not consume the item when the stat is already at max', () => {
+    const s = createNewGame(1);
+    s.player.thirst = 100;
+    const before = countItem(s.player.inventory, 'clean_water');
+    const r = useConsumable(s, 'clean_water');
+    expect(r.ok).toBe(false);
+    expect(r.amount).toBeUndefined();
+    expect(countItem(s.player.inventory, 'clean_water')).toBe(before);
+    expect(s.player.thirst).toBe(100);
+  });
+
+  it('names the stat, so the refusal reads as a reason rather than a dead key', () => {
+    const s = createNewGame(1);
+    addItem(s.player.inventory, 'medkit', 1);
+    s.player.hp = 100;
+    const r = useConsumable(s, 'medkit');
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('生命');
+    expect(r.reason).toContain('医疗包');
+  });
+
+  it('still consumes below max, even when the effect is only partly clamped', () => {
+    // 85 + 30 lands on 100, so 15 of the 30 is wasted. That is a real (if small)
+    // loss the player chose; only a wholly wasted item is refused.
+    const s = createNewGame(1);
+    s.player.thirst = 85;
+    const r = useConsumable(s, 'clean_water');
+    expect(r.ok).toBe(true);
+    expect(r.amount).toBe(15);
+    expect(countItem(s.player.inventory, 'clean_water')).toBe(2);
+  });
+
+  it('applies to every stat an item can restore, not just thirst', () => {
+    const s = createNewGame(1);
+    s.player.hunger = 100;
+    s.player.energy = 100;
+    addItem(s.player.inventory, 'ration_pack', 1);
+    const rations = countItem(s.player.inventory, 'ration_pack');
+    expect(useConsumable(s, 'ration_pack').ok).toBe(false);
+    expect(countItem(s.player.inventory, 'ration_pack')).toBe(rations);
+    expect(s.player.hunger).toBe(100);
+  });
+
+  it('leaves the other stats alone when it refuses', () => {
+    const s = createNewGame(1);
+    s.player.thirst = 100;
+    s.player.hunger = 40;
+    const before = { hunger: s.player.hunger, energy: s.player.energy, hp: s.player.hp };
+    useConsumable(s, 'clean_water');
+    expect(s.player.hunger).toBe(before.hunger);
+    expect(s.player.energy).toBe(before.energy);
+    expect(s.player.hp).toBe(before.hp);
   });
 });

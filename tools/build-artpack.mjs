@@ -147,7 +147,14 @@ for (const [id, file] of [['win', 'ui-54'], ['lose', 'ui-55']]) {
 // reads as pasted stickers. 80px keeps every prop inside the band the corridor
 // code already uses for its own props (a wall lamp stands at floorY-150) while
 // leaving the detail legible.
-const FURNITURE_HEIGHT = 80;
+// 56 rather than the original 80. 80 was chosen so a prop stayed inside the wall's
+// usable band and no prop was twice the height of the next, which was sound while
+// the player was a 16x24 silhouette — a prop was five times a person. Once the
+// characters became 32x48 (tools/build-characters.mjs) a crate was 66% taller than
+// the player and a door a third of the player's height, so the band that made 80
+// look deliberate now made it look wrong. 56 puts the tallest prop at 1.17x the
+// player: a large crate, not a wall. src/tests/sceneScale.test.ts holds the ratio.
+const FURNITURE_HEIGHT = 56;
 const FURNITURE = {
   bed: 0,
   cabinet: 3,

@@ -135,6 +135,7 @@ B2 的世界结构与导航。
 | B3-05.3 | ~~HUD 反馈被面板盖住；使用道具 flash 小数满天飞~~ | ✅ 已修：`HUD_FEEDBACK_DEPTH`，像素差分测试守住 |
 | B3-06 | **夜间危险循环实测**：换 QA 种子 1 让巡游体真的出现。它有牙（22 秒杀人）但只杀站着不动的人，且**夜里零收益**，最优玩法完全避开它 | [`B3-06_NIGHT_DANGER.md`](B3-06_NIGHT_DANGER.md) |
 | B3-07 | **角色像素自制**：`tools/build-characters.mjs` 画 4 个 32×48 角色替换「同一剪影涂四色」。同时暴露场景存在**三套互不相关的尺度**（16px 瓦片 / 48px 角色 / 80px 家具），货箱比人高 66%、门比人矮 | [`B3-07_CHARACTERS.md`](B3-07_CHARACTERS.md) |
+| B3-08 | **场景尺度归一**（B3-07 §5 选项 A）：家具 80→56、门重画 24×56、窗重画 32×40，并立 9 条比例不变量。货箱从比人高 66% 变成 1.17× | [`B3-08_SCENE_SCALE.md`](B3-08_SCENE_SCALE.md) |
 | B3-04 | 美术包切片与 UI 接入（物品图标 / 面板框 / 物品槽 / 结束横幅 / 家具） | [`ARTPACK_INTEGRATION.md`](ARTPACK_INTEGRATION.md) |
 
 ### 本轮遗留发现（不阻断旅程，待人工定夺）
@@ -152,7 +153,7 @@ B2 的世界结构与导航。
 | **HUD 反馈被面板盖住** | ~~面板开着时 flash / 背包满警告 / hint 行都不在画面上（深度 120/120/100 vs 面板最深 230）~~ | ✅ 已修：新增 `HUD_FEEDBACK_DEPTH = 300`，像素差分测试守住，见 [`B3-05_BUGFIX.md`](B3-05_BUGFIX.md) §6 |
 | **使用道具 flash 小数满天飞** | ~~「水分 +20.114303979999917」~~ | ✅ 已修：`Math.round`，断言 flash 不含小数点 |
 | **夜间危险是死内容** | 巡游体 22 秒能杀人，但只杀站着不动的人；会走路的两种方向都能活（0 或 8 HP 伤害），且**夜里零收益**——掉落/交易/制作都不是夜间限定，三个夜间事件全是负面 | 不是调数值能修好的 bug，是内容量问题。见 [`B3-06_NIGHT_DANGER.md`](B3-06_NIGHT_DANGER.md) §4 的四个方向 |
-| **场景三套尺度冲突** | 16px 瓦片（墙/地/门/窗）/ 48px 角色 / 80px 家具，互不相关。货箱比人高 66%，门只有人的 1/3 高 | 需定夺：建议家具降到 56px + 重画门。见 [`B3-07_CHARACTERS.md`](B3-07_CHARACTERS.md) §5 |
+| **场景三套尺度冲突** | ~~16px 瓦片（墙/地/门/窗）/ 48px 角色 / 80px 家具，互不相关。货箱比人高 66%，门只有人的 1/3 高~~ | ✅ 已修两套：家具降到 56px、门重画 24×56、窗重画 32×40，`sceneScale.test.ts` 9 条比例不变量守住。**剩 16px 墙地砖**，需项目负责人提供背景（`arch/` 无可平铺素材），见 [`B3-08_SCENE_SCALE.md`](B3-08_SCENE_SCALE.md) §4 |
 
 ### 验收标准
 
@@ -394,6 +395,7 @@ B2–B9 全部完成。
 | [`B3-05_BUGFIX.md`](B3-05_BUGFIX.md) | 试玩发现的两个 bug：喝满浪费物品、净化 flash 数量写死 |
 | [`B3-06_NIGHT_DANGER.md`](B3-06_NIGHT_DANGER.md) | **夜间危险循环实测**：巡游体 22 秒杀人但只杀不动的人，且夜里零收益 |
 | [`B3-07_CHARACTERS.md`](B3-07_CHARACTERS.md) | 角色像素自制，及它暴露的场景三套尺度冲突 |
+| [`B3-08_SCENE_SCALE.md`](B3-08_SCENE_SCALE.md) | 场景尺度归一：家具 56px、门 24×56、窗 32×40，9 条比例不变量 |
 | [`ARTPACK_INTEGRATION.md`](ARTPACK_INTEGRATION.md) | 美术包切片与 UI 接入（含两个 Phaser 4 渲染陷阱） |
 | [`B2_TOWER_ARCHITECTURE.md`](B2_TOWER_ARCHITECTURE.md) | B2 塔楼架构与实现记录 |
 | [`COMPONENT_INVENTORY.md`](COMPONENT_INVENTORY.md) | UI 组件清单（供外部美术/UI 协作） |

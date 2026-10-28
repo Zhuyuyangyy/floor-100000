@@ -335,10 +335,12 @@ export class GameScene extends Phaser.Scene {
     g.fillRect(740, 176, 14, 2);
     g.fillRect(740, 182, 10, 2);
 
-    // Doors on the room boundaries, standing on the floor line. Decorative only:
-    // they sit above the floor band, so they never block the walkable strip.
+    // Doors on the room boundaries. Their bottom sits ON the floor line: at 16px a
+    // 16px gap above it was invisible, but the door is 56px now and would clearly
+    // float. It still never enters the 48px floor band, so the walkable strip is
+    // untouched.
     for (let i = 1; i < ROOM_COUNT; i++) {
-      this.floorObjects.push(this.add.image(i * ROOM_WIDTH, wallH - 16, 'tile_door').setOrigin(0.5, 1));
+      this.floorObjects.push(this.add.image(i * ROOM_WIDTH, wallH, 'tile_door').setOrigin(0.5, 1));
     }
 
     this.floorObjects.push(wall, floor, g);

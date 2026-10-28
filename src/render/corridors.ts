@@ -69,14 +69,16 @@ function drawWorkerDorms(ctx: CorridorContext): void {
   const doorX = roomX + 52;
 
   ctx.objects.push(ctx.scene.add.image(doorX, floorY, 'tile_door').setOrigin(0.5, 1));
-  // Number plate above the door.
+  // Number plate above the door. Its offset is the door's height plus a gap, not a
+  // fixed 36 — the door used to be 16px and the plate sat well clear of it, but at
+  // 56px a fixed 36 puts the plate printed across the door.
   g.fillStyle(0x0b0f12, 1);
-  g.fillRect(doorX - 8, floorY - 36, 16, 9);
+  g.fillRect(doorX - 8, floorY - 66, 16, 9);
   g.fillStyle(0xb8b09a, 1);
-  g.fillRect(doorX - 6, floorY - 34, 12, 5);
+  g.fillRect(doorX - 6, floorY - 64, 12, 5);
   g.fillStyle(0x3a444c, 1);
-  g.fillRect(doorX - 4, floorY - 33, 3, 1);
-  g.fillRect(doorX - 4, floorY - 31, 5, 1);
+  g.fillRect(doorX - 4, floorY - 63, 3, 1);
+  g.fillRect(doorX - 4, floorY - 61, 5, 1);
 
   // Doormat, worn.
   g.fillStyle(0x1a2026, 1);

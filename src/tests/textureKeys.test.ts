@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { generateAllPixelArt } from '../render/pixelArt';
+import { bakedTextures } from './bakeProbe';
 import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHARACTER_KEYS, ITEM_ICON_FILES } from '../render/artpack';
 import { FURNITURE_KEYS } from '../render/furniture';
 
@@ -15,29 +15,8 @@ import { FURNITURE_KEYS } from '../render/furniture';
 // every key it asks for, and fail on the difference.
 
 // ── the keys generateAllPixelArt bakes ─────────────────────────────────────
-// bake() only needs add.graphics(), a drawing call and generateTexture(), so a
-// recording stub is enough — no Phaser instance required.
 function bakedKeys(): string[] {
-  const keys: string[] = [];
-  const graphics = {
-    fillStyle: () => graphics,
-    fillRect: () => graphics,
-    fillTriangle: () => graphics,
-    fillCircle: () => graphics,
-    lineStyle: () => graphics,
-    lineBetween: () => graphics,
-    strokeRect: () => graphics,
-    clear: () => graphics,
-    generateTexture: (key: string) => {
-      keys.push(key);
-    },
-    destroy: () => graphics,
-  };
-  const scene = { add: { graphics: () => graphics } };
-  // The parameter type is a Phaser.Scene; the stub satisfies every member the
-  // function actually touches, which is all bake() needs.
-  generateAllPixelArt(scene as unknown as Parameters<typeof generateAllPixelArt>[0]);
-  return keys;
+  return bakedTextures().map((t) => t.key);
 }
 
 // ── the keys BootScene loads ───────────────────────────────────────────────

@@ -91,40 +91,52 @@ function drawTileFloor(g: Phaser.GameObjects.Graphics): void {
   g.fillRect(12, 12, 2, 1);
 }
 
+// A door is architectural, not a fitting: at 16x16 it was a third the height of
+// the 48px player and read as a wall fitting. 24x56 makes it taller than the
+// person walking through it. sceneScale.test.ts holds both facts.
 function drawTileDoor(g: Phaser.GameObjects.Graphics): void {
   g.fillStyle(COLOR.building, 1);
-  g.fillRect(0, 0, 16, 16); // frame
+  g.fillRect(0, 0, 24, 56); // frame
   g.fillStyle(WOOD_DARK, 1);
-  g.fillRect(2, 1, 12, 15); // door slab
+  g.fillRect(2, 1, 20, 54); // door slab
   g.fillStyle(lighten(WOOD_DARK, 0.16), 1);
-  g.fillRect(2, 1, 12, 1); // top edge
+  g.fillRect(2, 1, 20, 1); // top edge
   g.fillStyle(lighten(WOOD_DARK, 0.08), 1);
-  g.fillRect(3, 3, 10, 4); // upper panel
-  g.fillRect(3, 9, 10, 5); // lower panel
+  g.fillRect(4, 4, 16, 18); // upper panel
   g.fillStyle(darken(WOOD_DARK), 1);
-  g.fillRect(3, 7, 10, 2); // panel gap
-  g.fillRect(3, 14, 10, 1); // lower panel shadow
+  g.fillRect(4, 22, 16, 2); // panel gap
+  g.fillStyle(lighten(WOOD_DARK, 0.08), 1);
+  g.fillRect(4, 26, 16, 22); // lower panel
+  g.fillStyle(darken(WOOD_DARK), 1);
+  g.fillRect(4, 46, 16, 2); // lower panel shadow
   g.fillStyle(COLOR.lamp, 1);
-  g.fillRect(11, 8, 2, 2); // knob
+  g.fillRect(18, 27, 2, 2); // knob
+  // Two plank seams down the margins, so the slab is not one flat rectangle.
+  g.fillStyle(darken(WOOD_DARK), 1);
+  g.fillRect(3, 1, 1, 54);
+  g.fillRect(20, 1, 1, 54);
 }
 
+// Same reasoning: 32x40, tall enough to read as a window rather than a vent.
 function drawTileWindow(g: Phaser.GameObjects.Graphics): void {
   g.fillStyle(COLOR.building, 1);
-  g.fillRect(0, 0, 16, 16); // frame
+  g.fillRect(0, 0, 32, 40); // frame
   g.fillStyle(0x16303c, 1);
-  g.fillRect(1, 1, 14, 14); // night glass
+  g.fillRect(2, 2, 28, 36); // night glass
   g.fillStyle(0x21424f, 1);
-  g.fillRect(1, 1, 14, 6); // sky band
+  g.fillRect(2, 2, 28, 14); // sky band
   g.fillStyle(COLOR.lamp, 0.5);
-  g.fillRect(3, 3, 3, 3); // distant lit window
+  g.fillRect(6, 8, 4, 4); // distant lit window
   g.fillStyle(COLOR.lamp, 0.32);
-  g.fillRect(10, 9, 3, 2); // faint reflection
+  g.fillRect(20, 14, 4, 3); // faint reflection
   g.fillStyle(COLOR.wall, 1);
-  g.fillRect(7, 1, 2, 14); // vertical mullion
-  g.fillRect(1, 7, 14, 2); // horizontal mullion
+  g.fillRect(15, 2, 2, 36); // vertical mullion
+  g.fillRect(2, 19, 28, 2); // horizontal mullion
   g.fillStyle(lighten(COLOR.building, 0.25), 1);
-  g.fillRect(0, 0, 16, 1); // frame highlight
-  g.fillRect(0, 0, 1, 16);
+  g.fillRect(0, 0, 32, 1); // frame highlight
+  g.fillRect(0, 0, 1, 40);
+  g.fillStyle(darken(COLOR.building), 1);
+  g.fillRect(0, 38, 32, 2); // sill
 }
 
 function drawTileStairsUp(g: Phaser.GameObjects.Graphics): void {
@@ -183,11 +195,12 @@ export function generateAllPixelArt(scene: Phaser.Scene): void {
   // those slots needs a real, if invisible, texture from the moment it is built.
   bake(scene, 'blank', 1, 1, () => {});
 
-  // 16x16 tiles
+  // 16x16 wall and floor tiles, plus the two architectural pieces at their own
+  // sizes (a door 24x56, a window 32x40 — see the drawers).
   bake(scene, 'tile_wall', 16, 16, drawTileWall);
   bake(scene, 'tile_floor', 16, 16, drawTileFloor);
-  bake(scene, 'tile_door', 16, 16, drawTileDoor);
-  bake(scene, 'tile_window', 16, 16, drawTileWindow);
+  bake(scene, 'tile_door', 24, 56, drawTileDoor);
+  bake(scene, 'tile_window', 32, 40, drawTileWindow);
   bake(scene, 'tile_stairs_up', 16, 16, drawTileStairsUp);
   bake(scene, 'tile_stairs_down', 16, 16, drawTileStairsDown);
 }

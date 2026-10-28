@@ -132,6 +132,8 @@ B2 的世界结构与导航。
 | B3-05 | **M1 自动试玩**：真实键盘跑两个整天，测时间预算/背包压力/空闲窗口。修正了 B3-03 的三个估算数字，发现 2 个真 bug | [`M1_PLAYTEST.md`](M1_PLAYTEST.md) |
 | B3-05.1 | ~~喝满时照样消耗物品~~ | ✅ 已修：满值拒绝、物品留包（[`B3-05_BUGFIX.md`](B3-05_BUGFIX.md)） |
 | B3-05.2 | ~~净化 flash 写死「1 瓶」~~ | ✅ 已修：改用 `converted` 真实值 |
+| B3-05.3 | ~~HUD 反馈被面板盖住；使用道具 flash 小数满天飞~~ | ✅ 已修：`HUD_FEEDBACK_DEPTH`，像素差分测试守住 |
+| B3-06 | **夜间危险循环实测**：换 QA 种子 1 让巡游体真的出现。它有牙（22 秒杀人）但只杀站着不动的人，且**夜里零收益**，最优玩法完全避开它 | [`B3-06_NIGHT_DANGER.md`](B3-06_NIGHT_DANGER.md) |
 | B3-04 | 美术包切片与 UI 接入（物品图标 / 面板框 / 物品槽 / 结束横幅 / 家具） | [`ARTPACK_INTEGRATION.md`](ARTPACK_INTEGRATION.md) |
 
 ### 本轮遗留发现（不阻断旅程，待人工定夺）
@@ -148,6 +150,7 @@ B2 的世界结构与导航。
 | 背包偏紧 | B3-05.1 修掉「喝满浪费」后，玩家不能再靠喝满腾格子，12 格实际紧了一格（旅程实测：回家正好 12 格，第 3 层的布带不走） | 观察项：再紧一格就会开始丢有用地东西。布料无配方用途所以当前损失为零，见 [`B3-05_BUGFIX.md`](B3-05_BUGFIX.md) §3.1 |
 | **HUD 反馈被面板盖住** | ~~面板开着时 flash / 背包满警告 / hint 行都不在画面上（深度 120/120/100 vs 面板最深 230）~~ | ✅ 已修：新增 `HUD_FEEDBACK_DEPTH = 300`，像素差分测试守住，见 [`B3-05_BUGFIX.md`](B3-05_BUGFIX.md) §6 |
 | **使用道具 flash 小数满天飞** | ~~「水分 +20.114303979999917」~~ | ✅ 已修：`Math.round`，断言 flash 不含小数点 |
+| **夜间危险是死内容** | 巡游体 22 秒能杀人，但只杀站着不动的人；会走路的两种方向都能活（0 或 8 HP 伤害），且**夜里零收益**——掉落/交易/制作都不是夜间限定，三个夜间事件全是负面 | 不是调数值能修好的 bug，是内容量问题。见 [`B3-06_NIGHT_DANGER.md`](B3-06_NIGHT_DANGER.md) §4 的四个方向 |
 
 ### 验收标准
 
@@ -387,6 +390,7 @@ B2–B9 全部完成。
 | [`B3-02.1_FIX_REPORT.md`](B3-02.1_FIX_REPORT.md) | 背包满常驻提示、楼层访问记录 |
 | [`M1_PLAYTEST.md`](M1_PLAYTEST.md) | **M1 自动试玩实测**：两个整天的时间预算/背包压力/空闲窗口；修正 B3-03 三个估算数字 |
 | [`B3-05_BUGFIX.md`](B3-05_BUGFIX.md) | 试玩发现的两个 bug：喝满浪费物品、净化 flash 数量写死 |
+| [`B3-06_NIGHT_DANGER.md`](B3-06_NIGHT_DANGER.md) | **夜间危险循环实测**：巡游体 22 秒杀人但只杀不动的人，且夜里零收益 |
 | [`ARTPACK_INTEGRATION.md`](ARTPACK_INTEGRATION.md) | 美术包切片与 UI 接入（含两个 Phaser 4 渲染陷阱） |
 | [`B2_TOWER_ARCHITECTURE.md`](B2_TOWER_ARCHITECTURE.md) | B2 塔楼架构与实现记录 |
 | [`COMPONENT_INVENTORY.md`](COMPONENT_INVENTORY.md) | UI 组件清单（供外部美术/UI 协作） |

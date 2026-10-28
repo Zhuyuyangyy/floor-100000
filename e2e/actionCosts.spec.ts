@@ -58,6 +58,20 @@ async function searchFloorOneCabinet(page: Page): Promise<void> {
   await page.waitForTimeout(250);
 }
 
+// 上楼 is the LEFT end of every floor (UP_EXIT_X); floor 1 has no down exit at
+// all, so the only way out of the dorm is leftward.
+const UP_EXIT_X = 40;
+
+async function climbOneFloor(page: Page, expectedFloor: number): Promise<void> {
+  await walkLeftTo(page, UP_EXIT_X);
+  for (let i = 0; i < 8; i++) {
+    if ((await readState(page)).currentFloor === expectedFloor) return;
+    await page.keyboard.press('E');
+    await page.waitForTimeout(250);
+  }
+  throw new Error(`never reached floor ${expectedFloor} (at ${(await readState(page)).currentFloor})`);
+}
+
 test('searching a container costs game time', async ({ page }) => {
   await startGame(page, 42);
   const before = await readState(page);
@@ -91,28 +105,26 @@ test('the action cost is visible to the player', async ({ page }) => {
   expect(shown, 'the flash should name the time cost').toContain('分钟');
 });
 
-test('a full sweep of five floors now costs a meaningful part of the day', async ({ page }) => {
-  test.setTimeout(180_000);
+test('a climb from floor 1 to floor 5 costs a real slice of the day', async ({ page }) => {
+  test.setTimeout(300_000);
   await startGame(page, 42);
   const before = await readState(page);
 
-  // Walk the whole tower: search every container on the way down and back up.
-  // Floor 1 cabinet, then down through 2-5 and back.
+  // One container on the way out, then climb by walking to each stairwell.
+  // An earlier version of this test wrote player.x = 1240 and pressed E, which
+  // changed no floor at all: floor 1 has no down exit (hasDownExit(1) is false),
+  // so it measured a walk plus one search plus a wait and reported it as a
+  // descent. Climb for real — the walk is most of the cost, and that is the
+  // honest number.
   await searchFloorOneCabinet(page);
-  for (let i = 0; i < 4; i++) {
-    await page.evaluate(() => {
-      const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { player: { x: number } } | null } }).__PHASER_SESSION__?.getState();
-      if (s) s.player.x = 1240; // down stair
-    });
-    await page.waitForTimeout(120);
-    await page.keyboard.press('E');
-    await page.waitForTimeout(600);
-  }
-  const afterDescent = await readState(page);
-  const descentCost = afterDescent.gameMinuteOfDay - before.gameMinuteOfDay;
-  console.log(`[sweep] cost to reach floor 5: ${Math.round(descentCost)} game minutes`);
+  for (let floor = 2; floor <= 5; floor++) await climbOneFloor(page, floor);
 
-  // One descent alone (1 container searched, 4 floor changes) must already be a
-  // real slice of the 14-hour waking day, not the 4.5 hours a full sweep used to be.
-  expect(descentCost).toBeGreaterThan(20);
+  const after = await readState(page);
+  expect(after.currentFloor).toBe(5);
+  const cost = after.gameMinuteOfDay - before.gameMinuteOfDay;
+  console.log(`[climb] floor 1 -> 5 with one search: ${Math.round(cost)} game minutes`);
+  // Walking 4 stairwells plus one search must already be a meaningful slice of
+  // the 14 waking hours, and must not silently bill a whole day.
+  expect(cost).toBeGreaterThan(40);
+  expect(cost).toBeLessThan(240);
 });

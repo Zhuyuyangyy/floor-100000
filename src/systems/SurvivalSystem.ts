@@ -65,13 +65,11 @@ export function isLegacyVictory(state: GameState): boolean {
   return state.day >= t.victoryDay && state.gameMinuteOfDay >= t.victoryMinute;
 }
 
-// Advances the clock by a real-time delta, applies survival decay, and resolves
-// loss (HP 0). No-op once ended.
-export function advanceTime(state: GameState, deltaMs: number): TimeTick {
+// The shared clock engine. Both the frame loop and discrete action costs go
+// through here so a 20-minute search rolls the day over and charges decay under
+// exactly the same rules as 20 minutes of walking (B3-03).
+function advanceGameMinutes(state: GameState, gameMinutes: number): TimeTick {
   if (state.status !== 'playing') return NONE;
-
-  const clampedMs = clamp(deltaMs, 0, MAX_FRAME_MS);
-  const gameMinutes = (clampedMs / 1000) * GAME_CONFIG.time.gameMinutesPerRealSecond;
   if (gameMinutes <= 0) return NONE;
 
   let minute = state.gameMinuteOfDay + gameMinutes;
@@ -97,6 +95,24 @@ export function advanceTime(state: GameState, deltaMs: number): TimeTick {
   }
   return { gameMinutes, dayChanged, died: false, won: false };
 }
+
+// Advances the clock by a real-time delta, applies survival decay, and resolves
+// loss (HP 0). No-op once ended.
+export function advanceTime(state: GameState, deltaMs: number): TimeTick {
+  const clampedMs = clamp(deltaMs, 0, MAX_FRAME_MS);
+  return advanceGameMinutes(state, (clampedMs / 1000) * GAME_CONFIG.time.gameMinutesPerRealSecond);
+}
+
+// B3-03: charges a discrete action its game-time cost. A day is a budget, not a
+// countdown — without this, one full sweep of five floors costs 4.5 game hours
+// and the player idles through the other 9.75.
+export function spendTime(state: GameState, gameMinutes: number): TimeTick {
+  return advanceGameMinutes(state, gameMinutes);
+}
+
+// Game-minutes each action costs, from config/game-balance.json so pacing can be
+// tuned without touching code.
+export const ACTION_COSTS = GAME_CONFIG.actionCosts;
 
 // The minutes a given sleep actually skips: from now (or from the 20:00 gate,
 // whichever is later) to 06:00 the next day. Sleeping at 02:00 skips a shorter

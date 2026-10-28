@@ -8,6 +8,12 @@
     "victoryMinute": 360,
     "maxMajorEventsPerDay": 1
   },
+  "actionCosts": {
+    "searchContainer": 20,
+    "pickupGround": 5,
+    "craft": 30,
+    "trade": 15
+  },
   "player": {
     "startingFloor": 1,
     "hpMax": 100,

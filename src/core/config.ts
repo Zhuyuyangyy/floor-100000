@@ -19,6 +19,14 @@ export interface GameBalanceConfig {
     victoryMinute: number;
     maxMajorEventsPerDay: number;
   };
+  // B3-03: game-minutes each action costs, so a day is a budget rather than a
+  // countdown. Tuned here so pacing changes need no code edits.
+  actionCosts: {
+    searchContainer: number;
+    pickupGround: number;
+    craft: number;
+    trade: number;
+  };
   player: {
     startingFloor: number;
     hpMax: number;

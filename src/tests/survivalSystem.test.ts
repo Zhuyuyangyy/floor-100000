@@ -3,11 +3,13 @@ import { createNewGame } from '../core/gameState';
 import {
   absoluteMinute,
   advanceTime,
+  ACTION_COSTS,
   AUTOSAVE_EVERY_GAME_MINUTES,
   deathCause,
   formatClock,
   isLegacyVictory,
   sleep,
+  spendTime,
 } from '../systems/SurvivalSystem';
 import { GAME_CONFIG } from '../core/config';
 
@@ -186,5 +188,105 @@ describe('death', () => {
     const t = advanceTime(s, 16);
     expect(t.died).toBe(false);
     expect(t.gameMinutes).toBe(0);
+  });
+});
+
+// B3-03: actions cost game time, so a day is a budget rather than a countdown.
+// spendTime must share advanceTime's rollover and decay rules exactly — a
+// discrete jump that skipped them would let a player farm the clock.
+describe('spendTime (action cost)', () => {
+  it('advances the clock by exactly the given minutes', () => {
+    const s = createNewGame(1);
+    const before = s.gameMinuteOfDay;
+    const t = spendTime(s, 20);
+    expect(t.gameMinutes).toBe(20);
+    expect(s.gameMinuteOfDay).toBe(before + 20);
+    expect(s.day).toBe(1);
+  });
+
+  it('charges survival decay for the minutes it advances', () => {
+    const s = createNewGame(1);
+    const before = { hunger: s.player.hunger, thirst: s.player.thirst };
+    spendTime(s, 60); // one full game hour
+    expect(s.player.hunger).toBeCloseTo(before.hunger - GAME_CONFIG.player.hungerLossPerGameHour, 5);
+    expect(s.player.thirst).toBeCloseTo(before.thirst - GAME_CONFIG.player.thirstLossPerGameHour, 5);
+  });
+
+  it('rolls the day over when the jump crosses midnight', () => {
+    const s = createNewGame(1);
+    s.gameMinuteOfDay = 23 * 60 + 30;
+    const t = spendTime(s, 60); // -> 00:30 next day
+    expect(t.dayChanged).toBe(true);
+    expect(s.day).toBe(2);
+    expect(s.gameMinuteOfDay).toBe(30);
+    expect(s.worldEvents.activeEvent).toBeNull(); // fresh roll for the new day
+  });
+
+  it('is a no-op once the run has ended', () => {
+    const s = createNewGame(1);
+    s.status = 'lost';
+    const before = s.gameMinuteOfDay;
+    expect(spendTime(s, 20).gameMinutes).toBe(0);
+    expect(s.gameMinuteOfDay).toBe(before);
+  });
+
+  it('is a no-op for zero or negative minutes', () => {
+    const s = createNewGame(1);
+    const before = s.gameMinuteOfDay;
+    expect(spendTime(s, 0).gameMinutes).toBe(0);
+    expect(spendTime(s, -5).gameMinutes).toBe(0);
+    expect(s.gameMinuteOfDay).toBe(before);
+  });
+
+  it('can end the run when the jump drains HP to zero', () => {
+    const s = createNewGame(1);
+    s.player.hp = 1;
+    s.player.thirst = 0; // starving/dehydrated -> HP drains per game hour
+    const t = spendTime(s, 60);
+    expect(t.died).toBe(true);
+    expect(s.status).toBe('lost');
+    expect(s.player.hp).toBe(0);
+  });
+
+  it('reports the same day rollover as an equivalent run of frames', () => {
+    // Each frame is clamped to MAX_FRAME_MS, so 200 frames of 250ms advance
+    // 200 * 0.75 = 150 game minutes — the same jump must land on the same day.
+    const frames = 200;
+    const minutes = frames * (250 / 1000) * GAME_CONFIG.time.gameMinutesPerRealSecond;
+    const a = createNewGame(7);
+    a.gameMinuteOfDay = 1300;
+    const b = createNewGame(7);
+    b.gameMinuteOfDay = 1300;
+    const jumped = spendTime(a, minutes);
+    let walked: ReturnType<typeof advanceTime> | undefined;
+    let anyFrameRolled = false;
+    for (let i = 0; i < frames; i++) {
+      walked = advanceTime(b, 250);
+      if (walked.dayChanged) anyFrameRolled = true;
+    }
+    expect(jumped.dayChanged).toBe(anyFrameRolled);
+    expect(a.day).toBe(b.day);
+    expect(Math.round(a.gameMinuteOfDay)).toBe(Math.round(b.gameMinuteOfDay));
+    expect(Math.round(a.player.thirst)).toBe(Math.round(b.player.thirst));
+  });
+});
+
+describe('action costs (B3-03)', () => {
+  it('charges every costly action a positive amount of game time', () => {
+    expect(ACTION_COSTS.searchContainer).toBeGreaterThan(0);
+    expect(ACTION_COSTS.pickupGround).toBeGreaterThan(0);
+    expect(ACTION_COSTS.craft).toBeGreaterThan(0);
+    expect(ACTION_COSTS.trade).toBeGreaterThan(0);
+  });
+
+  it('prices a search above a pickup and a craft above a search', () => {
+    // A container takes real effort; a loose item is a bend-down.
+    expect(ACTION_COSTS.pickupGround).toBeLessThan(ACTION_COSTS.searchContainer);
+    // Building something takes longer than rummaging through a box.
+    expect(ACTION_COSTS.searchContainer).toBeLessThan(ACTION_COSTS.craft);
+  });
+
+  it('matches the balance config, so pacing is tunable without code edits', () => {
+    expect(ACTION_COSTS).toEqual(GAME_CONFIG.actionCosts);
   });
 });

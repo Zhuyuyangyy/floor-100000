@@ -21,7 +21,7 @@ import { currentInteractionZone, floorName, hasDownExit, hasUpExit, movePlayerX,
 import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
 import { countItem, isBagFull, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
-import { absoluteMinute, advanceTime, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, isNight, sleep } from '../systems/SurvivalSystem';
+import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, isNight, sleep, spendTime } from '../systems/SurvivalSystem';
 import { ensureNightEvent } from '../systems/EventSystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
@@ -773,7 +773,8 @@ export class GameScene extends Phaser.Scene {
         this.refreshInventory();
         this.refreshUpgradeBoard();
         playSfx('craft');
-        this.flash(`建造了 ${getRecipe(entry.id!).displayName}`);
+        this.flash(`建造了 ${getRecipe(entry.id!).displayName}（-${ACTION_COSTS.craft} 分钟）`);
+        this.chargeTime(ACTION_COSTS.craft);
       } else {
         this.flash(result.reason);
       }
@@ -784,10 +785,28 @@ export class GameScene extends Phaser.Scene {
         this.refreshCraft();
         this.refreshInventory();
         playSfx('craft');
-        this.flash('净化了 1 瓶净水');
+        this.flash(`净化了 1 瓶净水（-${ACTION_COSTS.craft} 分钟）`);
+        this.chargeTime(ACTION_COSTS.craft);
       } else {
         this.flash(result.reason);
       }
+    }
+  }
+
+  // B3-03: charges an action its game-time cost, then applies the same
+  // consequences the frame loop would — HUD refresh, autosave, and the end-of-run
+  // transition. Keeping this in one place means a cost can never be charged
+  // without the clock, the save and the death check following it.
+  private chargeTime(gameMinutes: number): void {
+    const state = getGame();
+    const tick = spendTime(state, gameMinutes);
+    this.refreshClock();
+    this.refreshStats();
+    this.applyNightLighting();
+    saveToStorage(state);
+    if (tick.died || tick.won || state.status !== 'playing') {
+      saveToStorage(state);
+      this.scene.start('End');
     }
   }
 
@@ -942,6 +961,8 @@ export class GameScene extends Phaser.Scene {
         saveToStorage(getGame());
         this.refreshInventory();
         playSfx('trade');
+        d.message = `换到了 ${getItem(offer.give.itemId).displayName}×${offer.give.quantity}（-${ACTION_COSTS.trade} 分钟）`;
+        this.chargeTime(ACTION_COSTS.trade);
       }
     } else {
       d.level = 'main';
@@ -1148,7 +1169,11 @@ export class GameScene extends Phaser.Scene {
 
     if (result.took.length === 0 && !result.full) this.flash(`${label} 是空的`);
     else if (result.full) this.flash('背包已满，剩余留在容器');
-    else { playSfx('pickup'); this.flash(`获得 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}`); }
+    else {
+      playSfx('pickup');
+      this.flash(`获得 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${ACTION_COSTS.searchContainer} 分钟）`);
+      this.chargeTime(ACTION_COSTS.searchContainer);
+    }
   }
 
   private autoPickup(): void {
@@ -1163,7 +1188,8 @@ export class GameScene extends Phaser.Scene {
         this.refreshInventory();
         saveToStorage(state);
         playSfx('pickup');
-        this.flash(`拾取 ${getItem(r.took.itemId).displayName}×${r.took.quantity}`);
+        this.flash(`拾取 ${getItem(r.took.itemId).displayName}×${r.took.quantity}（-${ACTION_COSTS.pickupGround} 分钟）`);
+        this.chargeTime(ACTION_COSTS.pickupGround);
       } else if (r.full) {
         this.flash('背包已满');
       }

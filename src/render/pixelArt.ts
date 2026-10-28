@@ -10,6 +10,9 @@ import Phaser from 'phaser';
 // generateTexture / destroy. (v3 helpers such as Create.GenerateTexture and Geom.Point are gone.)
 
 // ── palette ────────────────────────────────────────────────────────────────
+// The six project colours from docs/05_ART_GUIDE.md §2. Not every entry is used
+// by a drawer below — cream and danger are carried by the text and stat-bar
+// colours elsewhere — but the set is the documented palette, so it stays whole.
 const COLOR = {
   building: 0x18242c, // dark blue-grey (mortar / outlines / boots)
   wall: 0x354650, // wall grey
@@ -48,33 +51,6 @@ function bake(scene: Phaser.Scene, key: string, width: number, height: number, d
   draw(g);
   g.generateTexture(key, width, height);
   g.destroy();
-}
-
-// ── shared figure (16x24) ─────────────────────────────────────────────────────
-// One humanoid silhouette reused for the player and NPCs; only the body / head / eye
-// colours change. The wanderer passes a near-black head so it reads as a shadowy figure.
-function drawHumanoid(g: Phaser.GameObjects.Graphics, body: number, head: number, eye: number): void {
-  g.fillStyle(head, 1);
-  g.fillRect(5, 1, 6, 6); // head
-  g.fillStyle(eye, 1);
-  g.fillRect(6, 3, 1, 1); // left eye
-  g.fillRect(9, 3, 1, 1); // right eye
-  g.fillStyle(body, 1);
-  g.fillRect(4, 7, 8, 9); // torso
-  g.fillStyle(darken(body), 1);
-  g.fillRect(4, 15, 8, 1); // belt
-  g.fillStyle(body, 1);
-  g.fillRect(2, 8, 2, 7); // left arm
-  g.fillRect(12, 8, 2, 7); // right arm
-  g.fillStyle(head, 1);
-  g.fillRect(2, 14, 2, 2); // left hand
-  g.fillRect(12, 14, 2, 2); // right hand
-  g.fillStyle(darken(body), 1);
-  g.fillRect(4, 16, 3, 6); // left leg
-  g.fillRect(9, 16, 3, 6); // right leg
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(3, 22, 4, 2); // left boot
-  g.fillRect(9, 22, 4, 2); // right boot
 }
 
 // ── 16x16 tiles ───────────────────────────────────────────────────────────────
@@ -191,9 +167,14 @@ function drawTileStairsDown(g: Phaser.GameObjects.Graphics): void {
 // Bakes every texture the game references. Call once from a Boot-style scene's create().
 // Regenerating a key simply overwrites the existing texture.
 //
-// The 15 item icons and the 9 furniture textures are deliberately NOT baked here:
-// they are loaded from the art pack (see BootScene and render/artpack.ts).
-// Baking over them would throw the real art away.
+// The 15 item icons, the 9 furniture textures and the 4 characters are deliberately
+// NOT baked here: they are loaded from the art pack (see BootScene and
+// render/artpack.ts). Baking over them would throw the real art away.
+//
+// The characters used to be baked by drawHumanoid() below — one shared 16x24
+// silhouette in four colours, so the player, both neighbours and the wanderer were
+// the same figure with different paint. tools/build-characters.mjs draws them
+// instead, at 32x48 with distinct silhouettes.
 export function generateAllPixelArt(scene: Phaser.Scene): void {
   // A transparent placeholder for the icon slots whose texture is chosen later
   // (inventory rows, craft rows, dialogue trade rows). Phaser 4 will not render an
@@ -202,12 +183,6 @@ export function generateAllPixelArt(scene: Phaser.Scene): void {
   // those slots needs a real, if invisible, texture from the moment it is built.
   bake(scene, 'blank', 1, 1, () => {});
 
-  // figures (the game already references these four keys)
-  bake(scene, 'player', 16, 24, (g) => drawHumanoid(g, COLOR.safe, COLOR.cream, COLOR.building));
-  bake(scene, 'npc_alin', 16, 24, (g) => drawHumanoid(g, 0x5a8ab5, COLOR.cream, COLOR.building));
-  bake(scene, 'npc_xiaozhou', 16, 24, (g) => drawHumanoid(g, 0xb5855a, COLOR.cream, COLOR.building));
-  bake(scene, 'wanderer', 16, 24, (g) => drawHumanoid(g, 0x3a1e24, lighten(0x3a1e24, 0.18), COLOR.danger));
-
   // 16x16 tiles
   bake(scene, 'tile_wall', 16, 16, drawTileWall);
   bake(scene, 'tile_floor', 16, 16, drawTileFloor);
@@ -215,5 +190,4 @@ export function generateAllPixelArt(scene: Phaser.Scene): void {
   bake(scene, 'tile_window', 16, 16, drawTileWindow);
   bake(scene, 'tile_stairs_up', 16, 16, drawTileStairsUp);
   bake(scene, 'tile_stairs_down', 16, 16, drawTileStairsDown);
-
 }

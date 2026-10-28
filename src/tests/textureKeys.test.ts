@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { generateAllPixelArt } from '../render/pixelArt';
-import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, ITEM_ICON_FILES } from '../render/artpack';
+import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHARACTER_KEYS, ITEM_ICON_FILES } from '../render/artpack';
 import { FURNITURE_KEYS } from '../render/furniture';
 
 // Phaser answers a texture key it does not have with __MISSING — a green
@@ -45,6 +45,8 @@ function loadedKeys(): string[] {
   return [
     ...Object.keys(ITEM_ICON_FILES),
     ...FURNITURE_KEYS,
+    // The four characters are loaded from PNGs drawn by build-characters.mjs.
+    ...CHARACTER_KEYS,
     'ui-marker',
     ART_SLOT_KEY,
     ART_BANNER_WIN_KEY,

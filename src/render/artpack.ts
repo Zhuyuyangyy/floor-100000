@@ -27,6 +27,26 @@ export const ITEM_ICON_FILES: Record<ItemId, string> = {
   flashlight: 'item-flashlight.png',
 };
 
+// Texture key -> file for the four characters. These used to be baked by
+// pixelArt.ts as one shared `drawHumanoid` shape in four colours, so the player,
+// both neighbours and the night threat were the same figure with different paint.
+// tools/build-characters.mjs draws them instead, on one 32x48 canvas with a
+// shared foot baseline and one shared palette.
+//
+// Explicit rather than derived: the game asks for these four keys by literal
+// ('player', 'wanderer') or by expression (npc_alin / npc_xiaozhou), and a
+// missing entry has to be a compile error rather than a green placeholder box.
+export const CHARACTER_KEYS = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer'] as const;
+
+export type CharacterKey = (typeof CHARACTER_KEYS)[number];
+
+export const CHARACTER_FILES: Record<CharacterKey, string> = {
+  player: 'char-player.png',
+  npc_alin: 'char-alin.png',
+  npc_xiaozhou: 'char-xiaozhou.png',
+  wanderer: 'char-wanderer.png',
+};
+
 // Texture keys for the rest of the pack, so a rename has one home.
 export const ART_SLOT_KEY = 'ui-slot';
 export const ART_BANNER_WIN_KEY = 'art-banner-win';

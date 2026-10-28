@@ -151,7 +151,14 @@ test('the wanderer is avoidable — leaving the floor escapes it undamaged', asy
   await page.screenshot({ path: 'e2e/screenshots/11-wanderer.png' });
 
   const hpBefore = (await readState(page)).player.hp;
-  await goUp(page); // -> 3, escape before it reaches us
+  // Escape through the DOWN stairwell, not the up one. The wanderer spawns at the
+  // end of the floor opposite the player, and the player is at ENTRY_X when it
+  // spawns — so it appears at x=48, which IS the up exit. Walking up teleports the
+  // player into its path (setX below) and it lands a hit before the stair registers,
+  // which is correct game behaviour and a broken test. Going down walks away from it.
+  await setX(page, 1240); // DOWN_EXIT_X
+  const floorBefore = (await readState(page)).currentFloor;
+  await pressEUntil(page, async () => (await readState(page)).currentFloor < floorBefore);
   expect(await hasWanderer(page)).toBe(false); // gone with the floor
   const after = await readState(page);
   expect(after.player.hp).toBe(hpBefore); // never hit while escaping

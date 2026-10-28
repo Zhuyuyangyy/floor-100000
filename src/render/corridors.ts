@@ -186,8 +186,27 @@ function drawMaintenance(ctx: CorridorContext): void {
   g.fillStyle(0x3a444c, 1);
   g.fillCircle(dropX + 2, 150, 2);
 
-  // Fusebox on the wall, and a conduit run along the skirting.
-  ctx.objects.push(ctx.scene.add.image(roomX + 140, 176, 'furn_fusebox').setOrigin(0.5, 1));
+  // Wall machinery, drawn rather than textured.
+  //
+  // This used to place furn_fusebox — the same art-pack texture the lootable
+  // container uses — so floor 4 showed four identical fuseboxes and only the one at
+  // x=640 could be opened (D7). A player had no way to tell which, and the map's
+  // "go and get the filter" only helps if the thing you walk to is the thing that
+  // opens. Drawn panels read as building machinery instead: flat, riveted, no
+  // hazard decal, and a different silhouette from the real prop.
+  for (const px of [roomX + 96, roomX + 236]) {
+    g.fillStyle(0x14181e, 1);
+    g.fillRect(px, 176, 34, 40); // cabinet
+    g.fillStyle(0x2a3238, 1);
+    g.fillRect(px + 2, 178, 30, 36); // face
+    g.fillStyle(0x3a444c, 1);
+    for (let r = 0; r < 3; r++) g.fillRect(px + 4 + r * 11, 182, 2, 2); // rivets
+    g.fillStyle(0x14181e, 1);
+    g.fillRect(px + 5, 192, 24, 12); // vent louvre
+    g.fillStyle(0x2a3238, 1);
+    for (let v = 0; v < 4; v++) g.fillRect(px + 6 + v * 6, 194, 4, 8);
+  }
+  // Conduit run along the skirting.
   g.fillStyle(0x1a2026, 1);
   g.fillRect(roomX, floorY - 10, ROOM_WIDTH, 3);
   g.fillStyle(0x2a3238, 1);

@@ -28,8 +28,8 @@ import {
   type TowerNavState,
 } from '../systems/TowerNav';
 import { SECTOR_COUNT, SECTOR_SIZE, TIERS, describeFloor, describeSector, sectorOf, sectorRange, type TierId } from '../core/tower';
-import { getFloorTemplate, type FloorTemplate } from '../data/floorTemplates';
-import { getItem } from '../data/items';
+import { getFloorTemplate } from '../data/floorTemplates';
+import { describeFloorContents } from '../systems/LootSystem';
 import { saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, PANEL_DEPTH, type PanelObject } from '../render/panels';
@@ -552,25 +552,6 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.legendText.setText(LEGEND.map((l) => l.label).join('  '));
   }
 
-  // "货箱：木材·胶带" style summary of what a floor holds, read from the floor's
-  // template so it stays true as the loot tables change. Containers the player
-  // has already emptied are marked, which is what makes a return trip worth
-  // planning rather than repeating.
-  private floorContents(floor: number, template: FloorTemplate | undefined): string {
-    if (!template) return '内容：未生成（B4 程序化楼层）';
-    const parts: string[] = [];
-    for (const c of template.containers) {
-      const looted = this.state.visitedFloors[floor]?.openedContainers.includes(c.id) ?? false;
-      const names = c.loot.map((l) => getItem(l.itemId).displayName);
-      const unique = [...new Set(names)];
-      parts.push(`${c.label}${looted ? '(已取)' : ''}：${unique.join('·') || '空'}`);
-    }
-    if (template.ground.length > 0) {
-      parts.push(`地面：${[...new Set(template.ground.map((g) => getItem(g.itemId).displayName))].join('·')}`);
-    }
-    return parts.length > 0 ? parts.join('　') : '内容：空';
-  }
-
   private refreshDetail(): void {
     const floor = this.nav.floor;
     const show = this.nav.level === 'floor' && floor !== null;
@@ -593,7 +574,12 @@ export class TowerOverviewScene extends Phaser.Scene {
     // explore anything in particular — the map named a floor but never said what
     // was there, so every trip was a guess. Naming the containers and the loot
     // they hold turns "go and look" into "go and get the filter".
-    this.detailRows[4].setText(this.floorContents(floor, template));
+    //
+    // The wording lives in LootSystem.describeFloorContents rather than here: it
+    // must read the resolved world (seed rolls applied, taken stacks removed). This
+    // scene used to read the loot table instead, so it advertised 布料 in floor 1's
+    // cabinet on every seed and kept listing contents already emptied.
+    this.detailRows[4].setText(describeFloorContents(this.state, floor));
     this.detailAction.setText(enterable.ok ? '按 Enter 进入' : '需先通过实际通路抵达').setColor(enterable.ok ? '#77c6a4' : '#e0705a');
   }
 

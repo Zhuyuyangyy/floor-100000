@@ -1,5 +1,6 @@
-import { containerItemKey, generateFloor } from '../data/floorTemplates';
+import { containerItemKey, generateFloor, getFloorTemplate } from '../data/floorTemplates';
 import { addItem, removeItem } from './InventorySystem';
+import { getItem } from '../data/items';
 import type { GameState, GeneratedFloor, InventoryStack } from '../core/gameTypes';
 
 // Turns looting into GameState so a saved + reloaded game never re-spawns loot
@@ -73,6 +74,29 @@ export function lootContainer(state: GameState, floor: number, containerId: stri
   visit.lootedItems = [...looted];
   if (!visit.openedContainers.includes(containerId)) visit.openedContainers.push(containerId);
   return { took, full };
+}
+
+// What the tower map tells the player is on a floor, so a trip can be planned
+// rather than guessed.
+//
+// Reads the RESOLVED view, never the loot table. The table lists probability rolls
+// whether or not they paid out for this seed, so the map used to advertise 布料 in
+// floor 1's cabinet on every seed — including the ones where the 60% roll failed
+// and the cloth was never there. Reading the view also drops stacks the player has
+// already taken, which is the other half of planning a return trip.
+export function describeFloorContents(state: GameState, floor: number): string {
+  if (!getFloorTemplate(floor)) return '内容：未生成（B4 程序化楼层）';
+  const view = getFloorView(state, floor);
+  const parts: string[] = [];
+  for (const c of view.containers) {
+    const looted = state.visitedFloors[floor]?.openedContainers.includes(c.id) ?? false;
+    const unique = [...new Set(c.items.map((i) => getItem(i.itemId).displayName))];
+    parts.push(`${c.label}${looted ? '(已取)' : ''}：${unique.join('·') || '空'}`);
+  }
+  if (view.groundItems.length > 0) {
+    parts.push(`地面：${[...new Set(view.groundItems.map((g) => getItem(g.itemId).displayName))].join('·')}`);
+  }
+  return parts.length > 0 ? parts.join('　') : '内容：空';
 }
 
 // Picks up a single ground item on contact. Returns full=true (item stays) if

@@ -1,9 +1,54 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { FLOOR_TEMPLATES, groundItemKey } from '../data/floorTemplates';
-import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
+import { describeFloorContents, getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
 import { countItem } from '../systems/InventorySystem';
 import { deserialize, serialize } from '../systems/SaveSystem';
+
+// The tower map names what a floor holds so a trip can be planned ("go and get the
+// filter" rather than "go and look"). It used to read the loot TABLE, which lists
+// probability rolls whether or not they paid out for this seed — so floor 1's
+// cabinet advertised 布料 on every seed, including the ones where the 60% roll
+// failed and the cloth was never there. It also kept listing a container's full
+// contents after the player emptied it.
+describe('describeFloorContents', () => {
+  it('names only the loot that actually rolled for this seed', () => {
+    const s = createNewGame(42);
+    const text = describeFloorContents(s, 1);
+    expect(text).toContain('储物柜');
+    expect(text).toContain('净水');
+    expect(text, 'seed 42 fails the cabinet cloth roll, so the map must not promise it').not.toContain('布料');
+  });
+
+  it('lists every guaranteed entry, so planning still works', () => {
+    const s = createNewGame(42);
+    const text = describeFloorContents(s, 3);
+    expect(text).toContain('废金属');
+    expect(text).toContain('木材');
+    expect(text).toContain('胶带');
+    expect(text).toContain('撬棍');
+  });
+
+  it('drops a stack the player has already taken', () => {
+    const s = createNewGame(42);
+    lootContainer(s, 1, 'cabinet');
+    const text = describeFloorContents(s, 1);
+    expect(text).toContain('储物柜(已取)');
+    expect(text, 'the water was taken, so the map must stop offering it').not.toContain('净水');
+  });
+
+  it('names ground supplies, and stops once they are picked up', () => {
+    const s = createNewGame(42);
+    expect(describeFloorContents(s, 3)).toContain('地面');
+    lootGround(s, 3, groundItemKey('battery', 160));
+    expect(describeFloorContents(s, 3)).not.toContain('电池');
+  });
+
+  it('says so for a floor with no authored content', () => {
+    const s = createNewGame(42);
+    expect(describeFloorContents(s, 6)).toContain('未生成');
+  });
+});
 
 describe('getFloorView', () => {
   it('removes looted container items so they cannot be re-looted', () => {

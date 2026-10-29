@@ -4,9 +4,17 @@ import { devEntry } from '../core/devMode';
 import { clearSave, hasSave } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, createMarker, PANEL_DEPTH, placeMarker, type PanelObject } from '../render/panels';
+import { buildTitleBackdrop, type TitleBackdrop } from '../render/titleBackdrop';
 
 // Title screen: a keyboard-navigable option list — 开始新游戏 / 继续游戏 (when a
 // save exists) / 操作说明. ↑/↓ to move, Enter to choose (docs/03_TASKS.md#p0-08).
+//
+// OVERHAUL: the screen used to be a flat colour with text on it, and the
+// owner's one-glance verdict was "this alone makes me not want to play". A
+// title screen is the game's first sentence; a static one says nothing. The
+// animated backdrop (tower, failing windows, drifting ash), the entrance
+// tweens and the title's slow flicker exist so the first frame already says
+// what this game is about.
 type InputSlot = 'up' | 'down' | 'enter' | 'esc';
 
 export class MenuScene extends Phaser.Scene {
@@ -22,6 +30,9 @@ export class MenuScene extends Phaser.Scene {
   private messageText!: Phaser.GameObjects.Text;
   private messageTimer?: Phaser.Time.TimerEvent;
   private lastInputFrame: Record<InputSlot, number> = { up: -1, down: -1, enter: -1, esc: -1 };
+  private backdrop?: TitleBackdrop;
+  private titleText?: Phaser.GameObjects.Text;
+  private subtitleText?: Phaser.GameObjects.Text;
 
   constructor() {
     super('Menu');
@@ -37,22 +48,28 @@ export class MenuScene extends Phaser.Scene {
     this.helpOpen = false;
 
     const { width, height } = this.cameras.main;
-    this.add.rectangle(width / 2, height / 2, width, height, 0x18242c);
+    this.add.rectangle(width / 2, height / 2, width, height, 0x121c24);
 
-    this.add
+    // The animated backdrop first, so everything else sits above it. Destroyed
+    // on shutdown: a scene restart re-runs create(), and the old tower's window
+    // rects would otherwise linger on top of the new ones.
+    this.backdrop?.destroy();
+    this.backdrop = buildTitleBackdrop(this, 7);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.backdrop?.destroy();
+      this.backdrop = undefined;
+    });
+
+    this.titleText = this.add
       .text(width / 2, 92, '第100000层', { fontFamily: 'monospace', fontSize: '40px', color: '#f4b66a', stroke: '#0b0f12', strokeThickness: 6 })
       .setOrigin(0.5);
-    this.add.text(width / 2, 138, '末 日 宿 舍', { fontFamily: 'monospace', fontSize: '22px', color: '#ece8d8' }).setOrigin(0.5);
+    this.subtitleText = this.add.text(width / 2, 138, '末 日 宿 舍', { fontFamily: 'monospace', fontSize: '22px', color: '#ece8d8' }).setOrigin(0.5);
 
     this.entries = [{ label: '开始新游戏', run: () => this.startNew() }];
     if (hasSave()) this.entries.push({ label: '继续游戏', run: () => this.continueRun() });
     this.entries.push({ label: '操作说明', run: () => this.toggleHelp() });
     this.selected = 0;
 
-    // Phaser does not re-run field initialisers on scene restart, so clear the
-    // per-create caches — otherwise they accumulate destroyed objects and
-    // refreshOptions() indexes past the end of `entries` (pre-existing bug:
-    // 暂停 -> 返回标题 crashed the title screen).
     // Bind input first: waitForScene() reports the scene active as soon as its
     // settings flip, which is before create() finishes. Callers (Playwright
     // startGame, and real players mashing keys during the transition) can
@@ -75,14 +92,45 @@ export class MenuScene extends Phaser.Scene {
     this.entries.forEach((entry, i) => {
       const t = this.add.text(width / 2, 210 + i * 30, entry.label, { fontFamily: 'monospace', fontSize: '18px', color: '#ece8d8' }).setOrigin(0.5);
       this.optionTexts.push(t);
+      // Entrance: a fade-in only. An earlier version also settled each entry
+      // down 8px, which broke the e2e selection probe — it finds the
+      // highlighted entry by comparing the marker's y to the entries' y, and a
+      // mid-tween entry reads as "no selection". The backdrop and the title's
+      // flicker carry the liveliness; the list just appears.
+      t.setAlpha(0);
+      this.tweens.add({ targets: t, alpha: 1, duration: 300, delay: 350 + i * 140, ease: 'Cubic.out' });
     });
     this.marker = createMarker(this);
+    // The marker breathes once visible so the selection reads as alive. Scale
+    // only: refreshOptions() repositions this marker by x/y every time the
+    // selection moves, so a positional tween would fight it (and the e2e probe
+    // finds the highlighted entry by the marker's position).
+    this.marker.setAlpha(0);
+    this.tweens.add({ targets: this.marker, alpha: 1, duration: 240, delay: 350 + this.entries.length * 140 });
+    this.tweens.add({ targets: this.marker, scaleX: 1.15, scaleY: 1.15, duration: 900, delay: 900, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
     this.refreshOptions();
     this.messageText = this.add
       .text(width / 2, height - 30, '', { fontFamily: 'monospace', fontSize: '13px', color: '#e0705a', align: 'center' })
       .setOrigin(0.5)
       .setVisible(false);
     this.buildHelp(width, height);
+  }
+
+  // The per-frame life of the title screen: the backdrop's tower drift, window
+  // flicker and ash, plus the title's slow power-flicker and the subtitle's
+  // breathing. Cheap, and it is the difference between a screenshot and a
+  // screen.
+  override update(time: number): void {
+    this.backdrop?.update(time, this.game.loop.delta);
+    if (this.titleText) {
+      // A failing light: mostly steady, with an occasional deeper dip. Two
+      // incommensurate sines so the pattern never visibly loops.
+      const flicker = 0.9 + 0.1 * Math.sin(time * 0.004) * Math.sin(time * 0.0013 + 1.7);
+      this.titleText.setAlpha(Math.max(0.55, Math.min(1, flicker)));
+    }
+    if (this.subtitleText) {
+      this.subtitleText.setAlpha(0.78 + 0.22 * Math.sin(time * 0.0016));
+    }
   }
 
   // Phaser can deliver one keydown several times inside a single frame when

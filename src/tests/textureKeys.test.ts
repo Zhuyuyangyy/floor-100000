@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { bakedTextures } from './bakeProbe';
 import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHARACTER_KEYS, ENV_FILES, ITEM_ICON_FILES } from '../render/artpack';
 import { FURNITURE_KEYS } from '../render/furniture';
+import { WALK_CHARACTERS, walkSheetKey } from '../render/walkcycle';
 
 // Phaser answers a texture key it does not have with __MISSING — a green
 // placeholder box — and says nothing. That is how a renamed furniture key turned
@@ -18,6 +19,11 @@ import { FURNITURE_KEYS } from '../render/furniture';
 function bakedKeys(): string[] {
   return bakedTextures().map((t) => t.key);
 }
+
+// Keys generated at runtime outside the pixelArt bake: the title backdrop
+// draws its tower into a texture with generateTexture on first use (the same
+// pattern the walk sheets use, just not part of generateAllPixelArt).
+const SELF_BAKED_KEYS = ['title-tower'];
 
 // ── the keys BootScene loads ───────────────────────────────────────────────
 function loadedKeys(): string[] {
@@ -47,9 +53,11 @@ const KEY_CALL = /(?:add\.image|add\.sprite|add\.tileSprite|add\.nineslice|setTe
 
 // A few keys are chosen by an expression rather than written as a literal — the
 // NPC sprite picks between two by id, the item icon and the furniture texture go
-// through itemIconKey() / containerTextureKey(). Those are enumerated here so the
-// "no unused key" direction still covers them.
-const DYNAMIC_KEYS = ['npc_alin', 'npc_xiaozhou', ...Object.keys(ITEM_ICON_FILES), ...FURNITURE_KEYS];
+// through itemIconKey() / containerTextureKey(), and the walk sheets are named by
+// walkSheetKey(). Those are enumerated here so the "no unused key" direction
+// still covers them. Derived rather than listed, so adding a character to
+// WALK_CHARACTERS cannot leave its sheet flagged as unused.
+const DYNAMIC_KEYS = ['npc_alin', 'npc_xiaozhou', ...Object.keys(ITEM_ICON_FILES), ...FURNITURE_KEYS, ...WALK_CHARACTERS.map(walkSheetKey)];
 
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
@@ -64,7 +72,7 @@ function sourceFiles(dir: string): string[] {
 const ROOT = join(process.cwd(), 'src');
 
 describe('every texture key the source asks for exists', () => {
-  const known = new Set([...bakedKeys(), ...loadedKeys()]);
+  const known = new Set([...bakedKeys(), ...SELF_BAKED_KEYS, ...loadedKeys()]);
   const asked = new Map<string, string[]>();
 
   for (const file of sourceFiles(ROOT)) {

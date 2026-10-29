@@ -1,5 +1,14 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { E2EGameState } from './globals';
+
+// The balance file is the single source of truth for starting values, and this
+// spec asserts against them at boot. Read it here rather than copying numbers:
+// B3-16 moved the starts to 65 and a pinned 79.5 failed for the wrong reason.
+const BALANCE = JSON.parse(readFileSync(join(process.cwd(), 'config/game-balance.json'), 'utf8')) as {
+  player: { hungerStart: number; thirstStart: number; energyStart: number };
+};
 
 // B3-02: the whole journey, walked for real.
 //
@@ -148,17 +157,12 @@ test.describe('B3-02 full survival journey', () => {
     expect(start.day).toBe(1);
     expect(start.player.hp).toBe(100);
     // A frame or two of decay has already run, so these are near-exact, not
-    // exact. The expected starts are read from the app's own balance module
-    // through the page (a static import of the JSON needs an import attribute
-    // under Playwright's ESM loader, and a copied number here would fail for
-    // the wrong reason the next time balance moves — B3-16 moved them to 65).
-    const starts = await page.evaluate(async () => {
-      const m = (await import('/src/core/config.ts')) as { GAME_CONFIG: { player: { hungerStart: number; thirstStart: number; energyStart: number } } };
-      return m.GAME_CONFIG.player;
-    });
-    expect(start.player.hunger).toBeGreaterThan(starts.hungerStart - 0.5);
-    expect(start.player.thirst).toBeGreaterThan(starts.thirstStart - 0.5);
-    expect(start.player.energy).toBeGreaterThan(starts.energyStart - 0.5);
+    // exact. The expected starts come from the balance file (BALANCE, above),
+    // not from a copied number — B3-16 moved them to 65 and a pinned 79.5
+    // failed for the wrong reason.
+    expect(start.player.hunger).toBeGreaterThan(BALANCE.player.hungerStart - 0.5);
+    expect(start.player.thirst).toBeGreaterThan(BALANCE.player.thirstStart - 0.5);
+    expect(start.player.energy).toBeGreaterThan(BALANCE.player.energyStart - 0.5);
     expect(start.gameMinuteOfDay).toBeGreaterThanOrEqual(360);
     expect(start.gameMinuteOfDay).toBeLessThan(365); // 06:00, seconds in
     // Starting kit, straight from config.
@@ -176,12 +180,8 @@ test.describe('B3-02 full survival journey', () => {
     // One bottle is +30 from wherever the start left the player (B3-16 moved
     // the starts to 65, so it no longer caps — the claim under test is that the
     // bottle landed, not that it overflowed).
-    const startsEarly = await page.evaluate(async () => {
-      const m = (await import('/src/core/config.ts')) as { GAME_CONFIG: { player: { thirstStart: number } } };
-      return m.GAME_CONFIG.player.thirstStart;
-    });
     await drinkOneBottle(page);
-    expect((await readState(page)).player.thirst).toBeGreaterThan(startsEarly + 25);
+    expect((await readState(page)).player.thirst).toBeGreaterThan(BALANCE.player.thirstStart + 25);
 
     // ── 2. climb ────────────────────────────────────────────────────────
     await takeStairs(page, 'up', 2);

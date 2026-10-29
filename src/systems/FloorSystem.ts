@@ -3,6 +3,11 @@ import {
   ENTRY_X,
   FLOOR_WIDTH,
   INTERACT_DISTANCE,
+  PLAYER_ACCELERATION,
+  PLAYER_BOB_AMPLITUDE,
+  PLAYER_BOB_STRIDE_PX,
+  PLAYER_DECELERATION,
+  PLAYER_SPEED,
   UP_EXIT_X,
   PLAYABLE_FLOORS_V01,
 } from '../core/constants';
@@ -49,6 +54,56 @@ export function movePlayerX(state: GameState, deltaX: number): void {
   const min = 8;
   const max = FLOOR_WIDTH - 8;
   state.player.x = Math.max(min, Math.min(max, state.player.x + deltaX));
+}
+
+// ── how the player's body moves ─────────────────────────────────────────────
+// The corridor handed the player its top speed the frame a key went down and
+// took it away the frame it came up, so walking read as dragging a sticker
+// across the backdrop. These ramp the speed instead of switching it.
+//
+// They live beside movePlayerX rather than in the scene because the scene holds
+// the Phaser objects, and a speed ramp is the one part of locomotion worth
+// unit-testing: it is where an unbounded frame turns into a flung player.
+
+// Advances `current` (px/s) one frame toward the direction being held.
+// `dir` is -1, 0 or +1. The result is always within ±PLAYER_SPEED, and braking
+// never crosses zero — that clamp is what stops a long frame (a backgrounded
+// tab coming back) from flinging the player the opposite way.
+export function stepHorizontalSpeed(current: number, dir: number, deltaMs: number): number {
+  if (deltaMs <= 0) return current;
+  const dt = deltaMs / 1000;
+
+  if (dir === 0) {
+    const drop = PLAYER_DECELERATION * dt;
+    return current > 0 ? Math.max(0, current - drop) : Math.min(0, current + drop);
+  }
+
+  // Reversing uses the brake rate, not the accelerator: flipping direction
+  // mid-stride should feel like planting a foot, not like ice.
+  const braking = current !== 0 && Math.sign(current) !== dir;
+  const rate = braking ? PLAYER_DECELERATION : PLAYER_ACCELERATION;
+  const next = current + rate * dt * dir;
+  return dir > 0 ? Math.min(PLAYER_SPEED, next) : Math.max(-PLAYER_SPEED, next);
+}
+
+// One walk cycle's phase in radians. It advances with the distance travelled
+// rather than with wall-clock time, so the bob stays locked to the ground while
+// the player accelerates instead of sliding out of step with their own feet.
+export function advanceBobPhase(phase: number, speed: number, deltaMs: number): number {
+  if (deltaMs <= 0) return phase;
+  const distance = Math.abs(speed) * (deltaMs / 1000);
+  const cycles = distance / PLAYER_BOB_STRIDE_PX;
+  return (phase + cycles * Math.PI * 2) % (Math.PI * 2);
+}
+
+// Vertical lift in px, positive = up. Scaled by speed so a player easing off the
+// accelerator settles back onto the floor line rather than freezing in mid-air.
+export function bobOffsetPx(phase: number, speed: number): number {
+  const scale = (Math.abs(speed) / PLAYER_SPEED) * PLAYER_BOB_AMPLITUDE;
+  // Short-circuited rather than left to the multiply: Math.sin(3π/2) * 0 is -0,
+  // and the contract is that a standing player's feet are on the floor line.
+  if (scale === 0) return 0;
+  return Math.sin(phase) * scale;
 }
 
 export type InteractionZone = 'up' | 'down' | null;

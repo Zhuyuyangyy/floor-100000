@@ -9,7 +9,7 @@ import {
   FLOOR_HEIGHT,
   FLOOR_WIDTH,
   INTERACT_DISTANCE,
-  PLAYER_SPEED,
+  PLAYER_FEET_Y,
   ROOM_COUNT,
   ROOM_WIDTH,
   STARTING_FLOOR,
@@ -18,7 +18,17 @@ import {
   WANDERER_HIT_COOLDOWN_MS,
   WANDERER_SPEED,
 } from '../core/constants';
-import { currentInteractionZone, floorName, hasDownExit, hasUpExit, movePlayerX, tryChangeFloor } from '../systems/FloorSystem';
+import {
+  advanceBobPhase,
+  bobOffsetPx,
+  currentInteractionZone,
+  floorName,
+  hasDownExit,
+  hasUpExit,
+  movePlayerX,
+  stepHorizontalSpeed,
+  tryChangeFloor,
+} from '../systems/FloorSystem';
 import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
 import { countItem, isBagFull, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
@@ -106,6 +116,11 @@ export class GameScene extends Phaser.Scene {
   private floorObjects: Phaser.GameObjects.GameObject[] = [];
   private wanderer?: Phaser.GameObjects.Sprite;
   private wandererHitAt = Number.NEGATIVE_INFINITY;
+  // Locomotion state. These are not field-initialised-only: a scene restart
+  // re-runs create() but not the class fields, so clearFloor() zeroes them too.
+  // Left over they would resume a run already at top speed, or mid-bob.
+  private speedX = 0;
+  private bobPhase = 0;
 
   private clockText!: Phaser.GameObjects.Text;
   private barsGfx!: Phaser.GameObjects.Graphics;
@@ -276,7 +291,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (floor === NPC_FLOOR) this.drawNpcs();
 
-    this.player = this.add.sprite(state.player.x, FLOOR_HEIGHT - 40, 'player').setOrigin(0.5, 1);
+    this.player = this.add.sprite(state.player.x, PLAYER_FEET_Y, 'player').setOrigin(0.5, 1);
     this.floorObjects.push(this.player);
     this.cameras.main.startFollow(this.player, true, 0.15, 0.15);
   }
@@ -285,6 +300,8 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.stopFollow();
     for (const o of this.floorObjects) o.destroy();
     this.floorObjects = [];
+    this.speedX = 0;
+    this.bobPhase = 0;
     this.containerObjs.clear();
     this.groundObjs.clear();
     this.wanderer?.destroy();
@@ -809,7 +826,7 @@ export class GameScene extends Phaser.Scene {
   private drawNpcs(): void {
     for (const npc of NPCS) {
       const key = npc.id === 'alin' ? 'npc_alin' : 'npc_xiaozhou';
-      const sprite = this.add.sprite(npc.x, FLOOR_HEIGHT - 40, key).setOrigin(0.5, 1);
+      const sprite = this.add.sprite(npc.x, PLAYER_FEET_Y, key).setOrigin(0.5, 1);
       const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
       this.floorObjects.push(sprite, nameLabel);
     }
@@ -1233,10 +1250,18 @@ export class GameScene extends Phaser.Scene {
     let dir = 0;
     if (this.cursors?.left.isDown || this.wasd?.left.isDown) dir -= 1;
     if (this.cursors?.right.isDown || this.wasd?.right.isDown) dir += 1;
-    if (dir !== 0) {
-      movePlayerX(state, dir * PLAYER_SPEED * (delta / 1000));
-      this.player.x = state.player.x;
-    }
+    // The speed is ramped rather than switched, and the distance covered comes
+    // from the ramped speed — so a tap of the key now moves a shorter distance
+    // than it used to, and the run feels like it has weight.
+    this.speedX = stepHorizontalSpeed(this.speedX, dir, delta);
+    const dx = this.speedX * (delta / 1000);
+    if (dx !== 0) movePlayerX(state, dx);
+    this.player.x = state.player.x;
+
+    // The camera's vertical bounds are a single 360px band, so it can never
+    // scroll vertically — the bob is fully visible and never fights the follow.
+    this.bobPhase = advanceBobPhase(this.bobPhase, this.speedX, delta);
+    this.player.y = PLAYER_FEET_Y - bobOffsetPx(this.bobPhase, this.speedX);
 
     const tick = advanceTime(state, delta);
     const rolled = ensureNightEvent(state);
@@ -1324,7 +1349,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (!this.wanderer) {
       const spawnX = state.player.x < FLOOR_WIDTH / 2 ? FLOOR_WIDTH - 48 : 48;
-      this.wanderer = this.add.sprite(spawnX, FLOOR_HEIGHT - 40, 'wanderer').setOrigin(0.5, 1);
+      this.wanderer = this.add.sprite(spawnX, PLAYER_FEET_Y, 'wanderer').setOrigin(0.5, 1);
     }
     const dir = Math.sign(state.player.x - this.wanderer.x);
     if (dir !== 0) this.wanderer.x += dir * WANDERER_SPEED * (delta / 1000);

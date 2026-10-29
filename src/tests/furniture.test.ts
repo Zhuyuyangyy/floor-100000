@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FLOOR_TEMPLATES } from '../data/floorTemplates';
 import { containerTextureKey, FURNITURE_KEYS } from '../render/furniture';
-import { FURNITURE_FILES } from '../render/artpack';
+import { ENV_FILES, FURNITURE_FILES } from '../render/artpack';
 
 // Every container in the world must map to a real furniture texture. There used
 // to be one acknowledged gap (餐台) and a Graphics box drawn for it; the art pack
@@ -87,5 +87,29 @@ describe('furniture art files', () => {
     const mapped = new Set(Object.values(FURNITURE_FILES));
     const onDisk = readdirSync(dir).filter((f) => f.startsWith('furn-'));
     expect(onDisk.filter((f) => !mapped.has(f))).toEqual([]);
+  });
+});
+
+// The room art (wall, floor, door, window) is loaded by path from ENV_FILES, and a
+// wrong path is a silent-ish failure: Phaser logs "Failed to process file" at
+// runtime and the object simply never draws. textureKeys.test.ts only checks that
+// a key is *known*, not that the file behind it exists — which is how the door and
+// window ended up in assets/artpack while BootScene looked in assets/env.
+describe('room art files', () => {
+  const envDir = join(process.cwd(), 'public/assets/env');
+
+  it('has a file on disk for every room texture the game loads', () => {
+    for (const [key, file] of Object.entries(ENV_FILES)) {
+      expect(existsSync(join(envDir, file)), `${key} -> assets/env/${file}`).toBe(true);
+    }
+  });
+
+  it('points at PNGs', () => {
+    for (const [, file] of Object.entries(ENV_FILES)) {
+      const buf = readFileSync(join(envDir, file));
+      expect(buf.subarray(1, 4).toString('ascii'), `${file} signature`).toBe('PNG');
+      expect(buf.readUInt32BE(16), `${file} width`).toBeGreaterThan(0);
+      expect(buf.readUInt32BE(20), `${file} height`).toBeGreaterThan(0);
+    }
   });
 });

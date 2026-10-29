@@ -13,6 +13,17 @@ import { decodePng, encodePng } from './png.mjs';
 const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
 const rgb = (n) => [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 
+// Luma-weighted Euclidean distance. Not Oklab, but it weights the channels the
+// way human vision does, which is what the contrast and error scores need.
+function dist(a, b) {
+  const [r1, g1, b1] = rgb(a);
+  const [r2, g2, b2] = rgb(b);
+  const dr = r1 - r2;
+  const dg = g1 - g2;
+  const db = b1 - b2;
+  return Math.sqrt(0.30 * dr * dr + 0.59 * dg * dg + 0.11 * db * db);
+}
+
 function load(file) {
   const img = decodePng(readFileSync(file));
   return { img, w: img.width, h: img.height, ch: img.channels, px: img.pixels };
@@ -64,6 +75,10 @@ if (cmd === 'rebuild') {
   const paletteSize = Number(arg('palette', 0));
   const out = arg('out', null);
   const dump = process.argv.includes('--dump');
+  // Shift the sprite so its lowest opaque row is the last row. Characters must share
+  // one foot baseline or they bob when swapped, and the source renders do not end
+  // on the same row.
+  const baseline = process.argv.includes('--baseline');
   if (!out) throw new Error('--out is required');
 
   const s = load(file);
@@ -78,7 +93,21 @@ if (cmd === 'rebuild') {
     return Math.abs(r1 - r2) + Math.abs(g1 - g2) + Math.abs(b1 - b2) <= tolerance;
   };
 
-  // Pass 1: dominant colour per cell, ignoring background.
+  // Pass 1: pick one colour per cell. Three strategies, because the choice is the
+  // whole problem and the answer is not obvious:
+  //
+  //   mode   — the most frequent colour. Cheap, and it is what loses a face: the
+  //            eyes occupy less area than the skin around them, so the majority
+  //            vote swallows them.
+  //   edge   — a high-contrast minority colour may beat the majority. Scored as
+  //            area x contrast^2, so contrast has to buy its area. This is the
+  //            internal-edge idea from BetterPixelArtDownscale: important colour
+  //            transitions survive even when they cover less area than a flat
+  //            region.
+  //   error  — the source colour that minimises total perceptual distance to every
+  //            pixel in the cell. Palette-preserving (never invents a colour) and
+  //            much better than mode across gradients.
+  const mode = arg('mode', 'mode');
   const cells = [];
   const histogram = new Map();
   for (let gy = 0; gy < gh; gy++) {
@@ -99,7 +128,33 @@ if (cmd === 'rebuild') {
       }
       let cell = null;
       if (fg > 0) {
-        cell = [...local.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        const ranked = [...local.entries()].sort((a, b) => b[1] - a[1]);
+        if (mode === 'mode') {
+          cell = ranked[0][0];
+        } else if (mode === 'edge') {
+          // Contrast is measured against the majority colour; a rival needs
+          // contrast^2 to overcome the majority's area.
+          const [top, topArea] = ranked[0];
+          cell = top;
+          let best = topArea;
+          for (const [c, area] of ranked.slice(1, 24)) {
+            const score = area * (dist(c, top) / 64) ** 2;
+            if (score > best) { best = score; cell = c; }
+          }
+        } else if (mode === 'error') {
+          // Only colours with real presence are candidates, so one stray pixel
+          // cannot win by being far from everything.
+          const cands = ranked.filter(([, n]) => n >= fg * 0.04).slice(0, 24);
+          let bestErr = Infinity;
+          for (const [c] of cands) {
+            let err = 0;
+            for (const [o, n] of local) err += n * dist(o, c) ** 2;
+            if (err < bestErr) { bestErr = err; cell = c; }
+          }
+          if (cell === null) cell = ranked[0][0];
+        } else {
+          throw new Error(`unknown --mode ${mode} (mode|edge|error)`);
+        }
         histogram.set(cell, (histogram.get(cell) ?? 0) + 1);
       }
       cells.push(cell);
@@ -134,6 +189,18 @@ if (cmd === 'rebuild') {
     outPx[o] = r; outPx[o + 1] = g; outPx[o + 2] = b; outPx[o + 3] = 255;
     usedColors.add(c);
   });
+  if (baseline) {
+    let last = -1;
+    for (let y = gh - 1; y >= 0 && last === -1; y--) {
+      for (let x = 0; x < gw; x++) if (outPx[(y * gw + x) * 4 + 3] !== 0) { last = y; break; }
+    }
+    if (last === -1) throw new Error('nothing to align');
+    const shift = gh - 1 - last;
+    if (shift > 0) {
+      outPx.copyWithin(shift * gw * 4, 0, (last + 1) * gw * 4);
+      outPx.fill(0, 0, shift * gw * 4);
+    }
+  }
   const img = { width: gw, height: gh, channels: 4, pixels: outPx };
   // A sprite with no foreground means the background key ate everything, which is
   // the failure mode SKILL.md calls 去背误伤前景. Writing it silently would hand

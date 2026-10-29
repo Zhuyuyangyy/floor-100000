@@ -56,12 +56,21 @@ export const ART_BANNER_LOSE_KEY = 'art-banner-lose';
 // which repeated a flat brick 80 times across a wall and read as graph paper next
 // to the art pack's props. One 1280px-wide image per band instead, so the wall has
 // directional light, peeling paint, stains and pipes drawn into it.
+//
+// The door and window live here too. They used to be baked at 24x56 and 32x40,
+// which was right when the player was a 48px silhouette and wrong the moment the
+// characters became 64x96 — a door shorter than the person walking through it. The
+// owner's renders are rebuilt at 44x104 and 56x76 instead.
 export const ENV_WALL_KEY = 'env-wall';
 export const ENV_FLOOR_KEY = 'env-floor';
+export const TILE_DOOR_KEY = 'tile_door';
+export const TILE_WINDOW_KEY = 'tile_window';
 
-export const ENV_FILES: Record<typeof ENV_WALL_KEY | typeof ENV_FLOOR_KEY, string> = {
+export const ENV_FILES: Record<string, string> = {
   [ENV_WALL_KEY]: 'wall.png',
   [ENV_FLOOR_KEY]: 'floor.png',
+  [TILE_DOOR_KEY]: 'tile-door.png',
+  [TILE_WINDOW_KEY]: 'tile-window.png',
 };
 
 // Which file holds each furniture texture. The seven procedural drawers in

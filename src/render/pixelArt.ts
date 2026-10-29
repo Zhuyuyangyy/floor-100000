@@ -22,9 +22,6 @@ const COLOR = {
   cream: 0xece8d8, // text cream (skin, paper, highlights)
 } as const;
 
-// Dark wood, reused by the tile drawers.
-const WOOD_DARK = 0x54391f;
-
 
 // ── colour maths (pure, 24-bit) ───────────────────────────────────────────────
 // Halve every channel without cross-channel bleed (mask off each byte's low bit first).
@@ -51,54 +48,6 @@ function bake(scene: Phaser.Scene, key: string, width: number, height: number, d
   draw(g);
   g.generateTexture(key, width, height);
   g.destroy();
-}
-
-// A door is architectural, not a fitting: at 16x16 it was a third the height of
-// the 48px player and read as a wall fitting. 24x56 makes it taller than the
-// person walking through it. sceneScale.test.ts holds both facts.
-function drawTileDoor(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(0, 0, 24, 56); // frame
-  g.fillStyle(WOOD_DARK, 1);
-  g.fillRect(2, 1, 20, 54); // door slab
-  g.fillStyle(lighten(WOOD_DARK, 0.16), 1);
-  g.fillRect(2, 1, 20, 1); // top edge
-  g.fillStyle(lighten(WOOD_DARK, 0.08), 1);
-  g.fillRect(4, 4, 16, 18); // upper panel
-  g.fillStyle(darken(WOOD_DARK), 1);
-  g.fillRect(4, 22, 16, 2); // panel gap
-  g.fillStyle(lighten(WOOD_DARK, 0.08), 1);
-  g.fillRect(4, 26, 16, 22); // lower panel
-  g.fillStyle(darken(WOOD_DARK), 1);
-  g.fillRect(4, 46, 16, 2); // lower panel shadow
-  g.fillStyle(COLOR.lamp, 1);
-  g.fillRect(18, 27, 2, 2); // knob
-  // Two plank seams down the margins, so the slab is not one flat rectangle.
-  g.fillStyle(darken(WOOD_DARK), 1);
-  g.fillRect(3, 1, 1, 54);
-  g.fillRect(20, 1, 1, 54);
-}
-
-// Same reasoning: 32x40, tall enough to read as a window rather than a vent.
-function drawTileWindow(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(0, 0, 32, 40); // frame
-  g.fillStyle(0x16303c, 1);
-  g.fillRect(2, 2, 28, 36); // night glass
-  g.fillStyle(0x21424f, 1);
-  g.fillRect(2, 2, 28, 14); // sky band
-  g.fillStyle(COLOR.lamp, 0.5);
-  g.fillRect(6, 8, 4, 4); // distant lit window
-  g.fillStyle(COLOR.lamp, 0.32);
-  g.fillRect(20, 14, 4, 3); // faint reflection
-  g.fillStyle(COLOR.wall, 1);
-  g.fillRect(15, 2, 2, 36); // vertical mullion
-  g.fillRect(2, 19, 28, 2); // horizontal mullion
-  g.fillStyle(lighten(COLOR.building, 0.25), 1);
-  g.fillRect(0, 0, 32, 1); // frame highlight
-  g.fillRect(0, 0, 1, 40);
-  g.fillStyle(darken(COLOR.building), 1);
-  g.fillRect(0, 38, 32, 2); // sill
 }
 
 function drawTileStairsUp(g: Phaser.GameObjects.Graphics): void {
@@ -137,18 +86,21 @@ function drawTileStairsDown(g: Phaser.GameObjects.Graphics): void {
   g.fillRect(7, 9, 2, 3);
 }
 
-
 // Bakes every texture the game references. Call once from a Boot-style scene's create().
 // Regenerating a key simply overwrites the existing texture.
 //
-// The 15 item icons, the 9 furniture textures and the 4 characters are deliberately
-// NOT baked here: they are loaded from the art pack (see BootScene and
-// render/artpack.ts). Baking over them would throw the real art away.
+// Almost nothing is baked any more. The wall, floor, door, window and the four
+// characters are all single art images loaded by BootScene (see render/artpack.ts
+// ENV_FILES and CHARACTER_FILES). Baking over them would throw the real art away.
 //
-// The characters used to be baked by drawHumanoid() below — one shared 16x24
-// silhouette in four colours, so the player, both neighbours and the wanderer were
-// the same figure with different paint. tools/build-characters.mjs draws them
-// instead, at 32x48 with distinct silhouettes.
+// What is left is the transparent slot placeholder the panels need, and the two
+// stairwell tiles — the stairs are a repeating 16px pattern drawn three rows tall,
+// which a single image cannot do.
+//
+// The characters used to be baked by drawHumanoid() — one shared 16x24 silhouette
+// in four colours, so the player, both neighbours and the wanderer were the same
+// figure with different paint. They come from the owner's renders now, rebuilt at
+// 64x96 by tools/artclean.mjs with distinct silhouettes.
 export function generateAllPixelArt(scene: Phaser.Scene): void {
   // A transparent placeholder for the icon slots whose texture is chosen later
   // (inventory rows, craft rows, dialogue trade rows). Phaser 4 will not render an
@@ -157,11 +109,6 @@ export function generateAllPixelArt(scene: Phaser.Scene): void {
   // those slots needs a real, if invisible, texture from the moment it is built.
   bake(scene, 'blank', 1, 1, () => {});
 
-  // The door and window are drawn at their own sizes — see the drawers. The wall
-  // and floor are no longer baked here: they are single 1280px-wide art images
-  // loaded by BootScene (render/artpack.ts ENV_FILES).
-  bake(scene, 'tile_door', 24, 56, drawTileDoor);
-  bake(scene, 'tile_window', 32, 40, drawTileWindow);
   bake(scene, 'tile_stairs_up', 16, 16, drawTileStairsUp);
   bake(scene, 'tile_stairs_down', 16, 16, drawTileStairsDown);
 }

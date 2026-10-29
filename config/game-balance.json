@@ -14,6 +14,9 @@
     "craft": 30,
     "trade": 15
   },
+  "dwellPressure": {
+    "rollIntervalGameMinutes": 60
+  },
   "player": {
     "startingFloor": 1,
     "hpMax": 100,

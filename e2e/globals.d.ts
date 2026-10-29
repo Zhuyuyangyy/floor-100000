@@ -22,7 +22,11 @@ interface E2EGameState {
     inventory: { slotCount: number; slots: Array<{ itemId: string; quantity: number }> };
   };
   visitedFloors: Record<string, { openedContainers: string[]; lootedItems: string[] }>;
-  worldEvents: { history: string[]; activeEvent: unknown };
+  worldEvents: {
+    history: string[];
+    activeEvent: unknown;
+    dwell?: { floor: number; minutes: number; nextRollAt: number; rolls: number };
+  };
   [key: string]: unknown;
 }
 

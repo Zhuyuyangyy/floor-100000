@@ -10,6 +10,7 @@ import {
   FLOOR_WIDTH,
   INTERACT_DISTANCE,
   PLAYER_FEET_Y,
+  PLAYER_SPEED,
   ROOM_COUNT,
   ROOM_WIDTH,
   STARTING_FLOOR,
@@ -19,8 +20,6 @@ import {
   WANDERER_SPEED,
 } from '../core/constants';
 import {
-  advanceBobPhase,
-  bobOffsetPx,
   currentInteractionZone,
   floorName,
   hasDownExit,
@@ -34,10 +33,12 @@ import { countItem, isBagFull, STAT_LABEL, useConsumable } from '../systems/Inve
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
 import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, isNight, sleep, spendTime } from '../systems/SurvivalSystem';
 import { ensureNightEvent } from '../systems/EventSystem';
+import { armNextRoll, dwellRollDue, ensureDwell, isDwellExempt, rollDwellEvent, tickDwell } from '../systems/dwellPressure';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, createMarker, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import { ENV_FLOOR_KEY, ENV_WALL_KEY } from '../render/artpack';
+import { idleAnimKey, walkAnimKey, walkSheetKey } from '../render/walkcycle';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
@@ -116,11 +117,10 @@ export class GameScene extends Phaser.Scene {
   private floorObjects: Phaser.GameObjects.GameObject[] = [];
   private wanderer?: Phaser.GameObjects.Sprite;
   private wandererHitAt = Number.NEGATIVE_INFINITY;
-  // Locomotion state. These are not field-initialised-only: a scene restart
-  // re-runs create() but not the class fields, so clearFloor() zeroes them too.
-  // Left over they would resume a run already at top speed, or mid-bob.
+  // Not field-initialised-only: a scene restart re-runs create() but not the
+  // class fields, so clearFloor() zeroes this too. Left over, a restarted floor
+  // would resume the run already at top speed.
   private speedX = 0;
-  private bobPhase = 0;
 
   private clockText!: Phaser.GameObjects.Text;
   private barsGfx!: Phaser.GameObjects.Graphics;
@@ -291,7 +291,12 @@ export class GameScene extends Phaser.Scene {
     }
     if (floor === NPC_FLOOR) this.drawNpcs();
 
-    this.player = this.add.sprite(state.player.x, PLAYER_FEET_Y, 'player').setOrigin(0.5, 1);
+    // The side-view walk sheet, not the front-facing portrait: the camera is a
+    // side-scroller, and a figure seen face-on while it moves laterally reads as
+    // a card sliding across the backdrop. The front-view art is the dialogue
+    // portrait, where facing the player is the correct axis.
+    this.player = this.add.sprite(state.player.x, PLAYER_FEET_Y, walkSheetKey('player')).setOrigin(0.5, 1);
+    this.player.play(idleAnimKey('player'));
     this.floorObjects.push(this.player);
     this.cameras.main.startFollow(this.player, true, 0.15, 0.15);
   }
@@ -301,7 +306,6 @@ export class GameScene extends Phaser.Scene {
     for (const o of this.floorObjects) o.destroy();
     this.floorObjects = [];
     this.speedX = 0;
-    this.bobPhase = 0;
     this.containerObjs.clear();
     this.groundObjs.clear();
     this.wanderer?.destroy();
@@ -825,8 +829,12 @@ export class GameScene extends Phaser.Scene {
   // ── NPCs & dialogue ─────────────────────────────────────────────────────
   private drawNpcs(): void {
     for (const npc of NPCS) {
-      const key = npc.id === 'alin' ? 'npc_alin' : 'npc_xiaozhou';
-      const sprite = this.add.sprite(npc.x, PLAYER_FEET_Y, key).setOrigin(0.5, 1);
+      const who = npc.id === 'alin' ? 'npc_alin' : 'npc_xiaozhou';
+      const sprite = this.add.sprite(npc.x, PLAYER_FEET_Y, walkSheetKey(who)).setOrigin(0.5, 1);
+      // NPCs stand still, so they breathe on the idle clip. Without an explicit
+      // play() a sprite sits on frame 0 forever, which reads as a frozen mannequin
+      // rather than someone waiting to talk to you.
+      sprite.play(idleAnimKey(who));
       const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
       this.floorObjects.push(sprite, nameLabel);
     }
@@ -1213,10 +1221,43 @@ export class GameScene extends Phaser.Scene {
     if (result.ok) {
       this.clearFloor();
       this.drawFloor(); // records the visit for the floor just entered...
+      // B3-15: a dwell-rolled wanderer belongs to the floor it was rolled on.
+      // Leaving is the escape, so the event must not follow the player up the
+      // stairs and squat in the day's single event slot.
+      const we = getGame().worldEvents;
+      if (we.activeEvent?.source === 'dwell') we.activeEvent = null;
       saveToStorage(getGame()); // ...so the save that follows includes it
       this.cameras.main.flash(180, 0, 0, 0); // transition through black
     } else {
       this.flash(result.reason === 'top' ? '已到顶层' : '已到尽头');
+    }
+  }
+
+  // B3-15: rolls dwell pressure and applies the outcome. Pure logic lives in
+  // systems/dwellPressure.ts; this is the side-effect half (flash + the
+  // wanderer event). The roll happens before the next one is armed so the
+  // first roll on a floor uses the gentlest table row.
+  private updateDwellPressure(state: GameState, minutes: number): void {
+    if (state.status !== 'playing') return;
+    const dwell = ensureDwell(state);
+    tickDwell(dwell, state.currentFloor, minutes);
+    if (isDwellExempt(state.currentFloor)) return;
+    if (state.worldEvents.activeEvent) return; // one event at a time
+    if (!dwellRollDue(dwell)) return;
+    const outcome = rollDwellEvent(state, dwell, state.currentFloor);
+    armNextRoll(dwell);
+    if (outcome.kind === 'prowler') {
+      state.worldEvents.activeEvent = {
+        type: 'wanderer',
+        floor: state.currentFloor,
+        source: 'dwell',
+        message: outcome.message,
+      };
+      state.worldEvents.history.push(`day${state.day}:dwell`);
+      playSfx('danger');
+      this.flash(outcome.message);
+    } else if (outcome.kind === 'atmosphere') {
+      this.flash(outcome.message);
     }
   }
 
@@ -1250,18 +1291,22 @@ export class GameScene extends Phaser.Scene {
     let dir = 0;
     if (this.cursors?.left.isDown || this.wasd?.left.isDown) dir -= 1;
     if (this.cursors?.right.isDown || this.wasd?.right.isDown) dir += 1;
-    // The speed is ramped rather than switched, and the distance covered comes
-    // from the ramped speed — so a tap of the key now moves a shorter distance
-    // than it used to, and the run feels like it has weight.
+    // The speed is ramped rather than switched, so a tap of the key moves a
+    // shorter distance than it used to and the run feels like it has weight.
     this.speedX = stepHorizontalSpeed(this.speedX, dir, delta);
     const dx = this.speedX * (delta / 1000);
     if (dx !== 0) movePlayerX(state, dx);
     this.player.x = state.player.x;
 
-    // The camera's vertical bounds are a single 360px band, so it can never
-    // scroll vertically — the bob is fully visible and never fights the follow.
-    this.bobPhase = advanceBobPhase(this.bobPhase, this.speedX, delta);
-    this.player.y = PLAYER_FEET_Y - bobOffsetPx(this.bobPhase, this.speedX);
+    // The walk cycle carries all the vertical motion now — the poses' own hip
+    // bob, not a sine wave bolted on top. What is left to do here is pick the
+    // clip, face it, and lock the playback rate to the actual speed so the feet
+    // do not skate while the player is still on the acceleration ramp.
+    if (dir !== 0) this.player.setFlipX(dir < 0);
+    const speedFraction = Math.abs(this.speedX) / PLAYER_SPEED;
+    const want = speedFraction > 0.03 ? walkAnimKey('player') : idleAnimKey('player');
+    if (this.player.anims.currentAnim?.key !== want) this.player.play(want, true);
+    this.player.anims.timeScale = Math.max(0.2, Math.min(1, speedFraction));
 
     const tick = advanceTime(state, delta);
     const rolled = ensureNightEvent(state);
@@ -1269,6 +1314,11 @@ export class GameScene extends Phaser.Scene {
       if (rolled.event.type === 'wanderer') playSfx('danger');
       this.flash(rolled.event.message);
     }
+    // B3-15: dwell pressure — the longer the player lingers on one floor, the
+    // more likely the next roll is teeth. Runs after the night roll so a night
+    // event already occupying the day's slot suppresses the prowler (an
+    // atmosphere roll can still fire).
+    this.updateDwellPressure(state, tick.gameMinutes);
     // Read after ensureNightEvent so an event rolled this very frame counts.
     const event = state.worldEvents.activeEvent;
     this.refreshClock();
@@ -1334,12 +1384,18 @@ export class GameScene extends Phaser.Scene {
     else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互 · I 背包 · ESC 菜单');
   }
 
-  // The wanderer only haunts its own floor at night; it is slower than the player
-  // and chips HP on a cooldown, so outrunning it or leaving the floor always works.
+  // The wanderer only haunts its own floor; it is slower than the player and
+  // chips HP on a cooldown, so outrunning it or leaving the floor always works.
+  // B3-15: a dwell-rolled wanderer acts day or night — the pressure comes from
+  // lingering, not from the clock, so gating it on night would let a player
+  // idle safely until dark.
   private updateWanderer(delta: number): void {
     const state = getGame();
     const event = state.worldEvents.activeEvent;
-    const active = event?.type === 'wanderer' && isNight(state.gameMinuteOfDay) && state.currentFloor === event.floor;
+    const active =
+      event?.type === 'wanderer' &&
+      state.currentFloor === event.floor &&
+      (isNight(state.gameMinuteOfDay) || event.source === 'dwell');
     if (!active) {
       if (this.wanderer) {
         this.wanderer.destroy();
@@ -1349,7 +1405,8 @@ export class GameScene extends Phaser.Scene {
     }
     if (!this.wanderer) {
       const spawnX = state.player.x < FLOOR_WIDTH / 2 ? FLOOR_WIDTH - 48 : 48;
-      this.wanderer = this.add.sprite(spawnX, PLAYER_FEET_Y, 'wanderer').setOrigin(0.5, 1);
+      this.wanderer = this.add.sprite(spawnX, PLAYER_FEET_Y, walkSheetKey('wanderer')).setOrigin(0.5, 1);
+      this.wanderer.play(walkAnimKey('wanderer'));
     }
     const dir = Math.sign(state.player.x - this.wanderer.x);
     if (dir !== 0) this.wanderer.x += dir * WANDERER_SPEED * (delta / 1000);

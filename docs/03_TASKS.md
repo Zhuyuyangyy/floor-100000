@@ -98,6 +98,7 @@
 | B3-12 | **移动手感**：速度阶跃改为加减速斜坡 | ✅ 见 [`B3-12_MOVEMENT_FEEL.md`](B3-12_MOVEMENT_FEEL.md) |
 | B3-13 | **侧面行走循环**：四个角色全部改为侧面 + 逆运动学腿部摆动，接 Phaser 动画系统。正面渲染图转作对话立绘 | ✅ 见 [`B3-13_WALK_CYCLE.md`](B3-13_WALK_CYCLE.md) |
 | B3-14 | **行走循环逐像素重制**：胶囊 rasterizer 换成手摆像素（水平硬边 run + 锥形轮廓 + 整体描边），远臂改躯干后遮挡，idle 加站姿分立 | ✅ 见 [`B3-14_WALK_PIXELS.md`](B3-14_WALK_PIXELS.md) |
+| B3-15 | **停留压力**（借鉴 CENTUM spawn timer，见 [`RE_COMPETITIVE.md`](RE_COMPETITIVE.md)）：楼层停留每 60 游戏分钟 roll 一次，逐级升级到昼夜皆然的巡游体；换层重置、宿舍豁免 | ✅ 见 [`B3-15_DWELL_PRESSURE.md`](B3-15_DWELL_PRESSURE.md) |
 | **下一步** | 人工试玩 + 决定 B4 是否现在开始 | ⬜ |
 
 ### B3-05 试玩结论（一句话版）

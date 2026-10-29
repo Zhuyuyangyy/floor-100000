@@ -55,6 +55,27 @@ function validateActiveEvent(value: unknown): string | null {
   if (value.floor !== undefined && (typeof value.floor !== 'number' || !PLAYABLE_FLOORS_V01.includes(value.floor))) {
     return 'worldEvents.activeEvent.floor 无效';
   }
+  if (value.source !== undefined && value.source !== 'night' && value.source !== 'dwell') {
+    return 'worldEvents.activeEvent.source 无效';
+  }
+  return null;
+}
+
+// B3-15: optional so pre-dwell saves stay valid; when present it must be
+// well-formed because GameScene ticks it without a guard.
+function validateDwell(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (!isRecord(value)) return 'worldEvents.dwell 无效';
+  if (typeof value.floor !== 'number' || !Number.isInteger(value.floor)) return 'worldEvents.dwell.floor 无效';
+  if (typeof value.minutes !== 'number' || !Number.isFinite(value.minutes) || value.minutes < 0) {
+    return 'worldEvents.dwell.minutes 无效';
+  }
+  if (typeof value.nextRollAt !== 'number' || !Number.isFinite(value.nextRollAt) || value.nextRollAt < 0) {
+    return 'worldEvents.dwell.nextRollAt 无效';
+  }
+  if (typeof value.rolls !== 'number' || !Number.isInteger(value.rolls) || value.rolls < 0) {
+    return 'worldEvents.dwell.rolls 无效';
+  }
   return null;
 }
 
@@ -128,6 +149,8 @@ export function validateGameState(data: unknown): string[] {
     if (!isStringArray(we.history)) errors.push('worldEvents.history 无效');
     const e = validateActiveEvent(we.activeEvent);
     if (e) errors.push(e);
+    const d = validateDwell(we.dwell);
+    if (d) errors.push(d);
   }
   return errors;
 }

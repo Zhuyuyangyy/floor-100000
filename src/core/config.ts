@@ -27,6 +27,14 @@ export interface GameBalanceConfig {
     craft: number;
     trade: number;
   };
+  // B3-15: game-minutes of dwelling on one floor between dwell-pressure rolls.
+  // At 3 game-minutes per real second this is one roll every 20 real seconds —
+  // fast enough that the M1 playtest's 8-hour idle window (≈8 rolls) actually
+  // fills with pressure, slow enough that a normal loot-and-leave floor visit
+  // sees one or two.
+  dwellPressure: {
+    rollIntervalGameMinutes: number;
+  };
   player: {
     startingFloor: number;
     hpMax: number;
@@ -79,6 +87,7 @@ const REQUIRED_NUMBERS: Array<[string, (c: GameBalanceConfig) => number]> = [
   ['player.energyStart', (c) => c.player.energyStart],
   ['player.energyLossPerGameHour', (c) => c.player.energyLossPerGameHour],
   ['inventory.slotCount', (c) => c.inventory.slotCount],
+  ['dwellPressure.rollIntervalGameMinutes', (c) => c.dwellPressure.rollIntervalGameMinutes],
   ['world.startingFloor', (c) => c.world.startingFloor],
   ['world.targetTotalFloors', (c) => c.world.targetTotalFloors],
 ];

@@ -70,6 +70,20 @@ export interface ActiveEvent {
   type: 'blackout' | 'wanderer' | 'leak';
   floor?: number;
   message: string;
+  // B3-15: which machinery rolled it. 'night' events only act at night; 'dwell'
+  // ones (the player lingered too long on one floor) act whenever the player is
+  // on that floor, day or night.
+  source?: 'night' | 'dwell';
+}
+
+// B3-15: how long the player has been lingering on one floor, and how many
+// dwell-pressure rolls that has earned. Optional so saves written before the
+// system existed stay loadable — a missing one is re-created on the next tick.
+export interface DwellState {
+  floor: number;
+  minutes: number;
+  nextRollAt: number;
+  rolls: number;
 }
 
 // Player-caused changes layered over the deterministic base layout of a floor.
@@ -91,7 +105,7 @@ export interface GameState {
   // or writes it beyond the initial empty map (GHI-03 n3).
   npcStates: Record<string, string>;
   visitedFloors: Record<number, FloorVisit>;
-  worldEvents: { history: string[]; activeEvent: ActiveEvent | null };
+  worldEvents: { history: string[]; activeEvent: ActiveEvent | null; dwell?: DwellState };
   status: GameStatus;
 }
 

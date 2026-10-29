@@ -321,3 +321,29 @@ export function resolveEncounter(state: GameState, encounter: Encounter, choice:
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// OVERHAUL Wave A：战斗型遭遇的接线面（combat.ts / monsters.ts 的胶水）。
+//
+// ambush 与 boss 不再是 resolveEncounter 里的一次性 roll——它们开一场真正的
+// 回合制战斗（见 systems/combat.ts）。这里的常量与判定供 GameScene 路由：
+// 踩到战斗型问号点时先问 isCombatKind，再走战斗面板；非战斗型（loot/cache/
+// trader/note）继续用上面的 resolveEncounter 单 roll 路径。
+//
+// 纯加法：以上所有导出与逻辑一行未动，24 条既有测试继续有效。
+export const COMBAT_KINDS = ['ambush', 'boss'] as const;
+
+export function isCombatKind(kind: Encounter['kind']): boolean {
+  return (COMBAT_KINDS as readonly string[]).includes(kind);
+}
+
+// ambush 的怪物由调用方按楼层 roll（返回 0 表示「无固定 id」）；boss 永远
+// 是 900 号守门人——与 monsters.ts 名册里的 boss 约定一致。
+export function combatMonsterId(kind: Encounter['kind']): number {
+  return kind === 'boss' ? 900 : 0;
+}
+
+// 战斗面板的首行文案。模板含怪物名，由调用方填入 roll 到的怪。
+export function combatIntroMessage(kind: Encounter['kind'], monsterName: string): string {
+  return kind === 'boss' ? `${monsterName} 挡在楼梯口，无路可退。` : `${monsterName} 从暗处扑出！`;
+}

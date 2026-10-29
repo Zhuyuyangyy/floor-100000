@@ -61,6 +61,9 @@ export function createNewGame(seed: number): GameState {
       inventory: inventoryFromStartingItems(cfg.inventory.slotCount, cfg.inventory.startingItems),
       equipped: null,
       homeUpgrades: [],
+      // OVERHAUL Wave C: every run starts broke; money comes from loot, goals
+      // and trades.
+      gold: 0,
     },
     npcStates: {},
     visitedFloors: {},

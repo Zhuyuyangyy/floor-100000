@@ -206,7 +206,14 @@ export function deserialize(json: string): SaveResult {
   if (errors.length > 0) {
     return { ok: false, error: `存档损坏：${errors.join('；')}` };
   }
-  return { ok: true, state: data as GameState };
+  const state = data as GameState;
+  // OVERHAUL Wave C: gold arrived after the first saves existed. A save that
+  // predates it is not corrupt — it just starts the run broke. Repair rather
+  // than reject, so nobody loses a run to a field they never had.
+  if (typeof state.player.gold !== 'number' || !Number.isFinite(state.player.gold)) {
+    state.player.gold = 0;
+  }
+  return { ok: true, state };
 }
 
 // LocalStorage persistence. A missing key is a normal "no save yet", not a

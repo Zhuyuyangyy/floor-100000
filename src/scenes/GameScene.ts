@@ -44,10 +44,16 @@ import {
   resolveEncounter,
   rollEncounter as rollFloorEncounter,
   shouldSkip,
+  isCombatKind,
+  combatIntroMessage,
   type Encounter,
   type EncounterChoice,
 } from '../systems/encounters';
 import { encounterSpots, nudgeSpotX } from '../systems/encounterSpots';
+import { resolveRound, playerCombatant, GUARD_ENERGY_RESTORE, type Combatant } from '../systems/combat';
+import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster } from '../systems/monsters';
+import { deriveSeed, makeRng } from '../core/rng';
+import { addItem } from '../systems/InventorySystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, createMarker, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
@@ -196,6 +202,11 @@ export class GameScene extends Phaser.Scene {
   private encounterOpen = false;
   private encounter?: { spotId: string; encounter: Encounter; choices: EncounterChoice[]; selected: number; resolved: boolean };
   private encounterObjects: Phaser.GameObjects.GameObject[] = [];
+  // OVERHAUL Wave A: the live turn-based combat (state lives in
+  // state.combat; this is only the panel's cursor).
+  private combatSelected = 0;
+  // True while the outcome screen is up (the fight is decided, one Enter left).
+  private combatDone = false;
   private feedbackTimer?: Phaser.Time.TimerEvent;
   private lastClock = '';
   private lastStats = '';
@@ -456,12 +467,288 @@ export class GameScene extends Phaser.Scene {
     if (shouldSkip(state, spotId)) return;
     const marker = this.spotMarkers.get(spotId);
     const enc = rollFloorEncounter(state, state.currentFloor, spotId);
+    // OVERHAUL Wave A: anything with teeth opens a real turn-based fight
+    // instead of the old single-roll panel.
+    if (isCombatKind(enc.kind)) {
+      this.startCombat(spotId, enc.kind as 'ambush' | 'boss');
+      return;
+    }
     this.encounter = { spotId, encounter: enc, choices: this.encounterChoices(enc.kind), selected: 0, resolved: false };
     this.encounterOpen = true;
     this.buildEncounterPanel(marker?.isBoss ?? false);
-    // The alert sting is the encounter's warning shot: anything with teeth in
-    // it gets one before the player reads the options.
-    if (enc.kind === 'ambush' || enc.kind === 'boss') playSfx('alert');
+    // The alert sting is the warning shot.
+    playSfx('alert');
+  }
+
+  // ── turn-based combat (OVERHAUL Wave A) ─────────────────────────────────
+  // The monster is rolled once per spot and frozen into state.combat, so a
+  // save/reload mid-fight resumes the same fight. Behaviours from monsters.ts
+  // shape the effective stats; the first-strike and guard-pierce rules are
+  // applied here because resolveRound stays a generic engine.
+
+  private monsterFor(kind: 'ambush' | 'boss', state: import('../core/gameTypes').GameState, spotId: string): Combatant & { id: number; behavior: string } {
+    const floor = state.currentFloor;
+    let def;
+    if (kind === 'boss') {
+      def = MONSTERS.find((m) => m.id === 900);
+      if (!def) throw new Error('monster roster lost the 900 guardian');
+    } else {
+      // Seeded per spot, so the same question mark always hides the same thing
+      // within a run — and deriveSeed, never a small integer, because
+      // xorshift32's first output for small seeds collapses toward 0.
+      const rng = makeRng(deriveSeed(state.runSeed, state.day, floor, spotId, 'combat-monster'));
+      def = rollMonster(floor, rng);
+    }
+    const base: Combatant = {
+      hp: def.hp,
+      maxHp: def.hp,
+      damage: def.damage,
+      accuracy: def.accuracy,
+      defense: def.defense,
+      evasion: def.evasion,
+      name: def.name,
+    };
+    const mods = behaviorModifiers(def.behavior);
+    const effective = applyBehavior(mods, base);
+    // applyBehavior rebuilds the object from the six combat fields, so the
+    // display name does not survive it — re-attach it here.
+    return { ...effective, name: def.name, id: def.id, behavior: def.behavior };
+  }
+
+  private startCombat(spotId: string, kind: 'ambush' | 'boss'): void {
+    const state = getGame();
+    const monster = this.monsterFor(kind, state, spotId);
+    const log: string[] = [combatIntroMessage(kind, monster.name ?? '敌人')];
+    // An ambusher's first strike lands before the player acts: the wind-up is
+    // the tell, the hit is the bill.
+    if (monster.behavior === 'ambusher') {
+      const mods = behaviorModifiers('ambusher');
+      const strike = Math.max(1, Math.round(monster.damage * mods.firstStrikeMult));
+      state.player.hp = Math.max(0, state.player.hp - strike);
+      log.push(`${monster.name} 抢先扑出，造成 ${strike} 点伤害！`);
+      this.playActionAnim(hurtAnimKey('player'), 400);
+      this.cameras.main.shake(160, 0.008);
+    }
+    state.combat = {
+      kind,
+      floor: state.currentFloor,
+      spotId,
+      monster: { ...monster, name: monster.name ?? '敌人' },
+      guarding: false,
+      turn: 1,
+      log,
+    };
+    this.encounterOpen = true; // the same panel slot and the same input routing
+    this.combatSelected = 0;
+    playSfx('alert');
+    this.refreshStats();
+    if (state.player.hp <= 0) {
+      state.status = 'lost';
+      saveToStorage(state);
+      this.scene.start('End');
+      return;
+    }
+    saveToStorage(state);
+    this.buildCombatPanel();
+  }
+
+  private closeCombat(): void {
+    const state = getGame();
+    state.combat = undefined;
+    this.combatDone = false;
+    this.encounterOpen = false;
+    for (const o of this.encounterObjects) o.destroy();
+    this.encounterObjects = [];
+    // The floor's spots are rebuilt so a resolved one disappears.
+    this.buildEncounterSpots();
+  }
+
+  private buildCombatPanel(): void {
+    for (const o of this.encounterObjects) o.destroy();
+    this.encounterObjects = [];
+    const state = getGame();
+    const combat = state.combat;
+    if (!combat) return;
+    const { width, height } = this.cameras.main;
+    const cx = width / 2;
+    const cy = height / 2;
+    const panelW = 440;
+    const panelH = 230;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+    const isBoss = combat.kind === 'boss';
+
+    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.dialogue));
+    this.encounterObjects.push(
+      this.add
+        .text(cx, top + 18, `${combat.monster.name}${isBoss ? '（守门人）' : ''}`, { fontFamily: 'monospace', fontSize: '16px', color: isBoss ? '#e8907c' : '#f4b66a' })
+        .setOrigin(0.5),
+    );
+    // The monster's HP bar — the fight's only clock.
+    const barW = 200;
+    const barX = cx - barW / 2;
+    this.encounterObjects.push(
+      this.add.rectangle(barX, top + 32, barW, 6, 0x0b0f12, 0.9).setOrigin(0, 0),
+      this.add.rectangle(barX, top + 32, Math.max(0, (barW * combat.monster.hp) / combat.monster.maxHp), 6, isBoss ? 0xe56d63 : 0xc96f4a).setOrigin(0, 0),
+      this.add.text(cx, top + 44, `HP ${combat.monster.hp}/${combat.monster.maxHp} · 第 ${combat.turn} 回合`, { fontFamily: 'monospace', fontSize: '11px', color: '#a8a49a' }).setOrigin(0.5),
+    );
+    // The log's tail: the last three lines, so the panel tells the story of the
+    // fight without scrolling.
+    const tail = combat.log.slice(-3);
+    tail.forEach((line, i) => {
+      this.encounterObjects.push(
+        this.add.text(left + 20, top + 62 + i * 18, line, { fontFamily: 'monospace', fontSize: '12px', color: '#ece8d8', wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+      );
+    });
+    const choices: Array<{ key: string; label: string }> = [
+      { key: 'attack', label: '攻击' },
+      { key: 'guard', label: '格挡（受伤减半 · 回精力）' },
+      { key: 'flee', label: '撤退' },
+    ];
+    choices.forEach((c, i) => {
+      const cursor = i === this.combatSelected ? '>' : ' ';
+      this.encounterObjects.push(
+        this.add
+          .text(left + 24, top + 132 + i * 24, `${cursor} ${c.label}`, { fontFamily: 'monospace', fontSize: '14px', color: i === this.combatSelected ? '#f4b66a' : '#a8a49a' })
+          .setOrigin(0, 0),
+      );
+    });
+    this.encounterObjects.push(
+      this.add.text(cx, top + panelH - 14, '↑/↓ 选择 · Enter 出招 · ESC 撤退', { fontFamily: 'monospace', fontSize: '11px', color: '#8a867c' }).setOrigin(0.5),
+    );
+  }
+
+  // One turn: the engine resolves the round, this method lands the numbers on
+  // state and decides whether the fight continues.
+  private activateCombatChoice(): void {
+    const state = getGame();
+    const combat = state.combat;
+    if (!combat) return;
+    const action = (['attack', 'guard', 'flee'] as const)[this.combatSelected];
+    const player = playerCombatant(state);
+    const monsterC: Combatant = {
+      hp: combat.monster.hp,
+      maxHp: combat.monster.maxHp,
+      damage: combat.monster.damage,
+      accuracy: combat.monster.accuracy,
+      defense: combat.monster.defense,
+      evasion: combat.monster.evasion,
+      name: combat.monster.name,
+    };
+    const rng = makeRng(deriveSeed(state.runSeed, state.day, combat.floor, combat.spotId, `combat-turn-${combat.turn}`));
+    const round = resolveRound(player, monsterC, action, rng);
+    combat.log.push(...round.messages);
+    combat.guarding = action === 'guard';
+
+    if (round.playerDamage > 0) {
+      combat.monster.hp = Math.max(0, combat.monster.hp - round.playerDamage);
+      this.playActionAnim(attackAnimKey('player'), 300);
+    }
+    if (action === 'guard') {
+      state.player.energy = Math.min(GAME_CONFIG.player.energyMax, state.player.energy + GUARD_ENERGY_RESTORE);
+    }
+    if (round.monsterDamage > 0 && !round.monsterDead && !round.fled) {
+      let dmg = round.monsterDamage;
+      // A coward that dropped below its threshold breaks off the fight and
+      // runs — the player keeps what they already did to it.
+      const cowardFrac = behaviorModifiers('coward').fleeAtHpFrac;
+      if (combat.monster.behavior === 'coward' && cowardFrac > 0 && combat.monster.hp / combat.monster.maxHp < cowardFrac) {
+        combat.log.push(`${combat.monster.name} 伤痕累累地逃走了。`);
+        this.finishCombat('coward');
+        return;
+      }
+      state.player.hp = Math.max(0, state.player.hp - dmg);
+      if (action === 'guard') this.playActionAnim(hurtAnimKey('player'), 400);
+      this.cameras.main.shake(160, 0.008);
+    }
+    combat.turn += 1;
+    this.refreshStats();
+
+    if (round.playerDead || state.player.hp <= 0) {
+      state.player.hp = 0;
+      state.status = 'lost';
+      saveToStorage(state);
+      this.scene.start('End');
+      return;
+    }
+    if (round.monsterDead) {
+      this.finishCombat('win');
+      return;
+    }
+    if (round.fled) {
+      // A successful retreat costs nothing and leaves the spot un-resolved —
+      // the player can come back with a better plan (or a crowbar).
+      combat.log.push('你成功撤出。');
+      saveToStorage(state);
+      this.closeCombat();
+      this.flash('你撤出了战斗。');
+      return;
+    }
+    saveToStorage(state);
+    this.buildCombatPanel();
+  }
+
+  // Combat over: pay out, consume the spot, close.
+  private finishCombat(outcome: 'win' | 'coward'): void {
+    const state = getGame();
+    const combat = state.combat;
+    if (!combat) return;
+    const isBoss = combat.kind === 'boss';
+    if (outcome === 'win') {
+      // Ambush win: the loser's pockets. Boss win: the chapter's payoff.
+      const rng = makeRng(deriveSeed(state.runSeed, state.day, combat.floor, combat.spotId, 'combat-loot'));
+      const lootCount = isBoss ? 3 : rng.nextInt(1, 2);
+      const taken: Array<{ itemId: ItemId; quantity: number }> = [];
+      const pool: ItemId[] = isBoss
+        ? ['medkit', 'clean_water', 'ration_pack', 'battery', 'filter']
+        : ['bread', 'clean_water', 'dirty_water', 'scrap_metal', 'cloth', 'battery'];
+      for (let i = 0; i < lootCount; i++) {
+        const itemId = pool[rng.nextInt(0, pool.length - 1)];
+        const qty = itemId === 'clean_water' || itemId === 'bread' ? rng.nextInt(1, 2) : 1;
+        const r = addItem(state.player.inventory, itemId, qty);
+        if (r.overflow === 0) taken.push({ itemId, quantity: qty });
+      }
+      const names = taken.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、');
+      combat.log.push(isBoss ? `守门人倒下了。你搜出：${names || '（背包已满）'}` : `你击败了 ${combat.monster.name}。战利品：${names || '（背包已满）'}`);
+      if (isBoss) {
+        state.records = { deepestFloor: Math.max(state.records?.deepestFloor ?? 0, state.currentFloor), bestScore: (state.records?.bestScore ?? 0) + 200 };
+        combat.log.push('上楼的路通了。分数 +200');
+      }
+      markResolved(state, combat.spotId, `combat:win`);
+      playSfx('goal');
+    } else {
+      // Coward break-off: half the glory, and the spot stays spent.
+      const rng = makeRng(deriveSeed(state.runSeed, state.day, combat.floor, combat.spotId, 'combat-coward'));
+      const itemId: ItemId = rng.chance(0.5) ? 'bread' : 'cloth';
+      const r = addItem(state.player.inventory, itemId, 1);
+      if (r.overflow === 0) combat.log.push(`它逃走时掉下了 ${getItem(itemId).displayName}。`);
+      markResolved(state, combat.spotId, `combat:coward`);
+    }
+    saveToStorage(state);
+    this.refreshStats();
+    // Show the outcome for one more Enter, same as the non-combat panel.
+    for (const o of this.encounterObjects) o.destroy();
+    this.encounterObjects = [];
+    const { width, height } = this.cameras.main;
+    const cx = width / 2;
+    const cy = height / 2;
+    this.encounterObjects.push(...buildPanel(this, cx, cy, 440, 170, 'yellow', PANEL_DEPTH.game.dialogue));
+    this.encounterObjects.push(
+      this.add.text(cx, cy - 60, outcome === 'win' ? (isBoss ? '守门人倒下了' : '战斗胜利') : '敌人逃走了', { fontFamily: 'monospace', fontSize: '16px', color: '#a8e0c8' }).setOrigin(0.5),
+    );
+    const tail = combat.log.slice(-3);
+    tail.forEach((line, i) => {
+      this.encounterObjects.push(
+        this.add.text(cx - 200, cy - 30 + i * 18, line, { fontFamily: 'monospace', fontSize: '12px', color: '#ece8d8', wordWrap: { width: 400 } }).setOrigin(0, 0),
+      );
+    });
+    this.encounterObjects.push(
+      this.add.text(cx, cy + 60, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: '11px', color: '#8a867c' }).setOrigin(0.5),
+    );
+    // The fight is over: the outcome screen waits for one Enter, then
+    // closeCombat clears state.combat and the floor's spots.
+    this.combatDone = true;
+    state.combat = { ...combat, log: combat.log };
   }
 
   private closeEncounter(): void {
@@ -1360,6 +1647,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onEsc(): void {
+    // OVERHAUL Wave A: ESC mid-fight is the retreat — it runs the flee round
+    // rather than walking away for free, so the choice has a cost.
+    if (this.encounterOpen && getGame().combat && !this.combatDone) {
+      this.combatSelected = 2; // flee
+      this.activateCombatChoice();
+      return;
+    }
     if (this.encounterOpen) {
       // Leaving an unresolved encounter is the walk-away: no cost, no
       // consumption. A resolved one just closes the outcome panel.
@@ -1373,7 +1667,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onNavUp(): void {
-    if (this.encounterOpen && this.encounter && !this.encounter.resolved) {
+    if (this.encounterOpen && getGame().combat && !this.combatDone) {
+      this.combatSelected = Math.max(0, this.combatSelected - 1);
+      this.buildCombatPanel();
+    } else if (this.encounterOpen && this.encounter && !this.encounter.resolved) {
       this.encounter.selected = Math.max(0, this.encounter.selected - 1);
       this.buildEncounterPanel(this.spotMarkers.get(this.encounter.spotId)?.isBoss ?? false);
     } else if (this.inventoryOpen) {
@@ -1392,7 +1689,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onNavDown(): void {
-    if (this.encounterOpen && this.encounter && !this.encounter.resolved) {
+    if (this.encounterOpen && getGame().combat && !this.combatDone) {
+      this.combatSelected = Math.min(2, this.combatSelected + 1);
+      this.buildCombatPanel();
+    } else if (this.encounterOpen && this.encounter && !this.encounter.resolved) {
       this.encounter.selected = Math.min(this.encounter.choices.length - 1, this.encounter.selected + 1);
       this.buildEncounterPanel(this.spotMarkers.get(this.encounter.spotId)?.isBoss ?? false);
     } else if (this.inventoryOpen) {
@@ -1414,6 +1714,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onUse(): void {
+    // OVERHAUL Wave A: the fight's turn key. Once the outcome screen is up,
+    // Enter closes it; until then it plays the selected action.
+    if (this.encounterOpen && getGame().combat) {
+      if (this.combatDone) this.closeCombat();
+      else this.activateCombatChoice();
+      return;
+    }
     if (this.encounterOpen) {
       if (this.encounter?.resolved) this.closeEncounter();
       else this.activateEncounterChoice();

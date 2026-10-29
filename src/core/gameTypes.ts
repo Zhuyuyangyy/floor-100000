@@ -61,6 +61,8 @@ export interface PlayerState {
   // or writes it beyond the initial null (GHI-03 n3).
   equipped: ItemId | null;
   homeUpgrades: string[];
+  // OVERHAUL Wave C: the run's spendable money (shops, shortcuts).
+  gold: number;
 }
 
 export type GameStatus = 'playing' | 'won' | 'lost';
@@ -94,6 +96,44 @@ export interface FloorVisit {
   localEvents: string[];
 }
 
+// OVERHAUL Wave A: the live turn-based combat state. Present only while a
+// combat encounter (ambush / boss) is being fought; absent the rest of the
+// time. Optional so pre-combat saves stay loadable.
+export interface CombatMonster {
+  id: number;
+  name: string;
+  hp: number;
+  maxHp: number;
+  damage: number;
+  accuracy: number;
+  defense: number;
+  evasion: number;
+  behavior: string;
+}
+
+export interface CombatState {
+  kind: 'ambush' | 'boss';
+  floor: number;
+  spotId: string;
+  monster: CombatMonster;
+  /** the player is guarding until the monster's next hit lands */
+  guarding: boolean;
+  /** 1-based; the ambusher's first-strike bonus applies on turn 1 */
+  turn: number;
+  /** rolling combat log, newest last; the panel renders the tail */
+  log: string[];
+}
+
+// OVERHAUL Wave B: cross-run meta-progression, persisted outside the save
+// (localStorage 'floor100000.meta.v1') so a wiped run keeps its unlocks.
+export interface MetaProgress {
+  unlockedCharacters: string[];
+  selectedCharacter: string;
+  bestDepth: number;
+  mode: 'quick' | 'adventure' | 'easy';
+  relics: string[];
+}
+
 export interface GameState {
   schemaVersion: number;
   runSeed: number;
@@ -113,6 +153,8 @@ export interface GameState {
   records?: { deepestFloor: number; bestScore: number };
   // OVERHAUL: encounter spotId -> resolved outcome key, so a spot never pays twice.
   encounters?: Record<string, string>;
+  // OVERHAUL Wave A: the live combat, if one is being fought.
+  combat?: CombatState;
   status: GameStatus;
 }
 

@@ -52,6 +52,18 @@ export const ART_SLOT_KEY = 'ui-slot';
 export const ART_BANNER_WIN_KEY = 'art-banner-win';
 export const ART_BANNER_LOSE_KEY = 'art-banner-lose';
 
+// The room itself. These replace the 16x16 procedural tile_wall / tile_floor,
+// which repeated a flat brick 80 times across a wall and read as graph paper next
+// to the art pack's props. One 1280px-wide image per band instead, so the wall has
+// directional light, peeling paint, stains and pipes drawn into it.
+export const ENV_WALL_KEY = 'env-wall';
+export const ENV_FLOOR_KEY = 'env-floor';
+
+export const ENV_FILES: Record<typeof ENV_WALL_KEY | typeof ENV_FLOOR_KEY, string> = {
+  [ENV_WALL_KEY]: 'wall.png',
+  [ENV_FLOOR_KEY]: 'floor.png',
+};
+
 // Which file holds each furniture texture. The seven procedural drawers in
 // pixelArt.ts used to own these; they are gone now, so this is the only list.
 //

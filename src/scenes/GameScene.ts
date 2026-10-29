@@ -5,6 +5,7 @@ import {
   BED_X,
   CRAFT_X,
   DOWN_EXIT_X,
+  FLOOR_BAND,
   FLOOR_HEIGHT,
   FLOOR_WIDTH,
   INTERACT_DISTANCE,
@@ -26,6 +27,7 @@ import { ensureNightEvent } from '../systems/EventSystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, createMarker, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
+import { ENV_FLOOR_KEY, ENV_WALL_KEY } from '../render/artpack';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
@@ -71,6 +73,24 @@ type DirKeys = {
 // up/down exits, lootable containers & ground items, a 12-slot inventory, and
 // consumable use. GameState (session) is the source of truth; this scene only
 // renders and feeds input back through pure logic functions.
+// A soft pool of warm light, drawn as an ellipse in banded alpha steps.
+//
+// Rectangles were used before, and over flat procedural wall tiles their edges
+// never showed. Against the art wall — which has its own pipes, peeling paint and
+// stains — a rectangle's boundary is clearly visible, so the light reads as a
+// glowing box. Sampling an ellipse row by row keeps the falloff round, and the
+// discrete alpha bands suit pixel art better than a smooth gradient would.
+function drawLightPool(g: Phaser.GameObjects.Graphics, cx: number, cy: number, rx: number, ry: number, peak: number): void {
+  for (let dy = -ry; dy <= ry; dy++) {
+    const t = 1 - (dy * dy) / (ry * ry);
+    if (t <= 0) continue;
+    const halfWidth = Math.round(rx * Math.sqrt(t));
+    const alpha = Math.round(peak * t * 6) / 6; // six banded steps, not a smooth ramp
+    if (alpha <= 0.02 || halfWidth <= 0) continue;
+    g.fillStyle(0xf4b66a, alpha);
+    g.fillRect(cx - halfWidth, cy + dy, halfWidth * 2, 1);
+  }
+}
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
   private cursors!: DirKeys;
@@ -271,42 +291,31 @@ export class GameScene extends Phaser.Scene {
     this.wanderer = undefined;
   }
 
-  // ── world ──────────────────────────────────────────────────────────────
-  // The starting floor — the player's dorm, and the visual template the other
-  // floors will follow. Wall and floor are tiled with the existing tile_*
-  // textures via TileSprite (two objects, not one per tile); windows, doors and
-  // props are placed at 1:1 pixel scale so nothing is resampled.
-  private drawDormRoom(): void {
-    const wallH = FLOOR_HEIGHT - 48; // the floor band is 48px = 3 tiles
 
-    const wall = this.add.tileSprite(0, 8, FLOOR_WIDTH, wallH - 8, 'tile_wall').setOrigin(0, 0);
-    const floor = this.add.tileSprite(0, wallH, FLOOR_WIDTH, FLOOR_HEIGHT - wallH, 'tile_floor').setOrigin(0, 0);
+  // The starting floor — the player's dorm, and the visual template the other
+  // floors will follow. The wall and floor are single 1280px-wide art images
+  // (assets/env), not 16x16 tiles: the art carries the skirting, service pipes,
+  // damp patches and the torn notice, so this method only adds what the art cannot
+  // — the ceiling shadow, the light sources, and the doors.
+  private drawDormRoom(): void {
+    const wallH = FLOOR_HEIGHT - FLOOR_BAND;
+
+    const wall = this.add.image(0, 8, ENV_WALL_KEY).setOrigin(0, 0);
+    const floor = this.add.image(0, wallH, ENV_FLOOR_KEY).setOrigin(0, 0);
 
     const g = this.add.graphics();
-    // Ceiling shadow, skirting where the wall meets the floor, and two service
-    // pipes running the length of the room.
+    // Ceiling shadow only. The skirting, the two service pipes, the damp patches
+    // and the pinned notice all used to be drawn here; the wall image has them, and
+    // drawing them again printed them straight over the art.
     g.fillStyle(0x0b0f12, 1);
     g.fillRect(0, 0, FLOOR_WIDTH, 8);
-    g.fillRect(0, wallH - 3, FLOOR_WIDTH, 3);
-    g.fillStyle(0x2a3238, 1);
-    g.fillRect(0, 58, FLOOR_WIDTH, 4);
-    g.fillStyle(0x232a30, 1);
-    g.fillRect(0, 66, FLOOR_WIDTH, 2);
-    // Damp patches, so the wall is not a flat repeat.
-    g.fillStyle(0x0e1418, 0.45);
-    g.fillRect(210, 150, 44, 60);
-    g.fillRect(880, 190, 36, 48);
 
-    // One lit window per room. The glow is stacked in decreasing-alpha bands so
-    // it reads as light falloff rather than a hard rectangle.
+    // One lit window per room. The pool is drawn row by row as an ellipse with
+    // banded alpha: three stacked rectangles used to sit here, and over textured
+    // wall art their edges read as a glowing box rather than as light.
     for (let r = 0; r < ROOM_COUNT; r++) {
       const cx = r * ROOM_WIDTH + ROOM_WIDTH / 2;
-      g.fillStyle(0xf4b66a, 0.05);
-      g.fillRect(cx - 72, 70, 144, 112);
-      g.fillStyle(0xf4b66a, 0.09);
-      g.fillRect(cx - 48, 84, 96, 84);
-      g.fillStyle(0xf4b66a, 0.16);
-      g.fillRect(cx - 28, 98, 56, 56);
+      drawLightPool(g, cx - 8, 116, 76, 62, 0.16);
       this.floorObjects.push(this.add.image(cx - 8, 116, 'tile_window').setOrigin(0.5));
     }
 
@@ -315,30 +324,14 @@ export class GameScene extends Phaser.Scene {
     for (let r = 0; r < ROOM_COUNT; r++) {
       const cx = r * ROOM_WIDTH + ROOM_WIDTH / 2;
       const lampX = cx + (r % 2 === 0 ? 96 : -96);
-      g.fillStyle(0xf4b66a, 0.12);
-      g.fillRect(lampX - 26, 150, 52, 44);
+      drawLightPool(g, lampX, 152, 30, 26, 0.13);
       g.fillStyle(0x6a4a2a, 1);
       g.fillRect(lampX - 2, 142, 4, 8);
       g.fillStyle(0xf4b66a, 1);
       g.fillRect(lampX - 5, 150, 10, 4);
     }
 
-    // Cables drooping from the pipes, and a torn notice pinned to the wall.
-    g.fillStyle(0x1a2026, 1);
-    g.fillRect(268, 68, 2, 34);
-    g.fillRect(268, 100, 26, 2);
-    g.fillRect(1044, 68, 2, 52);
-    g.fillRect(1018, 118, 28, 2);
-    g.fillStyle(0xb8b09a, 0.85);
-    g.fillRect(736, 168, 22, 28);
-    g.fillStyle(0x8a8474, 0.9);
-    g.fillRect(740, 176, 14, 2);
-    g.fillRect(740, 182, 10, 2);
-
-    // Doors on the room boundaries. Their bottom sits ON the floor line: at 16px a
-    // 16px gap above it was invisible, but the door is 56px now and would clearly
-    // float. It still never enters the 48px floor band, so the walkable strip is
-    // untouched.
+    // Doors on the room boundaries, standing on the floor line.
     for (let i = 1; i < ROOM_COUNT; i++) {
       this.floorObjects.push(this.add.image(i * ROOM_WIDTH, wallH, 'tile_door').setOrigin(0.5, 1));
     }
@@ -346,15 +339,15 @@ export class GameScene extends Phaser.Scene {
     this.floorObjects.push(wall, floor, g);
   }
 
-  // Floors 2-5 — corridors. They share the dorm's base (tiled wall, tiled floor,
-  // ceiling shadow, skirting) so the tower reads as one building, then take a
-  // per-floor tint and per-floor props: see src/render/corridors.ts.
+  // Floors 2-5 — corridors. They share the dorm's base (art wall, art floor) so
+  // the tower reads as one building, then take a per-floor tint and per-floor
+  // props: see src/render/corridors.ts.
   private drawCorridor(floor: number): void {
-    const wallH = FLOOR_HEIGHT - 48; // the floor band is 48px = 3 tiles
+    const wallH = FLOOR_HEIGHT - FLOOR_BAND;
     const tint = corridorTint(floor);
 
-    const wall = this.add.tileSprite(0, 8, FLOOR_WIDTH, wallH - 8, 'tile_wall').setOrigin(0, 0);
-    const floorBand = this.add.tileSprite(0, wallH, FLOOR_WIDTH, FLOOR_HEIGHT - wallH, 'tile_floor').setOrigin(0, 0);
+    const wall = this.add.image(0, 8, ENV_WALL_KEY).setOrigin(0, 0);
+    const floorBand = this.add.image(0, wallH, ENV_FLOOR_KEY).setOrigin(0, 0);
     this.floorObjects.push(wall, floorBand);
 
     if (tint) {
@@ -362,11 +355,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     const g = this.add.graphics();
-    // Ceiling shadow and the skirting where the wall meets the floor — the same
-    // two bands the dorm uses, so a floor change never looks like a different game.
     g.fillStyle(0x0b0f12, 1);
     g.fillRect(0, 0, FLOOR_WIDTH, 8);
-    g.fillRect(0, wallH - 3, FLOOR_WIDTH, 3);
 
     // Props, room by room. Each theme decides its own dressing; the loop only
     // supplies the room's position so nothing has to recompute the layout.
@@ -382,12 +372,12 @@ export class GameScene extends Phaser.Scene {
   // above and the tiles stay inside the floor band so nothing shifts.
   private drawExits(floor: number): void {
     if (hasUpExit(floor)) {
-      const stairs = this.add.tileSprite(UP_EXIT_X - 16, FLOOR_HEIGHT - 48, 32, 48, 'tile_stairs_up').setOrigin(0, 0);
+      const stairs = this.add.tileSprite(UP_EXIT_X - 16, FLOOR_HEIGHT - FLOOR_BAND, 32, FLOOR_BAND, 'tile_stairs_up').setOrigin(0, 0);
       const upLabel = this.add.text(UP_EXIT_X, FLOOR_HEIGHT - 104, '↑ 上楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#77c6a4' }).setOrigin(0.5);
       this.floorObjects.push(stairs, upLabel);
     }
     if (hasDownExit(floor)) {
-      const stairs = this.add.tileSprite(DOWN_EXIT_X - 16, FLOOR_HEIGHT - 48, 32, 48, 'tile_stairs_down').setOrigin(0, 0);
+      const stairs = this.add.tileSprite(DOWN_EXIT_X - 16, FLOOR_HEIGHT - FLOOR_BAND, 32, FLOOR_BAND, 'tile_stairs_down').setOrigin(0, 0);
       const downLabel = this.add.text(DOWN_EXIT_X, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#f4b66a' }).setOrigin(0.5);
       this.floorObjects.push(stairs, downLabel);
     }

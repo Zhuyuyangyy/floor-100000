@@ -53,44 +53,6 @@ function bake(scene: Phaser.Scene, key: string, width: number, height: number, d
   g.destroy();
 }
 
-// ── 16x16 tiles ───────────────────────────────────────────────────────────────
-function drawTileWall(g: Phaser.GameObjects.Graphics): void {
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(0, 0, 16, 16); // mortar
-  g.fillStyle(COLOR.wall, 1);
-  g.fillRect(1, 1, 6, 6); // top-left brick
-  g.fillRect(9, 1, 6, 6); // top-right brick
-  g.fillRect(1, 9, 7, 6); // bottom-left brick (staggered joint)
-  g.fillRect(9, 9, 6, 6); // bottom-right brick
-  g.fillStyle(lighten(COLOR.wall, 0.22), 1);
-  g.fillRect(1, 1, 6, 1);
-  g.fillRect(9, 1, 6, 1);
-  g.fillRect(1, 9, 7, 1);
-  g.fillRect(9, 9, 6, 1);
-  g.fillStyle(darken(COLOR.wall), 1);
-  g.fillRect(1, 6, 6, 1);
-  g.fillRect(9, 6, 6, 1);
-  g.fillRect(1, 14, 7, 1);
-  g.fillRect(9, 14, 6, 1);
-}
-
-function drawTileFloor(g: Phaser.GameObjects.Graphics): void {
-  const base = 0x2b3742;
-  g.fillStyle(base, 1);
-  g.fillRect(0, 0, 16, 16);
-  g.fillStyle(COLOR.building, 1);
-  g.fillRect(0, 0, 16, 1); // top seam
-  g.fillRect(0, 0, 1, 16); // left seam
-  g.fillStyle(lighten(base, 0.1), 1); // grime speckles
-  g.fillRect(4, 4, 1, 1);
-  g.fillRect(11, 7, 1, 1);
-  g.fillRect(7, 12, 1, 1);
-  g.fillStyle(darken(base), 1);
-  g.fillRect(9, 3, 1, 1);
-  g.fillRect(3, 10, 2, 1);
-  g.fillRect(12, 12, 2, 1);
-}
-
 // A door is architectural, not a fitting: at 16x16 it was a third the height of
 // the 48px player and read as a wall fitting. 24x56 makes it taller than the
 // person walking through it. sceneScale.test.ts holds both facts.
@@ -195,10 +157,9 @@ export function generateAllPixelArt(scene: Phaser.Scene): void {
   // those slots needs a real, if invisible, texture from the moment it is built.
   bake(scene, 'blank', 1, 1, () => {});
 
-  // 16x16 wall and floor tiles, plus the two architectural pieces at their own
-  // sizes (a door 24x56, a window 32x40 — see the drawers).
-  bake(scene, 'tile_wall', 16, 16, drawTileWall);
-  bake(scene, 'tile_floor', 16, 16, drawTileFloor);
+  // The door and window are drawn at their own sizes — see the drawers. The wall
+  // and floor are no longer baked here: they are single 1280px-wide art images
+  // loaded by BootScene (render/artpack.ts ENV_FILES).
   bake(scene, 'tile_door', 24, 56, drawTileDoor);
   bake(scene, 'tile_window', 32, 40, drawTileWindow);
   bake(scene, 'tile_stairs_up', 16, 16, drawTileStairsUp);

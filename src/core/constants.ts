@@ -27,8 +27,13 @@ export const NIGHT_RISK_START_MINUTE = 1200;
 
 // Floor geometry for v0.1 (docs/01_GDD.md §4: 4 fixed-width room modules, 16px
 // tiles). One floor is wider than the 640px viewport, so the camera scrolls.
+//
+// The floor band is 64px, up from 48. The wall and floor are single 1280px-wide
+// art images rather than 16x16 tiles, and 48px was too short a strip for the
+// drawn concrete to read — the wall band is what shrank to pay for it.
 export const FLOOR_WIDTH = 1280; // 4 rooms x 320px
 export const FLOOR_HEIGHT = 360;
+export const FLOOR_BAND = 64; // walkable ground band at the bottom
 export const ROOM_COUNT = 4;
 export const ROOM_WIDTH = FLOOR_WIDTH / ROOM_COUNT;
 export const PLAYER_SPEED = 130; // px / second

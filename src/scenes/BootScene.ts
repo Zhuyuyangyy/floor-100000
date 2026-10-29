@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { generateAllPixelArt } from '../render/pixelArt';
-import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHARACTER_FILES, FURNITURE_FILES, ITEM_ICON_FILES } from '../render/artpack';
+import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHARACTER_FILES, ENV_FILES, FURNITURE_FILES, ITEM_ICON_FILES } from '../render/artpack';
 
 // Bakes all procedural pixel-art textures, loads the licensed UI pack
 // (GHI-04), then shows the title menu (开始新游戏 / 继续游戏 / 操作说明).
@@ -39,6 +39,11 @@ export class BootScene extends Phaser.Scene {
     // The four characters are drawn by tools/build-characters.mjs, not baked here.
     for (const [key, file] of Object.entries(CHARACTER_FILES)) {
       this.load.image(key, `assets/artpack/${file}`);
+    }
+
+    // The room's wall and floor: single wide images, not 16x16 tiles.
+    for (const [key, file] of Object.entries(ENV_FILES)) {
+      this.load.image(key, `assets/env/${file}`);
     }
 
     this.load.image(ART_BANNER_WIN_KEY, 'assets/artpack/banner-win.png');

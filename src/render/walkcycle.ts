@@ -26,6 +26,23 @@ export const FRAME_H = 96;
 export const WALK_FRAMES = 6;
 export const IDLE_FRAMES = 2;
 
+// ── W5 新增动作帧数 ────────────────────────────────────────────────────
+// 三段式攻击（前摇 / 出手 / 回收）、两段式受击（后仰 / 回收过半）、
+// 两段式搜刮（弯腰前伸 / 重心变化）。全部接在行走 + 待机之后，烘进同一张
+// sheet，所以 GameScene 与 pixelArt 的接线一行都不用改。
+export const ATTACK_FRAMES = 3;
+export const HURT_FRAMES = 2;
+export const SEARCH_FRAMES = 2;
+
+/** sheet 中 attack 段的起始列（= 8）。 */
+export const ATTACK_FRAME_START = WALK_FRAMES + IDLE_FRAMES;
+/** sheet 中 hurt 段的起始列（= 11）。 */
+export const HURT_FRAME_START = ATTACK_FRAME_START + ATTACK_FRAMES;
+/** sheet 中 search 段的起始列（= 13）。 */
+export const SEARCH_FRAME_START = HURT_FRAME_START + HURT_FRAMES;
+/** 一张 sheet 的总列数：6 行走 + 2 待机 + 3 攻击 + 2 受击 + 2 搜刮 = 15。 */
+export const TOTAL_FRAMES = SEARCH_FRAME_START + SEARCH_FRAMES;
+
 // The ankle row when a foot is planted. The boot fills the last row of the
 // frame, so a foot here means the character is standing on the floor line.
 export const FOOT_GROUND = 94;
@@ -81,6 +98,33 @@ export interface Pose {
   armSwing: number;
   /** exposed so a test can read the bob without re-deriving it */
   hipY: number;
+  /**
+   * 躯干前倾量（px，前进方向为正，负值为后仰）。省略时等于行走/待机一直在用的
+   * 1.5——新增字段带默认值，所以 walkPose/idlePose 一个字节都没变。
+   */
+  lean?: number;
+  /**
+   * 脖子的前移量（px），默认 1 = 原来写死的那个值。
+   *
+   * 搜刮时头往前送 6–7px，脖子还留在肩口上，两者就在 x 上错开 5px 以上，
+   * 轮廓描边只能填 1px 的暗桥，读作"头飘着"。弯腰越深脖子越要往前伸。
+   */
+  neckDx?: number;
+  /**
+   * 远臂（sign=-1，画在躯干后面那条）自己的摆动角，单位度、正为向前。
+   * 省略时等于 `-armSwing`，即行走/待机一直在用的"两臂反向"镜像。
+   *
+   * 为什么需要它：镜像规则下，近臂向前打到 +78° 时远臂必然被甩到 −78°，
+   * 手会跑到 x≈5——贴死画布左缘，读作一根扎出去的刺而不是手臂。攻击要的是
+   * "一拳打出去、另一手收回来"，搜刮要的是"两只手一起往前伸"，都不是镜像。
+   */
+  farSwing?: number;
+  /**
+   * 双臂锚点整体上抬量（px）。受击的"手臂上扬"用：骨骼角度系里 0=下垂、
+   * ±90=水平，前臂永远是 0.6×上臂角所以手永远低于肘——"往上"只能靠抬锚点。
+   * 省略时为 0，行走/待机行为不变。
+   */
+  armRaise?: number;
 }
 
 // ── geometry ──────────────────────────────────────────────────────────────
@@ -212,6 +256,147 @@ export function idlePose(frame: number): Pose {
     near: 'a',
     armSwing: 0,
     hipY: hip.y,
+  };
+}
+
+// ── W5 新增姿态：攻击 / 受击 / 搜刮 ─────────────────────────────────────
+//
+// 时序结论来自 docs/RE_ANIMATION.md（CENTUM 源码级逆向）：
+//   ① 攻击 = 前摇 + 出手两段，且出手的前伸量必须严格大于前摇；
+//   ② 一次性动画不需要回调，repeat:0 播完停在末帧即"播完回 idle"；
+//   ③ 一次性姿态的帧间差分要做到 idle 帧间差分的 5 倍以上（CENTUM 死亡帧
+//      差分 114–144 px vs idle 8–29 px）；
+//   ④ 攻击在 CENTUM 里是"半格冲刺"而不是换帧——本项目角色不能真位移（会脱离
+//      碰撞盒），所以把"冲过去"翻译成手臂前伸量 + 躯干前倾量的峰值差。
+//
+// 三个姿态全部从同一套 hip/shoulder/head 骨架参数化派生，脚一律由 legTo() 反推，
+// 所以"脚站在地上"是构造性质而不是手调数值。受击允许整体轻跳（最多 3px），
+// 但髋与脚同步上移，腿骨长度不变，跳完仍在画布内。
+
+/** 站距 → 髋高。站距半宽 s 时腿恰好完全伸直（√(LEG²−s²)），落点零误差。 */
+function stanceHipY(spread: number): number {
+  return FOOT_GROUND - Math.sqrt(LEG * LEG - spread * spread);
+}
+
+/** 一双扎在地上的脚：a 在后（−x），b 在前（+x）。 */
+function plantedLegs(hip: Point, spread: number): { a: LegPose; b: LegPose } {
+  const legA = legTo(hip, { x: hip.x - spread, y: FOOT_GROUND });
+  const legB = legTo(hip, { x: hip.x + spread, y: FOOT_GROUND });
+  if (!legA || !legB) throw new Error('stance is unreachable by the skeleton');
+  return { a: legA, b: legB };
+}
+
+/** 攻击弓步的半距。10 与 11 都让腿恰好完全伸直，髋位随脚距精确反推。 */
+const ATTACK_STANCE = 10;
+
+export function attackPose(frame: number): Pose {
+  const f = ((frame % ATTACK_FRAMES) + ATTACK_FRAMES) % ATTACK_FRAMES;
+  // 三段：0 前摇（出拳手后引、躯干后仰，前伸量收到底）
+  //       1 出手（手臂到顶点 + 躯干前倾，前伸量最大）
+  //       2 回收过半（手臂回到半程，躯干仍略前倾）
+  // 站距在出手帧放宽 1px，髋随之降 0.3px——重心压上去的那一下。
+  //
+  // farSwing 是远臂自己的角：出手帧 −30°（收拳回腰），不是镜像的 −78°——
+  // 镜像会把手甩到 x≈5 贴死画布左缘（见 audit：attack f1 minX 曾为 5）。
+  const TABLE: ReadonlyArray<{
+    stance: number;
+    swing: number;
+    farSwing: number;
+    lean: number;
+    headDx: number;
+  }> = [
+    { stance: ATTACK_STANCE, swing: -50, farSwing: 25, lean: -1.5, headDx: -3 },
+    { stance: ATTACK_STANCE + 1, swing: 78, farSwing: -30, lean: 5, headDx: 4 },
+    { stance: ATTACK_STANCE, swing: 25, farSwing: -12, lean: 2.5, headDx: 1 },
+  ];
+  const t = TABLE[f];
+  const hip: Point = { x: HIP_X, y: stanceHipY(t.stance) };
+  const { a, b } = plantedLegs(hip, t.stance);
+  const shoulder: Point = { x: HIP_X, y: hip.y - TORSO };
+  return {
+    hip,
+    shoulder,
+    head: { x: HIP_X + t.headDx, y: shoulder.y - HEAD_R - 1 },
+    a,
+    b,
+    near: 'b', // 前腿（+x）压在夹克前面，出拳的同侧臂才在最前面
+    armSwing: t.swing,
+    farSwing: t.farSwing,
+    hipY: hip.y,
+    lean: t.lean,
+  };
+}
+
+/** 受击轻跳的幅度（px）。髋与脚同步上移，腿骨长度不变，落点零误差。 */
+const HURT_LIFT = [3, 1];
+
+export function hurtPose(frame: number): Pose {
+  const f = ((frame % HURT_FRAMES) + HURT_FRAMES) % HURT_FRAMES;
+  const lift = HURT_LIFT[f];
+  // 双脚仍按待机站距，只是整条身躯被"打上去"了 lift 像素：脚离地最多 3px，
+  // 第二帧 lift=1 已经落回地板线附近，读作弹一下然后站稳。
+  const hip: Point = { x: HIP_X, y: IDLE_HIP_Y - lift };
+  const legA = legTo(hip, { x: HIP_X - IDLE_STANCE, y: FOOT_GROUND - lift });
+  const legB = legTo(hip, { x: HIP_X + IDLE_STANCE, y: FOOT_GROUND - lift });
+  if (!legA || !legB) throw new Error('hurt pose is unreachable by the skeleton');
+  // 后仰 + 手臂上扬（armRaise 抬锚点）：两臂向外甩开、近臂向后远臂向前。
+  // raise 只抬 9px 而不是更多——抬到 12px 时上臂起点会顶到下颌高度，
+  // 两条胳膊从脖子旁边穿出来，读作"从头上长出手臂"。
+  // 两帧的差必须是"整条身躯被掀翻"的量级，不是待机那种 2px 呼吸。
+  const TABLE: ReadonlyArray<{ lean: number; headDx: number; swing: number; farSwing: number; raise: number }> = [
+    { lean: -5, headDx: -6, swing: -54, farSwing: 54, raise: 9 },
+    { lean: -2.5, headDx: -3, swing: -38, farSwing: 38, raise: 5 },
+  ];
+  const t = TABLE[f];
+  const shoulder: Point = { x: HIP_X, y: hip.y - 26 };
+  return {
+    hip,
+    shoulder,
+    head: { x: HIP_X + t.headDx, y: shoulder.y - HEAD_R - 1 },
+    a: legA,
+    b: legB,
+    near: 'a',
+    armSwing: t.swing,
+    farSwing: t.farSwing,
+    hipY: hip.y,
+    lean: t.lean,
+    armRaise: t.raise,
+  };
+}
+
+// 搜刮是"弯腰"不是"下蹲"：髋留在待机高度（腿因此完全伸直、脚精确踩线、
+// 靴头朝前），弯的是腰——躯干压短、头往前送、手臂前伸。用蹲姿会让
+// boot() 按小腿朝向把鞋头判成朝后，而这里要的是"站着俯身翻东西"。
+//
+// 两条手臂都往前伸（farSwing 取正 = 远臂也向前），一长一短错开，读作两只
+// 手在容器里翻；镜像规则会把远臂甩到身后，那就成"挨了一拳"而不是"搜刮"。
+const SEARCH_TABLE: ReadonlyArray<{ torso: number; headDx: number; neckDx: number; swing: number; farSwing: number }> = [
+  { torso: 16, headDx: 6, neckDx: 7, swing: 64, farSwing: 42 },
+  { torso: 15, headDx: 7, neckDx: 8, swing: 70, farSwing: 48 },
+];
+
+export function searchPose(frame: number): Pose {
+  const f = ((frame % SEARCH_FRAMES) + SEARCH_FRAMES) % SEARCH_FRAMES;
+  const t = SEARCH_TABLE[f];
+  const hip: Point = { x: HIP_X, y: IDLE_HIP_Y };
+  // 腿与待机同一副：站距 5、髋高由 √(LEG²−5²) 反推，腿恰好完全伸直，
+  // 所以落点是构造精确的（legTo 在完全伸直时 knee=0，无近似误差）。
+  const { a, b } = plantedLegs(hip, IDLE_STANCE);
+  // 弯腰 = 躯干压短（shoulder 贴近 hip）+ 头往前送。head.y 必须低于待机，
+  // 这是"真的在弯腰"而不是"站着抬手"的可测指标。
+  const shoulder: Point = { x: HIP_X, y: hip.y - t.torso };
+  return {
+    hip,
+    shoulder,
+    head: { x: HIP_X + t.headDx, y: shoulder.y - HEAD_R - 1 },
+    a,
+    b,
+    near: 'a',
+    armSwing: t.swing,
+    farSwing: t.farSwing,
+    neckDx: t.neckDx,
+    hipY: hip.y,
+    lean: 4,
   };
 }
 
@@ -462,7 +647,8 @@ function drawTorso(cv: PixelCanvas, pose: Pose, col: CharacterColors): void {
         break;
       }
     }
-    const cx = pose.shoulder.x + t * 1.5; // lean into the walk
+    // 前倾量由姿态提供，默认 1.5 = 原来写死的那个值。
+    const cx = pose.shoulder.x + t * (pose.lean ?? 1.5); // lean into the walk
     run(cv, cx, half, y, col.cloth);
     // One highlight column down the lit side, chest rows only — the outline
     // pass already edges the silhouette, so this is shaping, not bordering.
@@ -481,8 +667,11 @@ function drawTorso(cv: PixelCanvas, pose: Pose, col: CharacterColors): void {
 // carries it clear of the jacket; the near arm swings in front of it. That
 // occlusion is what makes the swing read as depth rather than two stripes.
 function drawArm(cv: PixelCanvas, pose: Pose, col: CharacterColors, sign: -1 | 1): void {
-  const swing = pose.armSwing * sign;
-  const shoulder = { x: pose.shoulder.x + (sign === 1 ? 1 : -5), y: pose.shoulder.y + 4 };
+  // 近臂用 armSwing，远臂用 farSwing（缺省 = 镜像的 -armSwing，即原行为）。
+  const swing = sign === 1 ? pose.armSwing : (pose.farSwing ?? -pose.armSwing);
+  // armRaise 只抬锚点不改骨骼角度，省略时为 0（行走/待机的原值）。
+  const raise = pose.armRaise ?? 0;
+  const shoulder = { x: pose.shoulder.x + (sign === 1 ? 1 : -5), y: pose.shoulder.y + 4 - raise };
   const elbow = joint(shoulder, 12, swing);
   const hand = joint(elbow, 11, swing * 0.6);
   taperedLimb(cv, shoulder, elbow, 4.5, 3.5, sign === 1 ? col.cloth : col.clothDark);
@@ -552,7 +741,8 @@ function drawHead(cv: PixelCanvas, pose: Pose, col: CharacterColors): void {
 // covers its top. Without it the head floats a pixel above the shoulders.
 function drawNeck(cv: PixelCanvas, pose: Pose, col: CharacterColors): void {
   const y0 = Math.round(pose.shoulder.y) - 2;
-  for (let y = y0; y <= y0 + 2; y++) run(cv, pose.shoulder.x + 1, 2.5, y, col.skinDark);
+  const dx = pose.neckDx ?? 1;
+  for (let y = y0; y <= y0 + 2; y++) run(cv, pose.shoulder.x + dx, 2.5, y, col.skinDark);
 }
 
 function drawPack(cv: PixelCanvas, pose: Pose, col: CharacterColors): void {
@@ -582,6 +772,19 @@ export function idleAnimKey(who: CharacterKey): string {
   return `idle-${who}`;
 }
 
+// W5 新增的三个一次性动作 key。命名与 walk-/idle- 同构，GameScene 直接 import。
+export function attackAnimKey(who: CharacterKey): string {
+  return `attack-${who}`;
+}
+
+export function hurtAnimKey(who: CharacterKey): string {
+  return `hurt-${who}`;
+}
+
+export function searchAnimKey(who: CharacterKey): string {
+  return `search-${who}`;
+}
+
 export const WALK_CHARACTERS: readonly CharacterKey[] = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer'];
 
 // Frames per second for the walk playback. The scene scales timeScale by the
@@ -590,13 +793,26 @@ export const WALK_CHARACTERS: readonly CharacterKey[] = ['player', 'npc_alin', '
 // skating when the player is only halfway up the ramp.
 export const WALK_FRAME_RATE = 8;
 
+// W5 一次性动作帧率。全部 repeat:0（播完停在末帧即"播完回 idle"，见
+// docs/RE_ANIMATION.md 结论②）。取值参考 CENTUM 的实测节奏：
+// 攻击 12fps ⇒ 3 帧 250ms，是最快的一次性动作（出手要干脆）；
+// 受击 8fps ⇒ 2 帧 250ms，与攻击同长但帧更少（大差分，少帧数）；
+// 搜刮 6fps ⇒ 2 帧 333ms，最慢，因为是"翻东西"不是"打"。
+export const ATTACK_FRAME_RATE = 12;
+export const HURT_FRAME_RATE = 8;
+export const SEARCH_FRAME_RATE = 6;
+
 // Bakes every character's frames into one horizontal sheet per character.
 //
 // A CanvasTexture rather than a Graphics: the poses are already pixel data, and
 // putImageData moves them in one call where generateTexture would need tens of
 // thousands of fillRects to say the same thing.
+//
+// W5：sheet 现在排 walk(6) + idle(2) + attack(3) + hurt(2) + search(2) = 15 列。
+// 新增段全部追加在尾部，行走与待机的列号 0..7 一字未动，所以既有动画与
+// GameScene 的接线不受影响。
 export function bakeWalkSheets(scene: Phaser.Scene): void {
-  const total = WALK_FRAMES + IDLE_FRAMES;
+  const total = TOTAL_FRAMES;
   for (const who of WALK_CHARACTERS) {
     const key = walkSheetKey(who);
     if (scene.textures.exists(key)) continue;
@@ -604,6 +820,15 @@ export function bakeWalkSheets(scene: Phaser.Scene): void {
     const sheet = makeCanvas(FRAME_W * total, FRAME_H);
     for (let f = 0; f < WALK_FRAMES; f++) drawPose(sheet, walkPose(f), col, f * FRAME_W);
     for (let f = 0; f < IDLE_FRAMES; f++) drawPose(sheet, idlePose(f), col, (WALK_FRAMES + f) * FRAME_W);
+    for (let f = 0; f < ATTACK_FRAMES; f++) {
+      drawPose(sheet, attackPose(f), col, (ATTACK_FRAME_START + f) * FRAME_W);
+    }
+    for (let f = 0; f < HURT_FRAMES; f++) {
+      drawPose(sheet, hurtPose(f), col, (HURT_FRAME_START + f) * FRAME_W);
+    }
+    for (let f = 0; f < SEARCH_FRAMES; f++) {
+      drawPose(sheet, searchPose(f), col, (SEARCH_FRAME_START + f) * FRAME_W);
+    }
 
     const tex = scene.textures.createCanvas(key, sheet.w, sheet.h);
     if (!tex) continue;
@@ -623,8 +848,9 @@ const COLORS: Record<CharacterKey, CharacterColors> = {
   wanderer: WANDERER_COLORS,
 };
 
-// Registers the walk and idle animations once. Guarded because a scene restart
-// re-runs create() while the global animation manager keeps what it already has.
+// Registers the walk, idle and the W5 one-shot animations once. Guarded because
+// a scene restart re-runs create() while the global animation manager keeps
+// what it already has.
 export function createCharacterAnimations(scene: Phaser.Scene): void {
   for (const who of WALK_CHARACTERS) {
     const sheet = walkSheetKey(who);
@@ -645,6 +871,44 @@ export function createCharacterAnimations(scene: Phaser.Scene): void {
         frames: scene.anims.generateFrameNumbers(sheet, { start: WALK_FRAMES, end: WALK_FRAMES + IDLE_FRAMES - 1 }),
         frameRate: 2,
         repeat: -1,
+      });
+    }
+    // 以下三个是一次性动作：repeat:0，播完停在最后一帧，由调用方决定何时
+    // 切回 idle——对应 CENTUM 的 "offset 衰减到 0 → isAttackAnimation=false"。
+    const attack = attackAnimKey(who);
+    if (!scene.anims.exists(attack)) {
+      scene.anims.create({
+        key: attack,
+        frames: scene.anims.generateFrameNumbers(sheet, {
+          start: ATTACK_FRAME_START,
+          end: ATTACK_FRAME_START + ATTACK_FRAMES - 1,
+        }),
+        frameRate: ATTACK_FRAME_RATE,
+        repeat: 0,
+      });
+    }
+    const hurt = hurtAnimKey(who);
+    if (!scene.anims.exists(hurt)) {
+      scene.anims.create({
+        key: hurt,
+        frames: scene.anims.generateFrameNumbers(sheet, {
+          start: HURT_FRAME_START,
+          end: HURT_FRAME_START + HURT_FRAMES - 1,
+        }),
+        frameRate: HURT_FRAME_RATE,
+        repeat: 0,
+      });
+    }
+    const search = searchAnimKey(who);
+    if (!scene.anims.exists(search)) {
+      scene.anims.create({
+        key: search,
+        frames: scene.anims.generateFrameNumbers(sheet, {
+          start: SEARCH_FRAME_START,
+          end: SEARCH_FRAME_START + SEARCH_FRAMES - 1,
+        }),
+        frameRate: SEARCH_FRAME_RATE,
+        repeat: 0,
       });
     }
   }

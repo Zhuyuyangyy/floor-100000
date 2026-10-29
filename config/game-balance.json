@@ -17,6 +17,17 @@
   "dwellPressure": {
     "rollIntervalGameMinutes": 60
   },
+  "overhaul": {
+    "sleepAnytime": true,
+    "nightLootBonusCount": 1,
+    "lungeSpeedMultiplier": 2.2,
+    "lungeRange": 220,
+    "lungeStillnessMs": 1500,
+    "lowHpPulseThreshold": 0.3,
+    "dailyGoalRewardScore": 80,
+    "lowEnergySpeedFactor": 0.75,
+    "lowEnergyThreshold": 20
+  },
   "player": {
     "startingFloor": 1,
     "hpMax": 100,

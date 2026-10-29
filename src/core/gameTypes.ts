@@ -106,6 +106,13 @@ export interface GameState {
   npcStates: Record<string, string>;
   visitedFloors: Record<number, FloorVisit>;
   worldEvents: { history: string[]; activeEvent: ActiveEvent | null; dwell?: DwellState };
+  // OVERHAUL (docs/OVERHAUL_M1.md): the day's rolled objective. Optional so
+  // saves written before the system existed stay loadable.
+  dailyGoal?: { day: number; kind: 'water' | 'containers' | 'upgrade' | 'floor'; target: number; done: boolean };
+  // OVERHAUL: cross-run bragging records. Persisted so a new run can see them.
+  records?: { deepestFloor: number; bestScore: number };
+  // OVERHAUL: encounter spotId -> resolved outcome key, so a spot never pays twice.
+  encounters?: Record<string, string>;
   status: GameStatus;
 }
 

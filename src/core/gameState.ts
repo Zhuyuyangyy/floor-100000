@@ -65,6 +65,13 @@ export function createNewGame(seed: number): GameState {
     npcStates: {},
     visitedFloors: {},
     worldEvents: { history: [], activeEvent: null },
+    // OVERHAUL (docs/OVERHAUL_M1.md): the day's objective, the cross-run
+    // records, and the resolved encounter spots. Initialised here so a new run
+    // has them from the first frame; old saves simply lack them and the systems
+    // create them on first use.
+    dailyGoal: undefined,
+    records: { deepestFloor: p.startingFloor, bestScore: 0 },
+    encounters: {},
     status: 'playing',
   };
 }

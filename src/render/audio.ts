@@ -11,7 +11,18 @@
 //
 // Nothing here throws: audio is decoration and must never break gameplay.
 
-export type SfxName = 'click' | 'pickup' | 'craft' | 'sleep' | 'trade' | 'hurt' | 'danger';
+export type SfxName =
+  | 'click'
+  | 'pickup'
+  | 'craft'
+  | 'sleep'
+  | 'trade'
+  | 'hurt'
+  | 'danger'
+  // OVERHAUL W4：开箱 / 追击预警 / 每日目标完成。
+  | 'chest'
+  | 'alert'
+  | 'goal';
 
 type AudioContextCtor = new (options?: AudioContextOptions) => AudioContext;
 
@@ -272,6 +283,30 @@ function sfxDanger(): void {
   });
 }
 
+// Chest opening: a short noise snap (latch/planks) then a downward square slide
+// (the lid dropping). Kept distinct from craft's low thunk by a higher start
+// pitch and a longer glide, so "open" never reads as "build".
+function sfxChest(): void {
+  playNoise({ duration: 0.06, gain: 0.26, bandpass: 1400 });
+  playTone({ type: 'square', from: 520, to: 170, duration: 0.18, gain: 0.2, attack: 0.001, lowpass: 1400, delay: 0.03 });
+}
+
+// Warning: a quick two-step rise. danger is the sustained three-pulse low alarm
+// for "something is chasing you"; alert is the one-shot "it has noticed you"
+// cue at a wanderer's lunge start (W2), so it climbs instead of repeating.
+function sfxAlert(): void {
+  playTone({ type: 'square', from: 660, duration: 0.07, gain: 0.18, attack: 0.004, lowpass: 3000 });
+  playTone({ type: 'square', from: 990, duration: 0.1, gain: 0.18, attack: 0.004, delay: 0.07, lowpass: 3000 });
+}
+
+// Daily goal complete: a three-note rising arpeggio (C5-E5-G5 major triad) on a
+// triangle wave — reads as a small whistle/horn fanfare for the W3 reward beat.
+function sfxGoal(): void {
+  [523.25, 659.25, 783.99].forEach((freq, i) => {
+    playTone({ type: 'triangle', from: freq, duration: 0.1, gain: 0.2, attack: 0.003, delay: i * 0.085 });
+  });
+}
+
 const SFX: Record<SfxName, () => void> = {
   click: sfxClick,
   pickup: sfxPickup,
@@ -280,6 +315,9 @@ const SFX: Record<SfxName, () => void> = {
   trade: sfxTrade,
   hurt: sfxHurt,
   danger: sfxDanger,
+  chest: sfxChest,
+  alert: sfxAlert,
+  goal: sfxGoal,
 };
 
 // Fire-and-forget: safe before unlockAudio (no context yet), while muted, and

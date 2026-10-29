@@ -79,6 +79,45 @@ function validateDwell(value: unknown): string | null {
   return null;
 }
 
+// OVERHAUL: the three additive state blocks. Optional so pre-overhaul saves
+// load; when present each must be well-formed because systems read them
+// without guards.
+function validateOverhaulBlocks(s: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const goal = s.dailyGoal;
+  if (goal !== undefined) {
+    if (!isRecord(goal)) errors.push('dailyGoal 无效');
+    else {
+      if (typeof goal.day !== 'number' || !Number.isInteger(goal.day)) errors.push('dailyGoal.day 无效');
+      if (!['water', 'containers', 'upgrade', 'floor'].includes(goal.kind as string)) errors.push('dailyGoal.kind 无效');
+      if (typeof goal.target !== 'number' || !Number.isInteger(goal.target) || (goal.target as number) < 1) {
+        errors.push('dailyGoal.target 无效');
+      }
+      if (typeof goal.done !== 'boolean') errors.push('dailyGoal.done 无效');
+    }
+  }
+  const records = s.records;
+  if (records !== undefined) {
+    if (!isRecord(records)) errors.push('records 无效');
+    else {
+      if (typeof records.deepestFloor !== 'number' || !Number.isInteger(records.deepestFloor)) {
+        errors.push('records.deepestFloor 无效');
+      }
+      if (typeof records.bestScore !== 'number' || !Number.isFinite(records.bestScore) || (records.bestScore as number) < 0) {
+        errors.push('records.bestScore 无效');
+      }
+    }
+  }
+  const encounters = s.encounters;
+  if (encounters !== undefined) {
+    if (!isRecord(encounters)) errors.push('encounters 无效');
+    else for (const [k, v] of Object.entries(encounters)) {
+      if (typeof v !== 'string') errors.push(`encounters.${k} 无效`);
+    }
+  }
+  return errors;
+}
+
 export function validateGameState(data: unknown): string[] {
   if (typeof data !== 'object' || data === null) return ['存档不是有效对象'];
   const s = data as Record<string, unknown>;
@@ -152,6 +191,7 @@ export function validateGameState(data: unknown): string[] {
     const d = validateDwell(we.dwell);
     if (d) errors.push(d);
   }
+  errors.push(...validateOverhaulBlocks(s));
   return errors;
 }
 

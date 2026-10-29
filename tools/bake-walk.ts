@@ -1,6 +1,10 @@
 // Bakes the walk cycle frames to PNG for visual review.
-// Run: node tools/bake-walk.ts [characterKey] [outDir]
+// Run: node tools/bake-walk.ts [characterKey] [outDir] [--dump]
 // Writes 1x frames plus a 4x nearest-neighbour contact sheet.
+//
+// W5: the sheet is walk(6) + idle(2) + attack(3) + hurt(2) + search(2) = 15
+// columns. The one-shot segments are appended, so the ASCII dump below is
+// printed in four labelled sections instead of one flat run of frames.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,10 +12,20 @@ import { encodePng } from './png.mjs';
 import {
   WALK_FRAMES,
   IDLE_FRAMES,
+  ATTACK_FRAMES,
+  HURT_FRAMES,
+  SEARCH_FRAMES,
+  ATTACK_FRAME_START,
+  HURT_FRAME_START,
+  SEARCH_FRAME_START,
+  TOTAL_FRAMES,
   FRAME_W,
   FRAME_H,
   walkPose,
   idlePose,
+  attackPose,
+  hurtPose,
+  searchPose,
   drawPose,
   makeCanvas,
   PLAYER_COLORS,
@@ -19,6 +33,7 @@ import {
   XIAOZHOU_COLORS,
   WANDERER_COLORS,
   type CharacterColors,
+  type Pose,
 } from '../src/render/walkcycle.ts';
 
 const key = process.argv[2] ?? 'player';
@@ -34,18 +49,31 @@ const COLORS: Record<string, CharacterColors> = {
 const col = COLORS[key];
 if (!col) throw new Error(`unknown character ${key}`);
 
-const total = WALK_FRAMES + IDLE_FRAMES;
+// 帧清单与 sheet 列号一一对应，bakeWalkSheets() 用的是同一套起始列常量。
+const SEGMENTS: ReadonlyArray<{ label: string; count: number; pose: (f: number) => Pose }> = [
+  { label: 'walk', count: WALK_FRAMES, pose: walkPose },
+  { label: 'idle', count: IDLE_FRAMES, pose: idlePose },
+  { label: 'attack', count: ATTACK_FRAMES, pose: attackPose },
+  { label: 'hurt', count: HURT_FRAMES, pose: hurtPose },
+  { label: 'search', count: SEARCH_FRAMES, pose: searchPose },
+];
+
 const frames: Uint8Array[] = [];
-for (let f = 0; f < WALK_FRAMES; f++) {
-  const cv = makeCanvas(FRAME_W, FRAME_H);
-  drawPose(cv, walkPose(f), col, 0);
-  frames.push(cv.px);
+const labels: string[] = [];
+for (const seg of SEGMENTS) {
+  for (let f = 0; f < seg.count; f++) {
+    const cv = makeCanvas(FRAME_W, FRAME_H);
+    drawPose(cv, seg.pose(f), col, 0);
+    frames.push(cv.px);
+    labels.push(`${seg.label} ${f}`);
+  }
 }
-for (let f = 0; f < IDLE_FRAMES; f++) {
-  const cv = makeCanvas(FRAME_W, FRAME_H);
-  drawPose(cv, idlePose(f), col, 0);
-  frames.push(cv.px);
+// 与 walkcycle.TOTAL_FRAMES 对齐：少一帧说明上面两处不同步。
+if (frames.length !== TOTAL_FRAMES) {
+  throw new Error(`baked ${frames.length} frames but TOTAL_FRAMES is ${TOTAL_FRAMES}`);
 }
+
+const total = frames.length;
 
 // individual 1x frames
 for (let f = 0; f < total; f++) {
@@ -83,7 +111,13 @@ for (let y = 0; y < H; y++) {
   }
 }
 writeFileSync(join(outDir, `${key}-sheet.png`), rgbaToPng(sheet, W, H));
-console.log(`wrote ${total} frames + sheet to ${outDir}`);
+console.log(
+  `wrote ${total} frames + sheet to ${outDir} ` +
+    `(walk 0-${WALK_FRAMES - 1}, idle ${WALK_FRAMES}-${WALK_FRAMES + IDLE_FRAMES - 1}, ` +
+    `attack ${ATTACK_FRAME_START}-${ATTACK_FRAME_START + ATTACK_FRAMES - 1}, ` +
+    `hurt ${HURT_FRAME_START}-${HURT_FRAME_START + HURT_FRAMES - 1}, ` +
+    `search ${SEARCH_FRAME_START}-${SEARCH_FRAME_START + SEARCH_FRAMES - 1})`,
+);
 
 // ASCII dump: one char per palette role, so the pixel placement can be reviewed
 // in a terminal (or a model that cannot view images).
@@ -106,10 +140,9 @@ function roleOf(px: Uint8Array, o: number): string {
   for (const [r, g, b, ch] of ROLE) if (px[o] === r && px[o + 1] === g && px[o + 2] === b) return ch;
   return '?';
 }
-const want = process.argv.includes('--dump');
-if (want) {
+if (process.argv.includes('--dump')) {
   for (let f = 0; f < total; f++) {
-    console.log(`\n=== ${key} frame ${f} ===`);
+    console.log(`\n=== ${key} frame ${f} (${labels[f]}) ===`);
     for (let y = 0; y < FRAME_H; y++) {
       let line = '';
       for (let x = 0; x < FRAME_W; x++) line += roleOf(frames[f], (y * FRAME_W + x) * 4);

@@ -21,17 +21,37 @@ import type { DwellState, GameState } from '../core/gameTypes';
 // the floor resets everything, which is the point — the pressure exists to
 // make "loot and move on" the default, not to kill anyone. The dorm
 // (STARTING_FLOOR) is exempt: going home must always be a valid escape.
+//
+// W2 (docs/OVERHAUL_M1.md): the table also rolls 'scout' from row 3 on — a
+// shadow glances at you, spawns nothing, but arms the NEXT roll's prowler
+// chance (+0.1, capped 0.85). It is the telegraph for "那东西盯上我的时候我
+// 知道": a warning beat between atmosphere and teeth, so a prowler that
+// arrives after a scout feels earned instead of random.
 
-// One row per roll count (index 0 = the first roll). Probabilities sum to 1.
+// One row per roll count (index 0 = the first roll). Probabilities sum to 1:
+// atmosphere + prowler + scout + nothing = 1 — 'nothing' is the implicit
+// remainder (1 − the three listed columns) and is deliberately not stored.
 // The prowler column climbs and never falls — the longer you stay, the more
 // likely the next roll is teeth.
-const TABLE: ReadonlyArray<{ atmosphere: number; prowler: number }> = [
-  { atmosphere: 0.75, prowler: 0.0 },
-  { atmosphere: 0.5, prowler: 0.25 },
-  { atmosphere: 0.35, prowler: 0.45 },
-  { atmosphere: 0.25, prowler: 0.6 },
+//
+// W2: rows 0–2 keep their original B3-15 weights (scout = 0). Row 3 takes
+// 0.15 out of atmosphere (0.25 → 0.10) and gives it to scout; prowler (0.60)
+// and the nothing remainder (0.15) are unchanged, so every row still sums to
+// 1 exactly. Check: 0.10 + 0.60 + 0.15 + 0.15 = 1.
+const TABLE: ReadonlyArray<{ atmosphere: number; prowler: number; scout: number }> = [
+  { atmosphere: 0.75, prowler: 0.0, scout: 0 },
+  { atmosphere: 0.5, prowler: 0.25, scout: 0 },
+  { atmosphere: 0.35, prowler: 0.45, scout: 0 },
+  { atmosphere: 0.10, prowler: 0.6, scout: 0.15 },
 ];
 const LAST_ROW = TABLE.length - 1;
+
+// W2: a scout hit adds this much to the NEXT roll's prowler chance, capped at
+// SCOUT_PROWLER_CAP. The cap keeps a late-floor chain of scouts from turning
+// every remaining roll into a guaranteed wanderer — pressure should climb,
+// not become certain.
+const SCOUT_PROWLER_BONUS = 0.1;
+const SCOUT_PROWLER_CAP = 0.85;
 
 const INTERVAL = GAME_CONFIG.dwellPressure.rollIntervalGameMinutes;
 
@@ -45,10 +65,29 @@ const ATMOSPHERE: readonly string[] = [
   '隔壁房间传来东西倒地的声响。',
 ];
 
+// W2: flavour lines for the scout rolls. Like atmosphere they carry no direct
+// mechanics, but unlike atmosphere they leave a mark: the next roll on this
+// floor gets a prowler bonus, so the line must read as "you were seen".
+const SCOUT_LINES: readonly string[] = [
+  '远处有个影子看了你一眼，又消失了。',
+  '楼道尽头似乎有东西在打量你，你一回头它就不见了。',
+  '黑暗里有什么东西安静地注视着你，然后退开了。',
+];
+
 export type DwellOutcome =
   | { kind: 'nothing' }
   | { kind: 'atmosphere'; message: string }
+  | { kind: 'scout'; message: string }
   | { kind: 'prowler'; message: string };
+
+// W2: "the previous roll on this dwell was a scout". DwellState itself lives
+// in src/core/gameTypes.ts and is owned by the Lead — this work order may not
+// touch core — so the flag rides along in a local extension instead. Optional
+// and undefined-by-default: saves written before W2 simply have no mark, which
+// reads as "not scouted", exactly like a missing `dwell` block does.
+export interface DwellStateExt extends DwellState {
+  scoutedLast?: boolean;
+}
 
 export function freshDwell(floor: number): DwellState {
   return { floor, minutes: 0, nextRollAt: INTERVAL, rolls: 0 };
@@ -71,6 +110,10 @@ export function tickDwell(dwell: DwellState, floor: number, minutes: number): Dw
     dwell.minutes = Math.max(0, minutes);
     dwell.nextRollAt = INTERVAL;
     dwell.rolls = 0;
+    // W2: a floor change resets the pressure, so the scout mark goes too —
+    // whatever glanced at you stays on the floor you left.
+    const ext = dwell as DwellStateExt;
+    if (ext.scoutedLast) ext.scoutedLast = false;
     return dwell;
   }
   dwell.minutes += Math.max(0, minutes);
@@ -101,12 +144,33 @@ export function isDwellExempt(floor: number): boolean {
 // the project's no-Math.random rule.
 export function rollDwellEvent(state: GameState, dwell: DwellState, floor: number): DwellOutcome {
   const row = TABLE[Math.min(dwell.rolls, LAST_ROW)];
+  // W2: the scout mark lives on the dwell object itself (DwellStateExt). A
+  // module-level Map<floor, boolean> was the other option, but a field on the
+  // state travels with the save, resets with tickDwell's floor change, and
+  // cannot leak between tests or runs — the Map could do none of that.
+  const ext = dwell as DwellStateExt;
+  const scoutedLast = ext.scoutedLast === true;
+  // The mark is consumed by this roll whether or not it pays out: one scout
+  // buys exactly one boosted roll. Letting it persist until a prowler actually
+  // spawned would make every later roll on the floor carry the bonus, and the
+  // "leaving resets everything" escape would stop meaning anything.
+  if (scoutedLast) ext.scoutedLast = false;
+  const prowlerChance = scoutedLast
+    ? Math.min(SCOUT_PROWLER_CAP, row.prowler + SCOUT_PROWLER_BONUS)
+    : row.prowler;
+
   const rng = makeRng(deriveSeed(state.runSeed, state.day, floor, dwell.rolls, 'dwell'));
   const roll = rng.nextFloat();
-  if (roll < row.prowler) {
+  if (roll < prowlerChance) {
     return { kind: 'prowler', message: `你在 ${floor} 层待得太久了，有东西被动静引了过来。` };
   }
-  if (roll < row.prowler + row.atmosphere) {
+  if (roll < prowlerChance + row.scout) {
+    // W2: mark the floor — the next roll's prowler chance gets the bonus.
+    ext.scoutedLast = true;
+    const line = SCOUT_LINES[Math.floor(rng.nextFloat() * SCOUT_LINES.length)];
+    return { kind: 'scout', message: line };
+  }
+  if (roll < prowlerChance + row.scout + row.atmosphere) {
     const line = ATMOSPHERE[Math.floor(rng.nextFloat() * ATMOSPHERE.length)];
     return { kind: 'atmosphere', message: line };
   }

@@ -35,6 +35,19 @@ export interface GameBalanceConfig {
   dwellPressure: {
     rollIntervalGameMinutes: number;
   };
+  // OVERHAUL (docs/OVERHAUL_M1.md): every tunable the four work orders read.
+  // They live here so the whole暴改 can be paced without touching code.
+  overhaul: {
+    sleepAnytime: boolean;
+    nightLootBonusCount: number;
+    lungeSpeedMultiplier: number;
+    lungeRange: number;
+    lungeStillnessMs: number;
+    lowHpPulseThreshold: number;
+    dailyGoalRewardScore: number;
+    lowEnergySpeedFactor: number;
+    lowEnergyThreshold: number;
+  };
   player: {
     startingFloor: number;
     hpMax: number;

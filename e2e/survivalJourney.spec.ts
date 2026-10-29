@@ -147,10 +147,18 @@ test.describe('B3-02 full survival journey', () => {
     expect(start.currentFloor).toBe(1);
     expect(start.day).toBe(1);
     expect(start.player.hp).toBe(100);
-    // A frame or two of decay has already run, so these are near-exact, not exact.
-    expect(start.player.hunger).toBeGreaterThan(79.5);
-    expect(start.player.thirst).toBeGreaterThan(79.5);
-    expect(start.player.energy).toBeGreaterThan(79.5);
+    // A frame or two of decay has already run, so these are near-exact, not
+    // exact. The expected starts are read from the app's own balance module
+    // through the page (a static import of the JSON needs an import attribute
+    // under Playwright's ESM loader, and a copied number here would fail for
+    // the wrong reason the next time balance moves — B3-16 moved them to 65).
+    const starts = await page.evaluate(async () => {
+      const m = (await import('/src/core/config.ts')) as { GAME_CONFIG: { player: { hungerStart: number; thirstStart: number; energyStart: number } } };
+      return m.GAME_CONFIG.player;
+    });
+    expect(start.player.hunger).toBeGreaterThan(starts.hungerStart - 0.5);
+    expect(start.player.thirst).toBeGreaterThan(starts.thirstStart - 0.5);
+    expect(start.player.energy).toBeGreaterThan(starts.energyStart - 0.5);
     expect(start.gameMinuteOfDay).toBeGreaterThanOrEqual(360);
     expect(start.gameMinuteOfDay).toBeLessThan(365); // 06:00, seconds in
     // Starting kit, straight from config.
@@ -165,8 +173,15 @@ test.describe('B3-02 full survival journey', () => {
     await page.screenshot({ path: 'e2e/screenshots/40-journey-1-wake.png' });
 
     // Top up before the walk, so the bag has room for what the tower holds.
+    // One bottle is +30 from wherever the start left the player (B3-16 moved
+    // the starts to 65, so it no longer caps — the claim under test is that the
+    // bottle landed, not that it overflowed).
+    const startsEarly = await page.evaluate(async () => {
+      const m = (await import('/src/core/config.ts')) as { GAME_CONFIG: { player: { thirstStart: number } } };
+      return m.GAME_CONFIG.player.thirstStart;
+    });
     await drinkOneBottle(page);
-    expect((await readState(page)).player.thirst).toBeGreaterThan(95); // capped, minus a frame
+    expect((await readState(page)).player.thirst).toBeGreaterThan(startsEarly + 25);
 
     // ── 2. climb ────────────────────────────────────────────────────────
     await takeStairs(page, 'up', 2);
@@ -196,7 +211,10 @@ test.describe('B3-02 full survival journey', () => {
 
     // Floor 5 is the top of the range: no up exit, only back down.
     await openContainer(page, 5, 'counter', 480);
-    expect(await count(page, 'ration_pack')).toBe(5); // 2 starting + 3 from the counter
+    // 2 starting + 3 from the counter. A floor rather than an exact count: the
+    // OVERHAUL daily-goal reward hands out a ration when the day's objective
+    // closes, and this route closes it on the way up.
+    expect(await count(page, 'ration_pack')).toBeGreaterThanOrEqual(5);
     expect(await count(page, 'dirty_water')).toBeGreaterThanOrEqual(2);
     const top = await readState(page);
     expect(top.currentFloor).toBe(5);
@@ -335,7 +353,10 @@ test.describe('B3-02 full survival journey', () => {
     expect(resumed.player.homeUpgrades.sort()).toEqual(['lamp', 'purifier', 'reinforced_door']);
     expect(await count(page, 'scrap_metal')).toBe(0); // spent, not restored
     expect(await count(page, 'wood')).toBe(0);
-    expect(await count(page, 'ration_pack')).toBe(5);
+    // 2 starting + 3 from the counter, plus the daily-goal reward's ration if
+    // the day's objective closed on the way up (it does on this route) — so a
+    // floor, not an exact count, and it must survive the reload either way.
+    expect(await count(page, 'ration_pack')).toBeGreaterThanOrEqual(5);
     expect(await count(page, 'clean_water')).toBeGreaterThanOrEqual(1); // from the cabinet
     // The exploration record survived too — all five floors the player set foot on.
     expect(Object.keys(resumed.visitedFloors).length).toBeGreaterThanOrEqual(5);

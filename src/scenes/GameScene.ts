@@ -34,11 +34,25 @@ import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../
 import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, isNight, sleep, spendTime } from '../systems/SurvivalSystem';
 import { ensureNightEvent } from '../systems/EventSystem';
 import { armNextRoll, dwellRollDue, ensureDwell, isDwellExempt, rollDwellEvent, tickDwell } from '../systems/dwellPressure';
+import { freshWandererAI, stepWandererAI, type WandererAI } from '../systems/wandererAI';
+import { ensureDailyGoal, grantDailyGoalReward, isDailyGoalDone } from '../systems/dailyGoals';
+import { depthRecord, recordDepth, runScore } from '../systems/progress';
+import { lowHpPulse, mostUrgentStat, moveSpeedFactor } from '../render/feedback';
+import { GAME_CONFIG } from '../core/config';
+import {
+  markResolved,
+  resolveEncounter,
+  rollEncounter as rollFloorEncounter,
+  shouldSkip,
+  type Encounter,
+  type EncounterChoice,
+} from '../systems/encounters';
+import { encounterSpots, nudgeSpotX } from '../systems/encounterSpots';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, createMarker, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import { ENV_FLOOR_KEY, ENV_WALL_KEY } from '../render/artpack';
-import { idleAnimKey, walkAnimKey, walkSheetKey } from '../render/walkcycle';
+import { attackAnimKey, hurtAnimKey, idleAnimKey, searchAnimKey, walkAnimKey, walkSheetKey } from '../render/walkcycle';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
@@ -65,13 +79,40 @@ const TYPE_AUX = 11;
 // with breathing room; 13px was too cramped to read at a glance.
 const STAT_ROW_PITCH = 15;
 
-const STAT_BARS: Array<{ label: string; color: number }> = [
-  { label: 'HP', color: 0xe56d63 },
-  { label: '饥', color: 0xf4b66a },
-  { label: '渴', color: 0x6aa8e5 },
-  { label: '精', color: 0x77c6a4 },
+const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: string; color: number }> = [
+  { key: 'hp', label: 'HP', color: 0xe56d63 },
+  { key: 'hunger', label: '饥', color: 0xf4b66a },
+  { key: 'thirst', label: '渴', color: 0x6aa8e5 },
+  { key: 'energy', label: '精', color: 0x77c6a4 },
 ];
 const PAUSE_OPTIONS = ['继续游戏', '塔楼地图', '重新开始', '返回标题'];
+
+// OVERHAUL: the daily objective's one-line label, per goal kind.
+const GOAL_LABELS: Record<'water' | 'containers' | 'upgrade' | 'floor', (target: number) => string> = {
+  water: (n) => `带回 ${n} 瓶净水`,
+  containers: (n) => `搜刮 ${n} 个容器`,
+  upgrade: (n) => `建成 ${n} 项宿舍升级`,
+  floor: (n) => `到达第 ${n} 层`,
+};
+
+// OVERHAUL: the encounter panel's vocabulary. Titles are the kind's name as the
+// player should read it; labels name the choices in the player's terms.
+const ENCOUNTER_TITLES: Record<Encounter['kind'], string> = {
+  loot: '一处遗落物资',
+  ambush: '黑暗中的伏击',
+  trader: '行商',
+  note: '一张纸条',
+  cache: '藏匿点',
+  boss: '守门人',
+};
+const CHOICE_LABELS: Record<EncounterChoice, string> = {
+  take: '拿走',
+  fight: '动手',
+  flee: '撤退',
+  trade: '交易（脏水×2 → 净水×1）',
+  leave: '离开',
+  read: '读纸条',
+};
 type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 'up' | 'down';
 type DirKeys = {
   up: Phaser.Input.Keyboard.Key;
@@ -117,10 +158,18 @@ export class GameScene extends Phaser.Scene {
   private floorObjects: Phaser.GameObjects.GameObject[] = [];
   private wanderer?: Phaser.GameObjects.Sprite;
   private wandererHitAt = Number.NEGATIVE_INFINITY;
+  // OVERHAUL: the wanderer's stalk/lunge state machine. Lives beside the sprite
+  // because the scene owns the movement it drives.
+  private wandererAI?: WandererAI;
   // Not field-initialised-only: a scene restart re-runs create() but not the
   // class fields, so clearFloor() zeroes this too. Left over, a restarted floor
   // would resume the run already at top speed.
   private speedX = 0;
+  // OVERHAUL: a one-shot action clip (search / attack / hurt) and the time it
+  // holds the sprite. Without the hold, the walk/idle selection below would
+  // switch back on the very next frame and the clip would never be seen.
+  private actionAnimKey = '';
+  private actionAnimUntil = 0;
 
   private clockText!: Phaser.GameObjects.Text;
   private barsGfx!: Phaser.GameObjects.Graphics;
@@ -134,6 +183,19 @@ export class GameScene extends Phaser.Scene {
   // frees up, so the state is readable whenever the player looks.
   private bagFullText!: Phaser.GameObjects.Text;
   private bagFullShown = false;
+  // OVERHAUL: the day's objective and the run's score, top-right; the low-HP
+  // vignette is a full-screen rect whose alpha the feedback module drives.
+  // Optional because buildHud destroys and clears them on a scene restart
+  // before recreating them — a destroyed Text throws on setText.
+  private goalText?: Phaser.GameObjects.Text;
+  private scoreText?: Phaser.GameObjects.Text;
+  private vignette?: Phaser.GameObjects.Rectangle;
+  private lastGoalKey = '';
+  // OVERHAUL: the floor's "?" spots and the encounter panel they open.
+  private spotMarkers = new Map<string, { x: number; isBoss: boolean; dot: Phaser.GameObjects.Arc; label: Phaser.GameObjects.Text }>();
+  private encounterOpen = false;
+  private encounter?: { spotId: string; encounter: Encounter; choices: EncounterChoice[]; selected: number; resolved: boolean };
+  private encounterObjects: Phaser.GameObjects.GameObject[] = [];
   private feedbackTimer?: Phaser.Time.TimerEvent;
   private lastClock = '';
   private lastStats = '';
@@ -290,6 +352,8 @@ export class GameScene extends Phaser.Scene {
       this.drawWorkbench();
     }
     if (floor === NPC_FLOOR) this.drawNpcs();
+    // OVERHAUL: the floor's question marks go up last, above the room.
+    this.buildEncounterSpots();
 
     // The side-view walk sheet, not the front-facing portrait: the camera is a
     // side-scroller, and a figure seen face-on while it moves laterally reads as
@@ -301,6 +365,14 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.player, true, 0.15, 0.15);
   }
 
+  // OVERHAUL: plays a one-shot action clip and holds it for `ms`. The frame
+  // loop's walk/idle pick stands down while the clip runs.
+  private playActionAnim(key: string, ms: number): void {
+    this.actionAnimKey = key;
+    this.actionAnimUntil = this.time.now + ms;
+    this.player.play(key, true);
+  }
+
   private clearFloor(): void {
     this.cameras.main.stopFollow();
     for (const o of this.floorObjects) o.destroy();
@@ -310,6 +382,185 @@ export class GameScene extends Phaser.Scene {
     this.groundObjs.clear();
     this.wanderer?.destroy();
     this.wanderer = undefined;
+    this.wandererAI = undefined;
+    this.clearEncounterSpots();
+  }
+
+  // ── encounter spots (OVERHAUL W1) ────────────────────────────────────────
+  // One "?" per deterministic spot, amber for a rumour and red for the boss.
+  // Resolved spots are not drawn at all — the floor visibly empties as the
+  // player works it, which is the "this place is picked over" read.
+  private clearEncounterSpots(): void {
+    for (const m of this.spotMarkers.values()) {
+      m.dot.destroy();
+      m.label.destroy();
+    }
+    this.spotMarkers.clear();
+  }
+
+  private buildEncounterSpots(): void {
+    this.clearEncounterSpots();
+    const state = getGame();
+    const y = FLOOR_HEIGHT - 34;
+    // Everything E already reaches for on this floor. A marker inside any of
+    // their radii would hijack the key (measured: it silently broke the NPC
+    // trade and the journey specs), so each spot is nudged clear first.
+    const taken: number[] = [UP_EXIT_X, DOWN_EXIT_X, ...this.floorView.containers.map((c) => c.x)];
+    if (state.currentFloor === NPC_FLOOR) taken.push(...NPCS.map((n) => n.x));
+    for (const spot of encounterSpots(state.runSeed, state.currentFloor)) {
+      if (shouldSkip(state, spot.id)) continue;
+      const x = nudgeSpotX(spot.x, taken, INTERACT_DISTANCE + 8);
+      const color = spot.isBoss ? 0xe56d63 : 0xf4b66a;
+      const dot = this.add.circle(x, y, 9, color, 0.9).setDepth(6);
+      const label = this.add
+        .text(x, y, '?', { fontFamily: 'monospace', fontSize: '13px', color: '#0b0f12' })
+        .setOrigin(0.5)
+        .setDepth(7);
+      this.spotMarkers.set(spot.id, { x, isBoss: spot.isBoss, dot, label });
+    }
+  }
+
+  private nearestEncounterSpot(): string | null {
+    const px = getGame().player.x;
+    let best: string | null = null;
+    let bestDist = INTERACT_DISTANCE;
+    for (const [id, m] of this.spotMarkers) {
+      const d = Math.abs(m.x - px);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = id;
+      }
+    }
+    return best;
+  }
+
+  // The legal choices per kind — the panel shows exactly these, so the UI can
+  // never offer an action resolveEncounter would reject.
+  private encounterChoices(kind: Encounter['kind']): EncounterChoice[] {
+    switch (kind) {
+      case 'loot':
+      case 'cache':
+        return ['take'];
+      case 'ambush':
+      case 'boss':
+        return ['fight', 'flee'];
+      case 'trader':
+        return ['trade', 'leave'];
+      case 'note':
+        return ['read'];
+    }
+  }
+
+  private openEncounter(spotId: string): void {
+    const state = getGame();
+    if (shouldSkip(state, spotId)) return;
+    const marker = this.spotMarkers.get(spotId);
+    const enc = rollFloorEncounter(state, state.currentFloor, spotId);
+    this.encounter = { spotId, encounter: enc, choices: this.encounterChoices(enc.kind), selected: 0, resolved: false };
+    this.encounterOpen = true;
+    this.buildEncounterPanel(marker?.isBoss ?? false);
+    // The alert sting is the encounter's warning shot: anything with teeth in
+    // it gets one before the player reads the options.
+    if (enc.kind === 'ambush' || enc.kind === 'boss') playSfx('alert');
+  }
+
+  private closeEncounter(): void {
+    this.encounterOpen = false;
+    this.encounter = undefined;
+    for (const o of this.encounterObjects) o.destroy();
+    this.encounterObjects = [];
+    // The floor's spots are rebuilt so a just-resolved one disappears.
+    this.buildEncounterSpots();
+  }
+
+  private buildEncounterPanel(isBoss: boolean): void {
+    for (const o of this.encounterObjects) o.destroy();
+    this.encounterObjects = [];
+    const enc = this.encounter;
+    if (!enc) return;
+    const { width, height } = this.cameras.main;
+    const cx = width / 2;
+    const cy = height / 2;
+    const panelW = 420;
+    const panelH = 190;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+
+    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.dialogue));
+    this.encounterObjects.push(
+      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: 'monospace', fontSize: '16px', color: isBoss ? '#e8907c' : '#f4b66a' }).setOrigin(0.5),
+    );
+    this.encounterObjects.push(
+      this.add.text(left + 20, top + 44, enc.encounter.message, { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8', wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+    );
+    if (!enc.resolved) {
+      enc.choices.forEach((choice, i) => {
+        const cursor = i === enc.selected ? '>' : ' ';
+        this.encounterObjects.push(
+          this.add
+            .text(left + 24, top + 96 + i * 24, `${cursor} ${CHOICE_LABELS[choice]}`, { fontFamily: 'monospace', fontSize: '14px', color: i === enc.selected ? '#f4b66a' : '#a8a49a' })
+            .setOrigin(0, 0),
+        );
+      });
+      this.encounterObjects.push(
+        this.add.text(cx, top + panelH - 14, '↑/↓ 选择 · Enter 确认 · ESC 离开', { fontFamily: 'monospace', fontSize: '11px', color: '#8a867c' }).setOrigin(0.5),
+      );
+    }
+  }
+
+  // Applies a choice: HP is applied here (the system only reports the delta),
+  // items are already in the bag from resolveEncounter, and the panel flips to
+  // the outcome text — Enter or Esc then closes it.
+  private activateEncounterChoice(): void {
+    const enc = this.encounter;
+    if (!enc || enc.resolved) return;
+    const state = getGame();
+    const choice = enc.choices[enc.selected];
+    const result = resolveEncounter(state, enc.encounter, choice);
+    if (result.consumed) markResolved(state, enc.spotId, `${enc.encounter.kind}:${choice}`);
+    if (result.hpChange !== 0) {
+      state.player.hp = Math.max(0, Math.min(GAME_CONFIG.player.hpMax, state.player.hp + result.hpChange));
+    }
+    saveToStorage(state);
+    enc.resolved = true;
+    if (result.items.length > 0) playSfx('chest');
+    // A swing reads as a swing: the attack clip plays whenever the player chose
+    // to fight, win or lose.
+    if (choice === 'fight') this.playActionAnim(attackAnimKey('player'), 300);
+    if (result.hpChange < 0) {
+      this.cameras.main.shake(160, 0.008);
+      this.refreshStats();
+    }
+    // Outcome panel: the message, and the item flow the player actually got.
+    for (const o of this.encounterObjects) o.destroy();
+    this.encounterObjects = [];
+    const { width, height } = this.cameras.main;
+    const cx = width / 2;
+    const cy = height / 2;
+    const panelW = 420;
+    const panelH = 170;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+    const isBoss = enc.encounter.kind === 'boss';
+    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.dialogue));
+    this.encounterObjects.push(
+      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: 'monospace', fontSize: '16px', color: isBoss ? '#e8907c' : '#f4b66a' }).setOrigin(0.5),
+    );
+    this.encounterObjects.push(
+      this.add.text(left + 20, top + 44, result.message, { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8', wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+    );
+    const loot = result.items.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、');
+    if (loot) {
+      this.encounterObjects.push(
+        this.add.text(left + 20, top + 96, `获得：${loot}`, { fontFamily: 'monospace', fontSize: '13px', color: '#a8e0c8', wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+      );
+    }
+    this.encounterObjects.push(
+      this.add.text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: '11px', color: '#8a867c' }).setOrigin(0.5),
+    );
+    if (state.status === 'lost') {
+      this.scene.start('End');
+    }
   }
 
 
@@ -461,6 +712,18 @@ export class GameScene extends Phaser.Scene {
 
   // ── HUD & inventory UI ─────────────────────────────────────────────────
   private buildHud(): void {
+    // A scene restart keeps the display list — Phaser 4's shutdown only nulls
+    // the textures — and field initialisers do not re-run, so the previous
+    // run's HUD objects would both double up on screen and throw on the first
+    // setText/setColor (a stale Text's glTexture is null). Destroy and reset
+    // everything this method owns before rebuilding.
+    this.statLabels = [];
+    this.goalText?.destroy();
+    this.goalText = undefined;
+    this.scoreText?.destroy();
+    this.scoreText = undefined;
+    this.vignette?.destroy();
+    this.vignette = undefined;
     this.clockText = this.add
       .text(12, 12, '', { fontFamily: 'monospace', fontSize: `${TYPE_TITLE}px`, color: '#ece8d8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 4 } })
       .setScrollFactor(0).setDepth(100);
@@ -495,6 +758,46 @@ export class GameScene extends Phaser.Scene {
     this.hintText = this.add
       .text(12, DESIGN_HEIGHT - 22, 'A/D 或 ←/→ 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
       .setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+
+    // OVERHAUL: the day's rolled objective and the run score sit top-right,
+    // opposite the clock — the two questions a player asks on waking are "what
+    // am I doing today" and "how am I doing".
+    this.goalText = this.add
+      .text(DESIGN_WIDTH - 12, 12, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#f4b66a', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 4 }, align: 'right' })
+      .setOrigin(1, 0).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    this.scoreText = this.add
+      .text(DESIGN_WIDTH - 12, 34, '', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 }, align: 'right' })
+      .setOrigin(1, 0).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+
+    // The low-HP vignette: pure red wash whose alpha is the pulse function's
+    // output. Created invisible; update() drives it every frame.
+    this.vignette = this.add
+      .rectangle(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT, 0xe56d63, 0)
+      .setOrigin(0, 0).setScrollFactor(0).setDepth(90);
+    this.refreshGoalHud();
+  }
+
+  // OVERHAUL: the day's objective (rolled lazily on first read of the day) and
+  // the run score + depth record. Recomputed on a key so the text objects are
+  // only touched when something actually changed.
+  //
+  // Guarded because refreshStats() — which calls this — runs from buildHud
+  // before the goal/score texts exist; the first real call is the one at the
+  // end of buildHud, after they are created.
+  private refreshGoalHud(): void {
+    if (!this.goalText || !this.scoreText) return;
+    const state = getGame();
+    ensureDailyGoal(state);
+    const goal = state.dailyGoal;
+    const done = goal ? isDailyGoalDone(state) : false;
+    const label = goal ? GOAL_LABELS[goal.kind](goal.target) : '';
+    const key = `${goal?.day ?? 0}|${goal?.kind ?? ''}|${goal?.target ?? 0}|${String(done)}`;
+    if (key !== this.lastGoalKey) {
+      this.lastGoalKey = key;
+      this.goalText.setText(`今日目标：${label}${done ? ' ✓' : ''}`);
+      this.goalText.setColor(done ? '#a8e0c8' : '#f4b66a');
+    }
+    this.scoreText.setText(`${runScore(state)} 分 · 最深 ${depthRecord(state)} 层`);
   }
 
   private refreshClock(): void {
@@ -520,6 +823,11 @@ export class GameScene extends Phaser.Scene {
       this.barsGfx.fillStyle(STAT_BARS[i].color, 1);
       this.barsGfx.fillRect(34, y + 2, 84 * Math.max(0, Math.min(1, v / 100)), 7);
     });
+    // OVERHAUL: the most urgent bar's label turns red, so the critical slot is
+    // findable without reading four numbers.
+    const urgent = mostUrgentStat(getGame().player);
+    this.statLabels.forEach((t, i) => t.setColor(STAT_BARS[i].key === urgent ? '#e8907c' : '#ece8d8'));
+    this.refreshGoalHud();
   }
 
   private buildInventoryPanel(): void {
@@ -1042,16 +1350,22 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onToggleMap(): void {
-    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen) return;
+    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen) return;
     this.openTowerOverview();
   }
 
   private onToggleInventory(): void {
-    if (this.craftingOpen || this.dialogueOpen || this.pauseOpen) return;
+    if (this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen) return;
     this.toggleInventory();
   }
 
   private onEsc(): void {
+    if (this.encounterOpen) {
+      // Leaving an unresolved encounter is the walk-away: no cost, no
+      // consumption. A resolved one just closes the outcome panel.
+      this.closeEncounter();
+      return;
+    }
     if (this.inventoryOpen) this.toggleInventory();
     else if (this.craftingOpen) this.toggleCrafting();
     else if (this.dialogueOpen) this.dialogueBack();
@@ -1059,7 +1373,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onNavUp(): void {
-    if (this.inventoryOpen) {
+    if (this.encounterOpen && this.encounter && !this.encounter.resolved) {
+      this.encounter.selected = Math.max(0, this.encounter.selected - 1);
+      this.buildEncounterPanel(this.spotMarkers.get(this.encounter.spotId)?.isBoss ?? false);
+    } else if (this.inventoryOpen) {
       this.invSelected = Math.max(0, this.invSelected - 1);
       this.refreshInventory();
     } else if (this.craftingOpen) {
@@ -1075,7 +1392,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onNavDown(): void {
-    if (this.inventoryOpen) {
+    if (this.encounterOpen && this.encounter && !this.encounter.resolved) {
+      this.encounter.selected = Math.min(this.encounter.choices.length - 1, this.encounter.selected + 1);
+      this.buildEncounterPanel(this.spotMarkers.get(this.encounter.spotId)?.isBoss ?? false);
+    } else if (this.inventoryOpen) {
       const count = getGame().player.inventory.slots.length;
       this.invSelected = Math.min(Math.max(0, count - 1), this.invSelected + 1);
       this.refreshInventory();
@@ -1094,6 +1414,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onUse(): void {
+    if (this.encounterOpen) {
+      if (this.encounter?.resolved) this.closeEncounter();
+      else this.activateEncounterChoice();
+      return;
+    }
     if (this.inventoryOpen) {
       const stack = getGame().player.inventory.slots[this.invSelected];
       if (!stack) return;
@@ -1126,6 +1451,14 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     const state = getGame();
+    // OVERHAUL: a "?" in reach is the first thing E reaches for — the floor's
+    // rumour beats its containers for attention, the way ALTACIMA's question
+    // marks pull the player across a room.
+    const spot = this.nearestEncounterSpot();
+    if (spot) {
+      this.openEncounter(spot);
+      return;
+    }
     const npc = this.nearestNpc(state);
     if (npc) {
       this.openDialogue(npc);
@@ -1198,7 +1531,12 @@ export class GameScene extends Phaser.Scene {
           : '背包已满：新物品放不下，能叠进已有堆的才能进包',
       );
     } else {
-      playSfx('pickup');
+      // OVERHAUL: a chest thunk for opening a container, distinct from the
+      // ground pickup's lighter blip — the container is the bigger event.
+      playSfx('chest');
+      // 420ms against the clip's 333ms: a frame overrun (scene switch, save,
+      // hitch) must not cut the bend in half.
+      this.playActionAnim(searchAnimKey('player'), 420);
       this.flash(`获得 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${ACTION_COSTS.searchContainer} 分钟）`);
       this.chargeTime(ACTION_COSTS.searchContainer);
     }
@@ -1229,6 +1567,9 @@ export class GameScene extends Phaser.Scene {
     if (result.ok) {
       this.clearFloor();
       this.drawFloor(); // records the visit for the floor just entered...
+      // OVERHAUL: a new deepest floor is the run's headline number, so the
+      // record is taken the moment the floor changes rather than at scoring.
+      recordDepth(getGame());
       // B3-15: a dwell-rolled wanderer belongs to the floor it was rolled on.
       // Leaving is the escape, so the event must not follow the player up the
       // stairs and squat in the day's single event slot.
@@ -1266,6 +1607,10 @@ export class GameScene extends Phaser.Scene {
       this.flash(outcome.message);
     } else if (outcome.kind === 'atmosphere') {
       this.flash(outcome.message);
+    } else if (outcome.kind === 'scout') {
+      // No monster — a sighting. The next roll on this floor is more likely to
+      // be teeth, so this is the warning shot the player should read as "move".
+      this.flash(outcome.message);
     }
   }
 
@@ -1283,7 +1628,7 @@ export class GameScene extends Phaser.Scene {
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
     this.refreshBagFullWarning();
-    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen) return;
+    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen) return;
     const state = getGame();
 
     // B3-01 D9: a rejected write used to be silent, so a full disk or a private
@@ -1301,7 +1646,10 @@ export class GameScene extends Phaser.Scene {
     if (this.cursors?.right.isDown || this.wasd?.right.isDown) dir += 1;
     // The speed is ramped rather than switched, so a tap of the key moves a
     // shorter distance than it used to and the run feels like it has weight.
-    this.speedX = stepHorizontalSpeed(this.speedX, dir, delta);
+    // OVERHAUL: an empty energy tank slows the walk (0.75x), so "how far can I
+    // get" is budgeted by food and rest. The factor applies to the ramped
+    // speed, not to dx, so the anim's speedFraction follows the slower walk.
+    this.speedX = stepHorizontalSpeed(this.speedX, dir, delta) * moveSpeedFactor(state.player);
     const dx = this.speedX * (delta / 1000);
     if (dx !== 0) movePlayerX(state, dx);
     this.player.x = state.player.x;
@@ -1311,10 +1659,16 @@ export class GameScene extends Phaser.Scene {
     // clip, face it, and lock the playback rate to the actual speed so the feet
     // do not skate while the player is still on the acceleration ramp.
     if (dir !== 0) this.player.setFlipX(dir < 0);
-    const speedFraction = Math.abs(this.speedX) / PLAYER_SPEED;
-    const want = speedFraction > 0.03 ? walkAnimKey('player') : idleAnimKey('player');
-    if (this.player.anims.currentAnim?.key !== want) this.player.play(want, true);
-    this.player.anims.timeScale = Math.max(0.2, Math.min(1, speedFraction));
+    // OVERHAUL: a one-shot action clip holds the sprite until its timer runs
+    // out; the walk/idle pick below only runs once the clip is over.
+    if (this.time.now < this.actionAnimUntil && this.player.anims.currentAnim?.key === this.actionAnimKey) {
+      // clip still playing
+    } else {
+      const speedFraction = Math.abs(this.speedX) / PLAYER_SPEED;
+      const want = speedFraction > 0.03 ? walkAnimKey('player') : idleAnimKey('player');
+      if (this.player.anims.currentAnim?.key !== want) this.player.play(want, true);
+      this.player.anims.timeScale = Math.max(0.2, Math.min(1, speedFraction));
+    }
 
     const tick = advanceTime(state, delta);
     const rolled = ensureNightEvent(state);
@@ -1327,6 +1681,17 @@ export class GameScene extends Phaser.Scene {
     // event already occupying the day's slot suppresses the prowler (an
     // atmosphere roll can still fire).
     this.updateDwellPressure(state, tick.gameMinutes);
+    // OVERHAUL: settle the day's objective the moment its condition holds —
+    // reward fires once, with the fanfare, so finishing it feels like an event
+    // rather than a silent counter.
+    ensureDailyGoal(state);
+    if (isDailyGoalDone(state) && !state.dailyGoal?.done) {
+      grantDailyGoalReward(state);
+      playSfx('goal');
+      this.flash('今日目标完成！分数 +' + GAME_CONFIG.overhaul.dailyGoalRewardScore + '，获得口粮×1');
+    }
+    // The low-HP vignette rides the pulse function every frame.
+    this.vignette?.setAlpha(lowHpPulse(state.player.hp, GAME_CONFIG.player.hpMax, this.time.now));
     // Read after ensureNightEvent so an event rolled this very frame counts.
     const event = state.worldEvents.activeEvent;
     this.refreshClock();
@@ -1386,7 +1751,8 @@ export class GameScene extends Phaser.Scene {
     }
     const container = this.nearestContainer();
     const zone = currentInteractionZone(state);
-    if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
+    if (this.nearestEncounterSpot()) this.hintText.setText('按 E 查看问号点');
+    else if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
     else if (zone === 'up') this.hintText.setText('按 E 上楼');
     else if (zone === 'down') this.hintText.setText('按 E 下楼');
     else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互 · I 背包 · ESC 菜单');
@@ -1408,6 +1774,7 @@ export class GameScene extends Phaser.Scene {
       if (this.wanderer) {
         this.wanderer.destroy();
         this.wanderer = undefined;
+        this.wandererAI = undefined;
       }
       return;
     }
@@ -1415,17 +1782,29 @@ export class GameScene extends Phaser.Scene {
       const spawnX = state.player.x < FLOOR_WIDTH / 2 ? FLOOR_WIDTH - 48 : 48;
       this.wanderer = this.add.sprite(spawnX, PLAYER_FEET_Y, walkSheetKey('wanderer')).setOrigin(0.5, 1);
       this.wanderer.play(walkAnimKey('wanderer'));
+      this.wandererAI = freshWandererAI(spawnX);
     }
+    const ai = this.wandererAI;
+    // OVERHAUL: the state machine drives the speed. Standing within its range
+    // for a second and a half earns a 2.2x lunge — the walk-away escape still
+    // works, but standing still is now genuinely fatal, which is the whole
+    // point of the rework (B3-06 measured the old "only kills the stationary"
+    // as a design bug, not a feature).
+    ai!.selfX = this.wanderer.x;
+    const step = stepWandererAI(ai!, state.player.x, delta);
     const dir = Math.sign(state.player.x - this.wanderer.x);
-    if (dir !== 0) this.wanderer.x += dir * WANDERER_SPEED * (delta / 1000);
+    if (dir !== 0) this.wanderer.x += dir * WANDERER_SPEED * step.speedMultiplier * (delta / 1000);
+    // A lunge hit lands double: the wind-up is the tell, the lunge is the bill.
+    const damage = ai!.state === 'lunge' ? WANDERER_DAMAGE * 2 : WANDERER_DAMAGE;
     if (Math.abs(this.wanderer.x - state.player.x) <= 12 && this.time.now - this.wandererHitAt >= WANDERER_HIT_COOLDOWN_MS) {
       this.wandererHitAt = this.time.now;
-      state.player.hp = Math.max(0, state.player.hp - WANDERER_DAMAGE);
+      state.player.hp = Math.max(0, state.player.hp - damage);
       this.refreshStats();
+      this.playActionAnim(hurtAnimKey('player'), 400);
       playSfx('hurt');
       this.cameras.main.shake(160, 0.008);
       this.cameras.main.flash(140, 230, 109, 99); // red damage flash
-      this.flash(`被巡游体击中！HP -${WANDERER_DAMAGE}，快回宿舍或换层！`);
+      this.flash(`被巡游体击中！HP -${damage}，快回宿舍或换层！`);
       if (state.player.hp <= 0) state.status = 'lost';
     }
   }

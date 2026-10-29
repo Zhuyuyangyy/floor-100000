@@ -31,6 +31,22 @@ async function startGame(page: Page, seed: number): Promise<void> {
   await page.goto(`/?seed=${seed}`);
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter');
+  // A new run lands on the character pick first.
+  await waitForScene(page, 'MetaSelect');
+  // The pick screen reports active before create() binds its keys, so an
+  // Enter can land in that window and be lost. Retry until the run starts.
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press('Enter');
+    const started = await page.waitForFunction(
+      () => {
+        const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScenes: (r?: boolean) => Array<{ scene: { key: string } }> } } }).__PHASER_GAME__;
+        return !!g && g.scene.getScenes(true).some((s) => s.scene.key === 'Game');
+      },
+      undefined,
+      { timeout: 2000 },
+    ).then(() => true).catch(() => false);
+    if (started) break;
+  }
   await waitForScene(page, 'Game');
 }
 
@@ -46,7 +62,7 @@ async function hasWanderer(page: Page): Promise<boolean> {
   return page.evaluate(() => {
     const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; texture?: { key: string } }> } } | null } } }).__PHASER_GAME__;
     const list = g?.scene.getScene('Game')?.children.list ?? [];
-    return list.some((o) => o.type === 'Sprite' && o.texture?.key === 'wanderer');
+    return list.some((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-wanderer'));
   });
 }
 
@@ -145,7 +161,7 @@ test('the wanderer is avoidable — leaving the floor escapes it undamaged', asy
   await page.waitForFunction(() => {
     const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; texture?: { key: string } }> } } | null } } }).__PHASER_GAME__;
     const list = g?.scene.getScene('Game')?.children.list ?? [];
-    return list.some((o) => o.type === 'Sprite' && o.texture?.key === 'wanderer');
+    return list.some((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-wanderer'));
   }, undefined, { timeout: 5000 });
   expect(await hasWanderer(page)).toBe(true);
   await page.screenshot({ path: 'e2e/screenshots/11-wanderer.png' });

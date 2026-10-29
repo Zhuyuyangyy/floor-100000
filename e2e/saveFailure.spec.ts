@@ -79,6 +79,22 @@ test('a rejected save warns the player instead of losing the run silently', asyn
   await page.goto('/?seed=42');
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter');
+  // A new run lands on the character pick first.
+  await waitForScene(page, 'MetaSelect');
+  // The pick screen reports active before create() binds its keys, so an
+  // Enter can land in that window and be lost. Retry until the run starts.
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press('Enter');
+    const started = await page.waitForFunction(
+      () => {
+        const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScenes: (r?: boolean) => Array<{ scene: { key: string } }> } } }).__PHASER_GAME__;
+        return !!g && g.scene.getScenes(true).some((s) => s.scene.key === 'Game');
+      },
+      undefined,
+      { timeout: 2000 },
+    ).then(() => true).catch(() => false);
+    if (started) break;
+  }
   await waitForScene(page, 'Game');
   await advanceToNight(page);
 
@@ -97,6 +113,22 @@ test('a run that saves normally never shows the warning', async ({ page }) => {
   await page.goto('/?seed=42');
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter');
+  // A new run lands on the character pick first.
+  await waitForScene(page, 'MetaSelect');
+  // The pick screen reports active before create() binds its keys, so an
+  // Enter can land in that window and be lost. Retry until the run starts.
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press('Enter');
+    const started = await page.waitForFunction(
+      () => {
+        const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScenes: (r?: boolean) => Array<{ scene: { key: string } }> } } }).__PHASER_GAME__;
+        return !!g && g.scene.getScenes(true).some((s) => s.scene.key === 'Game');
+      },
+      undefined,
+      { timeout: 2000 },
+    ).then(() => true).catch(() => false);
+    if (started) break;
+  }
   await waitForScene(page, 'Game');
   await advanceToNight(page);
   await page.waitForTimeout(1500);

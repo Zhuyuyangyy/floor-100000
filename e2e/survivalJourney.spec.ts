@@ -149,6 +149,22 @@ test.describe('B3-02 full survival journey', () => {
     await page.goto('/?seed=42');
     await waitForScene(page, 'Menu');
     await page.keyboard.press('Enter');
+    // A new run lands on the character pick first.
+    await waitForScene(page, 'MetaSelect');
+    // The pick screen reports active before create() binds its keys, so an
+    // Enter can land in that window and be lost. Retry until the run starts.
+    for (let i = 0; i < 5; i++) {
+      await page.keyboard.press('Enter');
+      const started = await page.waitForFunction(
+        () => {
+          const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScenes: (r?: boolean) => Array<{ scene: { key: string } }> } } }).__PHASER_GAME__;
+          return !!g && g.scene.getScenes(true).some((s) => s.scene.key === 'Game');
+        },
+        undefined,
+        { timeout: 2000 },
+      ).then(() => true).catch(() => false);
+      if (started) break;
+    }
     await waitForScene(page, 'Game');
 
     // ── 1. wake on floor 1 ──────────────────────────────────────────────
@@ -343,6 +359,8 @@ test.describe('B3-02 full survival journey', () => {
     await page.keyboard.press('ArrowDown'); // -> 继续游戏
     await page.waitForTimeout(150);
     await page.keyboard.press('Enter');
+    // A continue resumes the run directly — the character pick is for new runs
+    // only, so this goes straight to the Game scene.
     await waitForScene(page, 'Game');
 
     const resumed = await readState(page);

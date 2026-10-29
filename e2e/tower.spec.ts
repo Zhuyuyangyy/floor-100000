@@ -43,6 +43,22 @@ async function startGame(page: Page, seed = 42): Promise<void> {
   await page.goto(`/?seed=${seed}`);
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter');
+  // A new run lands on the character pick first.
+  await waitForScene(page, 'MetaSelect');
+  // The pick screen reports active before create() binds its keys, so an
+  // Enter can land in that window and be lost. Retry until the run starts.
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press('Enter');
+    const started = await page.waitForFunction(
+      () => {
+        const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScenes: (r?: boolean) => Array<{ scene: { key: string } }> } } }).__PHASER_GAME__;
+        return !!g && g.scene.getScenes(true).some((s) => s.scene.key === 'Game');
+      },
+      undefined,
+      { timeout: 2000 },
+    ).then(() => true).catch(() => false);
+    if (started) break;
+  }
   await waitForScene(page, 'Game');
 }
 
@@ -385,6 +401,22 @@ test('?devwin=1 still runs the retired day-8 victory fixture', async ({ page }) 
   await page.goto('/?seed=42&devwin=1');
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter');
+  // A new run lands on the character pick first.
+  await waitForScene(page, 'MetaSelect');
+  // The pick screen reports active before create() binds its keys, so an
+  // Enter can land in that window and be lost. Retry until the run starts.
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press('Enter');
+    const started = await page.waitForFunction(
+      () => {
+        const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScenes: (r?: boolean) => Array<{ scene: { key: string } }> } } }).__PHASER_GAME__;
+        return !!g && g.scene.getScenes(true).some((s) => s.scene.key === 'Game');
+      },
+      undefined,
+      { timeout: 2000 },
+    ).then(() => true).catch(() => false);
+    if (started) break;
+  }
   await waitForScene(page, 'Game');
 
   await page.evaluate(() => {
@@ -411,6 +443,22 @@ test('?devfloor=100000 starts the retired dev dorm scene and nothing else', asyn
   await page.goto('/?seed=42&devfloor=100000');
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter');
+  // A new run lands on the character pick first.
+  await waitForScene(page, 'MetaSelect');
+  // The pick screen reports active before create() binds its keys, so an
+  // Enter can land in that window and be lost. Retry until the run starts.
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press('Enter');
+    const started = await page.waitForFunction(
+      () => {
+        const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScenes: (r?: boolean) => Array<{ scene: { key: string } }> } } }).__PHASER_GAME__;
+        return !!g && g.scene.getScenes(true).some((s) => s.scene.key === 'Game');
+      },
+      undefined,
+      { timeout: 2000 },
+    ).then(() => true).catch(() => false);
+    if (started) break;
+  }
   await waitForScene(page, 'Game');
   expect((await readState(page)).currentFloor).toBe(100000);
 
@@ -422,6 +470,22 @@ test('?devfloor=100000 starts the retired dev dorm scene and nothing else', asyn
   await page.goto('/?seed=42&devfloor=1');
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter');
+  // A new run lands on the character pick first.
+  await waitForScene(page, 'MetaSelect');
+  // The pick screen reports active before create() binds its keys, so an
+  // Enter can land in that window and be lost. Retry until the run starts.
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press('Enter');
+    const started = await page.waitForFunction(
+      () => {
+        const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScenes: (r?: boolean) => Array<{ scene: { key: string } }> } } }).__PHASER_GAME__;
+        return !!g && g.scene.getScenes(true).some((s) => s.scene.key === 'Game');
+      },
+      undefined,
+      { timeout: 2000 },
+    ).then(() => true).catch(() => false);
+    if (started) break;
+  }
   await waitForScene(page, 'Game');
   expect((await readState(page)).currentFloor).toBe(1);
 });

@@ -194,7 +194,9 @@ export class MenuScene extends Phaser.Scene {
     // DEV_TEST_FLOORS — a normal run always begins on floor 1.
     const devFloor = devEntry().floor;
     if (devFloor !== null) state.currentFloor = devFloor;
-    this.scene.start('Game');
+    // OVERHAUL Wave B: every run starts with the character pick — the replay
+    // engine's front door.
+    this.scene.start('MetaSelect');
   }
 
   private continueRun(): void {

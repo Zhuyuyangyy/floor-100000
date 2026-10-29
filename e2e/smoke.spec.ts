@@ -37,13 +37,41 @@ test('boots to the pixel title and Enter starts into the game scene', async ({ p
   expect(await hasVisibleText(page, '开始新游戏')).toBe(true);
 
   await page.keyboard.press('Enter');
+  // A new run lands on the character pick first.
+  await waitForScene(page, 'MetaSelect');
+  // The pick screen reports active before create() binds its keys, so an
+  // Enter can land in that window and be lost. Retry until the run starts.
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press('Enter');
+    const started = await page.waitForFunction(
+      () => {
+        const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScenes: (r?: boolean) => Array<{ scene: { key: string } }> } } }).__PHASER_GAME__;
+        return !!g && g.scene.getScenes(true).some((s) => s.scene.key === 'Game');
+      },
+      undefined,
+      { timeout: 2000 },
+    ).then(() => true).catch(() => false);
+    if (started) break;
+  }
   await waitForScene(page, 'Game');
 
+  // The scene reports active before create() finishes, so wait for the player
+  // sprite itself rather than sampling the display list once — a one-shot
+  // evaluate is a coin flip on the transition timing.
+  await page.waitForFunction(
+    () => {
+      const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; texture?: { key: string } }> } } | null } } }).__PHASER_GAME__;
+      const list = g?.scene.getScene('Game')?.children.list ?? [];
+      return list.some((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-'));
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
   const rendered = await page.evaluate(() => {
     const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; texture?: { key: string }; text?: string }> } } | null } } }).__PHASER_GAME__;
     const list = g?.scene.getScene('Game')?.children.list ?? [];
     return {
-      player: list.some((o) => o.type === 'Sprite' && o.texture?.key === 'player'),
+      player: list.some((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-')),
       floor: list.some((o) => o.type === 'Text' && /层/.test(o.text ?? '')),
     };
   });

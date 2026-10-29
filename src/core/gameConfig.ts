@@ -4,6 +4,7 @@ import { BootScene } from '../scenes/BootScene';
 import { EndScene } from '../scenes/EndScene';
 import { GameScene } from '../scenes/GameScene';
 import { MenuScene } from '../scenes/MenuScene';
+import { MetaSelectScene } from '../scenes/MetaSelectScene';
 import { TowerOverviewScene } from '../scenes/TowerOverviewScene';
 
 export function createGameConfig(parent: string): Phaser.Types.Core.GameConfig {
@@ -18,6 +19,8 @@ export function createGameConfig(parent: string): Phaser.Types.Core.GameConfig {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [BootScene, MenuScene, GameScene, TowerOverviewScene, EndScene],
+    // MetaSelect sits between the title and the run: the player picks the
+    // survivor they have earned before every run.
+    scene: [BootScene, MenuScene, MetaSelectScene, GameScene, TowerOverviewScene, EndScene],
   };
 }

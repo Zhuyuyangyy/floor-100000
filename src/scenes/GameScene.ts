@@ -37,6 +37,8 @@ import { armNextRoll, dwellRollDue, ensureDwell, isDwellExempt, rollDwellEvent, 
 import { freshWandererAI, stepWandererAI, type WandererAI } from '../systems/wandererAI';
 import { ensureDailyGoal, grantDailyGoalReward, isDailyGoalDone } from '../systems/dailyGoals';
 import { depthRecord, recordDepth, runScore } from '../systems/progress';
+import { CHARACTER_NAMES, applyDepth, loadMeta, saveMeta, unlockFromDepth } from '../systems/metaProgress';
+import type { CharacterKey } from '../render/artpack';
 import { lowHpPulse, mostUrgentStat, moveSpeedFactor } from '../render/feedback';
 import { GAME_CONFIG } from '../core/config';
 import {
@@ -58,7 +60,7 @@ import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSyste
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, createMarker, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import { ENV_FLOOR_KEY, ENV_WALL_KEY } from '../render/artpack';
-import { attackAnimKey, hurtAnimKey, idleAnimKey, searchAnimKey, walkAnimKey, walkSheetKey } from '../render/walkcycle';
+import { WALK_CHARACTERS, attackAnimKey, hurtAnimKey, idleAnimKey, searchAnimKey, walkAnimKey, walkSheetKey } from '../render/walkcycle';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
@@ -370,8 +372,17 @@ export class GameScene extends Phaser.Scene {
     // side-scroller, and a figure seen face-on while it moves laterally reads as
     // a card sliding across the backdrop. The front-view art is the dialogue
     // portrait, where facing the player is the correct axis.
-    this.player = this.add.sprite(state.player.x, PLAYER_FEET_Y, walkSheetKey('player')).setOrigin(0.5, 1);
-    this.player.play(idleAnimKey('player'));
+    // The side-view walk sheet, not the front-view portrait: the camera is a
+    // side-scroller, and a figure seen face-on while it moves laterally reads as
+    // a card sliding across the backdrop. The front-view art is the dialogue
+    // portrait, where facing the player is the correct axis.
+    //
+    // OVERHAUL Wave B: the survivor is the one picked on the meta-select
+    // screen, not always the player — the unlocked neighbours are the replay
+    // engine's payload.
+    const who = this.metaSelectedCharacter();
+    this.player = this.add.sprite(state.player.x, PLAYER_FEET_Y, walkSheetKey(who)).setOrigin(0.5, 1);
+    this.player.play(idleAnimKey(who));
     this.floorObjects.push(this.player);
     this.cameras.main.startFollow(this.player, true, 0.15, 0.15);
   }
@@ -397,7 +408,20 @@ export class GameScene extends Phaser.Scene {
     this.clearEncounterSpots();
   }
 
-  // ── encounter spots (OVERHAUL W1) ────────────────────────────────────────
+  // The survivor picked on the meta-select screen, as a walk-sheet key. Falls
+  // back to the player when the meta is missing or holds a stale selection.
+  private metaSelectedCharacter(): CharacterKey {
+  try {
+    const meta = loadMeta();
+    return (WALK_CHARACTERS.includes(meta.selectedCharacter as CharacterKey)
+      ? meta.selectedCharacter
+      : 'player') as CharacterKey;
+  } catch {
+    return 'player';
+  }
+}
+
+// ── encounter spots (OVERHAUL W1) ────────────────────────────────────────
   // One "?" per deterministic spot, amber for a rumour and red for the boss.
   // Resolved spots are not drawn at all — the floor visibly empties as the
   // player works it, which is the "this place is picked over" read.
@@ -1346,7 +1370,10 @@ export class GameScene extends Phaser.Scene {
     } else if (this.pauseSelected === 2) {
       clearSave();
       startNewGame(Date.now() >>> 0); // 重新开始
-      this.scene.start('Game');
+      // A restart is a new run, so it goes through the character pick like any
+      // other new run — otherwise the pick screen would be skippable and the
+      // survivor choice would silently stop mattering.
+      this.scene.start('MetaSelect');
     } else {
       this.scene.start('Menu'); // 返回标题
     }
@@ -1877,6 +1904,16 @@ export class GameScene extends Phaser.Scene {
       // OVERHAUL: a new deepest floor is the run's headline number, so the
       // record is taken the moment the floor changes rather than at scoring.
       recordDepth(getGame());
+      // OVERHAUL Wave B: depth is also the meta-progression currency — the
+      // moment a new survivor is earned, the run says so, because "who can I
+      // play next" is the reason to start another run.
+      const meta = loadMeta();
+      const gained = applyDepth(meta, getGame().currentFloor);
+      if (gained.length > 0) {
+        saveMeta(unlockFromDepth(meta, getGame().currentFloor));
+        playSfx('goal');
+        this.flash(`新幸存者解锁：${gained.map((c) => CHARACTER_NAMES[c] ?? c).join('、')}！回标题可更换`);
+      }
       // B3-15: a dwell-rolled wanderer belongs to the floor it was rolled on.
       // Leaving is the escape, so the event must not follow the player up the
       // stairs and squat in the day's single event slot.

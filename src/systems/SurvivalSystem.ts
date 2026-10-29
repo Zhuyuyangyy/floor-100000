@@ -2,6 +2,8 @@ import { GAME_CONFIG } from '../core/config';
 import { DAY_START_MINUTE, MINUTES_PER_DAY } from '../core/constants';
 import { devEntry } from '../core/devMode';
 import type { GameState } from '../core/gameTypes';
+import { modeDecayMult } from './modes';
+import { hungerLossMult } from './relics';
 
 // Time & survival rules (docs/01_GDD.md §5-6, config/game-balance.json).
 // Pure & deterministic: Phaser only feeds the real-time delta; these functions
@@ -49,8 +51,13 @@ function applyDecay(state: GameState, gameMinutes: number): void {
   const hours = gameMinutes / 60;
   const p = state.player;
   const cfg = GAME_CONFIG.player;
-  p.hunger = clamp(p.hunger - cfg.hungerLossPerGameHour * hours, 0, cfg.hungerMax);
-  p.thirst = clamp(p.thirst - cfg.thirstLossPerGameHour * hours, 0, cfg.thirstMax);
+  // OVERHAUL Wave B2/B3: the mode scales the drain (quick tighter, easy
+  // softer) and the iron-stomach relic cuts hunger specifically. Both are
+  // multipliers on the shipped rate, so the baseline config stays the truth.
+  const modeMult = modeDecayMult(state.mode ?? 'adventure');
+  const relicHunger = hungerLossMult(state.relics ?? []);
+  p.hunger = clamp(p.hunger - cfg.hungerLossPerGameHour * hours * modeMult * relicHunger, 0, cfg.hungerMax);
+  p.thirst = clamp(p.thirst - cfg.thirstLossPerGameHour * hours * modeMult, 0, cfg.thirstMax);
   p.energy = clamp(p.energy - cfg.energyLossPerGameHour * hours, 0, cfg.energyMax);
   if (p.hunger <= 0 || p.thirst <= 0) {
     p.hp = clamp(p.hp - HP_STARVE_LOSS_PER_HOUR * hours, 0, cfg.hpMax);

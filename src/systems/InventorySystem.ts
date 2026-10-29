@@ -1,6 +1,7 @@
 import { GAME_CONFIG } from '../core/config';
 import { getItem } from '../data/items';
 import type { GameState, Inventory, InventoryStack, ItemId, StatKey } from '../core/gameTypes';
+import { waterRestoreMult } from './relics';
 
 // Inventory rules: 12 slots, stacking, full-bag handling that never loses or
 // silently swallows items, and consumable use with clamped stat effects.
@@ -119,7 +120,11 @@ export function useConsumable(state: GameState, itemId: ItemId): UseResult {
   if (before >= max) {
     return { ok: false, reason: `${item.displayName}现在不需要（${STAT_LABEL[item.effect.stat]}已满）` };
   }
-  p[item.effect.stat] = Math.min(max, before + item.effect.amount);
+  // OVERHAUL Wave B3: the water-heart relic makes every drink 50% stronger.
+  // The multiplier only touches the gain, never the clamp — a full bar still
+  // refuses the item, so the relic cannot be used to burn water for nothing.
+  const restoreMult = item.effect.stat === 'thirst' ? waterRestoreMult(state.relics ?? []) : 1;
+  p[item.effect.stat] = Math.min(max, before + item.effect.amount * restoreMult);
   removeItem(state.player.inventory, itemId, 1);
   return {
     ok: true,

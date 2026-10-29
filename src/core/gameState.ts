@@ -75,6 +75,10 @@ export function createNewGame(seed: number): GameState {
     dailyGoal: undefined,
     records: { deepestFloor: p.startingFloor, bestScore: 0 },
     encounters: {},
+    // OVERHAUL Wave B2/B3: the mode and relics are applied by the character
+    // pick (which owns the meta) right after this; vanilla until then.
+    mode: 'adventure',
+    relics: [],
     status: 'playing',
   };
 }

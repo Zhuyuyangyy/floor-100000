@@ -1,5 +1,6 @@
 import { GAME_CONFIG } from '../core/config';
 import type { GameState, ItemId } from '../core/gameTypes';
+import { modeScoreMult } from './modes';
 
 // OVERHAUL W3（docs/OVERHAUL_M1.md）：深度纪录与 run 计分。
 //
@@ -74,9 +75,10 @@ function treasureScore(state: GameState): number {
 //   因此简化为二值——本 run 的日常目标已结算（dailyGoal.done，由
 //   dailyGoals.grantDailyGoalReward 置位）时 +overhaul.dailyGoalRewardScore，
 //   否则 0。
+// - OVERHAUL Wave B2：快速跑按模式倍率放大整局得分——更紧的预算换更高的分。
 export function runScore(state: GameState): number {
   const depth = state.currentFloor;
   const treasure = treasureScore(state);
   const goal = state.dailyGoal?.done === true ? GAME_CONFIG.overhaul.dailyGoalRewardScore : 0;
-  return 2 * depth + treasure + goal;
+  return Math.round((2 * depth + treasure + goal) * modeScoreMult(state.mode ?? 'adventure'));
 }

@@ -155,6 +155,10 @@ export interface GameState {
   encounters?: Record<string, string>;
   // OVERHAUL Wave A: the live combat, if one is being fought.
   combat?: CombatState;
+  // OVERHAUL Wave B2/B3: the run's mode and its earned relics, copied from the
+  // meta at run start. Optional so pre-B saves stay loadable.
+  mode?: 'quick' | 'adventure' | 'easy';
+  relics?: string[];
   status: GameStatus;
 }
 

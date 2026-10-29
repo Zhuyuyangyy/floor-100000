@@ -54,6 +54,8 @@ import {
 import { encounterSpots, nudgeSpotX } from '../systems/encounterSpots';
 import { resolveRound, playerCombatant, GUARD_ENERGY_RESTORE, type Combatant } from '../systems/combat';
 import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster } from '../systems/monsters';
+import { guardianDamageMult, lootBonus, moveSpeedMult } from '../systems/relics';
+import { modeGuardianDamageMult } from '../systems/modes';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
@@ -672,7 +674,6 @@ export class GameScene extends Phaser.Scene {
       state.player.energy = Math.min(GAME_CONFIG.player.energyMax, state.player.energy + GUARD_ENERGY_RESTORE);
     }
     if (round.monsterDamage > 0 && !round.monsterDead && !round.fled) {
-      let dmg = round.monsterDamage;
       // A coward that dropped below its threshold breaks off the fight and
       // runs — the player keeps what they already did to it.
       const cowardFrac = behaviorModifiers('coward').fleeAtHpFrac;
@@ -681,6 +682,11 @@ export class GameScene extends Phaser.Scene {
         this.finishCombat('coward');
         return;
       }
+      // OVERHAUL Wave B2/B3: the guardian totem and easy mode both soften the
+      // hit the player takes; the relic applies to any monster, the mode only
+      // to the guardian.
+      const soften = (combat.kind === 'boss' ? guardianDamageMult(state.relics ?? []) * modeGuardianDamageMult(state.mode ?? 'adventure') : guardianDamageMult(state.relics ?? []));
+      const dmg = Math.max(1, Math.round(round.monsterDamage * soften));
       state.player.hp = Math.max(0, state.player.hp - dmg);
       if (action === 'guard') this.playActionAnim(hurtAnimKey('player'), 400);
       this.cameras.main.shake(160, 0.008);
@@ -720,8 +726,9 @@ export class GameScene extends Phaser.Scene {
     const isBoss = combat.kind === 'boss';
     if (outcome === 'win') {
       // Ambush win: the loser's pockets. Boss win: the chapter's payoff.
+      // OVERHAUL Wave B3: the lucky charm adds one more roll to the pile.
       const rng = makeRng(deriveSeed(state.runSeed, state.day, combat.floor, combat.spotId, 'combat-loot'));
-      const lootCount = isBoss ? 3 : rng.nextInt(1, 2);
+      const lootCount = (isBoss ? 3 : rng.nextInt(1, 2)) + lootBonus(state.relics ?? []);
       const taken: Array<{ itemId: ItemId; quantity: number }> = [];
       const pool: ItemId[] = isBoss
         ? ['medkit', 'clean_water', 'ration_pack', 'battery', 'filter']
@@ -1991,9 +1998,10 @@ export class GameScene extends Phaser.Scene {
     // The speed is ramped rather than switched, so a tap of the key moves a
     // shorter distance than it used to and the run feels like it has weight.
     // OVERHAUL: an empty energy tank slows the walk (0.75x), so "how far can I
-    // get" is budgeted by food and rest. The factor applies to the ramped
-    // speed, not to dx, so the anim's speedFraction follows the slower walk.
-    this.speedX = stepHorizontalSpeed(this.speedX, dir, delta) * moveSpeedFactor(state.player);
+    // get" is budgeted by food and rest. Wave B3's swift-feet relic then makes
+    // the corridors 15% shorter. The factors apply to the ramped speed, not to
+    // dx, so the anim's speedFraction follows the real walk.
+    this.speedX = stepHorizontalSpeed(this.speedX, dir, delta) * moveSpeedFactor(state.player) * moveSpeedMult(state.relics ?? []);
     const dx = this.speedX * (delta / 1000);
     if (dx !== 0) movePlayerX(state, dx);
     this.player.x = state.player.x;

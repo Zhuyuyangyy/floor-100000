@@ -77,9 +77,12 @@ describe('advanceTime decay (standing still)', () => {
   it('decays by the configured per-game-hour rates', () => {
     const s = createNewGame(1);
     tick(s, 20_000); // 60 game-minutes = 1 game-hour
-    expect(s.player.thirst).toBeCloseTo(80 - GAME_CONFIG.player.thirstLossPerGameHour, 1);
-    expect(s.player.hunger).toBeCloseTo(80 - GAME_CONFIG.player.hungerLossPerGameHour, 1);
-    expect(s.player.energy).toBeCloseTo(80 - GAME_CONFIG.player.energyLossPerGameHour, 1);
+    // Read the starts from the balance file rather than copying 80: a tuning
+    // pass that moves a start must not turn this red for the wrong reason.
+    const p = GAME_CONFIG.player;
+    expect(s.player.thirst).toBeCloseTo(p.thirstStart - p.thirstLossPerGameHour, 1);
+    expect(s.player.hunger).toBeCloseTo(p.hungerStart - p.hungerLossPerGameHour, 1);
+    expect(s.player.energy).toBeCloseTo(p.energyStart - p.energyLossPerGameHour, 1);
   });
 
   it('clamps a huge delta (backgrounded tab) to one frame budget', () => {
@@ -267,7 +270,10 @@ describe('spendTime (action cost)', () => {
     expect(jumped.dayChanged).toBe(anyFrameRolled);
     expect(a.day).toBe(b.day);
     expect(Math.round(a.gameMinuteOfDay)).toBe(Math.round(b.gameMinuteOfDay));
-    expect(Math.round(a.player.thirst)).toBe(Math.round(b.player.thirst));
+    // Tolerance, not rounded equality: the two paths accumulate float dust in
+    // different orders, and a start value that lands the total on a .5 boundary
+    // would otherwise flip this red over a rounding direction, not a bug.
+    expect(Math.abs(a.player.thirst - b.player.thirst)).toBeLessThan(0.5);
   });
 });
 

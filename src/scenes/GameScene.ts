@@ -487,7 +487,7 @@ export class GameScene extends Phaser.Scene {
       .text(
         DESIGN_WIDTH / 2,
         86,
-        `背包已满 · 使用、制作或交易腾出格子，否则搜刮会留在原处`,
+        `背包已满 · 使用、制作或交易腾出格子，否则搜刮会留在原处；能叠进已有堆的物品仍可拾取`,
         { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#e8907c', backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } },
       )
       .setOrigin(0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
@@ -1188,8 +1188,16 @@ export class GameScene extends Phaser.Scene {
     this.refreshInventory();
 
     if (result.took.length === 0 && !result.full) this.flash(`${label} 是空的`);
-    else if (result.full) this.flash('背包已满，剩余留在容器');
-    else {
+    else if (result.full) {
+      // B3-16: the bag takes mergeable stacks and refuses new ones, and nothing
+      // on screen said so — the playtest found players discovering the rule by
+      // being refused three times. Name which half happened.
+      this.flash(
+        result.took.length > 0
+          ? '叠放进的已入包；新物品放不下（背包已满），剩余留在容器'
+          : '背包已满：新物品放不下，能叠进已有堆的才能进包',
+      );
+    } else {
       playSfx('pickup');
       this.flash(`获得 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${ACTION_COSTS.searchContainer} 分钟）`);
       this.chargeTime(ACTION_COSTS.searchContainer);
@@ -1211,7 +1219,7 @@ export class GameScene extends Phaser.Scene {
         this.flash(`拾取 ${getItem(r.took.itemId).displayName}×${r.took.quantity}（-${ACTION_COSTS.pickupGround} 分钟）`);
         this.chargeTime(ACTION_COSTS.pickupGround);
       } else if (r.full) {
-        this.flash('背包已满');
+        this.flash('背包已满：新物品放不下，能叠进的堆才能拾取');
       }
     }
   }

@@ -56,6 +56,7 @@ import { resolveRound, playerCombatant, GUARD_ENERGY_RESTORE, type Combatant } f
 import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster } from '../systems/monsters';
 import { guardianDamageMult, lootBonus, moveSpeedMult } from '../systems/relics';
 import { modeGuardianDamageMult } from '../systems/modes';
+import { buy, sell, shopStock, traderX, type ShopEntry } from '../systems/shop';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
@@ -211,6 +212,9 @@ export class GameScene extends Phaser.Scene {
   private combatSelected = 0;
   // True while the outcome screen is up (the fight is decided, one Enter left).
   private combatDone = false;
+  // OVERHAUL Wave C1: the shop panel's cursor.
+  private shopSelected = 0;
+  private shopEntries: ShopEntry[] = [];
   private feedbackTimer?: Phaser.Time.TimerEvent;
   private lastClock = '';
   private lastStats = '';
@@ -232,6 +236,7 @@ export class GameScene extends Phaser.Scene {
   private upgradeBoard!: Phaser.GameObjects.Text;
   private keyC!: Phaser.Input.Keyboard.Key;
   private keyM!: Phaser.Input.Keyboard.Key;
+  private keyS!: Phaser.Input.Keyboard.Key;
 
   private dialogueOpen = false;
   private dialogue: { npc: NpcId; level: 'main' | 'trade'; selected: number; message: string; lineToggle: number } | null = null;
@@ -444,7 +449,12 @@ export class GameScene extends Phaser.Scene {
     // trade and the journey specs), so each spot is nudged clear first.
     const taken: number[] = [UP_EXIT_X, DOWN_EXIT_X, ...this.floorView.containers.map((c) => c.x)];
     if (state.currentFloor === NPC_FLOOR) taken.push(...NPCS.map((n) => n.x));
-    for (const spot of encounterSpots(state.runSeed, state.currentFloor)) {
+    // OVERHAUL Wave C1: the trader joins the taken list so nothing lands on
+    // top of him, and he is drawn after the spots so he reads above them.
+    const floor = state.currentFloor;
+    const shopX = floor >= 2 ? nudgeSpotX(traderX(state.runSeed, floor), taken, INTERACT_DISTANCE + 8) : null;
+    if (shopX !== null) taken.push(shopX);
+    for (const spot of encounterSpots(state.runSeed, floor)) {
       if (shouldSkip(state, spot.id)) continue;
       const x = nudgeSpotX(spot.x, taken, INTERACT_DISTANCE + 8);
       const color = spot.isBoss ? 0xe56d63 : 0xf4b66a;
@@ -454,6 +464,17 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0.5)
         .setDepth(7);
       this.spotMarkers.set(spot.id, { x, isBoss: spot.isBoss, dot, label });
+    }
+    if (shopX !== null) {
+      // The trader: a pack and a price tag, drawn as the walk sheet's own
+      // silhouette so he belongs to the same world.
+      const trader = this.add.sprite(shopX, PLAYER_FEET_Y, walkSheetKey('npc_alin')).setOrigin(0.5, 1).setDepth(5);
+      trader.play(idleAnimKey('npc_alin'));
+      const tag = this.add
+        .text(shopX, PLAYER_FEET_Y - 108, '行商', { fontFamily: 'monospace', fontSize: '11px', color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 4, y: 2 } })
+        .setOrigin(0.5)
+        .setDepth(6);
+      this.spotMarkers.set('shop', { x: shopX, isBoss: false, dot: trader as unknown as Phaser.GameObjects.Arc, label: tag });
     }
   }
 
@@ -486,6 +507,88 @@ export class GameScene extends Phaser.Scene {
       case 'note':
         return ['read'];
     }
+  }
+
+  // ── the trader (OVERHAUL Wave C1) ────────────────────────────────────────
+  // One panel, two directions: ↑/↓ moves along the stock, Enter buys one, and
+  // S sells one of the highlighted item. Gold is the run's second currency and
+  // the shortcut's price (Wave C2).
+
+  private openShop(): void {
+    const state = getGame();
+    this.shopEntries = [...shopStock(state.currentFloor)];
+    this.shopSelected = 0;
+    this.encounterOpen = true;
+    playSfx('click');
+    this.buildShopPanel();
+  }
+
+  private closeShop(): void {
+    this.encounterOpen = false;
+    for (const o of this.encounterObjects) o.destroy();
+    this.encounterObjects = [];
+    this.buildEncounterSpots();
+  }
+
+  private buildShopPanel(): void {
+    for (const o of this.encounterObjects) o.destroy();
+    this.encounterObjects = [];
+    const state = getGame();
+    const { width, height } = this.cameras.main;
+    const cx = width / 2;
+    const cy = height / 2;
+    const panelW = 400;
+    const panelH = 250;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+
+    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', PANEL_DEPTH.game.dialogue));
+    this.encounterObjects.push(
+      this.add.text(cx, top + 18, '行商', { fontFamily: 'monospace', fontSize: '16px', color: '#a8e0c8' }).setOrigin(0.5),
+    );
+    this.encounterObjects.push(
+      this.add.text(cx, top + 38, `金币：${state.player.gold}`, { fontFamily: 'monospace', fontSize: '12px', color: '#f4b66a' }).setOrigin(0.5),
+    );
+    this.shopEntries.forEach((e, i) => {
+      const cursor = i === this.shopSelected ? '>' : ' ';
+      const owned = countItem(state.player.inventory, e.itemId);
+      this.encounterObjects.push(
+        this.add
+          .text(left + 24, top + 62 + i * 24, `${cursor} ${getItem(e.itemId).displayName} —— ${e.price} 金（持有 ${owned}）`, {
+            fontFamily: 'monospace',
+            fontSize: '13px',
+            color: i === this.shopSelected ? '#f4b66a' : '#ece8d8',
+          })
+          .setOrigin(0, 0),
+      );
+    });
+    this.encounterObjects.push(
+      this.add.text(cx, top + panelH - 30, 'Enter 买入 1 件 · S 卖出 1 件 · ESC 离开', { fontFamily: 'monospace', fontSize: '11px', color: '#8a867c' }).setOrigin(0.5),
+    );
+  }
+
+  private shopBuy(): void {
+    const state = getGame();
+    const entry = this.shopEntries[this.shopSelected];
+    if (!entry) return;
+    const r = buy(state, entry.itemId, state.currentFloor);
+    playSfx(r.ok ? 'chest' : 'pickup');
+    this.flash(r.ok ? r.message : r.reason);
+    this.refreshInventory();
+    this.refreshStats();
+    this.buildShopPanel();
+  }
+
+  private shopSell(): void {
+    const state = getGame();
+    const entry = this.shopEntries[this.shopSelected];
+    if (!entry) return;
+    const r = sell(state, entry.itemId, state.currentFloor);
+    playSfx(r.ok ? 'chest' : 'pickup');
+    this.flash(r.ok ? r.message : r.reason);
+    this.refreshInventory();
+    this.refreshStats();
+    this.buildShopPanel();
   }
 
   private openEncounter(spotId: string): void {
@@ -1115,7 +1218,7 @@ export class GameScene extends Phaser.Scene {
       this.goalText.setText(`今日目标：${label}${done ? ' ✓' : ''}`);
       this.goalText.setColor(done ? '#a8e0c8' : '#f4b66a');
     }
-    this.scoreText.setText(`${runScore(state)} 分 · 最深 ${depthRecord(state)} 层`);
+    this.scoreText.setText(`${runScore(state)} 分 · 最深 ${depthRecord(state)} 层 · ${state.player.gold} 金`);
   }
 
   private refreshClock(): void {
@@ -1633,6 +1736,7 @@ export class GameScene extends Phaser.Scene {
     this.keyEnter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
     this.keyC = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
     this.keyM = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
+    this.keyS = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
 
     this.keyE.on('down', () => this.guard('e', this.onInteract), this);
     this.keyEsc.on('down', () => this.guard('esc', this.onEsc), this);
@@ -1640,6 +1744,10 @@ export class GameScene extends Phaser.Scene {
     this.keyEnter.on('down', () => this.guard('enter', this.onUse), this);
     this.keyC.on('down', () => this.guard('c', this.onToggleCrafting), this);
     this.keyM.on('down', () => this.guard('m', this.onToggleMap), this);
+    // OVERHAUL Wave C1: S sells inside the shop; nowhere else does anything.
+    this.keyS.on('down', () => {
+      if (this.encounterOpen && !getGame().combat && !this.encounter) this.shopSell();
+    }, this);
     this.cursors.up.on('down', () => this.guard('up', this.onNavUp), this);
     this.cursors.down.on('down', () => this.guard('down', this.onNavDown), this);
   }
@@ -1666,6 +1774,7 @@ export class GameScene extends Phaser.Scene {
     this.keyEnter?.removeAllListeners();
     this.keyC?.removeAllListeners();
     this.keyM?.removeAllListeners();
+    this.keyS?.removeAllListeners();
     this.cursors?.up.removeAllListeners();
     this.cursors?.down.removeAllListeners();
   }
@@ -1688,6 +1797,11 @@ export class GameScene extends Phaser.Scene {
       this.activateCombatChoice();
       return;
     }
+    // OVERHAUL Wave C1: the shop is open (no combat, no encounter object).
+    if (this.encounterOpen && !getGame().combat && !this.encounter) {
+      this.closeShop();
+      return;
+    }
     if (this.encounterOpen) {
       // Leaving an unresolved encounter is the walk-away: no cost, no
       // consumption. A resolved one just closes the outcome panel.
@@ -1701,6 +1815,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onNavUp(): void {
+    // OVERHAUL Wave C1: the shop's cursor.
+    if (this.encounterOpen && !getGame().combat && !this.encounter) {
+      this.shopSelected = Math.max(0, this.shopSelected - 1);
+      this.buildShopPanel();
+      return;
+    }
     if (this.encounterOpen && getGame().combat && !this.combatDone) {
       this.combatSelected = Math.max(0, this.combatSelected - 1);
       this.buildCombatPanel();
@@ -1723,6 +1843,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onNavDown(): void {
+    // OVERHAUL Wave C1: the shop's cursor.
+    if (this.encounterOpen && !getGame().combat && !this.encounter) {
+      this.shopSelected = Math.min(this.shopEntries.length - 1, this.shopSelected + 1);
+      this.buildShopPanel();
+      return;
+    }
     if (this.encounterOpen && getGame().combat && !this.combatDone) {
       this.combatSelected = Math.min(2, this.combatSelected + 1);
       this.buildCombatPanel();
@@ -1753,6 +1879,11 @@ export class GameScene extends Phaser.Scene {
     if (this.encounterOpen && getGame().combat) {
       if (this.combatDone) this.closeCombat();
       else this.activateCombatChoice();
+      return;
+    }
+    // OVERHAUL Wave C1: Enter in the shop buys one of the highlighted item.
+    if (this.encounterOpen && !this.encounter) {
+      this.shopBuy();
       return;
     }
     if (this.encounterOpen) {
@@ -1794,8 +1925,12 @@ export class GameScene extends Phaser.Scene {
     const state = getGame();
     // OVERHAUL: a "?" in reach is the first thing E reaches for — the floor's
     // rumour beats its containers for attention, the way ALTACIMA's question
-    // marks pull the player across a room.
+    // marks pull the player across a room. The trader's spot id is 'shop'.
     const spot = this.nearestEncounterSpot();
+    if (spot === 'shop') {
+      this.openShop();
+      return;
+    }
     if (spot) {
       this.openEncounter(spot);
       return;

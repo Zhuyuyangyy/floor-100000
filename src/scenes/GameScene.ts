@@ -9,6 +9,7 @@ import {
   FLOOR_HEIGHT,
   FLOOR_WIDTH,
   INTERACT_DISTANCE,
+  PLAYABLE_FLOORS_V01,
   PLAYER_FEET_Y,
   PLAYER_SPEED,
   ROOM_COUNT,
@@ -57,6 +58,7 @@ import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster } from '../syst
 import { guardianDamageMult, lootBonus, moveSpeedMult } from '../systems/relics';
 import { modeGuardianDamageMult } from '../systems/modes';
 import { buy, sell, shopStock, traderX, type ShopEntry } from '../systems/shop';
+import { charge, recordShortcut, shortcutAvailable, shortcutPrice, shortcutSkip, timesTaken } from '../systems/shortcut';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
@@ -124,7 +126,7 @@ const CHOICE_LABELS: Record<EncounterChoice, string> = {
   leave: '离开',
   read: '读纸条',
 };
-type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 'up' | 'down';
+type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 's' | 'f' | 'up' | 'down';
 type DirKeys = {
   up: Phaser.Input.Keyboard.Key;
   down: Phaser.Input.Keyboard.Key;
@@ -237,6 +239,7 @@ export class GameScene extends Phaser.Scene {
   private keyC!: Phaser.Input.Keyboard.Key;
   private keyM!: Phaser.Input.Keyboard.Key;
   private keyS!: Phaser.Input.Keyboard.Key;
+  private keyF!: Phaser.Input.Keyboard.Key;
 
   private dialogueOpen = false;
   private dialogue: { npc: NpcId; level: 'main' | 'trade'; selected: number; message: string; lineToggle: number } | null = null;
@@ -263,7 +266,7 @@ export class GameScene extends Phaser.Scene {
   // drain, so every menu action has to be accepted at most once per frame —
   // otherwise one ArrowDown moves the pause selection two entries and the
   // player lands on 重新开始 when they asked for 塔楼地图.
-  private lastInputFrame: Record<GameKey, number> = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, up: -1, down: -1 };
+  private lastInputFrame: Record<GameKey, number> = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, up: -1, down: -1 };
 
   constructor() {
     super({ key: 'Game' });
@@ -277,7 +280,7 @@ export class GameScene extends Phaser.Scene {
     this.lastActiveEvent = null;
     // The frame counter is monotonic across the session, so a stale slot would
     // never match anyway — reset to keep the per-create state honest.
-    this.lastInputFrame = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, up: -1, down: -1 };
+    this.lastInputFrame = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, up: -1, down: -1 };
     // Field initialisers do not re-run, so the HUD's cached visibility has to be
     // re-derived against the fresh bag of a restarted run.
     this.bagFullShown = false;
@@ -1737,6 +1740,7 @@ export class GameScene extends Phaser.Scene {
     this.keyC = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
     this.keyM = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
     this.keyS = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+    this.keyF = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
 
     this.keyE.on('down', () => this.guard('e', this.onInteract), this);
     this.keyEsc.on('down', () => this.guard('esc', this.onEsc), this);
@@ -1748,6 +1752,8 @@ export class GameScene extends Phaser.Scene {
     this.keyS.on('down', () => {
       if (this.encounterOpen && !getGame().combat && !this.encounter) this.shopSell();
     }, this);
+    // OVERHAUL Wave C2: F buys the paid shortcut at the up stairwell.
+    this.keyF.on('down', () => this.guard('f', this.tryShortcut), this);
     this.cursors.up.on('down', () => this.guard('up', this.onNavUp), this);
     this.cursors.down.on('down', () => this.guard('down', this.onNavDown), this);
   }
@@ -1775,6 +1781,7 @@ export class GameScene extends Phaser.Scene {
     this.keyC?.removeAllListeners();
     this.keyM?.removeAllListeners();
     this.keyS?.removeAllListeners();
+    this.keyF?.removeAllListeners();
     this.cursors?.up.removeAllListeners();
     this.cursors?.down.removeAllListeners();
   }
@@ -1952,6 +1959,47 @@ export class GameScene extends Phaser.Scene {
     const zone = currentInteractionZone(state);
     if (zone === 'up') this.changeFloor(1);
     else if (zone === 'down') this.changeFloor(-1);
+  }
+
+  // ── the paid shortcut (OVERHAUL Wave C2) ─────────────────────────────────
+  // F at the up stairwell buys a 2-4 floor skip. Centum's formula: the price
+  // climbs with every use, so skipping is a budget decision, not free
+  // fast-travel. The charge happens before the jump, so a broke player never
+  // moves.
+  private tryShortcut(): void {
+    const state = getGame();
+    if (state.status !== 'playing') return;
+    const top = Math.max(...PLAYABLE_FLOORS_V01);
+    if (!shortcutAvailable(state.currentFloor, top)) {
+      this.flash('这里没有可抄的近路');
+      return;
+    }
+    const zone = currentInteractionZone(state);
+    if (zone !== 'up') {
+      this.flash('要走上楼口才能抄近路');
+      return;
+    }
+    const salt = (state.runSeed ^ (state.day * 7919) ^ (state.currentFloor * 104729)) >>> 0;
+    const skip = Math.min(shortcutSkip(salt), top - state.currentFloor);
+    const price = shortcutPrice(state.currentFloor, skip, timesTaken(state), salt);
+    if (!charge(state, price)) {
+      this.flash(`抄近路要 ${price} 金，你只有 ${state.player.gold}`);
+      return;
+    }
+    recordShortcut(state);
+    // Apply the jump through the same path a stair uses, then walk the rest.
+    const target = Math.min(top, state.currentFloor + skip);
+    while (state.currentFloor < target) {
+      const r = tryChangeFloor(state, 1);
+      if (!r.ok) break;
+    }
+    recordDepth(state);
+    this.clearFloor();
+    this.drawFloor();
+    saveToStorage(state);
+    this.cameras.main.flash(180, 0, 0, 0);
+    this.flash(`你抄近路跳到了第 ${state.currentFloor} 层（-${price} 金）`);
+    playSfx('goal');
   }
 
   private nearBed(state: GameState): boolean {
@@ -2240,6 +2288,13 @@ export class GameScene extends Phaser.Scene {
     const zone = currentInteractionZone(state);
     if (this.nearestEncounterSpot()) this.hintText.setText('按 E 查看问号点');
     else if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
+    // OVERHAUL Wave C2: the up stairwell advertises the paid shortcut, priced
+    // live so the player can decide before spending.
+    else if (zone === 'up' && shortcutAvailable(state.currentFloor, Math.max(...PLAYABLE_FLOORS_V01))) {
+      const salt = (state.runSeed ^ (state.day * 7919) ^ (state.currentFloor * 104729)) >>> 0;
+      const price = shortcutPrice(state.currentFloor, shortcutSkip(salt), timesTaken(state), salt);
+      this.hintText.setText(`按 E 上楼 · F 抄近路（${price} 金）`);
+    }
     else if (zone === 'up') this.hintText.setText('按 E 上楼');
     else if (zone === 'down') this.hintText.setText('按 E 下楼');
     else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互 · I 背包 · ESC 菜单');

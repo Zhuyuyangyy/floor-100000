@@ -159,6 +159,9 @@ export interface GameState {
   // meta at run start. Optional so pre-B saves stay loadable.
   mode?: 'quick' | 'adventure' | 'easy';
   relics?: string[];
+  // OVERHAUL Wave C2: how many paid shortcuts this run has taken — the price
+  // inflation counter.
+  shortcuts?: number;
   status: GameStatus;
 }
 

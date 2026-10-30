@@ -87,6 +87,16 @@ const COLOR_CURRENT = PALETTE.lightHigh;
 const COLOR_EXPLORED = PALETTE.clothHigh;
 const COLOR_CURSOR = 0xece8d8; // the text cream; the palette's ink-friendly neutral
 const COLOR_BG = PALETTE.ink;
+
+/** Blend two 24-bit colours; local so this module keeps no Phaser runtime use. */
+function mixColour(a: number, b: number, t: number): number {
+  const lerp = (ca: number, cb: number): number => Math.round(ca + (cb - ca) * t);
+  return (
+    (lerp((a >> 16) & 0xff, (b >> 16) & 0xff) << 16) |
+    (lerp((a >> 8) & 0xff, (b >> 8) & 0xff) << 8) |
+    lerp(a & 0xff, b & 0xff)
+  );
+}
 // The two ends of the climb. Both are deliberately unlike COLOR_CURRENT: the
 // player has to be able to tell "where I am" from "where I started" and "where
 // I am going" at a glance.
@@ -167,6 +177,21 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.nav = openTower(this.access);
 
     this.cameras.main.setBackgroundColor(COLOR_BG);
+    // OVERHAUL UI: the map's backdrop used to be one flat ink fill, which the QA
+    // sweep measured at 52% of the frame in a single colour - the flattest screen
+    // in the game. A vertical gradient from the tower's base tone up to the
+    // summit tone gives the empty space a direction: you are looking up.
+    const { width, height } = this.cameras.main;
+    const sky = this.add.graphics().setDepth(-10);
+    const steps = 10;
+    for (let i = 0; i < steps; i++) {
+      const k = i / (steps - 1);
+      // Bottom (base of the tower) is warmer and darker; top is cold distance.
+      const color = mixColour(PALETTE.lightDeep, PALETTE.stone, k * 0.55);
+      sky.fillStyle(color, 1);
+      sky.fillRect(0, (height / steps) * i, width, height / steps + 1);
+    }
+    sky.setAlpha(0.5);
     this.cameras.main.setScroll(0, 0);
     this.cameras.main.setZoom(this.nav.zoom);
 
@@ -346,6 +371,11 @@ export class TowerOverviewScene extends Phaser.Scene {
       // 2px of fill with a 1px gap keeps 100 rows countable as a striped tower
       // instead of one solid block where adjacent sectors share a tier.
       g.fillRect(STRIP_X, y, STRIP_W, OVERVIEW_ROW_H - 1);
+      // A lit top edge on every row: at 3px a row there is no room for shading,
+      // but one lighter pixel on top turns a flat stripe into a ledge, and it is
+      // what stops the overview reading as a bar chart.
+      g.fillStyle(PALETTE.dust, 0.3);
+      g.fillRect(STRIP_X, y, STRIP_W, 1);
       if (visited) {
         // A full-height explored stripe along the left edge of the strip: at 3px
         // per sector anything narrower is invisible.
@@ -445,6 +475,26 @@ export class TowerOverviewScene extends Phaser.Scene {
         g.fillStyle(COLOR_LOCKED, 1);
       }
       g.fillRect(x, y, SECTOR_CELL - 1, SECTOR_CELL - 1);
+      // A bevel per cell, and a brightness ramp with height.
+      //
+      // The grid used to be 1000 flat fills, which measured as 52% one colour
+      // and 131 distinct colours in the whole frame - the flattest screen in the
+      // game. A 1px light edge on top and a dark one underneath turns each cell
+      // into a block you can see the shape of, and brightening toward the top of
+      // the sector reinforces that the tower climbs.
+      if (floor <= highest) {
+        const climb = (floor - from) / Math.max(1, to - from);
+        g.fillStyle(PALETTE.dust, 0.12 + climb * 0.22);
+        g.fillRect(x, y, SECTOR_CELL - 1, 1);
+        g.fillStyle(PALETTE.ink, 0.35);
+        g.fillRect(x, y + SECTOR_CELL - 2, SECTOR_CELL - 1, 1);
+        g.fillStyle(PALETTE.ink, 0.22);
+        g.fillRect(x + SECTOR_CELL - 2, y, 1, SECTOR_CELL - 1);
+      } else {
+        g.fillStyle(PALETTE.ink, 0.5);
+        g.fillRect(x, y, SECTOR_CELL - 1, 1);
+        g.fillRect(x, y, 1, SECTOR_CELL - 1);
+      }
     }
 
     // Current floor marker: filled, so it reads at a glance rather than only as

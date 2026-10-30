@@ -33,6 +33,7 @@ import { describeFloorContents } from '../systems/LootSystem';
 import { saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, PANEL_DEPTH, type PanelObject } from '../render/panels';
+import { PALETTE } from '../render/palette.ts';
 import type { GameState } from '../core/gameTypes';
 
 // TowerOverviewScene — the three-level map (docs/B2_TOWER_ARCHITECTURE.md):
@@ -62,28 +63,35 @@ const GRID_X = (DESIGN_WIDTH - SECTOR_COLS * SECTOR_CELL) / 2;
 // One colour per tier, brightening as the tower climbs: the gradient is the
 // whole point of the class society (design freeze §3).
 const TIER_COLOR: Record<TierId, number> = {
-  1: 0x4a3f36,
-  2: 0x44503c,
-  3: 0x35505f,
-  4: 0x424a6b,
-  5: 0x5a4a7d,
-  6: 0x7d4f86,
+  // One step per sector, climbing from stone through teal and into the light
+  // family: the map's own colour journey mirrors the run's.
+  1: PALETTE.stone,
+  2: PALETTE.stoneLight,
+  3: PALETTE.cloth,
+  4: PALETTE.clothLight,
+  5: PALETTE.lightDeep,
+  6: PALETTE.light,
 };
 
 // Sector-cell states. Locked is deliberately much darker than unlocked so the
 // frontier is readable at a glance — 1000 near-identical cells tell the player
 // nothing.
-const COLOR_LOCKED = 0x1b2128;
-const COLOR_UNLOCKED = 0x2f6b57;
-const COLOR_CURRENT = 0xf4b66a;
-const COLOR_EXPLORED = 0x63c9a4;
-const COLOR_CURSOR = 0xece8d8;
-const COLOR_BG = 0x0b0f12;
+// The map's colours, on the project palette.
+//
+// This screen had its own six hexes plus a per-sector table of six more, which
+// made it the last place where the UI could be a value off from the game it
+// describes. The roles are unchanged; only their sources are.
+const COLOR_LOCKED = PALETTE.shadow;
+const COLOR_UNLOCKED = PALETTE.cloth;
+const COLOR_CURRENT = PALETTE.lightHigh;
+const COLOR_EXPLORED = PALETTE.clothHigh;
+const COLOR_CURSOR = 0xece8d8; // the text cream; the palette's ink-friendly neutral
+const COLOR_BG = PALETTE.ink;
 // The two ends of the climb. Both are deliberately unlike COLOR_CURRENT: the
 // player has to be able to tell "where I am" from "where I started" and "where
 // I am going" at a glance.
-const COLOR_START = 0x77c6a4;
-const COLOR_SUMMIT = 0xd8a8e8;
+const COLOR_START = PALETTE.clothHigh;
+const COLOR_SUMMIT = PALETTE.dust;
 
 const LEGEND = [
   { color: COLOR_CURRENT, label: '当前' },
@@ -350,7 +358,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     const cy = this.rowY(currentSector);
     this.currentGfx.fillStyle(COLOR_CURRENT, 1);
     this.currentGfx.fillRect(STRIP_X, cy, STRIP_W, OVERVIEW_ROW_H);
-    this.currentGfx.lineStyle(1, 0x0b0f12, 1);
+    this.currentGfx.lineStyle(1, PALETTE.ink, 1);
     this.currentGfx.strokeRect(STRIP_X - 0.5, cy - 0.5, STRIP_W + 1, OVERVIEW_ROW_H + 1);
 
     // Keyboard cursor.
@@ -394,7 +402,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     // as a class hierarchy rather than decoration.
     for (const tier of TIERS) {
       const y = this.rowY(Math.floor((tier.minFloor - 1) / SECTOR_SIZE));
-      g.lineStyle(1, 0x9aa6b4, 0.9);
+      g.lineStyle(1, PALETTE.dust, 0.9);
       g.lineBetween(STRIP_X - 12, y, STRIP_X + STRIP_W + 12, y);
     }
   }
@@ -447,7 +455,7 @@ export class TowerOverviewScene extends Phaser.Scene {
       const cy2 = cellY(this.state.currentFloor);
       this.currentGfx.fillStyle(COLOR_CURRENT, 1);
       this.currentGfx.fillRect(cx, cy2, SECTOR_CELL - 1, SECTOR_CELL - 1);
-      this.currentGfx.lineStyle(1, 0x0b0f12, 1);
+      this.currentGfx.lineStyle(1, PALETTE.ink, 1);
       this.currentGfx.strokeRect(cx - 0.5, cy2 - 0.5, SECTOR_CELL, SECTOR_CELL);
     }
 

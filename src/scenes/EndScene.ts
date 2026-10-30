@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { PALETTE } from '../render/palette.ts';
 import { getGame, startNewGame } from '../core/session';
 import { deathCause } from '../systems/SurvivalSystem';
 import { clearSave } from '../systems/SaveSystem';
@@ -32,7 +33,11 @@ export class EndScene extends Phaser.Scene {
     const won = state.status === 'won';
     const { width, height } = this.cameras.main;
 
-    this.add.rectangle(width / 2, height / 2, width, height, won ? 0x14301f : 0x2a1414);
+    // The result screen's wash: a deep green for a run that reached the top, a deep
+    // red for one that did not. Both are the palette's cloth ramps pushed to their
+    // darkest step, so the end card belongs to the same world as the run.
+    this.add.rectangle(width / 2, height / 2, width, height, won ? PALETTE.cloth : PALETTE.lightDeep).setAlpha(0.22);
+    this.add.rectangle(width / 2, height / 2, width, height, PALETTE.ink).setAlpha(0.55);
 
     this.add
       .image(width / 2, 140, won ? ART_BANNER_WIN_KEY : ART_BANNER_LOSE_KEY)

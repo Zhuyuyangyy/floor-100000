@@ -4,8 +4,6 @@ import {
   FLOOR_WIDTH,
   INTERACT_DISTANCE,
   PLAYER_ACCELERATION,
-  PLAYER_BOB_AMPLITUDE,
-  PLAYER_BOB_STRIDE_PX,
   PLAYER_DECELERATION,
   PLAYER_SPEED,
   UP_EXIT_X,
@@ -86,25 +84,6 @@ export function stepHorizontalSpeed(current: number, dir: number, deltaMs: numbe
   return dir > 0 ? Math.min(PLAYER_SPEED, next) : Math.max(-PLAYER_SPEED, next);
 }
 
-// One walk cycle's phase in radians. It advances with the distance travelled
-// rather than with wall-clock time, so the bob stays locked to the ground while
-// the player accelerates instead of sliding out of step with their own feet.
-export function advanceBobPhase(phase: number, speed: number, deltaMs: number): number {
-  if (deltaMs <= 0) return phase;
-  const distance = Math.abs(speed) * (deltaMs / 1000);
-  const cycles = distance / PLAYER_BOB_STRIDE_PX;
-  return (phase + cycles * Math.PI * 2) % (Math.PI * 2);
-}
-
-// Vertical lift in px, positive = up. Scaled by speed so a player easing off the
-// accelerator settles back onto the floor line rather than freezing in mid-air.
-export function bobOffsetPx(phase: number, speed: number): number {
-  const scale = (Math.abs(speed) / PLAYER_SPEED) * PLAYER_BOB_AMPLITUDE;
-  // Short-circuited rather than left to the multiply: Math.sin(3π/2) * 0 is -0,
-  // and the contract is that a standing player's feet are on the floor line.
-  if (scale === 0) return 0;
-  return Math.sin(phase) * scale;
-}
 
 export type InteractionZone = 'up' | 'down' | null;
 

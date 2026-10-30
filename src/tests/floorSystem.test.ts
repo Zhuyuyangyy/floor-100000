@@ -5,14 +5,11 @@ import {
   ENTRY_X,
   FLOOR_WIDTH,
   PLAYER_ACCELERATION,
-  PLAYER_BOB_AMPLITUDE,
   PLAYER_DECELERATION,
   PLAYER_SPEED,
   UP_EXIT_X,
 } from '../core/constants';
 import {
-  advanceBobPhase,
-  bobOffsetPx,
   currentInteractionZone,
   hasDownExit,
   hasUpExit,
@@ -168,66 +165,6 @@ describe('stepHorizontalSpeed', () => {
   });
 });
 
-describe('advanceBobPhase', () => {
-  it('does not advance while standing still', () => {
-    expect(advanceBobPhase(1.2, 0, FRAME)).toBe(1.2);
-  });
-
-  it('advances with the distance travelled rather than with wall-clock time', () => {
-    // The same 10px at 20px/s and at 130px/s must produce the same phase, so the
-    // bob stays locked to the ground instead of sliding out of step when the
-    // player accelerates.
-    const slow = advanceBobPhase(0, 20, 500);
-    const fast = advanceBobPhase(0, PLAYER_SPEED, (500 * 20) / PLAYER_SPEED);
-    expect(fast).toBeCloseTo(slow, 10);
-  });
-
-  it('wraps instead of growing without bound', () => {
-    let p = 0;
-    for (let i = 0; i < 100_000; i++) p = advanceBobPhase(p, PLAYER_SPEED, FRAME);
-    expect(p).toBeGreaterThanOrEqual(0);
-    expect(p).toBeLessThan(Math.PI * 2);
-  });
-
-  it('keeps the cadence in walk range rather than tremble range', () => {
-    // Frames for one full bob cycle at top speed. This constant was first tuned
-    // as a frequency and measured 8 frames per cycle, which is a tremble rather
-    // than a step; the floor here catches that and the ceiling catches a bob so
-    // slow the player looks like they are floating.
-    let p = 0;
-    let frames = 0;
-    while (frames < 1000) {
-      const before = p;
-      p = advanceBobPhase(p, PLAYER_SPEED, FRAME);
-      frames++;
-      if (p < before) p += Math.PI * 2; // a wrap is still forward progress
-      if (p >= Math.PI * 2) break;
-    }
-    expect(frames, `one bob cycle every ${frames} frames`).toBeGreaterThanOrEqual(10);
-    expect(frames, `one bob cycle every ${frames} frames`).toBeLessThanOrEqual(25);
-  });
-});
-
-describe('bobOffsetPx', () => {
-  it('keeps the feet on the ground line at rest, whatever the phase', () => {
-    for (let p = 0; p < Math.PI * 2; p += 0.37) expect(bobOffsetPx(p, 0)).toBe(0);
-  });
-
-  it('never lifts further than the amplitude at top speed', () => {
-    for (let p = 0; p < Math.PI * 2; p += 0.05) {
-      expect(Math.abs(bobOffsetPx(p, PLAYER_SPEED))).toBeLessThanOrEqual(PLAYER_BOB_AMPLITUDE);
-    }
-  });
-
-  it('scales the lift with speed, so a slow start does not bounce', () => {
-    expect(Math.abs(bobOffsetPx(Math.PI / 2, PLAYER_SPEED / 2))).toBeCloseTo(PLAYER_BOB_AMPLITUDE / 2, 10);
-  });
-
-  it('lifts at the top of the cycle and sinks at the bottom', () => {
-    expect(bobOffsetPx(Math.PI / 2, PLAYER_SPEED)).toBeCloseTo(PLAYER_BOB_AMPLITUDE, 10);
-    expect(bobOffsetPx((3 * Math.PI) / 2, PLAYER_SPEED)).toBeCloseTo(-PLAYER_BOB_AMPLITUDE, 10);
-  });
-});
 
 // The two rates are load-bearing for the tests above, so pin them: if someone
 // tunes acceleration above deceleration the "brakes quicker" case silently

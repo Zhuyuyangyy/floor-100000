@@ -48,17 +48,6 @@ export const PLAYER_FEET_Y = FLOOR_HEIGHT - 40;
 export const PLAYER_ACCELERATION = 900; // px/s^2, from rest toward top speed
 export const PLAYER_DECELERATION = 1500; // px/s^2, braking or reversing
 
-// A speed-scaled vertical bob. All four characters are drawn facing the camera,
-// so there is no turn to play and no leg frames to cycle — without this the only
-// thing that moves is the x coordinate.
-//
-// Measured as a stride rather than a frequency on purpose. Expressed in Hz the
-// number silently changes meaning whenever PLAYER_SPEED is retuned; 32px of
-// travel per cycle is about four steps a second at top speed, which reads as a
-// walk. The first value tried here was 7.5 cycles/second, and the measured
-// result was a full bob every 8 frames — a tremble, not a step.
-export const PLAYER_BOB_STRIDE_PX = 32; // px travelled per bob cycle
-export const PLAYER_BOB_AMPLITUDE = 2; // px of lift at top speed
 export const ENTRY_X = FLOOR_WIDTH / 2;
 export const INTERACT_DISTANCE = 44;
 export const UP_EXIT_X = 40; // left end -> 上楼 (toward higher floors)

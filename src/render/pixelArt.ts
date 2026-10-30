@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 
+import { bakeWalkSheets } from './walkcycle';
+
 // Procedural pixel-art factory for 《第100000层：末日宿舍》.
 //
 // Every texture in the game is drawn in code with Phaser's Graphics + generateTexture
@@ -111,4 +113,8 @@ export function generateAllPixelArt(scene: Phaser.Scene): void {
 
   bake(scene, 'tile_stairs_up', 16, 16, drawTileStairsUp);
   bake(scene, 'tile_stairs_down', 16, 16, drawTileStairsDown);
+
+  // The side-view walk cycles. These are pixel data rather than Graphics calls,
+  // so they are baked by walkcycle.ts through a CanvasTexture.
+  bakeWalkSheets(scene);
 }

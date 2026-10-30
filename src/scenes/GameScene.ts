@@ -1680,7 +1680,7 @@ export class GameScene extends Phaser.Scene {
     this.nightOverlay.setAlpha(nightOverlayAlpha(getGame()));
     // OVERHAUL Art Pass: the pools breathe, so the light is alive rather than
     // a painted-on decal.
-    this.lightLayer?.update(this.time.now);
+    this.lightLayer?.update(this.time.now, this.game.loop.delta);
   }
 
   private nearCraftStation(state: GameState): boolean {

@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 
+import { PALETTE } from './palette.ts';
+
 // OVERHAUL Art Pass: the lighting layer — the fix for "everything is the same
 // grey-dark".
 //
@@ -111,7 +113,7 @@ export function addGlow(
 }
 
 export interface LightLayer {
-  update(time: number): void;
+  update(time: number, delta?: number): void;
   destroy(): void;
 }
 
@@ -223,9 +225,62 @@ export function buildLightLayer(
   };
   redraw(0);
 
+  // ── dust in the light ────────────────────────────────────────────────────
+  // The world was completely still apart from the glows breathing. Dust motes
+  // drifting through the lit pools is the cheapest way to make a room feel
+  // inhabited: it is motion the eye catches without being told about, and it
+  // reads as "there is air in here" rather than as an effect.
+  //
+  // Each mote belongs to a pool, so it only exists where there is light to catch
+  // it - motes in the dark would be invisible anyway. Deterministic from the
+  // pool position, so a floor's dust is the same every time it is entered.
+  interface Mote {
+    rect: Phaser.GameObjects.Rectangle;
+    baseX: number;
+    baseY: number;
+    speed: number;
+    sway: number;
+    phase: number;
+  }
+  const motes: Mote[] = [];
+  for (let i = 0; i < pools.length; i++) {
+    const pool = pools[i];
+    const count = 7;
+    for (let m = 0; m < count; m++) {
+      const seed = pool.x * 0.37 + m * 17.3;
+      const h = (n: number) => {
+        const v = Math.sin(seed + n) * 10000;
+        return v - Math.floor(v);
+      };
+      const rx = (h(1) - 0.5) * pool.radius * 1.1;
+      const ry = (h(2) - 0.5) * pool.radius * 0.9;
+      const rect = scene.add
+        .rectangle(pool.x + rx, pool.y + ry, h(3) > 0.7 ? 2 : 1, 1, PALETTE.lightHot)
+        .setAlpha(0.35 + h(4) * 0.3)
+        .setDepth(5);
+      motes.push({
+        rect,
+        baseX: pool.x + rx,
+        baseY: pool.y + ry,
+        speed: 3 + h(5) * 6,
+        sway: 2 + h(6) * 5,
+        phase: h(7) * Math.PI * 2,
+      });
+      owned.push(rect);
+    }
+  }
+
   return {
-    update(time) {
+    update(time, delta) {
       redraw(time);
+      // Motes drift upward and wrap inside their pool, so the field never
+      // empties and never escapes into unlit space.
+      const dt = Math.min(delta ?? 16, 50) / 1000;
+      for (const m of motes) {
+        m.rect.y -= m.speed * dt;
+        if (m.rect.y < m.baseY - 18) m.rect.y = m.baseY + 18;
+        m.rect.x = m.baseX + Math.sin(time / 1400 + m.phase) * m.sway;
+      }
     },
     destroy() {
       for (const o of owned) o.destroy();

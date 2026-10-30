@@ -180,3 +180,101 @@ export function buildForeground(scene: Phaser.Scene, opts: ForegroundOpts): Phas
 
   return out;
 }
+
+// ── surface detail ─────────────────────────────────────────────────────────
+// The wall and floor are single wide PNGs, and the measurement said what that
+// costs: the wall's own luminance varies by a standard deviation of 4 across its
+// whole area, and the floor was one flat band. A room whose two largest surfaces
+// are flat has nothing for the eye to rest on, however good the lighting is.
+//
+// This lays procedurally generated detail on top of the art instead of replacing
+// it: water streaks down the wall, darker panel seams, stains along the base,
+// tile lines and puddle highlights on the floor. All of it is seeded, so a floor
+// looks the same every time it is entered.
+
+/** Deterministic 0..1 from an integer-ish seed. */
+function h(n: number): number {
+  const x = Math.sin(n * 91.7 + 7.3) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+export interface SurfaceDetailOpts {
+  width: number;
+  /** wall/floor seam */
+  wallBottom: number;
+  /** canvas height */
+  height: number;
+  seed: number;
+}
+
+export function buildSurfaceDetail(scene: Phaser.Scene, opts: SurfaceDetailOpts): Phaser.GameObjects.GameObject[] {
+  const { width, wallBottom, height, seed } = opts;
+  const out: Phaser.GameObjects.GameObject[] = [];
+  // Depth 1: above the base art and the depth wash, below the props and the
+  // player, so the detail reads as part of the wall rather than as paint on top.
+  const D = 1;
+
+  // Water streaks: thin vertical runs from the top of the wall down, varying
+  // length and alpha. The strongest single cue that a building is abandoned.
+  for (let i = 0; i < 26; i++) {
+    const x = Math.round(h(seed + i * 3.7) * width);
+    const len = 24 + Math.round(h(seed + i * 9.1) * (wallBottom * 0.62));
+    const w = h(seed + i * 5.3) > 0.7 ? 2 : 1;
+    const alpha = 0.05 + h(seed + i * 1.9) * 0.1;
+    out.push(
+      scene.add
+        .rectangle(x, 8, w, len, 0x03060a)
+        .setOrigin(0, 0)
+        .setAlpha(alpha)
+        .setDepth(D),
+    );
+  }
+
+  // Panel seams: the wall is poured concrete in bays, and a few vertical lines
+  // break the surface into readable sections.
+  for (let x = 96; x < width; x += 192) {
+    const jitter = Math.round(h(seed + x) * 6) - 3;
+    out.push(
+      scene.add.rectangle(x + jitter, 8, 1, wallBottom - 10, 0x03060a).setOrigin(0, 0).setAlpha(0.3).setDepth(D),
+    );
+  }
+
+  // Base stains: a darker, irregular band where damp collects along the skirting.
+  let bx = 0;
+  let k = 0;
+  while (bx < width) {
+    const w = 30 + Math.round(h(seed + k * 4.4) * 90);
+    const hh = 6 + Math.round(h(seed + k * 8.2) * 22);
+    out.push(
+      scene.add
+        .rectangle(bx, wallBottom - hh, w, hh, 0x02050a)
+        .setOrigin(0, 0)
+        .setAlpha(0.18 + h(seed + k * 2.6) * 0.2)
+        .setDepth(D),
+    );
+    bx += w + 20 + Math.round(h(seed + k * 6.1) * 60);
+    k++;
+  }
+
+  // Floor: tile lines running away from the wall, plus puddle highlights.
+  const floorH = height - wallBottom;
+  for (let x = 0; x < width; x += 64) {
+    out.push(
+      scene.add.rectangle(x, wallBottom, 1, floorH, 0x02050a).setOrigin(0, 0).setAlpha(0.22).setDepth(D),
+    );
+  }
+  for (let y = wallBottom + 10; y < height; y += 14) {
+    out.push(scene.add.rectangle(0, y, width, 1, 0x02050a).setOrigin(0, 0).setAlpha(0.12).setDepth(D));
+  }
+  // Puddles: wide, very low-alpha ellipses that catch the light. Drawn as
+  // flattened glows so they brighten rather than darken - a puddle reflects.
+  for (let i = 0; i < 7; i++) {
+    const x = 60 + Math.round(h(seed + i * 12.9) * (width - 120));
+    const y = wallBottom + 12 + Math.round(h(seed + i * 7.7) * (floorH - 24));
+    const p = scene.add.rectangle(x, y, 40 + Math.round(h(seed + i * 3.3) * 60), 5, 0x22384a);
+    p.setOrigin(0.5).setAlpha(0.3).setDepth(D + 1);
+    out.push(p);
+  }
+
+  return out;
+}

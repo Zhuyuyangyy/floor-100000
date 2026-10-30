@@ -80,7 +80,7 @@ import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
 import { addGlow, buildLightLayer, type LightLayer } from '../render/lighting';
-import { buildForeground, buildRoomDepth } from '../render/roomDepth';
+import { buildForeground, buildRoomDepth, buildSurfaceDetail } from '../render/roomDepth';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
@@ -1070,6 +1070,9 @@ export class GameScene extends Phaser.Scene {
         height: FLOOR_HEIGHT,
         lightXs: lampXs,
       }),
+      // Water streaks, panel seams, base stains, tile lines and puddles: the
+      // detail that stops the two largest surfaces being flat.
+      ...buildSurfaceDetail(this, { width: FLOOR_WIDTH, wallBottom: wallH, height: FLOOR_HEIGHT, seed: 11 }),
     );
 
     // The foreground layer last: ceiling beam, floor debris, side margins. This
@@ -1130,6 +1133,7 @@ export class GameScene extends Phaser.Scene {
         height: FLOOR_HEIGHT,
         lightXs: [40, 1240],
       }),
+      ...buildSurfaceDetail(this, { width: FLOOR_WIDTH, wallBottom: wallH, height: FLOOR_HEIGHT, seed: floor * 17 }),
     );
 
     // OVERHAUL Art Pass: the lighting layer goes on after the props, so the

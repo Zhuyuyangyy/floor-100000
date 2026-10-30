@@ -101,7 +101,8 @@
 | B3-15 | **停留压力**（借鉴 CENTUM spawn timer，见 [`RE_COMPETITIVE.md`](RE_COMPETITIVE.md)）：楼层停留每 60 游戏分钟 roll 一次，逐级升级到昼夜皆然的巡游体；换层重置、宿舍豁免 | ✅ 见 [`B3-15_DWELL_PRESSURE.md`](B3-15_DWELL_PRESSURE.md) |
 | B3-16 | **第一天压力前移**（产品经理评审 P0）：饥渴起始 80→65，让生存槽第一天就有可见跌幅；满包 flash/常驻警告补上「可合并堆才能进包」规则说明 | ✅ 见 [`B3-16_DAY1_PRESSURE.md`](B3-16_DAY1_PRESSURE.md) |
 | **M1 暴改** | 五 agent 并行（作战书 [`OVERHAUL_M1.md`](OVERHAUL_M1.md)）：问号点遭遇+守门人（抄 ALTACIMA）、巡游体 lunge 状态机+dwell scout（抄 CENTUM）、每日目标+深度计分、低血红晕+精力减速+三音效、attack/hurt/search 新手摆姿态（逆向 CENTUM 精灵表结构） | ✅ 见 [`OVERHAUL_M1_REPORT.md`](OVERHAUL_M1_REPORT.md) |
-| **下一步** | 人工试玩（问号点密度/守门人难度/暴改后第一天张力）→ 通过则 B3 验收 → 再定 B4 | ⬜ |
+| **通宵作战** | 打到竞品品度（作战书 [`OVERNIGHT_PLAN.md`](OVERNIGHT_PLAN.md)）：Wave A 真回合制战斗（15 怪 7 行为）· Wave B 可解锁 4 幸存者 + 三档模式 + 5 遗物 · Wave C 行商经济 + CENTUM 公式付费跳层 · Wave D 对账 | ✅ 见 [`OVERNIGHT_FINAL.md`](OVERNIGHT_FINAL.md) |
+| **下一步** | 人工试玩（问号点/战斗/金币三密度判定）→ 通过则 B3 验收 → 再定 B4 | ⬜ |
 
 ### B3-05 试玩结论（一句话版）
 

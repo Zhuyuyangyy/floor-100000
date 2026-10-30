@@ -81,7 +81,7 @@ for (let f = 0; f < total; f++) {
   writeFileSync(join(outDir, `${key}-f${f}.png`), buf);
 }
 
-// 4x contact sheet, nearest neighbour, checkerboard background for alpha
+// 4x contact sheet, nearest neighbour, real alpha preserved
 const SCALE = 4;
 const cols = total;
 const rows = 1;
@@ -96,18 +96,19 @@ for (let y = 0; y < H; y++) {
     const fy = Math.floor(y / SCALE);
     const s = (fy * FRAME_W + fx) * 4;
     const a = frames[cell][s + 3];
-    if (a === 0) {
-      const dark = (Math.floor(x / SCALE) + Math.floor(y / SCALE)) % 2 === 0;
-      sheet[o] = dark ? 40 : 60;
-      sheet[o + 1] = dark ? 44 : 66;
-      sheet[o + 2] = dark ? 52 : 74;
-      sheet[o + 3] = 255;
-    } else {
-      sheet[o] = frames[cell][s];
-      sheet[o + 1] = frames[cell][s + 1];
-      sheet[o + 2] = frames[cell][s + 2];
-      sheet[o + 3] = 255;
-    }
+    // TRANSPARENT, not a checkerboard.
+    //
+    // This used to paint an opaque checkerboard behind the alpha so the sheet
+    // looked right in an image viewer - which made every exported sheet fully
+    // opaque, and that quietly broke two things: the silhouette audit could not
+    // find the figure (every row measured 64px wide) and the sheet could not be
+    // dropped into the game or into an art tool as a real sprite sheet. A viewer
+    // shows transparency as a checkerboard on its own; baking one in only
+    // destroys the information.
+    sheet[o] = frames[cell][s];
+    sheet[o + 1] = frames[cell][s + 1];
+    sheet[o + 2] = frames[cell][s + 2];
+    sheet[o + 3] = a;
   }
 }
 writeFileSync(join(outDir, `${key}-sheet.png`), rgbaToPng(sheet, W, H));

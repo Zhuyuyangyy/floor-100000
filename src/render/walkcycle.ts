@@ -830,14 +830,40 @@ function drawNeck(cv: PixelCanvas, pose: Pose, col: CharacterColors): void {
 
 function drawPack(cv: PixelCanvas, pose: Pose, col: CharacterColors): void {
   // Behind everything: the pack is what makes the silhouette a survivor.
+  //
+  // It was two flat rectangles - a lid and a body - carrying 15 of the
+  // silhouette's 25px of width, which made the widest part of the figure the
+  // least detailed. It now reads as a canvas pack: a lid that overhangs, a body
+  // with a lit back edge and a shadowed front, a compression strap across the
+  // middle, a buckled flap, and a bedroll lashed to the top.
   const x = Math.round(pose.shoulder.x) - 13;
   const y = Math.round(pose.shoulder.y) - 1;
-  for (let j = 0; j < 19; j++) {
-    const w = j < 2 ? 15 : 13; // a lid, then the body
-    run(cv, x + w / 2, w / 2, y + j, j < 2 ? col.pack : col.packDark);
+  const lit = mixRgb(col.pack, col.clothLight, 0.18);
+  const shade = mixRgb(col.packDark, col.outline, 0.5);
+
+  // Body: base, then a lit column on the outward edge and a shadow on the inner.
+  for (let j = 3; j < 19; j++) {
+    run(cv, x + 6.5, 6.5, y + j, col.packDark);
+    cv.set(x, y + j, lit);
+    cv.set(x + 13, y + j, shade);
   }
-  run(cv, x + 1.5, 1.5, y + 2, col.pack); // strap highlight down the back
-  run(cv, pose.shoulder.x - 3, 2, y - 1, col.packDark); // strap over the shoulder
+  // The lid overhangs the body by a pixel on each side, which is what makes a
+  // pack look packed rather than painted on.
+  for (let j = 0; j < 3; j++) run(cv, x + 7, 7, y + j, col.pack);
+  run(cv, x + 7, 7, y + 3, col.packDark);
+
+  // A compression strap across the middle, and its buckle on the lit edge.
+  run(cv, x + 6.5, 6.5, y + 10, col.outline);
+  run(cv, x + 6.5, 6.5, y + 11, col.outline);
+  cv.set(x + 1, y + 10, col.clothLight);
+  cv.set(x + 1, y + 11, col.clothLight);
+
+  // A bedroll lashed on top: two rounded rolls, one lit, one shaded.
+  run(cv, x + 6, 6, y - 2, col.cloth);
+  run(cv, x + 5, 5, y - 1, col.clothDark);
+  cv.set(x + 11, y - 2, col.clothLight);
+  // The shoulder strap running from the pack top toward the neck.
+  run(cv, pose.shoulder.x - 3, 2, y - 1, col.packDark);
 }
 
 // ── baking and animation ──────────────────────────────────────────────────

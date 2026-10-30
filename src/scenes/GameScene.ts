@@ -220,7 +220,8 @@ export class GameScene extends Phaser.Scene {
   private goldText?: Phaser.GameObjects.Text;
   private goalText?: Phaser.GameObjects.Text;
   private scoreText?: Phaser.GameObjects.Text;
-  private vignette?: Phaser.GameObjects.Rectangle;
+  /** the low-HP edge warning: bands with their own base weights */
+  private vignetteParts: Array<{ rect: Phaser.GameObjects.Rectangle; weight: number }> = [];
   private lastGoalKey = '';
   // OVERHAUL: the floor's "?" spots and the encounter panel they open.
   private spotMarkers = new Map<string, { x: number; isBoss: boolean; dot: Phaser.GameObjects.Arc; label: Phaser.GameObjects.Text }>();
@@ -1433,8 +1434,8 @@ export class GameScene extends Phaser.Scene {
     this.goalText = undefined;
     this.scoreText?.destroy();
     this.scoreText = undefined;
-    this.vignette?.destroy();
-    this.vignette = undefined;
+    for (const p of this.vignetteParts) p.rect.destroy();
+    this.vignetteParts = [];
     this.floorBadge?.destroy();
     this.floorBadge = undefined;
     this.goldText?.destroy();
@@ -1521,9 +1522,36 @@ export class GameScene extends Phaser.Scene {
 
     // The low-HP vignette: pure red wash whose alpha is the pulse function's
     // output. Created invisible; update() drives it every frame.
-    this.vignette = this.add
-      .rectangle(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT, 0xe56d63, 0)
-      .setOrigin(0, 0).setScrollFactor(0).setDepth(90);
+    // THE SAME fillAlpha TRAP AS THE NIGHT OVERLAY: this was created with a
+    // positional fillAlpha of 0 and only ever driven through setAlpha(), so the
+    // red low-HP warning never drew a single frame.
+    //
+    // Fixing it exposed a second problem that had never been visible either: as
+    // one full-screen rectangle the pulse peaks near 0.9, which floods the frame
+    // with red and hides the game at exactly the moment the player needs to see
+    // it. A warning should live at the EDGES. Eight bands (three deep on each
+    // side) carry decreasing alphas so the centre stays clear, which is what a
+    // vignette is for.
+    this.vignetteParts = [];
+    const band = (x: number, y: number, w: number, h: number, weight: number): void => {
+      const r = this.add
+        .rectangle(x, y, w, h)
+        .setFillStyle(0xe56d63, 1)
+        .setAlpha(0)
+        .setOrigin(0, 0)
+        .setScrollFactor(0)
+        .setDepth(90);
+      this.vignetteParts.push({ rect: r, weight });
+    };
+    const T = 26;
+    for (let i = 0; i < 3; i++) {
+      const inset = i * T;
+      const weight = 0.9 - i * 0.26; // deepest band is the strongest
+      band(0, inset, DESIGN_WIDTH, T, weight); // top
+      band(0, DESIGN_HEIGHT - inset - T, DESIGN_WIDTH, T, weight); // bottom
+      band(inset, 0, T, DESIGN_HEIGHT, weight); // left
+      band(DESIGN_WIDTH - inset - T, 0, T, DESIGN_HEIGHT, weight); // right
+    }
     this.lastStats = '';
     this.refreshGoalHud();
   }
@@ -2729,7 +2757,10 @@ export class GameScene extends Phaser.Scene {
       this.flash('今日目标完成！分数 +' + GAME_CONFIG.overhaul.dailyGoalRewardScore + '，获得口粮×1');
     }
     // The low-HP vignette rides the pulse function every frame.
-    this.vignette?.setAlpha(lowHpPulse(state.player.hp, GAME_CONFIG.player.hpMax, this.time.now));
+    // The pulse is a 0..1 heartbeat; each band takes its own share of it so the
+    // deep bands saturate while the centre stays clear.
+    const pulse = lowHpPulse(state.player.hp, GAME_CONFIG.player.hpMax, this.time.now);
+    for (const p of this.vignetteParts) p.rect.setAlpha(pulse * p.weight);
     // Read after ensureNightEvent so an event rolled this very frame counts.
     const event = state.worldEvents.activeEvent;
     this.refreshClock();

@@ -263,6 +263,8 @@ export class GameScene extends Phaser.Scene {
   private dialogueOpen = false;
   private dialogue: { npc: NpcId; level: 'main' | 'trade'; selected: number; message: string; lineToggle: number } | null = null;
   private dialogueObjects: PanelObject[] = [];
+  /** one selection band per dialogue row, toggled in refreshDialogue */
+  private dialogueBands: Array<{ band: Phaser.GameObjects.Rectangle; rule: Phaser.GameObjects.Rectangle }> = [];
   private dialogueTitle!: Phaser.GameObjects.Text;
   private dialogueMessage!: Phaser.GameObjects.Text;
   private dialogueOptions: Phaser.GameObjects.Text[] = [];
@@ -1912,22 +1914,52 @@ export class GameScene extends Phaser.Scene {
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
-    this.dialogueObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', PANEL_DEPTH.game.dialogue));
+    const depth = PANEL_DEPTH.game.dialogue;
+    this.dialogueObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
+    // OVERHAUL UI: the same header strip every other panel uses, with the NPC's
+    // name on it, and the message in an inset well so speech reads as speech
+    // rather than as more body text.
+    // Empty header title on purpose: the NPC's name is the header, and drawing a
+    // static '对话' underneath it printed the two on top of each other.
+    this.dialogueObjects.push(...buildPanelHeader(this, left, top, panelW, '', UI.good, depth + 5));
     // Create with placeholder content so each text's canvas/frame exists up front
     // (setText on a never-rendered empty text throws in Phaser 4).
-    this.dialogueTitle = this.add.text(cx, top + 20, '对话', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
-    this.dialogueMessage = this.add.text(cx, top + 58, '……', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8', align: 'center' }).setOrigin(0.5);
-    this.dialogueObjects.push(this.dialogueTitle, this.dialogueMessage);
+    this.dialogueTitle = this.add
+      .text(left + 10, top + 10, '对话', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: '#ece8d8' })
+      .setOrigin(0, 0.5)
+      .setDepth(depth + 6);
+    this.dialogueObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 34, depth + 5));
+    // dialogueTitle MUST be in the list: closeDialogue() hides everything in it,
+    // and a name left out of the list stays on screen after the panel closes.
+    this.dialogueObjects.push(this.dialogueTitle);
+    this.dialogueMessage = this.add
+      .text(cx, top + 45, '……', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: '#ece8d8', align: 'center', wordWrap: { width: panelW - 44 } })
+      .setOrigin(0.5)
+      .setDepth(depth + 7);
+    this.dialogueObjects.push(this.dialogueMessage);
 
+    this.dialogueBands = [];
     for (let i = 0; i < 4; i++) {
-      const rowY = top + 112 + i * 26;
-      const icon = this.add.image(left + 30, rowY + 7, 'blank').setOrigin(0, 0.5);
-      const t = this.add.text(left + 48, rowY + 7, '……', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }).setOrigin(0, 0.5);
+      const rowY = top + 74 + i * 30;
+      // A selection band per row, the same language as every other list: a wash
+      // plus a 2px accent rule. Toggled in refreshDialogue.
+      const band = this.add.rectangle(left + 12, rowY, panelW - 24, 26, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 5);
+      const rule = this.add.rectangle(left + 12, rowY, 2, 26, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 6);
+      this.dialogueBands.push({ band, rule });
+      this.dialogueObjects.push(band, rule);
+      const icon = this.add.image(left + 30, rowY + 12, 'blank').setOrigin(0.5).setDepth(depth + 7);
+      const t = this.add
+        .text(left + 46, rowY + 12, '……', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: '#ece8d8' })
+        .setOrigin(0, 0.5)
+        .setDepth(depth + 7);
       this.dialogueOptionIcons.push(icon);
       this.dialogueOptions.push(t);
       this.dialogueObjects.push(icon, t);
     }
-    const footer = this.add.text(cx, top + panelH - 14, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
+    const footer = this.add
+      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#77c6a4' })
+      .setOrigin(0.5)
+      .setDepth(depth + 7);
     this.dialogueObjects.push(footer, this.dialogueMarker);
 
     applyPanelDepth(this.dialogueObjects, PANEL_DEPTH.game.dialogue);
@@ -1998,6 +2030,13 @@ export class GameScene extends Phaser.Scene {
       this.dialogueOptions[i].setText(option.label);
       if (option.icon) icon.setTexture(itemIconKey(option.icon)).setVisible(true);
       else icon.setVisible(false);
+      const selected = i === d.selected;
+      this.dialogueOptions[i].setColor(selected ? '#f4b66a' : '#ece8d8');
+      const b = this.dialogueBands[i];
+      if (b) {
+        b.band.setAlpha(selected ? 0.14 : 0);
+        b.rule.setAlpha(selected ? 1 : 0);
+      }
     }
     const selectedIcon = this.dialogueOptionIcons[d.selected];
     this.dialogueMarker.setVisible(options[d.selected] !== undefined);

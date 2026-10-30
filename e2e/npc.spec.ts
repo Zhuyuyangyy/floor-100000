@@ -81,7 +81,17 @@ async function cursorLabel(page: Page): Promise<string> {
     const list = g?.scene.getScene('Game')?.children.list ?? [];
     const marker = list.find((o) => o.type === 'Image' && o.texture?.key === 'ui-marker' && o.visible);
     if (!marker) return '';
-    const label = list.find((o) => o.type === 'Text' && o.visible && Math.abs(o.y - marker.y) <= 4);
+    // PANEL CONTENT ONLY. A world label (a container's name) can sit within a few
+    // pixels of a dialogue row now that the rows moved, and the world objects are
+    // created first, so a plain y-probe returned '邻居货架' while the cursor was on
+    // '退出'. Panel content is drawn at depth >= 190; the world is at 0-30.
+    const label = list.find(
+      (o) =>
+        o.type === 'Text' &&
+        o.visible &&
+        ((o as unknown as { depth: number }).depth ?? 0) >= 190 &&
+        Math.abs(o.y - marker.y) <= 6,
+    );
     return label?.text ?? '';
   });
 }

@@ -418,6 +418,16 @@ export interface CharacterColors {
   hair: RGB;
   pack: RGB;
   packDark: RGB;
+  /**
+   * Body bulk: 1 is the base build. It scales the torso and arm widths only -
+   * the skeleton, the leg length and the ground contact stay identical for every
+   * character, because a figure whose feet sit at a different height breaks the
+   * shared walk cycle and every interaction radius with it.
+   *
+   * Four survivors on one skeleton with only a palette swap read as recolours.
+   * A broader neighbour and a slighter kid do not.
+   */
+  bulk?: number;
 }
 type RGB = [number, number, number];
 
@@ -452,6 +462,8 @@ export const PLAYER_COLORS: CharacterColors = {
 // without any of them being a repaint of another.
 export const ALIN_COLORS: CharacterColors = {
   ...PLAYER_COLORS,
+  // The neighbour is older and heavier than the survivor.
+  bulk: 1.3,
   cloth: rgb(PALETTE.stoneLight),
   clothDark: rgb(PALETTE.stone),
   clothLight: rgb(PALETTE.dust),
@@ -460,6 +472,8 @@ export const ALIN_COLORS: CharacterColors = {
 
 export const XIAOZHOU_COLORS: CharacterColors = {
   ...PLAYER_COLORS,
+  // The kid is slighter.
+  bulk: 0.82,
   cloth: rgb(PALETTE.lightHigh),
   clothDark: rgb(PALETTE.light),
   clothLight: rgb(PALETTE.lightHot),
@@ -471,6 +485,8 @@ export const XIAOZHOU_COLORS: CharacterColors = {
 // second survivor with different clothes.
 export const WANDERER_COLORS: CharacterColors = {
   ...PLAYER_COLORS,
+  // The thing in the dark is thin: it should not read as a person's build.
+  bulk: 0.6,
   cloth: [0x3a, 0x1e, 0x24],
   clothDark: [0x24, 0x12, 0x1a],
   clothLight: [0x5a, 0x30, 0x38],
@@ -680,15 +696,16 @@ function drawTorso(cv: PixelCanvas, pose: Pose, col: CharacterColors): void {
     [0.92, 8],
     [1, 7.5],
   ];
+  const bulk = col.bulk ?? 1;
   for (let y = top; y <= bottom; y++) {
     const t = (y - top) / span;
-    let half = 8;
+    let half = 8 * bulk;
     for (let i = 1; i < PROFILE.length; i++) {
       if (t <= PROFILE[i][0]) {
         const [t0, w0] = PROFILE[i - 1];
         const [t1, w1] = PROFILE[i];
         const k = t1 === t0 ? 0 : (t - t0) / (t1 - t0);
-        half = w0 + k * (w1 - w0);
+        half = (w0 + k * (w1 - w0)) * bulk;
         break;
       }
     }
@@ -731,7 +748,8 @@ function drawArm(cv: PixelCanvas, pose: Pose, col: CharacterColors, sign: -1 | 1
   // limbs, and the near arm's anchor sits clear of the torso's edge so it reads
   // as an arm passing in front of the body rather than a stripe on it.
   const sleeve = sign === 1 ? col.cloth : col.clothDark;
-  taperedLimb(cv, shoulder, elbow, 6, 4.5, sleeve);
+  const armBulk = col.bulk ?? 1;
+  taperedLimb(cv, shoulder, elbow, 6 * armBulk, 4.5 * armBulk, sleeve);
   const skin = sign === 1 ? col.skin : col.skinDark;
   taperedLimb(cv, elbow, hand, 4.5, 3.5, skin);
   // THREE VALUES ON THE SLEEVE, like the legs and the jacket. A cylindrical limb
@@ -742,7 +760,7 @@ function drawArm(cv: PixelCanvas, pose: Pose, col: CharacterColors, sign: -1 | 1
   for (let y = Math.round(shoulder.y) + 1; y <= Math.round(elbow.y) - 1; y++) {
     const k = (y - shoulder.y) / Math.max(1, elbow.y - shoulder.y);
     const cx = shoulder.x + k * (elbow.x - shoulder.x);
-    const halfW = (6 - k * 1.5) / 2;
+    const halfW = ((6 - k * 1.5) * armBulk) / 2;
     cv.set(Math.round(cx + halfW - 1), y, lit);
     cv.set(Math.round(cx - halfW + 1), y, shade);
   }
@@ -855,31 +873,37 @@ function drawPack(cv: PixelCanvas, pose: Pose, col: CharacterColors): void {
   // least detailed. It now reads as a canvas pack: a lid that overhangs, a body
   // with a lit back edge and a shadowed front, a compression strap across the
   // middle, a buckled flap, and a bedroll lashed to the top.
-  const x = Math.round(pose.shoulder.x) - 13;
+  // The pack follows the build: a broad survivor carries a broad pack, and the
+  // slighter ones carry less. Otherwise every character is the same silhouette
+  // from the waist up no matter what the torso does.
+  const bulk = col.bulk ?? 1;
+  const packHalf = 6.5 * bulk;
+  const x = Math.round(pose.shoulder.x) - Math.round(packHalf * 2);
   const y = Math.round(pose.shoulder.y) - 1;
   const lit = mixRgb(col.pack, col.clothLight, 0.18);
   const shade = mixRgb(col.packDark, col.outline, 0.5);
 
   // Body: base, then a lit column on the outward edge and a shadow on the inner.
+  const packW = Math.round(packHalf * 2);
   for (let j = 3; j < 19; j++) {
-    run(cv, x + 6.5, 6.5, y + j, col.packDark);
+    run(cv, x + packHalf, packHalf, y + j, col.packDark);
     cv.set(x, y + j, lit);
-    cv.set(x + 13, y + j, shade);
+    cv.set(x + packW, y + j, shade);
   }
   // The lid overhangs the body by a pixel on each side, which is what makes a
   // pack look packed rather than painted on.
-  for (let j = 0; j < 3; j++) run(cv, x + 7, 7, y + j, col.pack);
-  run(cv, x + 7, 7, y + 3, col.packDark);
+  for (let j = 0; j < 3; j++) run(cv, x + packHalf + 0.5, packHalf + 0.5, y + j, col.pack);
+  run(cv, x + packHalf + 0.5, packHalf + 0.5, y + 3, col.packDark);
 
   // A compression strap across the middle, and its buckle on the lit edge.
-  run(cv, x + 6.5, 6.5, y + 10, col.outline);
-  run(cv, x + 6.5, 6.5, y + 11, col.outline);
+  run(cv, x + packHalf, packHalf, y + 10, col.outline);
+  run(cv, x + packHalf, packHalf, y + 11, col.outline);
   cv.set(x + 1, y + 10, col.clothLight);
   cv.set(x + 1, y + 11, col.clothLight);
 
   // A bedroll lashed on top: two rounded rolls, one lit, one shaded.
-  run(cv, x + 6, 6, y - 2, col.cloth);
-  run(cv, x + 5, 5, y - 1, col.clothDark);
+  run(cv, x + packHalf - 0.5, packHalf - 0.5, y - 2, col.cloth);
+  run(cv, x + packHalf - 1.5, packHalf - 1.5, y - 1, col.clothDark);
   cv.set(x + 11, y - 2, col.clothLight);
   // The shoulder strap running from the pack top toward the neck.
   run(cv, pose.shoulder.x - 3, 2, y - 1, col.packDark);

@@ -182,6 +182,8 @@ export class GameScene extends Phaser.Scene {
   private groundObjs = new Map<string, Phaser.GameObjects.Rectangle>();
   private floorObjects: Phaser.GameObjects.GameObject[] = [];
   private wanderer?: Phaser.GameObjects.Sprite;
+  /** the dim red pool that makes the wanderer findable in the dark */
+  private wandererGlow?: Phaser.GameObjects.Image;
   private wandererHitAt = Number.NEGATIVE_INFINITY;
   // OVERHAUL: the wanderer's stalk/lunge state machine. Lives beside the sprite
   // because the scene owns the movement it drives.
@@ -2862,6 +2864,9 @@ export class GameScene extends Phaser.Scene {
     if (!active) {
       if (this.wanderer) {
         this.wanderer.destroy();
+        this.wanderer.destroy();
+        this.wandererGlow?.destroy();
+        this.wandererGlow = undefined;
         this.wanderer = undefined;
         this.wandererAI = undefined;
       }
@@ -2872,6 +2877,14 @@ export class GameScene extends Phaser.Scene {
       this.wanderer = this.add.sprite(spawnX, PLAYER_FEET_Y, walkSheetKey('wanderer')).setOrigin(0.5, 1);
       this.wanderer.play(walkAnimKey('wanderer'));
       this.wandererAI = freshWandererAI(spawnX);
+      // A THREAT YOU CANNOT SEE IS NOT A THREAT, IT IS A PUNISHMENT.
+      //
+      // The wanderer is deliberately thin (bulk 0.6, a 16px torso) and it only
+      // comes out at night, which is the darkest the game gets. A dim red pool
+      // under it is enough to make it findable across the corridor without
+      // lighting it up: it reads as something wrong in the room rather than as a
+      // character, which is what it should be.
+      this.wandererGlow = addGlow(this, spawnX, PLAYER_FEET_Y - 8, 34, 0.42, LIGHT_DEPTH);
     }
     const ai = this.wandererAI;
     // OVERHAUL: the state machine drives the speed. Standing within its range
@@ -2880,6 +2893,7 @@ export class GameScene extends Phaser.Scene {
     // point of the rework (B3-06 measured the old "only kills the stationary"
     // as a design bug, not a feature).
     ai!.selfX = this.wanderer.x;
+    if (this.wandererGlow) this.wandererGlow.x = this.wanderer.x;
     const step = stepWandererAI(ai!, state.player.x, delta);
     const dir = Math.sign(state.player.x - this.wanderer.x);
     if (dir !== 0) this.wanderer.x += dir * WANDERER_SPEED * step.speedMultiplier * (delta / 1000);

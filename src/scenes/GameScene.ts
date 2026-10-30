@@ -80,7 +80,15 @@ import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
 import { addGlow, buildLightLayer, type LightLayer } from '../render/lighting';
-import { addContactShadow, buildCeilingLights, buildForeground, buildRoomDepth, buildSurfaceDetail } from '../render/roomDepth';
+import {
+  addContactShadow,
+  buildCeilingLights,
+  buildFloorClutter,
+  buildForeground,
+  buildRoomDepth,
+  buildSurfaceDetail,
+  buildWallDressing,
+} from '../render/roomDepth';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
@@ -1081,6 +1089,12 @@ export class GameScene extends Phaser.Scene {
       // detail that stops the two largest surfaces being flat.
       ...buildSurfaceDetail(this, { width: FLOOR_WIDTH, wallBottom: wallH, height: FLOOR_HEIGHT, seed: 11 }),
       ...buildCeilingLights(this, { width: FLOOR_WIDTH, seed: 5, top: 16 }),
+      // The room's density: pipes, vents, junction boxes and signage on the
+      // background plane, debris on the floor line. Without this a floor that
+      // measures well still looks empty, because an empty frame can pass every
+      // colour metric while having nothing in it.
+      ...buildWallDressing(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: 3, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
+      ...buildFloorClutter(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: 3, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
     );
 
     // The foreground layer last: ceiling beam, floor debris, side margins. This
@@ -1143,6 +1157,8 @@ export class GameScene extends Phaser.Scene {
       }),
       ...buildSurfaceDetail(this, { width: FLOOR_WIDTH, wallBottom: wallH, height: FLOOR_HEIGHT, seed: floor * 17 }),
       ...buildCeilingLights(this, { width: FLOOR_WIDTH, seed: floor * 13, top: 16 }),
+      ...buildWallDressing(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
+      ...buildFloorClutter(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
     );
 
     // OVERHAUL Art Pass: the lighting layer goes on after the props, so the

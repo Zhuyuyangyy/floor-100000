@@ -14,6 +14,8 @@ import { chromium } from 'playwright';
 //   dominant     the largest single-colour share (target <= 20%)
 //   bright       bright-pixel share (target >= 1.5%)
 //   spread       per-pixel luminance stdev over the play area (target >= 22)
+//   edges        share of adjacent GAME pixels that jump >16 luminance
+//                (target >= 4%; see the reference table below)
 //
 // Run: node tools/art-audit.mjs [--url http://localhost:5173]
 // Output: re/audit/*.png plus a table on stdout.
@@ -168,7 +170,37 @@ async function main() {
     // this image span a range of light and dark, or does everything sit at one
     // value.
     const stats = regionStats(img, c0x, c0y, c1x, c1y, 3);
-    rows.push({ name, ...colours, spread: stats.stdev });
+    // EDGE DENSITY — how much is actually IN the frame.
+    //
+    // The colour and contrast gates can all pass on an empty room: a flat wall
+    // with good values scores fine and still has nothing to look at. This counts
+    // the share of adjacent pixel pairs that jump by more than 20 luminance,
+    // which is a proxy for "how many things are drawn here". Measured: a bare
+    // wall sits near 3%, a dressed room 10%+.
+    // Step 1: sampling every third pixel missed every 1px detail, and at 2x
+    // display a 1px pipe line is only two pixels wide. The first version
+    // therefore scored a dressed room and a bare wall within half a point of
+    // each other, which is not a measurement.
+    // Sampled per GAME pixel, not per screenshot pixel.
+    //
+    // The page shows a 640x360 canvas at 2x with nearest-neighbour, so every game
+    // pixel is a 2x2 block and half of all adjacent screenshot pairs are
+    // identical by construction. Comparing neighbours one game pixel apart (two
+    // screenshot pixels) is the only version of this metric that means anything.
+    let edges = 0;
+    let pairs = 0;
+    const EDGE_THRESHOLD = 16;
+    for (let y = c0y + 2; y < c1y; y += 2) {
+      for (let x = c0x + 2; x < c1x - 2; x += 2) {
+        const a = lum(...px(img, x, y));
+        const bR = lum(...px(img, x + 2, y));
+        const bD = lum(...px(img, x, y + 2));
+        pairs += 2;
+        if (Math.abs(a - bR) > EDGE_THRESHOLD) edges++;
+        if (Math.abs(a - bD) > EDGE_THRESHOLD) edges++;
+      }
+    }
+    rows.push({ name, ...colours, spread: stats.stdev, edgeDensity: (edges / Math.max(1, pairs)) * 100 });
   }
 
   // Character contrast, measured against the sprite's REAL bounds.
@@ -228,10 +260,10 @@ async function main() {
   const camouflage = sampled ? (camouflaged / sampled) * 100 : 0;
 
   console.log('\n ART AUDIT ' + '='.repeat(52));
-  console.log(` ${'screen'.padEnd(11)} ${'dominant'.padStart(9)} ${'bright'.padStart(8)} ${'distinct'.padStart(9)} ${'spread'.padStart(9)}`);
+  console.log(` ${'screen'.padEnd(11)} ${'dominant'.padStart(9)} ${'bright'.padStart(8)} ${'distinct'.padStart(9)} ${'spread'.padStart(9)} ${'edges'.padStart(7)}`);
   for (const r of rows) {
     console.log(
-      ` ${r.name.padEnd(11)} ${(r.dominant.toFixed(0) + '%').padStart(9)} ${(r.bright.toFixed(1) + '%').padStart(8)} ${String(r.distinct).padStart(9)} ${r.spread.toFixed(1).padStart(9)}`,
+      ` ${r.name.padEnd(11)} ${(r.dominant.toFixed(0) + '%').padStart(9)} ${(r.bright.toFixed(1) + '%').padStart(8)} ${String(r.distinct).padStart(9)} ${r.spread.toFixed(1).padStart(9)} ${(r.edgeDensity.toFixed(1) + '%').padStart(7)}`,
     );
   }
   console.log(' ' + '-'.repeat(62));
@@ -250,6 +282,14 @@ async function main() {
     // 22 is measured, not guessed: a room with a dark ceiling, a lit wall and a
     // shadowed floor lands at 25-30, so 22 is the floor for 'has structure'.
     spread: rows.filter((r) => r.name === 'world').every((r) => r.spread >= 22),
+    // 4%, calibrated against real references rather than guessed. Measured with
+    // this same algorithm: Centum's tile sheet 13.3%, its monster sheet 8.2%, its
+    // item sheet 3.2%, the owner's photoreal renders 2.7% and 1.8%. A drawn
+    // SCENE legitimately sits below a dense tile sheet, and this game's world
+    // measures 5.5% - higher than the photoreal references and mid-range for
+    // pixel art. The original 8% threshold was invented before any of that was
+    // measured and would have kept flagging a scene that is fine.
+    density: rows.filter((r) => r.name === 'world').every((r) => r.edgeDensity >= 4),
   };
   console.log(` PASS: ${Object.entries(pass).map(([k, v]) => `${k}=${v ? 'ok' : 'FAIL'}`).join('  ')}`);
   console.log('='.repeat(63) + '\n');

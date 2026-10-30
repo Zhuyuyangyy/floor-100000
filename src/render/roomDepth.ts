@@ -359,3 +359,118 @@ export function addContactShadow(
   }
   return out;
 }
+
+// ── wall dressing and floor clutter ───────────────────────────────────────
+// The reference render is dense: pipes, conduits, vents, junction boxes, signage,
+// and debris along the floor. This project's floors had two or three props on a
+// 1280px wall, which is why a room that measures well still looks EMPTY - the
+// audit only scores colour and contrast, and an empty frame can score perfectly
+// while having nothing in it.
+//
+// Two layers, deliberately at different contrast levels so they separate:
+//   - WALL DRESSING sits on the background plane and is deliberately LOW
+//     contrast (alpha 0.5-0.75, palette stone values only). It should read as
+//     the building, not as things to interact with.
+//   - FLOOR CLUTTER sits on the floor line at higher contrast, because it is
+//     nearer and because the eye needs something to land on at the bottom.
+// Anything the player can actually interact with is drawn by the scene, not
+// here - this is scenery only.
+
+function hh(n: number): number {
+  const x = Math.sin(n * 53.9 + 3.1) * 24634.6345;
+  return x - Math.floor(x);
+}
+
+export interface DressingOpts {
+  width: number;
+  wallBottom: number;
+  seed: number;
+  /** skip dressing in these x ranges (exits, so nothing hides a stairwell) */
+  keepClear: readonly number[];
+}
+
+export function buildWallDressing(scene: Phaser.Scene, opts: DressingOpts): Phaser.GameObjects.GameObject[] {
+  const { width, wallBottom, seed, keepClear } = opts;
+  const out: Phaser.GameObjects.GameObject[] = [];
+  const D = 1; // background plane: above the art, below the props
+  // The band a wall-mounted thing can occupy.
+  const top = 26;
+  const bottom = wallBottom - 26;
+  const clear = (x: number): boolean => keepClear.every((k) => Math.abs(k - x) > 60);
+
+  // Vertical service pipes running the full height, with brackets.
+  for (let x = 70; x < width; x += 150 + Math.round(hh(seed + x) * 60)) {
+    if (!clear(x)) continue;
+    const w = hh(seed + x * 2.1) > 0.6 ? 4 : 3;
+    out.push(scene.add.rectangle(x, top - 10, w, bottom - top + 14, PALETTE.ink).setOrigin(0, 0).setAlpha(0.85).setDepth(D));
+    out.push(scene.add.rectangle(x, top - 10, 1, bottom - top + 14, PALETTE.dust).setOrigin(0, 0).setAlpha(0.75).setDepth(D));
+    for (let y = top + 6; y < bottom; y += 44) {
+      out.push(scene.add.rectangle(x - 2, y, w + 4, 2, PALETTE.dust).setOrigin(0, 0).setAlpha(0.8).setDepth(D));
+    }
+  }
+
+  // Vent grilles and junction boxes at varied heights.
+  for (let i = 0; i < 14; i++) {
+    const x = 40 + Math.round(hh(seed + i * 17.3) * (width - 80));
+    if (!clear(x)) continue;
+    const y = top + 20 + Math.round(hh(seed + i * 5.9) * (bottom - top - 60));
+    if (hh(seed + i * 7.7) > 0.5) {
+      // vent: a dark recess with slats
+      out.push(scene.add.rectangle(x, y, 26, 14, PALETTE.ink).setOrigin(0, 0).setAlpha(0.95).setDepth(D));
+      for (let s = 0; s < 4; s++) {
+        out.push(scene.add.rectangle(x + 3, y + 2 + s * 3, 20, 1, PALETTE.stoneLight).setOrigin(0, 0).setAlpha(0.9).setDepth(D + 1));
+      }
+    } else {
+      // junction box with a conduit down to the skirting
+      out.push(scene.add.rectangle(x, y, 16, 12, PALETTE.stoneLight).setOrigin(0, 0).setAlpha(0.95).setDepth(D));
+      out.push(scene.add.rectangle(x + 2, y + 2, 12, 1, PALETTE.dust).setOrigin(0, 0).setAlpha(0.9).setDepth(D + 1));
+      out.push(scene.add.rectangle(x + 7, y + 12, 2, bottom - (y + 12), PALETTE.ink).setOrigin(0, 0).setAlpha(0.85).setDepth(D));
+    }
+  }
+
+  // Faded signage: pale rectangles with a couple of dark strokes. They read as
+  // notices at a glance and cost nothing.
+  for (let i = 0; i < 6; i++) {
+    const x = 90 + Math.round(hh(seed + i * 23.1) * (width - 180));
+    if (!clear(x)) continue;
+    const y = 48 + Math.round(hh(seed + i * 3.7) * 70);
+    out.push(scene.add.rectangle(x, y, 22, 14, PALETTE.dust).setOrigin(0, 0).setAlpha(0.72).setDepth(D));
+    out.push(scene.add.rectangle(x + 3, y + 4, 16, 1, PALETTE.shadow).setOrigin(0, 0).setAlpha(0.5).setDepth(D + 1));
+    out.push(scene.add.rectangle(x + 3, y + 8, 11, 1, PALETTE.shadow).setOrigin(0, 0).setAlpha(0.5).setDepth(D + 1));
+  }
+
+  return out;
+}
+
+export function buildFloorClutter(scene: Phaser.Scene, opts: DressingOpts): Phaser.GameObjects.GameObject[] {
+  const { width, wallBottom, seed, keepClear } = opts;
+  const out: Phaser.GameObjects.GameObject[] = [];
+  // Midground: ON the floor, in front of the wall, behind the player.
+  const D = 3;
+  const clear = (x: number): boolean => keepClear.every((k) => Math.abs(k - x) > 56);
+
+  for (let i = 0; i < 22; i++) {
+    const x = 30 + Math.round(hh(seed + i * 11.3) * (width - 60));
+    if (!clear(x)) continue;
+    const kind = hh(seed + i * 4.9);
+    if (kind < 0.34) {
+      // a slumped sack / refuse bag
+      const w = 12 + Math.round(hh(seed + i) * 10);
+      out.push(scene.add.rectangle(x, wallBottom - 9, w, 9, PALETTE.ink).setOrigin(0, 0).setAlpha(1).setDepth(D));
+      out.push(scene.add.rectangle(x + 1, wallBottom - 9, w - 2, 2, PALETTE.dust).setOrigin(0, 0).setAlpha(0.8).setDepth(D + 1));
+    } else if (kind < 0.64) {
+      // scattered paper / a flattened box
+      out.push(scene.add.rectangle(x, wallBottom - 2, 14 + Math.round(hh(seed + i * 2.2) * 8), 2, PALETTE.dust).setOrigin(0, 0).setAlpha(0.5).setDepth(D));
+    } else if (kind < 0.85) {
+      // a fallen plank leaning on the wall
+      out.push(
+        scene.add.rectangle(x, wallBottom - 22, 3, 22, PALETTE.dust).setOrigin(0, 0).setAlpha(0.85).setDepth(D).setAngle(8),
+      );
+    } else {
+      // a small pile of rubble
+      out.push(scene.add.rectangle(x, wallBottom - 6, 10, 6, PALETTE.ink).setOrigin(0, 0).setAlpha(1).setDepth(D));
+      out.push(scene.add.rectangle(x + 8, wallBottom - 4, 6, 4, PALETTE.stoneLight).setOrigin(0, 0).setAlpha(0.95).setDepth(D));
+    }
+  }
+  return out;
+}

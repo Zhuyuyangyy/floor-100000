@@ -809,8 +809,27 @@ function drawHead(cv: PixelCanvas, pose: Pose, col: CharacterColors): void {
     [-7, 5.5],
     [-6, 5],
   ];
+  // Hair with three values: a base cap, a lit top-left where the key light
+  // falls, and a darker band at the hairline. Hair drawn as one flat cap is the
+  // single most common reason a pixel head reads as a helmet.
+  const hairLit = mixRgb(col.hair, col.clothLight, 0.22);
+  const hairDeep = mixRgb(col.hair, col.outline, 0.55);
   for (const [dy, half] of HAIR) run(cv, dy <= -7 ? cx : cx + 0.5, half, cy + dy, col.hair);
+  // The lit side: the upper-left arc of the cap, where a room light would land.
+  for (const [dy, half] of HAIR) {
+    if (dy > -7) continue;
+    const cxx = dy <= -7 ? cx : cx + 0.5;
+    cv.set(Math.round(cxx - half + 1), cy + dy, hairLit);
+    cv.set(Math.round(cxx - half + 2), cy + dy, hairLit);
+  }
+  // The shadow line where the fringe meets the forehead.
+  for (let x = Math.round(cx - 4); x <= Math.round(cx + 4); x++) cv.set(x, cy - 6, hairDeep);
   run(cv, cx + 5, 2, cy - 8, col.hair); // fringe at the front
+  // The face's own light: a lit column down the cheek so the skin is not one
+  // value, then the features sit on top of it.
+  for (let dy = -5; dy <= 3; dy++) {
+    cv.set(Math.round(cx + 3), cy + dy, mixRgb(col.skin, col.clothLight, 0.16));
+  }
   // Face on the leading edge, sitting on the tapered jaw.
   run(cv, cx + 6, 1.5, cy - 6, col.skinDark); // brow
   cv.set(cx + 7, cy - 4, col.outline); // eye

@@ -82,7 +82,7 @@ test('the flash renders on top of an open panel', async ({ page }) => {
   const scale = box!.width / 640;
   const clip = {
     x: box!.x + 180 * scale,
-    y: box!.y + 47 * scale,
+    y: box!.y + 42 * scale,
     width: 280 * scale,
     height: 28 * scale,
   };
@@ -95,12 +95,15 @@ test('the flash renders on top of an open panel', async ({ page }) => {
   // 「水分 +20.114303979999917」. No message in this channel legitimately carries a
   // decimal point — loot quantities and minute costs are integers — so its
   // presence is the bug. Read it before the 1.6s expires.
+  // OVERHAUL UI: the HUD moved to a bar, so the flash is no longer at y=60.
+  // Located by content instead of by row — the flash is the only text in the
+  // top band that reports a stat change.
   const shown = await page.evaluate(() => {
     const g = (window as unknown as {
       __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean; y: number }> } } | null } };
     }).__PHASER_GAME__;
     for (const o of g?.scene.getScene('Game')?.children.list ?? []) {
-      if (o.type === 'Text' && o.visible && Math.abs(o.y - 60) < 2) return o.text ?? '';
+      if (o.type === 'Text' && o.visible && (o.text ?? '').includes('水分') && o.y < 140) return o.text ?? '';
     }
     return '';
   });
@@ -134,9 +137,14 @@ test('all three HUD feedback objects clear the deepest panel', async ({ page }) 
     // Matched by content, not by y alone: the fourth stat label sits at y=85, one
     // pixel from the bag-full warning at y=86, and a y-probe silently returns the
     // wrong object.
-    const flash = list.find((o) => o.type === 'Text' && Math.abs(o.y - 60) < 2);
+    // OVERHAUL UI: the HUD is a bar now, so the three feedback objects have
+    // fixed rows of their own — flash at HUD_BAR_H + 26 = 52, bag-full warning
+    // below it, and the hint on the foot bar at 360 - 8 = 352. Matched by
+    // content as well, because a bare y-probe here once read a panel's copy of
+    // the same string.
+    const flash = list.find((o) => o.type === 'Text' && Math.abs(o.y - 52) < 2);
     const bagFull = list.find((o) => o.type === 'Text' && (o.text ?? '').includes('否则搜刮会留在原处'));
-    const hint = list.find((o) => o.type === 'Text' && Math.abs(o.y - 338) < 2);
+    const hint = list.find((o) => o.type === 'Text' && Math.abs(o.y - 352) < 2 && (o.text ?? '').includes('ESC 菜单'));
     return { flash: flash?.depth, bagFull: bagFull?.depth, hint: hint?.depth };
   });
 

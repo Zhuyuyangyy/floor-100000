@@ -5,6 +5,7 @@ import {
   BED_X,
   CRAFT_X,
   DOWN_EXIT_X,
+  ENTRY_X,
   FLOOR_BAND,
   FLOOR_HEIGHT,
   FLOOR_WIDTH,
@@ -51,12 +52,12 @@ import {
   type Encounter,
   type EncounterChoice,
 } from '../systems/encounters';
-import { encounterSpots, nudgeSpotX } from '../systems/encounterSpots';
+import { encounterSpots, nudgeSpotX, placeClearX } from '../systems/encounterSpots';
 import { resolveRound, playerCombatant, GUARD_ENERGY_RESTORE, type Combatant } from '../systems/combat';
 import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster } from '../systems/monsters';
 import { guardianDamageMult, lootBonus, moveSpeedMult } from '../systems/relics';
 import { modeGuardianDamageMult } from '../systems/modes';
-import { buy, sell, shopStock, traderX, type ShopEntry } from '../systems/shop';
+import { buy, sell, shopStock, type ShopEntry } from '../systems/shop';
 import { charge, recordShortcut, shortcutAvailable, shortcutPrice, shortcutSkip, timesTaken } from '../systems/shortcut';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
@@ -458,8 +459,13 @@ export class GameScene extends Phaser.Scene {
     if (state.currentFloor === NPC_FLOOR) taken.push(...NPCS.map((n) => n.x));
     // OVERHAUL Wave C1: the trader joins the taken list so nothing lands on
     // top of him, and he is drawn after the spots so he reads above them.
+    // The player arrives at ENTRY_X on every floor, so a trader placed there
+    // spawns inside them - measured: trader 614, arrival 640, the two figures
+    // overlapped on screen and neither was clickable-looking. Clear a full
+    // interact radius plus a body width from both the arrival point and any NPC.
     const floor = state.currentFloor;
-    const shopX = floor >= 2 ? nudgeSpotX(traderX(state.runSeed, floor), taken, INTERACT_DISTANCE + 8) : null;
+    const shopTaken = [...taken, ENTRY_X];
+    const shopX = floor >= 2 ? placeClearX(state.runSeed, floor, 'trader', shopTaken, INTERACT_DISTANCE * 2) : null;
     if (shopX !== null) taken.push(shopX);
     for (const spot of encounterSpots(state.runSeed, floor)) {
       if (shouldSkip(state, spot.id)) continue;
@@ -1434,6 +1440,7 @@ export class GameScene extends Phaser.Scene {
     this.invObjects.push(footer, this.invMarker);
 
     applyPanelDepth(this.invObjects, depth);
+    this.assertPanelContent('inventory', this.invObjects);
     for (const o of this.invObjects) o.setVisible(false);
   }
 
@@ -1554,6 +1561,7 @@ export class GameScene extends Phaser.Scene {
     this.craftObjects.push(footer, this.craftMarker);
 
     applyPanelDepth(this.craftObjects, PANEL_DEPTH.game.craft);
+    this.assertPanelContent('craft', this.craftObjects);
     for (const o of this.craftObjects) o.setVisible(false);
   }
 
@@ -1636,6 +1644,7 @@ export class GameScene extends Phaser.Scene {
     });
 
     applyPanelDepth(this.pauseObjects, PANEL_DEPTH.game.pause);
+    this.assertPanelContent('pause', this.pauseObjects);
     for (const o of this.pauseObjects) o.setVisible(false);
   }
 
@@ -1790,6 +1799,7 @@ export class GameScene extends Phaser.Scene {
     this.dialogueObjects.push(footer, this.dialogueMarker);
 
     applyPanelDepth(this.dialogueObjects, PANEL_DEPTH.game.dialogue);
+    this.assertPanelContent('dialogue', this.dialogueObjects);
     for (const o of this.dialogueObjects) o.setVisible(false);
   }
 
@@ -2181,6 +2191,32 @@ export class GameScene extends Phaser.Scene {
     playSfx('goal');
   }
 
+  // A panel with a frame but no readable content is the worst failure mode the
+  // UI can produce: it looks like the game broke. This runs in dev only and
+  // names the panel in the console the moment it opens empty, so a report of
+  // "a big empty box appeared" becomes a one-line diagnosis instead of a hunt.
+  private assertPanelContent(panel: string, objects: PanelObject[]): void {
+    if (!import.meta.env.DEV) return;
+    const readable = objects.some(
+      (o) => o instanceof Phaser.GameObjects.Text && o.visible && (o.text ?? '').trim().length > 0,
+    );
+    if (!readable) console.warn(`[ui] panel "${panel}" opened with no visible text — it will look like an empty box`);
+  }
+
+  // What the foot bar should say while a panel is open: the panel's own keys.
+  // Returns null when no panel is open, so the world hint can take over.
+  private openPanelHint(): string | null {
+    const combat = getGame().combat;
+    if (this.encounterOpen && combat) return '↑/↓ 选择 · Enter 出招 · ESC 撤退';
+    if (this.encounterOpen && this.encounter) return '↑/↓ 选择 · Enter 确认 · ESC 离开';
+    if (this.encounterOpen) return '↑/↓ 选择 · Enter 买入 · S 卖出 · ESC 离开';
+    if (this.inventoryOpen) return '↑/↓ 选择 · Enter 使用 · I 关闭';
+    if (this.craftingOpen) return '↑/↓ 选择 · Enter 制作 · C 关闭';
+    if (this.dialogueOpen) return '↑/↓ 选择 · Enter 确定 · ESC 返回';
+    if (this.pauseOpen) return '↑/↓ 选择 · Enter 确认 · ESC 继续';
+    return null;
+  }
+
   private nearBed(state: GameState): boolean {
     return state.currentFloor === STARTING_FLOOR && Math.abs(state.player.x - BED_X) <= INTERACT_DISTANCE;
   }
@@ -2446,6 +2482,16 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.autoPickup();
+
+    // OVERHAUL interaction: the hint used to describe the WORLD even while a
+    // panel covered it, so the bar read "按 E 查看问号点" underneath an open
+    // inventory - it promised an interaction the player could not perform and
+    // said nothing about the one they were in. A panel owns the bar now.
+    const panelHint = this.openPanelHint();
+    if (panelHint !== null) {
+      this.hintText.setText(panelHint);
+      return;
+    }
 
     if (this.nearBed(state)) {
       this.hintText.setText('按 E 睡觉');

@@ -45,12 +45,58 @@ function placeSpot(seed: number, floor: number, index: number, taken: readonly n
 // Pushes a spot marker clear of everything already interactable on the floor.
 // Deterministic: the same floor always nudges the same way, so a save/reload
 // never moves a question mark the player has already walked to.
+//
+// It searches BOTH directions and returns the clearest position it found if
+// nothing is fully clear. The one-directional version only ever stepped +24 and
+// gave up after eight tries, so a marker that started next to an NPC could be
+// pushed straight onto the NPC on its other side and still be returned as
+// "nudged" - measured on floor 2: the trader landed 6px from an NPC.
 export function nudgeSpotX(x: number, taken: readonly number[], clearance: number): number {
-  for (let i = 0; i < NUDGE_LIMIT; i++) {
-    if (!taken.some((t) => Math.abs(t - x) <= clearance)) return x;
-    x += NUDGE_STEP;
+  const gapAt = (v: number): number => (taken.length === 0 ? Infinity : Math.min(...taken.map((t) => Math.abs(t - v))));
+  if (gapAt(x) > clearance) return x;
+  let bestX = x;
+  let bestGap = gapAt(x);
+  for (let i = 1; i <= NUDGE_LIMIT; i++) {
+    for (const candidate of [x + NUDGE_STEP * i, x - NUDGE_STEP * i]) {
+      if (candidate < 40 || candidate > FLOOR_WIDTH - 40) continue;
+      const gap = gapAt(candidate);
+      if (gap > clearance) return candidate;
+      if (gap > bestGap) {
+        bestGap = gap;
+        bestX = candidate;
+      }
+    }
   }
-  return x;
+  return bestX;
+}
+
+// Places a single thing (a trader, a stall) at a deterministic position clear of
+// everything in `taken`. Resamples the hash instead of nudging, so the result is
+// spread across the floor rather than clustered wherever the seed landed - and
+// it falls back to the clearest sampled position, never to a colliding one.
+export function placeClearX(
+  seed: number,
+  floor: number,
+  salt: string,
+  taken: readonly number[],
+  clearance: number,
+): number {
+  const margin = 200;
+  const span = Math.max(1, FLOOR_WIDTH - margin * 2);
+  const gapAt = (v: number): number => (taken.length === 0 ? Infinity : Math.min(...taken.map((t) => Math.abs(t - v))));
+  let bestX = margin;
+  let bestGap = -1;
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const h = hashString(`clear-x:${seed}:${floor}:${salt}:${attempt}`);
+    const x = margin + (h % span);
+    const gap = gapAt(x);
+    if (gap > clearance) return x;
+    if (gap > bestGap) {
+      bestGap = gap;
+      bestX = x;
+    }
+  }
+  return bestX;
 }
 
 export function encounterSpots(seed: number, floor: number): EncounterSpot[] {

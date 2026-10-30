@@ -620,9 +620,20 @@ function outlinePass(cv: PixelCanvas, outline: RGB): void {
         (y < h - 1 && solid[i + w]);
       if (!touches) continue;
       const o = i * 4;
-      px[o] = outline[0];
-      px[o + 1] = outline[1];
-      px[o + 2] = outline[2];
+      // RIM LIGHT on the leading edge.
+      //
+      // An outline that is uniformly near-black separates the figure from a bright
+      // background and disappears against a dark one - and this game's background
+      // is dark. The pixels on the RIGHT of the figure (the direction it faces,
+      // and therefore the side a room light would catch) take a lighter outline
+      // instead, which is the standard rim-light trick for exactly this problem:
+      // it gives the silhouette a lit edge that survives any backdrop.
+      const behind = x > 0 && solid[i - 1];
+      const onLeadingEdge = behind && !(x < w - 1 && solid[i + 1]);
+      const rim = onLeadingEdge;
+      px[o] = rim ? Math.min(255, outline[0] + 96) : outline[0];
+      px[o + 1] = rim ? Math.min(255, outline[1] + 104) : outline[1];
+      px[o + 2] = rim ? Math.min(255, outline[2] + 88) : outline[2];
       px[o + 3] = 255;
     }
   }

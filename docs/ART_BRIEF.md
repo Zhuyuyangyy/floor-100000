@@ -12,8 +12,13 @@
 |---|---|---|---|
 | 角色精灵表 | `src/assets/characters/player.png` | **960×96** | 15 帧 × 64×96，横向一条，透明背景 |
 | 同上 | `npc_alin.png` / `npc_xiaozhou.png` / `wanderer.png` | 960×96 | 同上 |
-| 墙面 | `src/assets/env/wall.png` | **1280×220** | 横向无缝平铺 |
-| 地板 | `src/assets/env/floor.png` | **1280×80** | 横向无缝平铺 |
+| 墙面 | `src/assets/env/wall.png` | **1280×288** | 横向无缝平铺 |
+| 地板 | `src/assets/env/floor.png` | **1280×64** | 横向无缝平铺 |
+
+> **高度必须精确，不是建议。** 代码把墙面贴在 `y=8`、地板贴在 `y=296`（`FLOOR_HEIGHT 360 − FLOOR_BAND 64`）。
+> 所以墙面**必须正好 288 高**（296 − 8），地板**必须正好 64 高**。
+> 少 1px 就是一道露出背景色的缝，多 1px 就盖住地板。
+> （这份简报之前写的是 220/80，那是错的——照那个做会留 76px 的空洞。）
 
 Vite 在构建时用 glob 扫描这两个文件夹（`BootScene.ts` 的 `CUSTOM_CHARACTER_SHEETS` / `CUSTOM_ENV`）。
 **文件不存在 = 用程序化图**，不会报错、不会 404。放了新图，刷新页面就换。
@@ -35,7 +40,7 @@ Vite 在构建时用 glob 扫描这两个文件夹（`BootScene.ts` 的 `CUSTOM_
 
 下面按"画面主体 + 风格 + 技术约束"三段写。**英文版对多数模型效果更好**，中文版给通义/即梦等国产模型用。
 
-### 1. 墙面（1280×220，横向无缝）
+### 1. 墙面（1280×288，横向无缝）
 
 **English**
 ```
@@ -46,7 +51,7 @@ conduit, cracked plaster, one faded wall-mounted lamp bracket. Muted cold palett
 desaturated blue-grey #354650, deep shadow #18242c, faint warm rust accents #6a4a2a.
 Dramatic side lighting from the left, strong contrast between lit and shadowed
 areas. Pixel art, 1-pixel dark outlines, no anti-aliasing, no text, no watermark.
-Aspect ratio 1280:220 (wide strip). Left and right edges must tile seamlessly.
+Aspect ratio 1280:288 (wide strip) - exactly 288 pixels tall, this is load-bearing. Left and right edges must tile seamlessly.
 ```
 
 **中文**
@@ -55,7 +60,7 @@ Aspect ratio 1280:220 (wide strip). Left and right edges must tile seamlessly.
 剥落的漆皮、往下淌的水渍、细的走线管和电气线槽、开裂的抹灰、一个褪色的壁灯支架。
 低饱和冷色：蓝灰 #354650、阴影 #18242c、少量暖锈色 #6a4a2a。左侧打光，
 明暗对比强。像素画，1 像素深色描边，不要抗锯齿，不要文字，不要水印。
-比例 1280:220 的横条，左右两边必须能无缝接上。
+比例 1280:288 的横条，**高度必须正好 288 像素**（这是硬约束不是建议），左右两边必须能无缝接上。
 ```
 
 ### 2. 地板（1280×80，横向无缝，湿的）

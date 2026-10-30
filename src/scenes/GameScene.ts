@@ -78,7 +78,7 @@ import { WALK_CHARACTERS, attackAnimKey, hurtAnimKey, idleAnimKey, searchAnimKey
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
-import { buildLightLayer, type LightLayer } from '../render/lighting';
+import { addGlow, buildLightLayer, type LightLayer } from '../render/lighting';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
@@ -153,24 +153,6 @@ type DirKeys = {
 // up/down exits, lootable containers & ground items, a 12-slot inventory, and
 // consumable use. GameState (session) is the source of truth; this scene only
 // renders and feeds input back through pure logic functions.
-// A soft pool of warm light, drawn as an ellipse in banded alpha steps.
-//
-// Rectangles were used before, and over flat procedural wall tiles their edges
-// never showed. Against the art wall — which has its own pipes, peeling paint and
-// stains — a rectangle's boundary is clearly visible, so the light reads as a
-// glowing box. Sampling an ellipse row by row keeps the falloff round, and the
-// discrete alpha bands suit pixel art better than a smooth gradient would.
-function drawLightPool(g: Phaser.GameObjects.Graphics, cx: number, cy: number, rx: number, ry: number, peak: number): void {
-  for (let dy = -ry; dy <= ry; dy++) {
-    const t = 1 - (dy * dy) / (ry * ry);
-    if (t <= 0) continue;
-    const halfWidth = Math.round(rx * Math.sqrt(t));
-    const alpha = Math.round(peak * t * 6) / 6; // six banded steps, not a smooth ramp
-    if (alpha <= 0.02 || halfWidth <= 0) continue;
-    g.fillStyle(0xf4b66a, alpha);
-    g.fillRect(cx - halfWidth, cy + dy, halfWidth * 2, 1);
-  }
-}
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
   private cursors!: DirKeys;
@@ -1032,7 +1014,9 @@ export class GameScene extends Phaser.Scene {
     // wall art their edges read as a glowing box rather than as light.
     for (let r = 0; r < ROOM_COUNT; r++) {
       const cx = r * ROOM_WIDTH + ROOM_WIDTH / 2;
-      drawLightPool(g, cx - 8, 116, 76, 62, 0.16);
+      // Cold daylight through the glass, as an ADD glow: the ellipse halo this
+      // replaced read as a beige shape painted on the wall rather than as light.
+      this.floorObjects.push(addGlow(this, cx - 8, 116, 62, 0.22, 3));
       this.floorObjects.push(this.add.image(cx - 8, 116, 'tile_window').setOrigin(0.5));
     }
 
@@ -1041,7 +1025,8 @@ export class GameScene extends Phaser.Scene {
     for (let r = 0; r < ROOM_COUNT; r++) {
       const cx = r * ROOM_WIDTH + ROOM_WIDTH / 2;
       const lampX = cx + (r % 2 === 0 ? 96 : -96);
-      drawLightPool(g, lampX, 152, 30, 26, 0.13);
+      // The lamp's own glow, tighter and warmer than the window's.
+      this.floorObjects.push(addGlow(this, lampX, 152, 34, 0.42, 4));
       g.fillStyle(0x6a4a2a, 1);
       g.fillRect(lampX - 2, 142, 4, 8);
       g.fillStyle(0xf4b66a, 1);

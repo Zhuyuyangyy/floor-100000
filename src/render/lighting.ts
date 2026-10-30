@@ -66,25 +66,57 @@ const VIGNETTE_COLOR = 0x0b0f12;
 const VIGNETTE_BANDS: readonly number[] = [0.36, 0.24, 0.13, 0.06];
 const VIGNETTE_BAND_H = 26;
 
+// A single warm glow at an arbitrary point — the shared language for "there is
+// a light here". Scenes use this for window spill, lamps and anything else that
+// emits, so every light on screen is the same soft radial falloff instead of
+// three different hand-rolled shapes.
+export function addGlow(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  radius: number,
+  alpha = 0.5,
+  depth = 4,
+): Phaser.GameObjects.Image {
+  const size = Math.max(8, Math.round(radius * 2));
+  ensureGlowTexture(scene, size);
+  return scene.add.image(x, y, glowKey(size)).setBlendMode(Phaser.BlendModes.ADD).setAlpha(alpha).setDepth(depth);
+}
+
 export interface LightLayer {
   update(time: number): void;
   destroy(): void;
 }
 
-// Draws one pool as concentric circles from the rim inward, so the warm core is
-// the last (and strongest) thing drawn. `t` is 0..1, the breathing phase.
-function drawPool(g: Phaser.GameObjects.Graphics, pool: LightPool, t: number): void {
-  const steps = 10;
-  for (let s = steps - 1; s >= 0; s--) {
-    const f = s / steps; // 0 = core, 1 = rim
-    const r = pool.radius * (1 - f * 0.9);
-    // The core is near-saturated warm: measured, a pool whose centre alpha is
-    // under ~0.5 disappears into the dark base entirely.
-    const a = pool.strength * Math.pow(1 - f, 1.5) * (0.62 + 0.14 * t);
-    if (a <= 0.004) continue;
-    g.fillStyle(pool.color, Math.min(0.98, a));
-    g.fillCircle(pool.x, pool.y, r);
-  }
+// One soft glow texture, baked once per size.
+//
+// The previous version drew concentric Graphics circles, and the owner
+// screenshotted the result: a solid tan disc about 180px across with the ten
+// steps visible as rings. It read as an object lying on the floor, not as
+// light, and it was the ugliest thing on screen.
+//
+// Light has to fall off per pixel. This bakes a real radial gradient into a
+// canvas texture and adds it with ADD blending: ADD brightens the wall without
+// covering it, which is the whole difference between "a lamp is lit here" and
+// "a beige ball is here".
+const glowKey = (size: number): string => `glow-${size}`;
+
+function ensureGlowTexture(scene: Phaser.Scene, size: number): void {
+  const key = glowKey(size);
+  if (scene.textures.exists(key)) return;
+  const tex = scene.textures.createCanvas(key, size, size);
+  if (!tex) return;
+  const ctx = tex.getContext();
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  // Warm at the core, gone by the rim. The stops ARE the falloff curve.
+  g.addColorStop(0, 'rgba(255,230,186,0.95)');
+  g.addColorStop(0.22, 'rgba(255,206,144,0.52)');
+  g.addColorStop(0.5, 'rgba(247,180,108,0.2)');
+  g.addColorStop(0.78, 'rgba(232,152,82,0.05)');
+  g.addColorStop(1, 'rgba(220,140,70,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  tex.refresh();
 }
 
 export function buildLightLayer(
@@ -99,13 +131,21 @@ export function buildLightLayer(
   if (opts.hasDownExit) pools.push(STAIR_LIGHTS[1]);
   if (isDorm) pools.push(BED_LIGHT, BENCH_LIGHT);
 
-  // The ambient wash and the vignette are static; the pools are the Graphics.
   // Order matters and was measured: the pools are drawn FIRST (depth 4), the
   // ambient wash SECOND (depth 6), the vignette LAST (depth 8). Drawing the
   // ambient over the pools is what makes the pools read as warm against cold
   // instead of everything being tinted the same blue.
-  const poolG = scene.add.graphics().setDepth(4);
-  owned.push(poolG);
+  const poolImages: Array<{ img: Phaser.GameObjects.Image; base: number; phase: number }> = [];
+  for (const pool of pools) {
+    const size = Math.round(pool.radius * 2);
+    ensureGlowTexture(scene, size);
+    // `strength` is the peak alpha now, not a multiplicative factor: at 1.0 an
+    // ADD glow washes the wall to white, so the pools sit around 0.5.
+    const base = pool.strength * 0.5;
+    const img = scene.add.image(pool.x, pool.y, glowKey(size)).setBlendMode(Phaser.BlendModes.ADD).setAlpha(base).setDepth(4);
+    poolImages.push({ img, base, phase: pool.x * 0.7 % 10 });
+    owned.push(img);
+  }
 
   // Banded ambient, not one rectangle: the top band keeps the wall PNG's own
   // light, the wall band takes a light cold wash, the floor band a strong one.
@@ -132,13 +172,13 @@ export function buildLightLayer(
 
   // Each pool breathes on its own offset, so the light is alive — a lit room in
   // an abandoned tower is never perfectly steady.
-  const phases = pools.map((p) => (p.x * 0.7 + p.y * 0.3) % 10);
 
   const redraw = (time: number): void => {
-    poolG.clear();
-    for (let i = 0; i < pools.length; i++) {
-      const t = 0.5 + 0.5 * Math.sin((time / 2400) * Math.PI * 2 + phases[i]);
-      drawPool(poolG, pools[i], t);
+    for (const p of poolImages) {
+      // A slow breath: a lit room in an abandoned tower is never perfectly
+      // steady, and a still glow reads as a decal.
+      const t = 0.5 + 0.5 * Math.sin((time / 2600) * Math.PI * 2 + p.phase);
+      p.img.setAlpha(p.base * (0.82 + 0.36 * t));
     }
   };
   redraw(0);

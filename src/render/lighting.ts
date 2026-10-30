@@ -16,6 +16,13 @@ import Phaser from 'phaser';
 //
 // Everything is procedural: no asset is touched, the pool list is data, and a
 // floor declares its own lights.
+//
+// PHASER 4 GOTCHA, learned the hard way here: add.rectangle() ignores the
+// fillAlpha positional argument — every rectangle this module creates is fully
+// opaque unless setAlpha() is called on it. The first version of this file
+// painted an opaque blue sheet over the whole floor, which is exactly the
+// "everything is one flat colour" symptom it was written to fix. Any new
+// rectangle in this project needs .setAlpha(), never the 6th argument.
 
 export interface LightPool {
   x: number;
@@ -105,17 +112,17 @@ export function buildLightLayer(
   const clearY = height * AMBIENT_CLEAR_TOP;
   const floorTop = height * 0.62;
   owned.push(
-    scene.add.rectangle(width / 2, (clearY + floorTop) / 2, width, floorTop - clearY, AMBIENT_COLOR, AMBIENT_WALL_ALPHA).setDepth(6),
+    scene.add.rectangle(width / 2, (clearY + floorTop) / 2, width, floorTop - clearY, AMBIENT_COLOR).setAlpha(AMBIENT_WALL_ALPHA).setDepth(6),
   );
   owned.push(
-    scene.add.rectangle(width / 2, (floorTop + height) / 2, width, height - floorTop, AMBIENT_COLOR, AMBIENT_FLOOR_ALPHA).setDepth(6),
+    scene.add.rectangle(width / 2, (floorTop + height) / 2, width, height - floorTop, AMBIENT_COLOR).setAlpha(AMBIENT_FLOOR_ALPHA).setDepth(6),
   );
 
   for (let i = 0; i < VIGNETTE_BANDS.length; i++) {
     const a = VIGNETTE_BANDS[i];
     const inset = i * VIGNETTE_BAND_H;
     const mk = (x: number, y: number, w: number, h: number): void => {
-      owned.push(scene.add.rectangle(x, y, w, h, VIGNETTE_COLOR, a).setDepth(8));
+      owned.push(scene.add.rectangle(x, y, w, h, VIGNETTE_COLOR).setAlpha(a).setDepth(8));
     };
     mk(width / 2, inset + VIGNETTE_BAND_H / 2, width, VIGNETTE_BAND_H);
     mk(width / 2, height - inset - VIGNETTE_BAND_H / 2, width, VIGNETTE_BAND_H);

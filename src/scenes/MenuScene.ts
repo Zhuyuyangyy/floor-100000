@@ -48,7 +48,11 @@ export class MenuScene extends Phaser.Scene {
     this.helpOpen = false;
 
     const { width, height } = this.cameras.main;
-    this.add.rectangle(width / 2, height / 2, width, height, 0x121c24);
+    // Art pass: this rect used to sit at the default depth 0, which is ABOVE
+    // every negative-depth backdrop object — the sky, the moon and the tower
+    // were all drawn behind an opaque full-screen rectangle, and the title
+    // measured as 92% one colour. It goes to the very back now.
+    this.add.rectangle(width / 2, height / 2, width, height, 0x121c24).setDepth(-100);
 
     // The animated backdrop first, so everything else sits above it. Destroyed
     // on shutdown: a scene restart re-runs create(), and the old tower's window

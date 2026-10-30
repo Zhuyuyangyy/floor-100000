@@ -93,6 +93,27 @@ export const LIGHT: Ramp = {
 // ── roles ───────────────────────────────────────────────────────────────────
 // What a call site should ask for. These are the only names UI and world code
 // should use; reaching for PALETTE directly is for the drawers.
+// Text colours, measured against the panel surface with WCAG contrast.
+//
+// The disabled pair was #5a564e / #4a4640, which measure 2.7 and 2.0:1 - below
+// the 4.5:1 floor and, at 2.0, effectively invisible. Those were the colours
+// painting every locked character's name and every locked relic, so the player
+// saw a blank row where the information should be. Disabled text may be quieter
+// than body text, but it has to be readable enough to explain WHY it is locked.
+//
+//   TEXT.primary    #ece8d8   15.6-16.3:1  AAA
+//   TEXT.secondary  #a8a49a    7.7-8.1:1   AAA
+//   TEXT.dim        #8a867c    5.3-5.5:1   AA
+//   TEXT.disabled   #82796b    4.6:1       AA
+//   TEXT.disabledDeep #6e685c  3.4:1       readable, clearly secondary
+export const TEXT = {
+  primary: 0xece8d8,
+  secondary: 0xa8a49a,
+  dim: 0x8a867c,
+  disabled: 0x82796b,
+  disabledDeep: 0x6e685c,
+} as const;
+
 export const ROLE = {
   /** the void behind everything */
   void: PALETTE.ink,

@@ -1,10 +1,14 @@
 import Phaser from 'phaser';
 
+/** 24-bit colour to the '#rrggbb' a Phaser text style wants. */
+const hex = (c: number): string => `#${c.toString(16).padStart(6, '0')}`;
+
 import { CHARACTER_NAMES, CHARACTER_UNLOCKS, canSelect, loadMeta, saveMeta } from '../systems/metaProgress';
 import { MODE_BLURBS, MODE_LABELS, MODES } from '../systems/modes';
 import { relicDisplay } from '../systems/relics';
 import { getGame } from '../core/session';
 import { playSfx } from '../render/audio';
+import { PALETTE, TEXT } from '../render/palette.ts';
 import { buildPanel, createMarker, PANEL_DEPTH, placeMarker } from '../render/panels';
 import { buildPanelHeader, TYPE, UI } from '../render/uiKit';
 import { idleAnimKey, walkSheetKey } from '../render/walkcycle';
@@ -115,14 +119,14 @@ export class MetaSelectScene extends Phaser.Scene {
         .text(listX + 8, y + 6, CHARACTER_NAMES[id] ?? id, {
           fontFamily: 'monospace',
           fontSize: `${TYPE.body}px`,
-          color: unlocked ? '#ece8d8' : '#5a564e',
+          color: unlocked ? hex(TEXT.primary) : hex(TEXT.disabled),
         })
         .setDepth(depth + 7);
       const lock = this.add
         .text(listX + 8, y + 22, unlocked ? '可出战' : `最深第 ${need} 层解锁`, {
           fontFamily: 'monospace',
           fontSize: `${TYPE.caption}px`,
-          color: unlocked ? '#77c6a4' : '#4a4640',
+          color: unlocked ? hex(PALETTE.clothHigh) : hex(TEXT.disabled),
         })
         .setDepth(depth + 7);
       this.optionTexts.push(name);
@@ -149,7 +153,7 @@ export class MetaSelectScene extends Phaser.Scene {
         .text(colX, top + 108 + i * 26, r.unlocked ? `◆ ${r.name}` : `◇ 第 ${r.need} 层`, {
           fontFamily: 'monospace',
           fontSize: `${TYPE.caption}px`,
-          color: r.unlocked ? '#a8e0c8' : '#4a4640',
+          color: r.unlocked ? hex(PALETTE.clothHigh) : hex(TEXT.disabledDeep),
         })
         .setDepth(depth + 7);
     });
@@ -250,7 +254,7 @@ export class MetaSelectScene extends Phaser.Scene {
     this.optionTexts.forEach((t, i) => {
       const unlocked = canSelect(meta, ROSTER[i]);
       const isSelected = i === this.selected;
-      t.setColor(unlocked ? (isSelected ? '#f4b66a' : '#ece8d8') : '#5a564e');
+      t.setColor(unlocked ? (isSelected ? hex(PALETTE.lightHigh) : hex(TEXT.primary)) : hex(TEXT.disabled));
       // The selected row gets a band, same language as every other list.
       if (isSelected) {
         t.setDepth(PANEL_DEPTH.menu.help + 8);

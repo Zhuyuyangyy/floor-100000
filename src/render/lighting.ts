@@ -57,6 +57,33 @@ const BENCH_LIGHT: LightPool = { x: 480, y: 286, radius: 86, strength: 0.95, col
 const AMBIENT_COLOR = 0x24405e;
 const AMBIENT_FLOOR_ALPHA = 0.4;
 const AMBIENT_WALL_ALPHA = 0.16;
+
+// ── per-floor ambience ────────────────────────────────────────────────────
+// One ambient colour for every floor made the tower feel like one corridor
+// repeated five times - which, mechanically, it is, so the art has to do the
+// work of making each level a different place. Each floor gets its own ambient
+// hue and strength: home is neutral, the worker housing is cold, the store room
+// is a green darkness, maintenance is cyan steel, and the canteen - the floor
+// that used to be social, and the one with the guardian on it - is warm and
+// wrong. The values are deliberately restrained; an ambient strong enough to
+// name itself would fight the warm lamps.
+export interface FloorAmbience {
+  color: number;
+  wallAlpha: number;
+  floorAlpha: number;
+}
+
+export const FLOOR_AMBIENCE: Record<number, FloorAmbience> = {
+  1: { color: 0x2a3348, wallAlpha: 0.12, floorAlpha: 0.3 }, // home: soft neutral blue
+  2: { color: 0x24405e, wallAlpha: 0.16, floorAlpha: 0.4 }, // worker housing: cold
+  3: { color: 0x1e3a34, wallAlpha: 0.2, floorAlpha: 0.44 }, // store room: green dark
+  4: { color: 0x1a3a48, wallAlpha: 0.18, floorAlpha: 0.42 }, // maintenance: cyan steel
+  5: { color: 0x4a2a22, wallAlpha: 0.16, floorAlpha: 0.38 }, // canteen: warm and wrong
+};
+
+export function ambienceFor(floor: number): FloorAmbience {
+  return FLOOR_AMBIENCE[floor] ?? FLOOR_AMBIENCE[2];
+}
 /** the fraction of the canvas height where the wall art keeps its own light */
 const AMBIENT_CLEAR_TOP = 0.16;
 
@@ -121,9 +148,18 @@ function ensureGlowTexture(scene: Phaser.Scene, size: number): void {
 
 export function buildLightLayer(
   scene: Phaser.Scene,
-  opts: { width: number; height: number; isDorm: boolean; hasUpExit: boolean; hasDownExit: boolean },
+  opts: {
+    width: number;
+    height: number;
+    isDorm: boolean;
+    hasUpExit: boolean;
+    hasDownExit: boolean;
+    /** overrides the default cold wash; see FLOOR_AMBIENCE */
+    ambience?: FloorAmbience;
+  },
 ): LightLayer {
   const { width, height, isDorm } = opts;
+  const amb = opts.ambience ?? { color: AMBIENT_COLOR, wallAlpha: AMBIENT_WALL_ALPHA, floorAlpha: AMBIENT_FLOOR_ALPHA };
   const owned: Phaser.GameObjects.GameObject[] = [];
 
   const pools: LightPool[] = [];
@@ -156,10 +192,10 @@ export function buildLightLayer(
   const clearY = height * AMBIENT_CLEAR_TOP;
   const floorTop = height * 0.62;
   owned.push(
-    scene.add.rectangle(width / 2, (clearY + floorTop) / 2, width, floorTop - clearY, AMBIENT_COLOR).setAlpha(AMBIENT_WALL_ALPHA).setDepth(0),
+    scene.add.rectangle(width / 2, (clearY + floorTop) / 2, width, floorTop - clearY, amb.color).setAlpha(amb.wallAlpha).setDepth(0),
   );
   owned.push(
-    scene.add.rectangle(width / 2, (floorTop + height) / 2, width, height - floorTop, AMBIENT_COLOR).setAlpha(AMBIENT_FLOOR_ALPHA).setDepth(0),
+    scene.add.rectangle(width / 2, (floorTop + height) / 2, width, height - floorTop, amb.color).setAlpha(amb.floorAlpha).setDepth(0),
   );
 
   for (let i = 0; i < VIGNETTE_BANDS.length; i++) {

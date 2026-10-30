@@ -79,7 +79,7 @@ import { WALK_CHARACTERS, attackAnimKey, hurtAnimKey, idleAnimKey, searchAnimKey
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
-import { addGlow, buildLightLayer, type LightLayer } from '../render/lighting';
+import { addGlow, ambienceFor, buildLightLayer, type LightLayer } from '../render/lighting';
 import {
   addContactShadow,
   buildCeilingLights,
@@ -1112,6 +1112,7 @@ export class GameScene extends Phaser.Scene {
       isDorm: true,
       hasUpExit: true,
       hasDownExit: false,
+      ambience: ambienceFor(STARTING_FLOOR),
     });
   }
 
@@ -1170,6 +1171,10 @@ export class GameScene extends Phaser.Scene {
       isDorm: false,
       hasUpExit: hasUpExit(floor),
       hasDownExit: hasDownExit(floor),
+      // Each floor's own atmosphere: cold housing, green storage, cyan
+      // maintenance, warm-and-wrong canteen. Without this the tower is one
+      // corridor repeated.
+      ambience: ambienceFor(floor),
     });
     this.floorObjects.push(...[]); // the layer owns its own objects
   }

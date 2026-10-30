@@ -87,6 +87,7 @@ import {
   addContactShadow,
   buildCeilingLights,
   buildFloorClutter,
+  buildLeakEffect,
   buildForeground,
   buildRoomDepth,
   buildSurfaceDetail,
@@ -258,6 +259,8 @@ export class GameScene extends Phaser.Scene {
   private lightLayer?: LightLayer;
   /** the player's contact shadow, moved with them every frame */
   private playerShadow: Phaser.GameObjects.GameObject[] = [];
+  /** puddles and drips while a leak event is running on this floor */
+  private leakObjects: Phaser.GameObjects.GameObject[] = [];
   private upgradeBoard!: Phaser.GameObjects.Text;
   private keyC!: Phaser.Input.Keyboard.Key;
   private keyM!: Phaser.Input.Keyboard.Key;
@@ -1324,6 +1327,9 @@ export class GameScene extends Phaser.Scene {
       ...buildAerialHaze(this, { width: FLOOR_WIDTH, wallBottom: wallH, hazeColor: ambienceFor(floor).color, strength: 0.34 }),
       ...buildWallDressing(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
       ...buildFloorClutter(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
+      // A flooding floor looks like one. Held on the scene so the effect can be
+      // torn down when the event clears instead of stacking a second set.
+      ...this.refreshLeakEffect(floor),
     );
 
     // OVERHAUL Art Pass: the lighting layer goes on after the props, so the
@@ -1729,6 +1735,18 @@ export class GameScene extends Phaser.Scene {
     // OVERHAUL Art Pass: the pools breathe, so the light is alive rather than
     // a painted-on decal.
     this.lightLayer?.update(this.time.now, this.game.loop.delta);
+  }
+
+  /** Puddles and drips while this floor is the leaking one. */
+  private refreshLeakEffect(floor: number): Phaser.GameObjects.GameObject[] {
+    for (const o of this.leakObjects) o.destroy();
+    this.leakObjects = [];
+    const event = getGame().worldEvents.activeEvent;
+    if (event?.type !== 'leak' || event.floor !== floor) return [];
+    // The puddles sit on the floor line, which the wall height tells us.
+    const floorY = FLOOR_HEIGHT - FLOOR_BAND;
+    this.leakObjects = buildLeakEffect(this, { width: FLOOR_WIDTH, floorY, seed: floor * 31 });
+    return [];
   }
 
   private nearCraftStation(state: GameState): boolean {
@@ -2736,6 +2754,9 @@ export class GameScene extends Phaser.Scene {
       this.lastActiveEvent = event;
       this.floorView = getFloorView(state, state.currentFloor);
       this.rebuildGround();
+      // A leak that starts or clears while the player is standing here has to
+      // change the floor they are looking at, not wait for a re-entry.
+      this.refreshLeakEffect(state.currentFloor);
     }
 
     if (tick.died || tick.won) {

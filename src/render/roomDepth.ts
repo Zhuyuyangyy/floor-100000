@@ -540,3 +540,49 @@ export function buildAerialHaze(scene: Phaser.Scene, opts: HazeOpts): Phaser.Gam
   }
   return out;
 }
+
+// ── the leak ──────────────────────────────────────────────────────────────
+// The world events had no visual signature: blackout darkens the frame (through
+// the night overlay) and the wanderer is an NPC, but a leak only changed which
+// loot was damp. Measured across the three states, the frame was
+// indistinguishable. A floor that is flooding should look like it.
+export interface LeakOpts {
+  width: number;
+  floorY: number;
+  seed: number;
+}
+
+export function buildLeakEffect(scene: Phaser.Scene, opts: LeakOpts): Phaser.GameObjects.GameObject[] {
+  const { width, floorY, seed } = opts;
+  const out: Phaser.GameObjects.GameObject[] = [];
+  // Standing water: flattened ellipses on the floor, lit at the top edge so they
+  // read as wet rather than as holes.
+  for (let i = 0; i < 7; i++) {
+    const x = 60 + hh(seed + i * 7.7) * (width - 120);
+    const w = 34 + hh(seed + i * 3.1) * 70;
+    const h = 5 + hh(seed + i * 5.3) * 4;
+    const g = scene.add.graphics().setDepth(3);
+    g.fillStyle(PALETTE.clothDeep, 0.55);
+    g.fillEllipse(x, floorY + 2, w, h);
+    g.fillStyle(PALETTE.clothHigh, 0.22);
+    g.fillEllipse(x, floorY, w * 0.82, h * 0.45);
+    out.push(g);
+  }
+  // Ceiling drips: a short vertical line from above, on a slow cycle so the
+  // floor looks like it is still coming down.
+  for (let i = 0; i < 5; i++) {
+    const x = 90 + hh(seed + i * 11.9) * (width - 180);
+    const drip = scene.add.rectangle(x, 120, 1, 7, PALETTE.clothHigh).setAlpha(0.5).setDepth(3);
+    scene.tweens.add({
+      targets: drip,
+      y: floorY - 4,
+      alpha: { from: 0.55, to: 0 },
+      duration: 900 + hh(seed + i) * 700,
+      repeat: -1,
+      delay: i * 420,
+      ease: 'Quad.In',
+    });
+    out.push(drip);
+  }
+  return out;
+}

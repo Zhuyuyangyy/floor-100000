@@ -70,6 +70,7 @@ import {
   STAT_COLORS,
   TYPE,
   UI,
+  buildListRow,
   buildPanelHeader,
   buildPanelWell,
   drawStatBar,
@@ -565,33 +566,64 @@ export class GameScene extends Phaser.Scene {
     const { width, height } = this.cameras.main;
     const cx = width / 2;
     const cy = height / 2;
-    const panelW = 400;
-    const panelH = 250;
+    const panelW = 440;
+    const panelH = 248;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    const depth = PANEL_DEPTH.game.dialogue;
 
-    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', PANEL_DEPTH.game.dialogue));
+    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
+    this.encounterObjects.push(...buildPanelHeader(this, left, top, panelW, '行商', UI.good, depth + 5));
+
+    // The purse, right-aligned on the header row: the one number that decides
+    // what the rest of this panel means.
     this.encounterObjects.push(
-      this.add.text(cx, top + 18, '行商', { fontFamily: 'monospace', fontSize: '16px', color: '#a8e0c8' }).setOrigin(0.5),
+      this.add
+        .text(left + panelW - 10, top + 10, `${state.player.gold} 金`, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: '#f4b66a' })
+        .setOrigin(1, 0.5)
+        .setDepth(depth + 6),
     );
-    this.encounterObjects.push(
-      this.add.text(cx, top + 38, `金币：${state.player.gold}`, { fontFamily: 'monospace', fontSize: '12px', color: '#f4b66a' }).setOrigin(0.5),
-    );
+
+    // Stock as rows: icon, name, price, how many the player already carries.
+    // The icon is the item's own 16x16 art, so the shop speaks the same visual
+    // language as the bag.
     this.shopEntries.forEach((e, i) => {
-      const cursor = i === this.shopSelected ? '>' : ' ';
-      const owned = countItem(state.player.inventory, e.itemId);
+      const y = top + 30 + i * 30;
+      const selected = i === this.shopSelected;
+      this.encounterObjects.push(
+        ...buildListRow(this, left + 8, y, panelW - 16, depth + 5, {
+          iconKey: itemIconKey(e.itemId),
+          label: getItem(e.itemId).displayName,
+          value: `${e.price} 金 · 持 ${countItem(state.player.inventory, e.itemId)}`,
+          selected,
+        }),
+      );
+      if (!selected) return;
+      // The selected row also shows what the trade would do, since the only
+      // feedback otherwise arrives after the gold is already spent.
+      const canBuy = state.player.gold >= e.price;
       this.encounterObjects.push(
         this.add
-          .text(left + 24, top + 62 + i * 24, `${cursor} ${getItem(e.itemId).displayName} —— ${e.price} 金（持有 ${owned}）`, {
+          .text(left + panelW - 20, y + 20, canBuy ? 'Enter 买入' : '金币不足', {
             fontFamily: 'monospace',
-            fontSize: '13px',
-            color: i === this.shopSelected ? '#f4b66a' : '#ece8d8',
+            fontSize: `${TYPE.caption}px`,
+            color: canBuy ? '#77c6a4' : '#e8907c',
           })
-          .setOrigin(0, 0),
+          .setOrigin(1, 0.5)
+          .setDepth(depth + 7),
       );
     });
+
+    // The sell hint lives in its own strip at the bottom: the stock list is
+    // what the player is browsing, and the sell mechanics apply to the whole bag
+    // rather than to the highlighted row.
+    const footY = top + panelH - 34;
+    this.encounterObjects.push(...buildPanelWell(this, left + 8, footY, panelW - 16, 22, depth + 5));
     this.encounterObjects.push(
-      this.add.text(cx, top + panelH - 30, 'Enter 买入 1 件 · S 卖出 1 件 · ESC 离开', { fontFamily: 'monospace', fontSize: '11px', color: '#8a867c' }).setOrigin(0.5),
+      this.add
+        .text(left + 16, footY + 11, 'S 卖出背包里的一件  ·  ESC 离开', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#a8a49a' })
+        .setOrigin(0, 0.5)
+        .setDepth(depth + 7),
     );
   }
 

@@ -131,10 +131,14 @@ export function buildLightLayer(
   if (opts.hasDownExit) pools.push(STAIR_LIGHTS[1]);
   if (isDorm) pools.push(BED_LIGHT, BENCH_LIGHT);
 
-  // Order matters and was measured: the pools are drawn FIRST (depth 4), the
-  // ambient wash SECOND (depth 6), the vignette LAST (depth 8). Drawing the
-  // ambient over the pools is what makes the pools read as warm against cold
-  // instead of everything being tinted the same blue.
+  // Depth rule: the ambient wash is at depth 0 — the same as the room art, added
+  // after it — so it tints the WALL and the floor but leaves the props and the
+  // player at full colour. At depth 6 it also washed over the player, who then
+  // read as a dark blob; a cold tint belongs to the room, not to the character.
+  //
+  // The glows are at depth 4 (ABOVE the props and the player) on purpose: an
+  // additive glow over the character is what makes standing in a lamp pool look
+  // like standing in a lamp pool. The vignette stays at 8, above everything.
   const poolImages: Array<{ img: Phaser.GameObjects.Image; base: number; phase: number }> = [];
   for (const pool of pools) {
     const size = Math.round(pool.radius * 2);
@@ -152,10 +156,10 @@ export function buildLightLayer(
   const clearY = height * AMBIENT_CLEAR_TOP;
   const floorTop = height * 0.62;
   owned.push(
-    scene.add.rectangle(width / 2, (clearY + floorTop) / 2, width, floorTop - clearY, AMBIENT_COLOR).setAlpha(AMBIENT_WALL_ALPHA).setDepth(6),
+    scene.add.rectangle(width / 2, (clearY + floorTop) / 2, width, floorTop - clearY, AMBIENT_COLOR).setAlpha(AMBIENT_WALL_ALPHA).setDepth(0),
   );
   owned.push(
-    scene.add.rectangle(width / 2, (floorTop + height) / 2, width, height - floorTop, AMBIENT_COLOR).setAlpha(AMBIENT_FLOOR_ALPHA).setDepth(6),
+    scene.add.rectangle(width / 2, (floorTop + height) / 2, width, height - floorTop, AMBIENT_COLOR).setAlpha(AMBIENT_FLOOR_ALPHA).setDepth(0),
   );
 
   for (let i = 0; i < VIGNETTE_BANDS.length; i++) {

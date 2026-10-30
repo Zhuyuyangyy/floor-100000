@@ -79,6 +79,7 @@ import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
 import { addGlow, buildLightLayer, type LightLayer } from '../render/lighting';
+import { buildRoomDepth } from '../render/roomDepth';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
@@ -1040,6 +1041,23 @@ export class GameScene extends Phaser.Scene {
 
     this.floorObjects.push(wall, floor, g);
 
+    // OVERHAUL Art Pass 2: ceiling shadow, baseboard seam, floor gradient and
+    // reflections under the lights — the four cues that make a flat side view
+    // read as a room with depth.
+    const lampXs: number[] = [];
+    for (let r = 0; r < ROOM_COUNT; r++) {
+      const cx = r * ROOM_WIDTH + ROOM_WIDTH / 2;
+      lampXs.push(cx + (r % 2 === 0 ? 96 : -96));
+    }
+    this.floorObjects.push(
+      ...buildRoomDepth(this, {
+        width: FLOOR_WIDTH,
+        wallBottom: wallH,
+        height: FLOOR_HEIGHT,
+        lightXs: lampXs,
+      }),
+    );
+
     // OVERHAUL Art Pass: the lighting layer over the dorm too — the bed and the
     // workbench are where the player works, so they get the warm pools.
     this.lightLayer?.destroy();
@@ -1078,6 +1096,17 @@ export class GameScene extends Phaser.Scene {
       drawCorridorRoom({ scene: this, g, floor, roomX: r * ROOM_WIDTH, floorY: wallH, room: r, objects: props });
     }
     this.floorObjects.push(g, ...props);
+
+    // OVERHAUL Art Pass 2: the same depth cues as the dorm, with the
+    // stairwells as this floor's light sources.
+    this.floorObjects.push(
+      ...buildRoomDepth(this, {
+        width: FLOOR_WIDTH,
+        wallBottom: wallH,
+        height: FLOOR_HEIGHT,
+        lightXs: [40, 1240],
+      }),
+    );
 
     // OVERHAUL Art Pass: the lighting layer goes on after the props, so the
     // pools and the ambient wash tint everything the room already drew.

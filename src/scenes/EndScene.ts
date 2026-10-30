@@ -49,9 +49,9 @@ export class EndScene extends Phaser.Scene {
     // palette's ramps, so the end card belongs to the same world as the run.
     this.add
       .rectangle(width / 2, height / 2, width, height, won ? PALETTE.clothDeep : PALETTE.lightDeep)
-      .setAlpha(0.3)
+      .setAlpha(0.26)
       .setDepth(-29);
-    this.add.rectangle(width / 2, height / 2, width, height, PALETTE.ink).setAlpha(0.62).setDepth(-28);
+    this.add.rectangle(width / 2, height / 2, width, height, PALETTE.ink).setAlpha(0.46).setDepth(-28);
 
     // ── the card ────────────────────────────────────────────────────────────
     const cx = width / 2;

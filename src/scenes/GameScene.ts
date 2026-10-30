@@ -962,18 +962,35 @@ export class GameScene extends Phaser.Scene {
     const { width, height } = this.cameras.main;
     const cx = width / 2;
     const cy = height / 2;
-    this.encounterObjects.push(...buildPanel(this, cx, cy, 440, 170, 'yellow', PANEL_DEPTH.game.dialogue));
-    this.encounterObjects.push(
-      this.add.text(cx, cy - 60, outcome === 'win' ? (isBoss ? '守门人倒下了' : '战斗胜利') : '敌人逃走了', { fontFamily: 'monospace', fontSize: '16px', color: '#a8e0c8' }).setOrigin(0.5),
-    );
+    // OVERHAUL UI: the outcome uses the same header strip and log well as the
+    // fight itself, so the panel does not change shape when the fight ends.
+    const outDepth = PANEL_DEPTH.game.dialogue;
+    const outW = 440;
+    const outH = 170;
+    const outLeft = cx - outW / 2;
+    const outTop = cy - outH / 2;
+    const headline = outcome === 'win' ? (isBoss ? '守门人倒下了' : '战斗胜利') : '敌人逃走了';
+    this.encounterObjects.push(...buildPanel(this, cx, cy, outW, outH, 'yellow', outDepth));
+    this.encounterObjects.push(...buildPanelHeader(this, outLeft, outTop, outW, headline, UI.good, outDepth + 5));
+    this.encounterObjects.push(...buildPanelWell(this, outLeft + 12, outTop + 26, outW - 24, 62, outDepth + 5));
     const tail = combat.log.slice(-3);
     tail.forEach((line, i) => {
       this.encounterObjects.push(
-        this.add.text(cx - 200, cy - 30 + i * 18, line, { fontFamily: 'monospace', fontSize: '12px', color: '#ece8d8', wordWrap: { width: 400 } }).setOrigin(0, 0),
+        this.add
+          .text(outLeft + 20, outTop + 38 + i * 17, line, {
+            fontFamily: 'monospace',
+            fontSize: `${TYPE.caption}px`,
+            color: i === tail.length - 1 ? '#ece8d8' : '#8a867c',
+            wordWrap: { width: outW - 40 },
+          })
+          .setDepth(outDepth + 7),
       );
     });
     this.encounterObjects.push(
-      this.add.text(cx, cy + 60, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: '11px', color: '#8a867c' }).setOrigin(0.5),
+      this.add
+        .text(cx, outTop + outH - 12, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#8a867c' })
+        .setOrigin(0.5)
+        .setDepth(outDepth + 7),
     );
     // The fight is over: the outcome screen waits for one Enter, then
     // closeCombat clears state.combat and the floor's spots.
@@ -1003,24 +1020,51 @@ export class GameScene extends Phaser.Scene {
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
-    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.dialogue));
+    const depth = PANEL_DEPTH.game.dialogue;
+    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
+    // OVERHAUL UI: header strip, the message in an inset well, and choices as
+    // banded rows instead of '> label' text runs.
     this.encounterObjects.push(
-      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: 'monospace', fontSize: '16px', color: isBoss ? '#e8907c' : '#f4b66a' }).setOrigin(0.5),
+      ...buildPanelHeader(this, left, top, panelW, ENCOUNTER_TITLES[enc.encounter.kind], isBoss ? UI.danger : UI.accent, depth + 5),
     );
+    this.encounterObjects.push(...buildPanelWell(this, left + 12, top + 26, panelW - 24, 48, depth + 5));
     this.encounterObjects.push(
-      this.add.text(left + 20, top + 44, enc.encounter.message, { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8', wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+      this.add
+        .text(left + 20, top + 50, enc.encounter.message, {
+          fontFamily: 'monospace',
+          fontSize: `${TYPE.body}px`,
+          color: '#ece8d8',
+          wordWrap: { width: panelW - 40 },
+        })
+        .setOrigin(0, 0.5)
+        .setDepth(depth + 7),
     );
     if (!enc.resolved) {
       enc.choices.forEach((choice, i) => {
-        const cursor = i === enc.selected ? '>' : ' ';
+        const y = top + 84 + i * 28;
+        const selected = i === enc.selected;
+        if (selected) {
+          this.encounterObjects.push(
+            this.add.rectangle(left + 12, y, panelW - 24, 26, UI.accent).setOrigin(0, 0).setAlpha(0.14).setDepth(depth + 5),
+            this.add.rectangle(left + 12, y, 2, 26, UI.accent).setOrigin(0, 0).setDepth(depth + 6),
+          );
+        }
         this.encounterObjects.push(
           this.add
-            .text(left + 24, top + 96 + i * 24, `${cursor} ${CHOICE_LABELS[choice]}`, { fontFamily: 'monospace', fontSize: '14px', color: i === enc.selected ? '#f4b66a' : '#a8a49a' })
-            .setOrigin(0, 0),
+            .text(left + 24, y + 13, CHOICE_LABELS[choice], {
+              fontFamily: 'monospace',
+              fontSize: `${TYPE.body}px`,
+              color: selected ? '#f4b66a' : '#a8a49a',
+            })
+            .setOrigin(0, 0.5)
+            .setDepth(depth + 7),
         );
       });
       this.encounterObjects.push(
-        this.add.text(cx, top + panelH - 14, '↑/↓ 选择 · Enter 确认 · ESC 离开', { fontFamily: 'monospace', fontSize: '11px', color: '#8a867c' }).setOrigin(0.5),
+        this.add
+          .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确认 · ESC 离开', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#8a867c' })
+          .setOrigin(0.5)
+          .setDepth(depth + 7),
       );
     }
   }

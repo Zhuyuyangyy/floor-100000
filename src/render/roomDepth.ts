@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 
-import { addGlow } from './lighting';
+import { addGlow, LIGHT_DEPTH } from './lighting';
 import { PALETTE } from './palette.ts';
 
 // OVERHAUL Art Pass 2: room depth.
@@ -102,7 +102,11 @@ export function buildRoomDepth(scene: Phaser.Scene, opts: RoomDepthOpts): Phaser
   //    the viewer. One stretched glow each — cheap, and it is the cue that
   //    reads "wet concrete" in the reference photo.
   for (const lx of opts.lightXs) {
-    const streak = addGlow(scene, lx, wallBottom + floorH * 0.55, 40, 0.16, 4);
+    // LIGHT_DEPTH, not 4. These two were the only glows still under the night
+    // overlay (depth 23), so the darker the night got the dimmer the ceiling
+    // fixtures and the floor reflections became - backwards, and invisible until
+    // the overlay started rendering at all.
+    const streak = addGlow(scene, lx, wallBottom + floorH * 0.55, 40, 0.16, LIGHT_DEPTH);
     streak.setScale(0.55, 1.5);
     out.push(streak);
   }
@@ -307,7 +311,7 @@ export function buildCeilingLights(scene: Phaser.Scene, opts: CeilingLightOpts):
     out.push(scene.add.rectangle(x - w / 2 + 2, top + 1, w - 4, 3, PALETTE.lightHot).setOrigin(0, 0).setDepth(3));
     // Its spill: a wide flat glow under the tube. Flattened so it reads as light
     // falling from a strip rather than a point.
-    const glow = addGlow(scene, x, top + 12, 56, 0.42, 4);
+    const glow = addGlow(scene, x, top + 12, 56, 0.42, LIGHT_DEPTH);
     glow.setScale(1.5, 0.8);
     out.push(glow);
     // Two thin hangers up to the ceiling.

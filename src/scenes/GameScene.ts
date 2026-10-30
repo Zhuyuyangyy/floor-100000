@@ -69,6 +69,7 @@ import { WALK_CHARACTERS, attackAnimKey, hurtAnimKey, idleAnimKey, searchAnimKey
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
+import { buildLightLayer, type LightLayer } from '../render/lighting';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
@@ -235,6 +236,9 @@ export class GameScene extends Phaser.Scene {
   private craftMarker!: Phaser.GameObjects.Image;
   private craftSelected = 0;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
+  // OVERHAUL Art Pass: the floor's lighting layer (warm pools, cool ambient,
+  // stepped vignette). Rebuilt per floor; destroyed with the floor.
+  private lightLayer?: LightLayer;
   private upgradeBoard!: Phaser.GameObjects.Text;
   private keyC!: Phaser.Input.Keyboard.Key;
   private keyM!: Phaser.Input.Keyboard.Key;
@@ -1033,6 +1037,17 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.floorObjects.push(wall, floor, g);
+
+    // OVERHAUL Art Pass: the lighting layer over the dorm too — the bed and the
+    // workbench are where the player works, so they get the warm pools.
+    this.lightLayer?.destroy();
+    this.lightLayer = buildLightLayer(this, {
+      width: FLOOR_WIDTH,
+      height: FLOOR_HEIGHT,
+      isDorm: true,
+      hasUpExit: true,
+      hasDownExit: false,
+    });
   }
 
   // Floors 2-5 — corridors. They share the dorm's base (art wall, art floor) so
@@ -1061,6 +1076,18 @@ export class GameScene extends Phaser.Scene {
       drawCorridorRoom({ scene: this, g, floor, roomX: r * ROOM_WIDTH, floorY: wallH, room: r, objects: props });
     }
     this.floorObjects.push(g, ...props);
+
+    // OVERHAUL Art Pass: the lighting layer goes on after the props, so the
+    // pools and the ambient wash tint everything the room already drew.
+    this.lightLayer?.destroy();
+    this.lightLayer = buildLightLayer(this, {
+      width: FLOOR_WIDTH,
+      height: FLOOR_HEIGHT,
+      isDorm: false,
+      hasUpExit: hasUpExit(floor),
+      hasDownExit: hasDownExit(floor),
+    });
+    this.floorObjects.push(...[]); // the layer owns its own objects
   }
 
   // The stairwells, drawn with the tile_stairs_* textures instead of a flat
@@ -1341,6 +1368,9 @@ export class GameScene extends Phaser.Scene {
 
   private applyNightLighting(): void {
     this.nightOverlay.setAlpha(nightOverlayAlpha(getGame()));
+    // OVERHAUL Art Pass: the pools breathe, so the light is alive rather than
+    // a painted-on decal.
+    this.lightLayer?.update(this.time.now);
   }
 
   private nearCraftStation(state: GameState): boolean {

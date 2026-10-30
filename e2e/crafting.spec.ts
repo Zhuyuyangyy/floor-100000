@@ -210,9 +210,9 @@ test('the purifier converts dirty water to clean water', async ({ page }) => {
     const g = (window as unknown as {
       __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean; y: number }> } } | null } };
     }).__PHASER_GAME__;
-    // OVERHAUL UI: the HUD is a bar, so the flash moved from y=60 to y=52.
+    // OVERHAUL UI: the HUD is a bar, so the flash sits at HUD_BAR_H(30) + 26 = 56.
     for (const o of g?.scene.getScene('Game')?.children.list ?? []) {
-      if (o.type === 'Text' && o.visible && Math.abs(o.y - 52) < 2) return o.text ?? '';
+      if (o.type === 'Text' && o.visible && Math.abs(o.y - 56) < 2) return o.text ?? '';
     }
     return '';
   });

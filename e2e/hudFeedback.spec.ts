@@ -138,13 +138,13 @@ test('all three HUD feedback objects clear the deepest panel', async ({ page }) 
     // pixel from the bag-full warning at y=86, and a y-probe silently returns the
     // wrong object.
     // OVERHAUL UI: the HUD is a bar now, so the three feedback objects have
-    // fixed rows of their own — flash at HUD_BAR_H + 26 = 52, bag-full warning
-    // below it, and the hint on the foot bar at 360 - 8 = 352. Matched by
-    // content as well, because a bare y-probe here once read a panel's copy of
-    // the same string.
-    const flash = list.find((o) => o.type === 'Text' && Math.abs(o.y - 52) < 2);
+    // fixed rows of their own — flash at HUD_BAR_H(30) + 26 = 56, the bag-full
+    // warning below it, and the hint centred on the foot bar at
+    // 360 - HUD_FOOT_H(20)/2 = 350. Matched by content as well, because a bare
+    // y-probe here once read a panel's copy of the same string.
+    const flash = list.find((o) => o.type === 'Text' && Math.abs(o.y - 56) < 2);
     const bagFull = list.find((o) => o.type === 'Text' && (o.text ?? '').includes('否则搜刮会留在原处'));
-    const hint = list.find((o) => o.type === 'Text' && Math.abs(o.y - 352) < 2 && (o.text ?? '').includes('ESC 菜单'));
+    const hint = list.find((o) => o.type === 'Text' && Math.abs(o.y - 350) < 2 && (o.text ?? '').includes('ESC 菜单'));
     return { flash: flash?.depth, bagFull: bagFull?.depth, hint: hint?.depth };
   });
 

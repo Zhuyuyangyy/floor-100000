@@ -27,19 +27,26 @@ export type UiObject =
 /** everything snaps to this */
 export const UI_UNIT = 4;
 /** tall enough to hold a 9px label and a 4px bar */
-export const HUD_BAR_H = 26;
-export const HUD_FOOT_H = 16;
+export const HUD_BAR_H = 30;
+export const HUD_FOOT_H = 20;
 
 // ── the type scale ──────────────────────────────────────────────────────────
 // Only three sizes. The old UI mixed 11/12/13/16/18/22/40 with no rule, which
 // is most of why it read as a prototype.
+//
+// SIZES ARE A LEGIBILITY FLOOR, NOT A TASTE CHOICE. The canvas is 640x360 and
+// the page displays it at 2x, so an 8px glyph is drawn into 8 device pixels and
+// then doubled — for Latin monospace that reads as chunky pixel art, but a
+// Chinese glyph carved in 8px is an illegible smudge. That is the "界面不清晰"
+// complaint, and it was a real defect: the caption size is now 10, the body 12
+// and titles 15, which is the smallest this script stays readable at.
 export const TYPE = {
   /** panel and HUD titles */
-  title: 13,
+  title: 15,
   /** body rows, values */
-  body: 10,
+  body: 12,
   /** captions, hints, the smallest legal text */
-  caption: 8,
+  caption: 10,
 } as const;
 
 // ── the colour roles ────────────────────────────────────────────────────────
@@ -185,7 +192,7 @@ export function buildPanelWell(
  * label and a 10px value with 4px of air — and 24 rows fit a 240px panel, which
  * is why the panels can be a third of the screen instead of half.
  */
-export const ROW_H = 24;
+export const ROW_H = 26;
 
 /**
  * One list row: icon slot, label, and a right-aligned value. Returns the

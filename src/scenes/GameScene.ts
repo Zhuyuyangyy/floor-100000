@@ -111,9 +111,9 @@ const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: stri
 // Columns on the shared 4px grid: floor badge, clock, four stat bars (label +
 // bar each), then the right-aligned score and gold. These are computed once
 // here rather than sprinkled through buildHud, so moving a column is one edit.
-const HUD_STAT_X = 96;
-const HUD_STAT_PITCH = 74;
-const HUD_STAT_BAR_W = 46;
+const HUD_STAT_X = 100;
+const HUD_STAT_PITCH = 84;
+const HUD_STAT_BAR_W = 52;
 const PAUSE_OPTIONS = ['继续游戏', '塔楼地图', '重新开始', '返回标题'];
 
 // OVERHAUL: the daily objective's one-line label, per goal kind.
@@ -1341,7 +1341,7 @@ export class GameScene extends Phaser.Scene {
     this.lastStats = key;
     this.barsGfx.clear();
     values.forEach((v, i) => {
-      const x = HUD_STAT_X + i * HUD_STAT_PITCH + 20;
+      const x = HUD_STAT_X + i * HUD_STAT_PITCH + 24;
       const color = STAT_COLORS[STAT_BARS[i].key] ?? UI.good;
       drawStatBar(this.barsGfx, x, HUD_BAR_H / 2 - 2, HUD_STAT_BAR_W, 4, v / 100, color);
     });

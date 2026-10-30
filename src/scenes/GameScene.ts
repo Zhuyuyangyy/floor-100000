@@ -2897,6 +2897,10 @@ export class GameScene extends Phaser.Scene {
     const step = stepWandererAI(ai!, state.player.x, delta);
     const dir = Math.sign(state.player.x - this.wanderer.x);
     if (dir !== 0) this.wanderer.x += dir * WANDERER_SPEED * step.speedMultiplier * (delta / 1000);
+    // The sheet is drawn facing right, so a thing that walks left must be
+    // flipped or it moonwalks at the player. The player sprite has done this
+    // since the beginning; the wanderer never did.
+    if (dir !== 0) this.wanderer.setFlipX(dir < 0);
     // A lunge hit lands double: the wind-up is the tell, the lunge is the bill.
     const damage = ai!.state === 'lunge' ? WANDERER_DAMAGE * 2 : WANDERER_DAMAGE;
     if (Math.abs(this.wanderer.x - state.player.x) <= 12 && this.time.now - this.wandererHitAt >= WANDERER_HIT_COOLDOWN_MS) {

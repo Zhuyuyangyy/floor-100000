@@ -730,12 +730,35 @@ function drawArm(cv: PixelCanvas, pose: Pose, col: CharacterColors, sign: -1 | 1
   // invisible — the audit dump showed no arm at all in the walk frames. Wider
   // limbs, and the near arm's anchor sits clear of the torso's edge so it reads
   // as an arm passing in front of the body rather than a stripe on it.
-  taperedLimb(cv, shoulder, elbow, 6, 4.5, sign === 1 ? col.cloth : col.clothDark);
-  taperedLimb(cv, elbow, hand, 4.5, 3.5, sign === 1 ? col.skin : col.skinDark);
-  // A fist, because a tapering point reads as a wire.
+  const sleeve = sign === 1 ? col.cloth : col.clothDark;
+  taperedLimb(cv, shoulder, elbow, 6, 4.5, sleeve);
   const skin = sign === 1 ? col.skin : col.skinDark;
+  taperedLimb(cv, elbow, hand, 4.5, 3.5, skin);
+  // THREE VALUES ON THE SLEEVE, like the legs and the jacket. A cylindrical limb
+  // needs a lit edge and a shadow edge or it reads as a flat sticker; the near
+  // arm gets both, the far arm only the shadow (it is behind the body).
+  const lit = mixRgb(sleeve, col.clothLight, sign === 1 ? 0.34 : 0.12);
+  const shade = mixRgb(sleeve, col.outline, 0.42);
+  for (let y = Math.round(shoulder.y) + 1; y <= Math.round(elbow.y) - 1; y++) {
+    const k = (y - shoulder.y) / Math.max(1, elbow.y - shoulder.y);
+    const cx = shoulder.x + k * (elbow.x - shoulder.x);
+    const halfW = (6 - k * 1.5) / 2;
+    cv.set(Math.round(cx + halfW - 1), y, lit);
+    cv.set(Math.round(cx - halfW + 1), y, shade);
+  }
+  // Forearm: the skin gets the same treatment, one step only - a hand is small
+  // enough that two extra columns would turn it to noise.
+  for (let y = Math.round(elbow.y) + 1; y <= Math.round(hand.y) - 1; y++) {
+    const k = (y - elbow.y) / Math.max(1, hand.y - elbow.y);
+    const cx = elbow.x + k * (hand.x - elbow.x);
+    const halfW = (4.5 - k) / 2;
+    cv.set(Math.round(cx + halfW - 1), y, mixRgb(skin, col.clothLight, 0.2));
+  }
+  // A fist, because a tapering point reads as a wire.
   run(cv, hand.x, 2.5, Math.round(hand.y), skin);
   run(cv, hand.x, 2.5, Math.round(hand.y) + 1, skin);
+  // A knuckle line so the fist has two values.
+  cv.set(Math.round(hand.x + 1), Math.round(hand.y) + 1, mixRgb(skin, col.outline, 0.35));
 }
 
 // The head in profile: an egg of a skull, hair over the back and top, and the

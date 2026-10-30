@@ -614,8 +614,11 @@ function drawLeg(cv: PixelCanvas, pose: Pose, which: 'a' | 'b', col: CharacterCo
   const knee = joint(pose.hip, THIGH, leg.thigh);
   const ankle = joint(knee, SHIN, leg.thigh - leg.knee);
   const trouser = far ? col.trouserDark : col.trouser;
-  taperedLimb(cv, pose.hip, knee, 7, 5, trouser);
-  taperedLimb(cv, knee, ankle, 5, 4, trouser);
+  // Art pass: the legs were 7/5 half-width — the dump read as two wires under a
+  // rectangle. Thigh 9/7, shin 7/5.5: still slim enough for a survivor, thick
+  // enough to read as a leg with a trouser on it.
+  taperedLimb(cv, pose.hip, knee, 9, 7, trouser);
+  taperedLimb(cv, knee, ankle, 7, 5.5, trouser);
   boot(cv, ankle, knee, col);
 }
 
@@ -650,9 +653,15 @@ function drawTorso(cv: PixelCanvas, pose: Pose, col: CharacterColors): void {
     // 前倾量由姿态提供，默认 1.5 = 原来写死的那个值。
     const cx = pose.shoulder.x + t * (pose.lean ?? 1.5); // lean into the walk
     run(cv, cx, half, y, col.cloth);
-    // One highlight column down the lit side, chest rows only — the outline
-    // pass already edges the silhouette, so this is shaping, not bordering.
-    if (t > 0.1 && t < 0.6) cv.set(Math.round(cx + half - 1), y, col.clothLight);
+    // Art pass: the torso used to be one flat colour with a single highlight
+    // column, which read as a painted rectangle. Now the lit side carries a
+    // proper two-step shade and the shadow side a darker band, so the jacket has
+    // volume. The outline pass still owns the silhouette edge.
+    if (t > 0.06 && t < 0.94) {
+      cv.set(Math.round(cx + half - 1), y, col.clothLight);
+      if (half > 6.5) cv.set(Math.round(cx + half - 2), y, col.clothLight);
+      cv.set(Math.round(cx - half + 1), y, col.clothDark);
+    }
   }
   // Collar: two lighter rows across the shoulders.
   run(cv, pose.shoulder.x + 0.75, 5, top, col.clothLight);
@@ -671,15 +680,20 @@ function drawArm(cv: PixelCanvas, pose: Pose, col: CharacterColors, sign: -1 | 1
   const swing = sign === 1 ? pose.armSwing : (pose.farSwing ?? -pose.armSwing);
   // armRaise 只抬锚点不改骨骼角度，省略时为 0（行走/待机的原值）。
   const raise = pose.armRaise ?? 0;
-  const shoulder = { x: pose.shoulder.x + (sign === 1 ? 1 : -5), y: pose.shoulder.y + 4 - raise };
+  const shoulder = { x: pose.shoulder.x + (sign === 1 ? 2 : -6), y: pose.shoulder.y + 4 - raise };
   const elbow = joint(shoulder, 12, swing);
   const hand = joint(elbow, 11, swing * 0.6);
-  taperedLimb(cv, shoulder, elbow, 4.5, 3.5, sign === 1 ? col.cloth : col.clothDark);
-  taperedLimb(cv, elbow, hand, 3.5, 3, sign === 1 ? col.skin : col.skinDark);
+  // Art pass: the arms used to be 4.5/3.5 half-width against a 16px-wide torso,
+  // so from the side the near arm was swallowed by the jacket and the swing was
+  // invisible — the audit dump showed no arm at all in the walk frames. Wider
+  // limbs, and the near arm's anchor sits clear of the torso's edge so it reads
+  // as an arm passing in front of the body rather than a stripe on it.
+  taperedLimb(cv, shoulder, elbow, 6, 4.5, sign === 1 ? col.cloth : col.clothDark);
+  taperedLimb(cv, elbow, hand, 4.5, 3.5, sign === 1 ? col.skin : col.skinDark);
   // A fist, because a tapering point reads as a wire.
   const skin = sign === 1 ? col.skin : col.skinDark;
-  run(cv, hand.x, 1.5, Math.round(hand.y), skin);
-  run(cv, hand.x, 1.5, Math.round(hand.y) + 1, skin);
+  run(cv, hand.x, 2.5, Math.round(hand.y), skin);
+  run(cv, hand.x, 2.5, Math.round(hand.y) + 1, skin);
 }
 
 // The head in profile: an egg of a skull, hair over the back and top, and the
@@ -695,46 +709,50 @@ function drawHead(cv: PixelCanvas, pose: Pose, col: CharacterColors): void {
   const cx = Math.round(pose.head.x);
   const cy = Math.round(pose.head.y);
   // [row offset, half-width, forward shift]
+  //
+  // Art pass: the old skull held half-width 6 from row -6 all the way to -1 and
+  // only started narrowing at the chin — 22 rows of near-constant width read as
+  // a cylinder, and the head swamped the body. Now the cranium is the wide part
+  // (rows -6..-3) and the face tapers through the jaw to the chin, which is what
+  // a head in profile actually does.
   const SKULL: ReadonlyArray<readonly [number, number, number]> = [
-    [-10, 3.5, 0],
+    [-11, 3, 0],
+    [-10, 4, 0],
     [-9, 4.5, 0],
     [-8, 5, 0],
-    [-7, 5.5, 0],
-    [-6, 6, 0],
-    [-5, 6, 0],
-    [-4, 6, 0],
-    [-3, 6, 0],
-    [-2, 6, 0],
-    [-1, 5.5, 0],
-    [0, 5.5, 0.5],
-    [1, 5, 0.5],
-    [2, 4.5, 1],
-    [3, 4, 1],
-    [4, 3, 1],
-    [5, 2.5, 1],
-    [6, 2, 1],
-    [7, 1.5, 0.5],
-    [8, 1, 0],
+    [-7, 5.5, 0.5],
+    [-6, 6, 1],
+    [-5, 5.5, 1.5],
+    [-4, 5, 2],
+    [-3, 4.5, 2.5],
+    [-2, 4, 3],
+    [-1, 3.5, 3],
+    [0, 3, 3],
+    [1, 2.5, 2.5],
+    [2, 2, 2],
+    [3, 1.5, 1.5],
+    [4, 1.5, 1],
   ];
   for (const [dy, half, dx] of SKULL) run(cv, cx + 1 + dx, half, cy + dy, col.skin);
   // Hair: a contiguous cap over the top and back of the skull.
   const HAIR: ReadonlyArray<readonly [number, number]> = [
+    [-12, 3.5],
     [-11, 4],
     [-10, 4.5],
     [-9, 5],
     [-8, 5.5],
-    [-7, 6],
-    [-6, 5.5],
+    [-7, 5.5],
+    [-6, 5],
   ];
-  for (const [dy, half] of HAIR) run(cv, cx + dy <= -7 ? cx : cx + 0.5, half, cy + dy, col.hair);
-  run(cv, cx + 4, 2, cy - 7, col.hair); // fringe at the front
-  // Face on the leading edge.
-  run(cv, cx + 4, 2, cy - 5, col.skinDark); // brow
-  cv.set(cx + 5, cy - 3, col.outline); // eye
-  cv.set(cx + 5, cy - 2, col.outline);
-  run(cv, cx + 6, 1, cy - 1, col.skinDark); // nose
-  cv.set(cx + 7, cy, col.skinDark);
-  run(cv, cx + 4, 1.5, cy + 3, col.skinDark); // mouth
+  for (const [dy, half] of HAIR) run(cv, dy <= -7 ? cx : cx + 0.5, half, cy + dy, col.hair);
+  run(cv, cx + 5, 2, cy - 8, col.hair); // fringe at the front
+  // Face on the leading edge, sitting on the tapered jaw.
+  run(cv, cx + 6, 1.5, cy - 6, col.skinDark); // brow
+  cv.set(cx + 7, cy - 4, col.outline); // eye
+  cv.set(cx + 7, cy - 3, col.outline);
+  run(cv, cx + 7, 1, cy - 2, col.skinDark); // nose
+  cv.set(cx + 7, cy - 1, col.skinDark);
+  run(cv, cx + 5, 1, cy + 1, col.skinDark); // mouth
 }
 
 // A neck, drawn before the torso so the collar covers its bottom and the skull

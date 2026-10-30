@@ -1121,8 +1121,15 @@ export class GameScene extends Phaser.Scene {
     for (let r = 0; r < ROOM_COUNT; r++) {
       const cx = r * ROOM_WIDTH + ROOM_WIDTH / 2;
       const lampX = cx + (r % 2 === 0 ? 96 : -96);
-      // The lamp's own glow, tighter and warmer than the window's.
-      this.floorObjects.push(addGlow(this, lampX, 152, 34, 0.42, 4));
+      // The lamp's glow, shaped like the fixture rather than like a ball.
+      //
+      // A wall lamp throws light DOWN and out; a circular pool centred on the
+      // bulb was the one thing that made these read as floating white dots on a
+      // wall rather than as lamps. The glow is anchored below the shade and
+      // stretched vertically, which is what a cone looks like from the side.
+      const lampGlow = addGlow(this, lampX, 162, 26, 0.5, 4);
+      lampGlow.setScale(1.05, 1.5);
+      this.floorObjects.push(lampGlow);
       g.fillStyle(0x6a4a2a, 1);
       g.fillRect(lampX - 2, 142, 4, 8);
       g.fillStyle(0xf4b66a, 1);

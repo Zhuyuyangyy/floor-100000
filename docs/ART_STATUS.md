@@ -94,6 +94,30 @@
 - 低血量警示改成边缘八条带：边缘 rgb (42,46,49) → **(147,83,78)**，中心 **完全不变**
 - 漏水事件从"只有数值"变成七处水洼 + 五道滴水（地面带 9,756 像素变化）
 
+## 二之补二、最终实测（全部门禁）
+
+这一夜最后一次完整验证的数值，与上面各表一致：
+
+```
+tsc --noEmit      exit 0
+vitest            570 passed
+playwright        65 passed
+art-audit         PASS: readable / dominant / bright / spread / density
+silhouette-audit  PASS: motion / sections / headRatio / waistRatio / legs
+```
+
+| 指标 | 最终值 | 门槛 |
+|---|---|---|
+| 画面主色占比 | 9% | ≤40% |
+| 角色 vs 背景对比度 | 41.9 | ≥15 |
+| camouflage | 8.5% | ≤25% |
+| 边缘密度 | 7.4% | ≥4% |
+| 明度分散 | 26.9 | ≥22 |
+| 走循环帧间差分 | 36–53% | ≥6% |
+| 剪影分段 | 17 | ≥3 |
+
+工作树干净，全部改动在分支 `feat/tower-zoom-b2`，共 50 个提交。
+
 ## 三、为什么停在这里（诚实的边界）
 
 ### 环境图资产只有 28 色

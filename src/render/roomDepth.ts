@@ -474,3 +474,46 @@ export function buildFloorClutter(scene: Phaser.Scene, opts: DressingOpts): Phas
   }
   return out;
 }
+
+// ── aerial perspective ────────────────────────────────────────────────────
+// The last depth cue, and the cheapest: things further away are LOWER contrast
+// and slightly bluer, because air is between you and them. In a side view the
+// "distance" axis is toward the top of the wall, so the wall gets progressively
+// hazier with height while the floor - nearest the camera - stays crisp.
+//
+// This is not a vignette. A vignette darkens the edges of the frame; this
+// reduces contrast with height, which is what tells the eye that the wall
+// recedes. The haze is the floor's ambient colour at low alpha, so it also ties
+// each floor's atmosphere into its own depth.
+export interface HazeOpts {
+  width: number;
+  /** where the wall meets the floor */
+  wallBottom: number;
+  /** the floor's ambient colour, so the haze belongs to this floor */
+  hazeColor: number;
+  /** 0..1, how strong the far haze is */
+  strength?: number;
+}
+
+export function buildAerialHaze(scene: Phaser.Scene, opts: HazeOpts): Phaser.GameObjects.GameObject[] {
+  const { width, wallBottom, hazeColor } = opts;
+  const strength = opts.strength ?? 0.3;
+  const out: Phaser.GameObjects.GameObject[] = [];
+  // Six bands from the top of the wall down: strongest at the top (furthest),
+  // gone by the floor line. Depth 2, above the surface detail, below the props.
+  const bands = 6;
+  for (let i = 0; i < bands; i++) {
+    const t0 = i / bands;
+    const t1 = (i + 1) / bands;
+    // The top band is the farthest, so alpha falls as we come down.
+    const a = strength * (1 - t0) * (1 - t0);
+    out.push(
+      scene.add
+        .rectangle(0, 8 + (wallBottom - 8) * t0, width, (wallBottom - 8) * (t1 - t0) + 1, hazeColor)
+        .setOrigin(0, 0)
+        .setAlpha(a * 0.42)
+        .setDepth(2),
+    );
+  }
+  return out;
+}

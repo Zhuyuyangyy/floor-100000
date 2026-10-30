@@ -88,6 +88,7 @@ import {
   buildForeground,
   buildRoomDepth,
   buildSurfaceDetail,
+  buildAerialHaze,
   buildWallDressing,
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
@@ -1158,6 +1159,8 @@ export class GameScene extends Phaser.Scene {
       // background plane, debris on the floor line. Without this a floor that
       // measures well still looks empty, because an empty frame can pass every
       // colour metric while having nothing in it.
+      // Aerial perspective: the wall loses contrast with height, so it recedes.
+      ...buildAerialHaze(this, { width: FLOOR_WIDTH, wallBottom: wallH, hazeColor: ambienceFor(STARTING_FLOOR).color, strength: 0.34 }),
       ...buildWallDressing(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: 3, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
       ...buildFloorClutter(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: 3, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
     );
@@ -1223,6 +1226,7 @@ export class GameScene extends Phaser.Scene {
       }),
       ...buildSurfaceDetail(this, { width: FLOOR_WIDTH, wallBottom: wallH, height: FLOOR_HEIGHT, seed: floor * 17 }),
       ...buildCeilingLights(this, { width: FLOOR_WIDTH, seed: floor * 13, top: 16 }),
+      ...buildAerialHaze(this, { width: FLOOR_WIDTH, wallBottom: wallH, hazeColor: ambienceFor(floor).color, strength: 0.34 }),
       ...buildWallDressing(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
       ...buildFloorClutter(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
     );

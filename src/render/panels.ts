@@ -8,7 +8,8 @@ import Phaser from 'phaser';
 // Fully opaque: at 0.96 the world's furniture labels and the HUD bled through
 // the panel and made the text inside hard to read. The art guide asks for a dark
 // translucent background, but readability of the panel's own contents wins.
-const PANEL_FILL = 0x0b0f12;
+const PANEL_FILL_TOP = 0x1b2731;
+const PANEL_FILL_BOTTOM = 0x090d10;
 const PANEL_FILL_ALPHA = 1;
 
 // The frame is eight plain Images, not a NineSlice. In Phaser 4 a NineSlice is
@@ -73,6 +74,22 @@ export const PANEL_DEPTH = {
 // the canvas still goes green.
 export const HUD_FEEDBACK_DEPTH = 300;
 
+// Linear blend between two 24-bit colours.
+//
+// Deliberately local rather than Phaser.Display.Color.Interpolate: this module is
+// imported by panels.test.ts under Node, and Phaser's ESM bundle touches
+// `window.cordova` the moment it is actually loaded. Every use of the Phaser
+// namespace in this file has to stay in a TYPE position so esbuild elides the
+// import — a single value-position call turns the import real and the Node test
+// dies with "window is not defined".
+function mixColor(a: number, b: number, t: number): number {
+  const mix = (ca: number, cb: number): number => Math.round(ca + (cb - ca) * t);
+  const r = mix((a >> 16) & 0xff, (b >> 16) & 0xff);
+  const g = mix((a >> 8) & 0xff, (b >> 8) & 0xff);
+  const bl = mix(a & 0xff, b & 0xff);
+  return (r << 16) | (g << 8) | bl;
+}
+
 // The uniform pass every panel's object list goes through: park it in screen
 // space at `depth`. The frame and fill are skipped, because buildPanel already
 // put them just below it.
@@ -109,7 +126,27 @@ export function buildPanel(
   const left = cx - w / 2;
   const top = cy - h / 2;
 
-  const fill = scene.add.rectangle(cx, cy, w, h, PANEL_FILL, PANEL_FILL_ALPHA).setDepth(depth + PANEL_FILL_OFFSET);
+  // OVERHAUL UI: the fill is FIVE stepped bands, not one rectangle.
+  //
+  // Measured before: a 460x300 panel covers 60% of the 640x360 canvas, and a
+  // single flat fill meant ~50% of every screenshot was one colour — the exact
+  // "big flat slab" that made the interface look like a prototype. Stepping the
+  // brightness from a raised header tone down to the base surface breaks the
+  // slab into a gradient you can feel without a smooth blur (which would break
+  // the pixel look), and it costs four extra rectangles.
+  const FILL_BANDS = 5;
+  const fill: Phaser.GameObjects.Rectangle[] = [];
+  for (let i = 0; i < FILL_BANDS; i++) {
+    const t0 = i / FILL_BANDS;
+    const t1 = (i + 1) / FILL_BANDS;
+    const k = t0; // 0 at the top, ~0.8 at the bottom
+    const bandColor = mixColor(PANEL_FILL_TOP, PANEL_FILL_BOTTOM, k);
+    fill.push(
+      scene.add
+        .rectangle(cx, cy - h / 2 + h * ((t0 + t1) / 2), w, h * (t1 - t0) + 1, bandColor, PANEL_FILL_ALPHA)
+        .setDepth(depth + PANEL_FILL_OFFSET),
+    );
+  }
 
   // Corners sit at their natural size; edges stretch to fill the gap between
   // them. Origin (0,0) everywhere so each piece is placed by its top-left. The
@@ -127,9 +164,9 @@ export function buildPanel(
   ];
   for (const o of frame) o.setDepth(depth + PANEL_FRAME_OFFSET);
 
-  PANEL_OWNED.add(fill);
+  for (const f of fill) PANEL_OWNED.add(f);
   for (const o of frame) PANEL_OWNED.add(o);
-  return [fill, ...frame];
+  return [...fill, ...frame];
 }
 
 // The licensed arrow used as the selection marker in every list, replacing the

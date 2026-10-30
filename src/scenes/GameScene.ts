@@ -22,7 +22,6 @@ import {
 } from '../core/constants';
 import {
   currentInteractionZone,
-  floorName,
   hasDownExit,
   hasUpExit,
   movePlayerX,
@@ -37,7 +36,7 @@ import { ensureNightEvent } from '../systems/EventSystem';
 import { armNextRoll, dwellRollDue, ensureDwell, isDwellExempt, rollDwellEvent, tickDwell } from '../systems/dwellPressure';
 import { freshWandererAI, stepWandererAI, type WandererAI } from '../systems/wandererAI';
 import { ensureDailyGoal, grantDailyGoalReward, isDailyGoalDone } from '../systems/dailyGoals';
-import { depthRecord, recordDepth, runScore } from '../systems/progress';
+import { recordDepth, runScore } from '../systems/progress';
 import { CHARACTER_NAMES, applyDepth, loadMeta, saveMeta, unlockFromDepth } from '../systems/metaProgress';
 import type { CharacterKey } from '../render/artpack';
 import { lowHpPulse, mostUrgentStat, moveSpeedFactor } from '../render/feedback';
@@ -64,6 +63,16 @@ import { addItem } from '../systems/InventorySystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, createMarker, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
+import {
+  HUD_BAR_H,
+  HUD_FOOT_H,
+  STAT_COLORS,
+  TYPE,
+  UI,
+  buildPanelHeader,
+  buildPanelWell,
+  drawStatBar,
+} from '../render/uiKit';
 import { ENV_FLOOR_KEY, ENV_WALL_KEY } from '../render/artpack';
 import { WALK_CHARACTERS, attackAnimKey, hurtAnimKey, idleAnimKey, searchAnimKey, walkAnimKey, walkSheetKey } from '../render/walkcycle';
 import { itemIconKey } from '../render/itemIcons';
@@ -79,19 +88,16 @@ import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId
 const INVENTORY_SLOTS = 12;
 // Row pitch for the inventory list: 20px fits a full-size 16x16 icon with a 2px
 // gap either side, and keeps every offset an integer (no scaling, no blur).
-const INV_ROW_PITCH = 20;
 // Crafting rows: same 16px icon, 24px pitch keeps the cost text readable.
 const CRAFT_ROW_PITCH = 24;
 // HUD type scale (docs/05_ART_GUIDE.md §2: no size too small to read). Title 16 /
 // body 13 / auxiliary 11 — all integer pixels, since any fractional size would be
 // resampled and blur the pixel look.
-const TYPE_TITLE = 16;
 const TYPE_BODY = 13;
 const TYPE_AUX = 11;
 
 // Row pitch for the four HUD stat bars. 15px gives an 11px label plus a 7px bar
 // with breathing room; 13px was too cramped to read at a glance.
-const STAT_ROW_PITCH = 15;
 
 const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: string; color: number }> = [
   { key: 'hp', label: 'HP', color: 0xe56d63 },
@@ -99,6 +105,14 @@ const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: stri
   { key: 'thirst', label: '渴', color: 0x6aa8e5 },
   { key: 'energy', label: '精', color: 0x77c6a4 },
 ];
+
+// ── HUD layout (OVERHAUL UI) ────────────────────────────────────────────────
+// Columns on the shared 4px grid: floor badge, clock, four stat bars (label +
+// bar each), then the right-aligned score and gold. These are computed once
+// here rather than sprinkled through buildHud, so moving a column is one edit.
+const HUD_STAT_X = 96;
+const HUD_STAT_PITCH = 74;
+const HUD_STAT_BAR_W = 46;
 const PAUSE_OPTIONS = ['继续游戏', '塔楼地图', '重新开始', '返回标题'];
 
 // OVERHAUL: the daily objective's one-line label, per goal kind.
@@ -188,7 +202,11 @@ export class GameScene extends Phaser.Scene {
   private clockText!: Phaser.GameObjects.Text;
   private barsGfx!: Phaser.GameObjects.Graphics;
   private statLabels: Phaser.GameObjects.Text[] = [];
-  private tooltipText!: Phaser.GameObjects.Text;
+  private invCountText?: Phaser.GameObjects.Text;
+  private invCells: Phaser.GameObjects.Rectangle[] = [];
+  private invDetailName?: Phaser.GameObjects.Text;
+  private invDetailMeta?: Phaser.GameObjects.Text;
+  private invDetailBody?: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
   private feedbackText!: Phaser.GameObjects.Text;
   // B3-02 §4.2: a full bag used to be a 1.6s flash, so a player who filled the
@@ -201,6 +219,8 @@ export class GameScene extends Phaser.Scene {
   // vignette is a full-screen rect whose alpha the feedback module drives.
   // Optional because buildHud destroys and clears them on a scene restart
   // before recreating them — a destroyed Text throws on setText.
+  private floorBadge?: Phaser.GameObjects.Text;
+  private goldText?: Phaser.GameObjects.Text;
   private goalText?: Phaser.GameObjects.Text;
   private scoreText?: Phaser.GameObjects.Text;
   private vignette?: Phaser.GameObjects.Rectangle;
@@ -231,8 +251,7 @@ export class GameScene extends Phaser.Scene {
 
   private craftingOpen = false;
   private craftObjects: PanelObject[] = [];
-  private craftEntryTexts: Phaser.GameObjects.Text[] = [];
-  private craftEntryIcons: Phaser.GameObjects.Image[] = [];
+  private craftRows: Array<{ band: Phaser.GameObjects.Rectangle; name: Phaser.GameObjects.Text; status: Phaser.GameObjects.Text }> = [];
   private craftMarker!: Phaser.GameObjects.Image;
   private craftSelected = 0;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
@@ -301,8 +320,6 @@ export class GameScene extends Phaser.Scene {
     this.invSlotIcons = [];
     this.invMarker = createMarker(this);
     this.craftObjects = [];
-    this.craftEntryTexts = [];
-    this.craftEntryIcons = [];
     this.craftMarker = createMarker(this);
     this.pauseObjects = [];
     this.pauseOptionTexts = [];
@@ -1175,24 +1192,68 @@ export class GameScene extends Phaser.Scene {
     this.scoreText = undefined;
     this.vignette?.destroy();
     this.vignette = undefined;
+    this.floorBadge?.destroy();
+    this.floorBadge = undefined;
+    this.goldText?.destroy();
+    this.goldText = undefined;
+
+    // ── the top bar ─────────────────────────────────────────────────────────
+    // OVERHAUL UI: the HUD used to be five text chips with their own
+    // background colours scattered at the screen corners, which is what made the
+    // game read as a prototype. It is now one bar on the shared grid: floor
+    // badge, clock, four segmented stat bars, gold, score — each in its own
+    // column, all baseline-aligned.
+    this.add.rectangle(0, 0, DESIGN_WIDTH, HUD_BAR_H, UI.surface).setOrigin(0, 0).setAlpha(0.9).setScrollFactor(0).setDepth(100);
+    const topLine = this.add.graphics().setScrollFactor(0).setDepth(101);
+    topLine.fillStyle(UI.line, 0.9);
+    topLine.fillRect(0, HUD_BAR_H - 1, DESIGN_WIDTH, 1);
+
+    // Floor badge: the one number that is always the answer to "where am I".
+    this.floorBadge = this.add
+      .text(8, HUD_BAR_H / 2, '1F', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: '#0b0f12' })
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(103);
+    this.add
+      .rectangle(6, HUD_BAR_H / 2, 26, 15, UI.accent)
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(102);
+
     this.clockText = this.add
-      .text(12, 12, '', { fontFamily: 'monospace', fontSize: `${TYPE_TITLE}px`, color: '#ece8d8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 4 } })
-      .setScrollFactor(0).setDepth(100);
+      .text(38, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#ece8d8' })
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(103);
     this.refreshClock();
 
-    this.barsGfx = this.add.graphics().setScrollFactor(0).setDepth(100);
+    // The four survival bars, drawn by one Graphics.
+    this.barsGfx = this.add.graphics().setScrollFactor(0).setDepth(103);
     STAT_BARS.forEach((s, i) => {
+      const col = 0 + i;
+      void col;
       this.statLabels.push(
-        this.add.text(12, 40 + i * STAT_ROW_PITCH, s.label, { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#ece8d8' }).setScrollFactor(0).setDepth(101),
+        this.add
+          .text(HUD_STAT_X + i * HUD_STAT_PITCH, HUD_BAR_H / 2, s.label, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#ece8d8' })
+          .setOrigin(0, 0.5).setScrollFactor(0).setDepth(103),
       );
     });
     this.refreshStats();
+
+    // Gold and score, right-aligned in their own columns.
+    this.goldText = this.add
+      .text(DESIGN_WIDTH - 8, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#f4b66a' })
+      .setOrigin(1, 0.5).setScrollFactor(0).setDepth(103);
+    this.scoreText = this.add
+      .text(DESIGN_WIDTH - 62, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#a8e0c8' })
+      .setOrigin(1, 0.5).setScrollFactor(0).setDepth(103);
+
+    // The daily objective gets its own slim line under the bar: it is the
+    // answer to "what am I doing today", so it should not be a corner chip.
+    const goalY = HUD_BAR_H + 8;
+    this.goalText = this.add
+      .text(8, goalY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#f4b66a' })
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // Centred on the CAMERA viewport, not the floor: FLOOR_WIDTH is the 1280px
     // world, but a scrollFactor-0 object is positioned in screen space, so
     // FLOOR_WIDTH/2 (=640) sat half outside the 640px canvas.
     this.feedbackText = this.add
-      .text(DESIGN_WIDTH / 2, 60, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#f4b66a', backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } })
+      .text(DESIGN_WIDTH / 2, HUD_BAR_H + 26, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: '#f4b66a', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
       .setOrigin(0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // Red rather than amber: this is a standing blocker, not news. It sits below
@@ -1200,31 +1261,27 @@ export class GameScene extends Phaser.Scene {
     this.bagFullText = this.add
       .text(
         DESIGN_WIDTH / 2,
-        86,
+        HUD_BAR_H + 46,
         `背包已满 · 使用、制作或交易腾出格子，否则搜刮会留在原处；能叠进已有堆的物品仍可拾取`,
-        { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#e8907c', backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } },
+        { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#e8907c', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } },
       )
       .setOrigin(0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
 
+    // ── the foot bar ────────────────────────────────────────────────────────
+    this.add.rectangle(0, DESIGN_HEIGHT - HUD_FOOT_H, DESIGN_WIDTH, HUD_FOOT_H, UI.surface).setOrigin(0, 0).setAlpha(0.88).setScrollFactor(0).setDepth(100);
+    const footLine = this.add.graphics().setScrollFactor(0).setDepth(101);
+    footLine.fillStyle(UI.line, 0.9);
+    footLine.fillRect(0, DESIGN_HEIGHT - HUD_FOOT_H, DESIGN_WIDTH, 1);
     this.hintText = this.add
-      .text(12, DESIGN_HEIGHT - 22, 'A/D 或 ←/→ 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
-      .setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
-
-    // OVERHAUL: the day's rolled objective and the run score sit top-right,
-    // opposite the clock — the two questions a player asks on waking are "what
-    // am I doing today" and "how am I doing".
-    this.goalText = this.add
-      .text(DESIGN_WIDTH - 12, 12, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#f4b66a', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 4 }, align: 'right' })
-      .setOrigin(1, 0).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
-    this.scoreText = this.add
-      .text(DESIGN_WIDTH - 12, 34, '', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 }, align: 'right' })
-      .setOrigin(1, 0).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+      .text(8, DESIGN_HEIGHT - HUD_FOOT_H / 2, 'A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#a8e0c8' })
+      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // The low-HP vignette: pure red wash whose alpha is the pulse function's
     // output. Created invisible; update() drives it every frame.
     this.vignette = this.add
       .rectangle(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT, 0xe56d63, 0)
       .setOrigin(0, 0).setScrollFactor(0).setDepth(90);
+    this.lastStats = '';
     this.refreshGoalHud();
   }
 
@@ -1245,19 +1302,21 @@ export class GameScene extends Phaser.Scene {
     const key = `${goal?.day ?? 0}|${goal?.kind ?? ''}|${goal?.target ?? 0}|${String(done)}`;
     if (key !== this.lastGoalKey) {
       this.lastGoalKey = key;
-      this.goalText.setText(`今日目标：${label}${done ? ' ✓' : ''}`);
+      this.goalText.setText(`目标 ${label}${done ? ' ✓' : ''}`);
       this.goalText.setColor(done ? '#a8e0c8' : '#f4b66a');
     }
-    this.scoreText.setText(`${runScore(state)} 分 · 最深 ${depthRecord(state)} 层 · ${state.player.gold} 金`);
+    this.scoreText.setText(`${runScore(state)}分`);
+    this.goldText?.setText(`${state.player.gold}金`);
   }
 
   private refreshClock(): void {
     const s = getGame();
-    const label = `第 ${s.day} 天 ${formatClock(s.gameMinuteOfDay)} · ${s.currentFloor} 层 ${floorName(s.currentFloor)}`;
+    const label = `D${s.day} ${formatClock(s.gameMinuteOfDay)}`;
     if (label !== this.lastClock) {
       this.lastClock = label;
       this.clockText.setText(label);
     }
+    this.floorBadge?.setText(`${s.currentFloor}F`);
   }
 
   private refreshStats(): void {
@@ -1268,88 +1327,143 @@ export class GameScene extends Phaser.Scene {
     this.lastStats = key;
     this.barsGfx.clear();
     values.forEach((v, i) => {
-      const y = 40 + i * STAT_ROW_PITCH;
-      this.barsGfx.fillStyle(0x0b0f12, 0.7);
-      this.barsGfx.fillRect(34, y + 2, 84, 7);
-      this.barsGfx.fillStyle(STAT_BARS[i].color, 1);
-      this.barsGfx.fillRect(34, y + 2, 84 * Math.max(0, Math.min(1, v / 100)), 7);
+      const x = HUD_STAT_X + i * HUD_STAT_PITCH + 20;
+      const color = STAT_COLORS[STAT_BARS[i].key] ?? UI.good;
+      drawStatBar(this.barsGfx, x, HUD_BAR_H / 2 - 2, HUD_STAT_BAR_W, 4, v / 100, color);
     });
-    // OVERHAUL: the most urgent bar's label turns red, so the critical slot is
-    // findable without reading four numbers.
+    // The most urgent bar's label turns red, so the critical slot is findable
+    // without reading four numbers.
     const urgent = mostUrgentStat(getGame().player);
-    this.statLabels.forEach((t, i) => t.setColor(STAT_BARS[i].key === urgent ? '#e8907c' : '#ece8d8'));
+    this.statLabels.forEach((t, i) => t.setColor(STAT_BARS[i].key === urgent ? '#e8907c' : '#a8a49a'));
     this.refreshGoalHud();
   }
 
   private buildInventoryPanel(): void {
+    // OVERHAUL UI: this panel used to be a 380x340 box holding twelve rows of
+    // "name ×count" text in 13px monospace — measured, 46% of the whole screen
+    // was one flat colour. It is now an icon grid on the left and a detail pane
+    // on the right: the icons carry the identity, the pane carries the words,
+    // and neither one is a wall of text.
     const { width, height } = this.cameras.main;
-    const panelW = 380;
-    const panelH = 340;
+    const panelW = 440;
+    const panelH = 236;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    const depth = PANEL_DEPTH.game.inventory;
 
-    this.invObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', PANEL_DEPTH.game.inventory));
+    this.invObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
+    this.invObjects.push(...buildPanelHeader(this, left, top, panelW, '背包', UI.good, depth + 5));
+    this.invObjects.push(
+      this.add
+        .text(left + panelW - 10, top + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#a8e0c8' })
+        .setOrigin(1, 0.5)
+        .setDepth(depth + 6),
+    );
+    this.invCountText = this.invObjects[this.invObjects.length - 1] as Phaser.GameObjects.Text;
 
-    const title = this.add.text(cx, top + 18, '背包', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
-    this.invObjects.push(title);
-
-    // One row per slot: 16x16 icon in a metal slot frame. Row pitch is 20px so a
-    // full-size icon fits without scaling (scaling would blur the pixels).
-    const startY = top + 46;
+    // ── the grid ────────────────────────────────────────────────────────────
+    // 4 columns x 3 rows of 40px cells: twelve slots, no scrolling, and each
+    // cell is big enough for a 2x icon (pixel art upscales cleanly at integer
+    // factors, unlike the old 16px icons in a 20px row).
+    const GRID_X = left + 12;
+    const GRID_Y = top + 30;
+    const CELL = 40;
+    const GAP = 5;
+    this.invCells = [];
+    this.invSlotIcons = [];
+    this.invSlotTexts = [];
     for (let i = 0; i < INVENTORY_SLOTS; i++) {
-      const rowY = startY + i * INV_ROW_PITCH;
-      // The frame is drawn first so the icon sits inside it, and it is pushed into
-      // invObjects like everything else so it hides with the panel. It stays
-      // visible on empty rows: an empty slot is a slot the player can still fill.
-      const frame = this.add.image(left + 38, rowY + 10, 'ui-slot').setOrigin(0.5);
-      const icon = this.add.image(left + 30, rowY + 10, 'blank').setOrigin(0, 0.5);
-      const t = this.add.text(left + 52, rowY + 10, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }).setOrigin(0, 0.5);
+      const col = i % 4;
+      const row = Math.floor(i / 4);
+      const x = GRID_X + col * (CELL + GAP);
+      const y = GRID_Y + row * (CELL + GAP);
+      const cell = this.add.rectangle(x, y, CELL, CELL, 0x080c0f).setOrigin(0, 0).setAlpha(0.6).setDepth(depth + 5);
+      const border = this.add.graphics().setDepth(depth + 6);
+      border.lineStyle(1, UI.line, 0.85);
+      border.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
+      const icon = this.add
+        .image(x + CELL / 2, y + CELL / 2, 'blank')
+        .setOrigin(0.5)
+        .setScale(2)
+        .setDepth(depth + 6);
+      const badge = this.add
+        .text(x + CELL - 3, y + CELL - 3, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#ece8d8', stroke: '#0b0f12', strokeThickness: 3 })
+        .setOrigin(1, 1)
+        .setDepth(depth + 7);
+      this.invCells.push(cell);
       this.invSlotIcons.push(icon);
-      this.invSlotTexts.push(t);
-      this.invObjects.push(frame, icon, t);
+      this.invSlotTexts.push(badge);
+      this.invObjects.push(cell, border, icon, badge);
     }
 
-    this.tooltipText = this.add.text(left + 22, top + 288, '', { fontFamily: 'monospace', fontSize: '11px', color: '#f4b66a' });
-    this.invObjects.push(this.tooltipText);
+    // ── the detail pane ─────────────────────────────────────────────────────
+    const DETAIL_X = GRID_X + 4 * (CELL + GAP) + 8;
+    const DETAIL_W = left + panelW - 12 - DETAIL_X;
+    this.invObjects.push(...buildPanelWell(this, DETAIL_X, GRID_Y, DETAIL_W, 3 * (CELL + GAP) - GAP, depth + 5));
+    this.invDetailName = this.add
+      .text(DETAIL_X + 8, GRID_Y + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: '#f4b66a' })
+      .setDepth(depth + 7);
+    this.invDetailMeta = this.add
+      .text(DETAIL_X + 8, GRID_Y + 28, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#8a867c' })
+      .setDepth(depth + 7);
+    this.invDetailBody = this.add
+      .text(DETAIL_X + 8, GRID_Y + 46, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: '#ece8d8', wordWrap: { width: DETAIL_W - 16 } })
+      .setDepth(depth + 7);
+    this.invObjects.push(this.invDetailName, this.invDetailMeta, this.invDetailBody);
 
-    const footer = this.add.text(cx, top + panelH - 16, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
+    const footer = this.add
+      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#77c6a4' })
+      .setOrigin(0.5, 0.5)
+      .setDepth(depth + 6);
     this.invObjects.push(footer, this.invMarker);
 
-    applyPanelDepth(this.invObjects, PANEL_DEPTH.game.inventory);
+    applyPanelDepth(this.invObjects, depth);
     for (const o of this.invObjects) o.setVisible(false);
   }
 
   private refreshInventory(): void {
     const slots = getGame().player.inventory.slots;
-    if (this.invSelected >= slots.length) this.invSelected = Math.max(0, slots.length - 1);
+    if (this.invSelected >= INVENTORY_SLOTS) this.invSelected = Math.max(0, INVENTORY_SLOTS - 1);
     for (let i = 0; i < INVENTORY_SLOTS; i++) {
-      const t = this.invSlotTexts[i];
+      const badge = this.invSlotTexts[i];
       const icon = this.invSlotIcons[i];
       const stack = slots[i];
       if (stack) {
-        t.setText(`${getItem(stack.itemId).displayName} ×${stack.quantity}`);
         // Keyed by item id, never by display name — see itemIconKey().
         icon.setTexture(itemIconKey(stack.itemId)).setVisible(true);
+        badge.setText(stack.quantity > 1 ? `${stack.quantity}` : '');
       } else {
-        t.setText('（空）');
         icon.setVisible(false);
+        badge.setText('');
       }
     }
+    // Highlight the selected cell.
+    this.invCells.forEach((c, i) => {
+      c.setFillStyle(i === this.invSelected ? UI.accent : 0x080c0f, i === this.invSelected ? 0.2 : 0.6);
+    });
+    if (this.invCountText) this.invCountText.setText(`${slots.length}/${INVENTORY_SLOTS}`);
+
     const selected = slots[this.invSelected];
-    const selectedIcon = this.invSlotIcons[this.invSelected];
-    this.invMarker.setVisible(selected !== undefined);
-    if (selected && selectedIcon) placeMarkerLeftOf(this.invMarker, selectedIcon);
+    const cell = this.invCells[this.invSelected];
+    this.invMarker.setVisible(selected !== undefined && cell !== undefined);
+    if (selected && cell) placeMarkerLeftOf(this.invMarker, cell);
+
     if (selected) {
       const item = getItem(selected.itemId);
       const category = item.category === 'consumable' ? '消耗品' : item.category === 'material' ? '材料' : '工具';
-      const effect = item.effect ? ` · ${STAT_LABEL[item.effect.stat]} +${item.effect.amount}` : '';
-      this.tooltipText.setText(`${item.displayName} · ${category}${effect}`);
+      this.invDetailName?.setText(item.displayName);
+      this.invDetailMeta?.setText(`${category} · 持有 ${selected.quantity}`);
+      const effect = item.effect ? `${STAT_LABEL[item.effect.stat]} +${item.effect.amount}` : '';
+      this.invDetailBody?.setText(effect || `${category}，暂时没有直接效果。`);
     } else {
-      this.tooltipText.setText('');
+      this.invDetailName?.setText('');
+      this.invDetailMeta?.setText('');
+      this.invDetailBody?.setText('空格子。搜刮、制作或交易都往这里放东西。');
     }
   }
+
 
   private toggleInventory(): void {
     this.inventoryOpen = !this.inventoryOpen;
@@ -1402,18 +1516,27 @@ export class GameScene extends Phaser.Scene {
     const top = cy - panelH / 2;
 
     this.craftObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.craft));
-    const title = this.add.text(cx, top + 18, '工作台 · 制作', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
+    // OVERHAUL UI: header strip instead of a centred title floating on a slab.
+    this.craftObjects.push(...buildPanelHeader(this, left, top, panelW, '工作台 · 制作', UI.accent, PANEL_DEPTH.game.craft + 5));
+    const title = this.add.text(cx, top + 18, '', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
     this.craftObjects.push(title);
 
+    // OVERHAUL UI: row bands + a status column.
+    //
+    // The old list was four lines of text inside an opaque slab — no banding, no
+    // columns, nothing to anchor the eye. Each row now has its own band (alternate
+    // rows tinted), a fixed-cost column and a right-aligned status, so a row reads
+    // like a row instead of a sentence.
+    this.craftRows = [];
     for (let i = 0; i < 4; i++) {
-      const rowY = top + 48 + i * CRAFT_ROW_PITCH;
-      const icon = this.add.image(left + 30, rowY + 7, 'blank').setOrigin(0, 0.5);
-      const t = this.add.text(left + 52, rowY + 7, '', { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8' }).setOrigin(0, 0.5);
-      this.craftEntryIcons.push(icon);
-      this.craftEntryTexts.push(t);
-      this.craftObjects.push(icon, t);
+      const rowY = top + 30 + i * CRAFT_ROW_PITCH;
+      const band = this.add.rectangle(left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.34).setDepth(PANEL_DEPTH.game.craft + 5);
+      const name = this.add.text(left + 18, rowY + 9, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: '#ece8d8' }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      const status = this.add.text(left + panelW - 16, rowY + 9, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#a8e0c8' }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      this.craftRows.push({ band, name, status });
+      this.craftObjects.push(band, name, status);
     }
-    const footer = this.add.text(cx, top + panelH - 16, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
+    const footer = this.add.text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#77c6a4' }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
     this.craftObjects.push(footer, this.craftMarker);
 
     applyPanelDepth(this.craftObjects, PANEL_DEPTH.game.craft);
@@ -1431,32 +1554,42 @@ export class GameScene extends Phaser.Scene {
     const entries = this.craftEntries();
     if (this.craftSelected >= entries.length) this.craftSelected = Math.max(0, entries.length - 1);
     for (let i = 0; i < 4; i++) {
-      const t = this.craftEntryTexts[i];
-      const icon = this.craftEntryIcons[i];
+      const row = this.craftRows[i];
+      if (!row) continue;
       const entry = entries[i];
       if (!entry) {
-        t.setText('');
-        icon.setVisible(false);
+        row.name.setText('');
+        row.status.setText('');
+        row.band.setAlpha(0);
         continue;
       }
-      // Recipes produce an upgrade, not an item, so they have no item icon —
-      // showing one would be a mismatch. Only 净化 outputs a real item.
+      const selected = i === this.craftSelected;
+      row.band.setAlpha(selected ? 0.72 : 0.3);
+      row.band.setFillStyle(selected ? UI.accent : UI.surfaceRaised, 1);
       if (entry.kind === 'recipe') {
-        icon.setVisible(false);
         const recipe = getRecipe(entry.id!);
-        const cost = Object.entries(recipe.cost).map(([id, n]) => `${getItem(id as ItemId).displayName}×${n}`).join(' ');
-        const status = hasUpgrade(state, entry.id!) ? '[已建]' : canCraft(state, entry.id!).ok ? '[可制作]' : '[材料不足]';
-        t.setText(`${recipe.displayName}（${cost}）${status}`);
+        const cost = Object.entries(recipe.cost)
+          .map(([id, n]) => `${getItem(id as ItemId).displayName}×${n}`)
+          .join(' ');
+        row.name.setText(`${recipe.displayName}  ${cost}`);
+        row.name.setColor(selected ? '#f4b66a' : '#ece8d8');
+        const built = hasUpgrade(state, entry.id!);
+        const ok = canCraft(state, entry.id!).ok;
+        row.status.setText(built ? '已建' : ok ? '可制作' : '材料不足');
+        row.status.setColor(built ? '#77c6a4' : ok ? '#f4b66a' : '#8a867c');
       } else {
         const can = countItem(state.player.inventory, 'dirty_water') >= 1;
-        icon.setTexture(itemIconKey('clean_water')).setVisible(true);
-        t.setText(`净化 脏水→净水 ${can ? '[可净化]' : '[无脏水]'}`);
+        row.name.setText('净化  脏水→净水');
+        row.name.setColor(selected ? '#f4b66a' : '#ece8d8');
+        row.status.setText(can ? '可净化' : '缺脏水');
+        row.status.setColor(can ? '#77c6a4' : '#8a867c');
       }
     }
-    const selectedIcon = this.craftEntryIcons[this.craftSelected];
-    this.craftMarker.setVisible(entries[this.craftSelected] !== undefined);
-    if (entries[this.craftSelected] && selectedIcon) placeMarkerLeftOf(this.craftMarker, selectedIcon);
+    const selectedRow = this.craftRows[this.craftSelected];
+    this.craftMarker.setVisible(entries[this.craftSelected] !== undefined && selectedRow !== undefined);
+    if (entries[this.craftSelected] && selectedRow) placeMarkerLeftOf(this.craftMarker, selectedRow.name);
   }
+
 
   private toggleCrafting(): void {
     this.craftingOpen = !this.craftingOpen;
@@ -1473,10 +1606,12 @@ export class GameScene extends Phaser.Scene {
     const panelH = 220;
     const cx = width / 2;
     const cy = height / 2;
+    const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
     this.pauseObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.pause));
-    const title = this.add.text(cx, top + 20, '已暂停', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
+    this.pauseObjects.push(...buildPanelHeader(this, left, top, panelW, '已暂停', UI.accent, PANEL_DEPTH.game.pause + 5));
+    const title = this.add.text(cx, top + 20, '', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
     const controls = this.add.text(cx, top + 50, 'A/D 移动 · E 交互 · I 背包 · C 制作', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
     this.pauseObjects.push(title, controls, this.pauseMarker);
 

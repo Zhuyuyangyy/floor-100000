@@ -91,10 +91,13 @@ describe('every texture key the source asks for exists', () => {
   });
 
   it('finds the keys the game actually references', () => {
-    // Same guard for the scan.
+    // Same guard for the scan. These two are literal `add.image(...)` keys, so
+    // they are exactly what the scan is supposed to see — the old guard also
+    // asserted 'clean_water', which stopped being a literal when the inventory
+    // rewrite moved item icons behind itemIconKey().
     expect(asked.size).toBeGreaterThan(10);
     expect(asked.has('furn_crate_wood')).toBe(true);
-    expect(asked.has('clean_water')).toBe(true);
+    expect(asked.has('tile_window')).toBe(true);
   });
 
   it('has no unknown key', () => {

@@ -326,7 +326,11 @@ test('重新开始 leaves the panels working', async ({ page }) => {
   await startGame(page, 42);
   await page.keyboard.press('I');
   await page.waitForTimeout(300);
-  expect(await hasVisibleText(page, '净水 ×3')).toBe(true);
+  // OVERHAUL UI: the bag is an icon grid with a detail pane now, so the bag
+  // having rendered shows up as the detail pane naming the selected stack
+  // (the old assertion read the removed "净水 ×3" row text).
+  expect(await hasVisibleText(page, '净水')).toBe(true);
+  expect(await hasVisibleText(page, '持有 3')).toBe(true);
   await page.keyboard.press('Escape'); // close inventory
   await page.waitForTimeout(200);
 
@@ -359,7 +363,7 @@ test('重新开始 leaves the panels working', async ({ page }) => {
 
   await page.keyboard.press('I');
   await page.waitForTimeout(300);
-  expect(await hasVisibleText(page, '净水 ×3'), 'inventory must survive a restart').toBe(true);
+  expect(await hasVisibleText(page, '净水'), 'inventory must survive a restart').toBe(true);
   await page.keyboard.press('Escape'); // close inventory
   await page.waitForTimeout(200);
 
@@ -394,9 +398,14 @@ test('the inventory shows an item tooltip', async ({ page }) => {
   await startGame(page, 42);
   await page.keyboard.press('I');
   await page.waitForTimeout(200);
-  expect(await hasVisibleText(page, '净水 · 消耗品 · 水分 +30')).toBe(true);
+  // The old single-line tooltip became name / meta / effect across the detail
+  // pane. Same claim — the panel tells you what the selected item is and does.
+  expect(await hasVisibleText(page, '净水')).toBe(true);
+  expect(await hasVisibleText(page, '消耗品')).toBe(true);
+  expect(await hasVisibleText(page, '水分 +30')).toBe(true);
   await page.keyboard.press('ArrowDown'); // -> 压缩口粮
   await page.waitForTimeout(120);
-  expect(await hasVisibleText(page, '压缩口粮 · 消耗品 · 饱食 +30')).toBe(true);
+  expect(await hasVisibleText(page, '压缩口粮')).toBe(true);
+  expect(await hasVisibleText(page, '饱食 +30')).toBe(true);
   await page.screenshot({ path: 'e2e/screenshots/15-inventory-tooltip.png' });
 });

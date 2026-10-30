@@ -126,10 +126,14 @@ test('inventory panel opens and using a consumable raises a clamped stat', async
 
   // Open inventory (I). Slot 0 is the starting 净水 x3.
   await page.keyboard.press('I');
+  // OVERHAUL UI: the bag is an icon grid with a detail pane, so the selected
+  // stack shows as the item's name plus its held count rather than the old
+  // "净水 ×3" row text.
   const panelShowsWater = await page.evaluate(() => {
     const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean }> } } | null } } }).__PHASER_GAME__;
     const list = g?.scene.getScene('Game')?.children.list ?? [];
-    return list.some((o) => o.type === 'Text' && (o.text ?? '').includes('净水 ×3') && o.visible);
+    const texts = list.filter((o) => o.type === 'Text' && o.visible).map((o) => o.text ?? '');
+    return texts.some((x) => x.includes('净水')) && texts.some((x) => x.includes('持有 3'));
   });
   expect(panelShowsWater).toBe(true);
   await page.screenshot({ path: 'e2e/screenshots/05-inventory.png' });

@@ -39,8 +39,19 @@ const BENCH_LIGHT: LightPool = { x: 480, y: 286, radius: 86, strength: 0.95, col
 
 // The ambient wash biases the unlit floor cold, so the warm pools have
 // something to fight. Drawn as a normal-alpha fill, not additive.
+//
+// Art pass: this used to be one full-canvas rectangle at alpha 0.42, and the
+// measurement showed what that did — it flattened the wall PNG into a single
+// (36,53,65), burying the directional light, the peeling paint and the stains
+// the asset was drawn with. Now the wash is three bands with a hole in the
+// middle: strongest at the very bottom (the floor, where a cold wash reads as
+// depth), lighter up the wall, and nothing at all across the top band where the
+// wall art carries its own light.
 const AMBIENT_COLOR = 0x24405e;
-const AMBIENT_ALPHA = 0.42;
+const AMBIENT_FLOOR_ALPHA = 0.4;
+const AMBIENT_WALL_ALPHA = 0.16;
+/** the fraction of the canvas height where the wall art keeps its own light */
+const AMBIENT_CLEAR_TOP = 0.16;
 
 // Stepped vignette bands, not a smooth gradient: a pixel game should not have a
 // filter-looking gradient anywhere.
@@ -89,8 +100,16 @@ export function buildLightLayer(
   const poolG = scene.add.graphics().setDepth(4);
   owned.push(poolG);
 
-  const ambient = scene.add.rectangle(width / 2, height / 2, width, height, AMBIENT_COLOR, AMBIENT_ALPHA).setDepth(6);
-  owned.push(ambient);
+  // Banded ambient, not one rectangle: the top band keeps the wall PNG's own
+  // light, the wall band takes a light cold wash, the floor band a strong one.
+  const clearY = height * AMBIENT_CLEAR_TOP;
+  const floorTop = height * 0.62;
+  owned.push(
+    scene.add.rectangle(width / 2, (clearY + floorTop) / 2, width, floorTop - clearY, AMBIENT_COLOR, AMBIENT_WALL_ALPHA).setDepth(6),
+  );
+  owned.push(
+    scene.add.rectangle(width / 2, (floorTop + height) / 2, width, height - floorTop, AMBIENT_COLOR, AMBIENT_FLOOR_ALPHA).setDepth(6),
+  );
 
   for (let i = 0; i < VIGNETTE_BANDS.length; i++) {
     const a = VIGNETTE_BANDS[i];

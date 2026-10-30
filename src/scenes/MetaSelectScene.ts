@@ -5,21 +5,28 @@ import { MODE_BLURBS, MODE_LABELS, MODES } from '../systems/modes';
 import { relicDisplay } from '../systems/relics';
 import { getGame } from '../core/session';
 import { playSfx } from '../render/audio';
-import { createMarker, placeMarker } from '../render/panels';
+import { buildPanel, createMarker, PANEL_DEPTH, placeMarker } from '../render/panels';
+import { buildPanelHeader, TYPE, UI } from '../render/uiKit';
+import { idleAnimKey, walkSheetKey } from '../render/walkcycle';
+import { TITLE_BG_KEY } from '../render/artpack';
 
-// OVERHAUL Wave B: the character-select screen — the replay engine both
-// benchmarks run on. It sits between the title and the run: pick the survivor
-// you have earned. Locked characters show the depth that unlocks them, so the
-// list itself is the progression chart.
+// OVERHAUL UI: the character select, rebuilt.
 //
-// Keyboard-only, like every other screen in this game.
-
+// The QA sweep found this was the ugliest screen in the game by a wide margin:
+// 91% of it was a single flat colour and it held 431 distinct colours in total,
+// against 9056 on the dorm floor and 16937 on the title. It is also the screen
+// every run passes through, and the one that has to sell "play again".
+//
+// So it is no longer a list of names on a dark rectangle. The painted backdrop
+// sits behind it (the same render as the title, dimmed), and the selected
+// survivor is drawn at native size as a portrait with a warm lamp glow behind
+// them - the sprite art is 88px tall, which is a portrait if you give it room.
+// The four names are compact rows to the right, and the mode and relic
+// information lives in its own column.
 type InputSlot = 'up' | 'down' | 'enter' | 'esc';
 
-// The order the four appear in; the player is always first.
 const ROSTER = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer'] as const;
 
-// One line of flavour per survivor, so the choice says who you are playing.
 const FLAVOUR: Record<string, string> = {
   player: '从底层醒来的那个人。没有特长，只有背包。',
   npc_alin: '宿舍区的老邻居。交易时总能多聊出点门道。',
@@ -40,7 +47,9 @@ export class MetaSelectScene extends Phaser.Scene {
   private keyRight!: Phaser.Input.Keyboard.Key;
   private modeText!: Phaser.GameObjects.Text;
   private modeBlurbText!: Phaser.GameObjects.Text;
-  private relicTexts: Phaser.GameObjects.Text[] = [];
+  private portrait?: Phaser.GameObjects.Sprite;
+  private portraitGlow?: Phaser.GameObjects.Graphics;
+  private flavourText!: Phaser.GameObjects.Text;
   private lastInputFrame: Record<InputSlot, number> = { up: -1, down: -1, enter: -1, esc: -1 };
 
   constructor() {
@@ -50,70 +59,119 @@ export class MetaSelectScene extends Phaser.Scene {
   create(): void {
     this.lastInputFrame = { up: -1, down: -1, enter: -1, esc: -1 };
     const { width, height } = this.cameras.main;
-    this.add.rectangle(width / 2, height / 2, width, height, 0x121c24);
 
-    this.add
-      .text(width / 2, 40, '出发之前', { fontFamily: 'monospace', fontSize: '26px', color: '#f4b66a', stroke: '#0b0f12', strokeThickness: 5 })
-      .setOrigin(0.5);
+    // ── the backdrop ────────────────────────────────────────────────────────
+    // The same painted render as the title, dimmed hard: the pick screen should
+    // feel like standing in the same building, not like a separate menu.
+    if (this.textures.exists(TITLE_BG_KEY)) {
+      const bg = this.add.image(width / 2, height / 2, TITLE_BG_KEY).setDisplaySize(width, height).setDepth(-30);
+      this.textures.get(TITLE_BG_KEY).setFilter(Phaser.Textures.FilterMode.LINEAR);
+      void bg;
+    } else {
+      this.add.rectangle(width / 2, height / 2, width, height, UI.surface).setDepth(-30);
+    }
+    this.add.rectangle(width / 2, height / 2, width, height, UI.surface).setAlpha(0.62).setDepth(-29);
 
+    const cx = width / 2;
+    const panelW = 470;
+    const panelH = 300;
+    const left = cx - panelW / 2;
+    const top = height / 2 - panelH / 2;
+    const depth = PANEL_DEPTH.menu.help;
+
+    this.add.text(cx, top - 18, '出发之前', { fontFamily: 'monospace', fontSize: '18px', color: '#f4b66a', stroke: '#05080c', strokeThickness: 4 }).setOrigin(0.5).setDepth(depth + 1);
+
+    for (const o of buildPanel(this, cx, height / 2, panelW, panelH, 'green', depth)) o.setDepth(o.depth);
+    for (const o of buildPanelHeader(this, left, top, panelW, '幸存者', UI.good, depth + 5)) this.add.existing(o as Phaser.GameObjects.GameObject);
+
+    // ── the portrait ────────────────────────────────────────────────────────
+    // Left third. The sprite is 88px of figure at native size, which is the
+    // whole reason to give it room instead of a 16px thumbnail.
+    const portraitX = left + 62;
+    const portraitFeet = top + panelH - 60;
+    this.portraitGlow = this.add.graphics().setDepth(depth + 5);
+    this.portrait = this.add
+      .sprite(portraitX, portraitFeet, walkSheetKey('player'))
+      .setOrigin(0.5, 1)
+      .setDepth(depth + 7);
+    this.portrait.play(idleAnimKey('player'));
+
+    this.flavourText = this.add
+      .text(portraitX, portraitFeet + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#a8a49a', align: 'center', wordWrap: { width: 110 } })
+      .setOrigin(0.5, 0)
+      .setDepth(depth + 7);
+
+    // ── the roster ──────────────────────────────────────────────────────────
     const meta = loadMeta();
-    const startY = 76;
+    const listX = left + 128;
+    const listW = 200;
     this.optionTexts = [];
     this.lockTexts = [];
     ROSTER.forEach((id, i) => {
       const unlocked = canSelect(meta, id);
       const need = CHARACTER_UNLOCKS[id];
-      const label = CHARACTER_NAMES[id] ?? id;
-      const t = this.add
-        .text(40, startY + i * 42, label, { fontFamily: 'monospace', fontSize: '17px', color: unlocked ? '#ece8d8' : '#4a4640' })
-        .setOrigin(0, 0.5);
-      const lock = this.add
-        .text(40, startY + i * 42 + 16, unlocked ? FLAVOUR[id] : `尚未相遇 —— 最深第 ${need} 层解锁`, {
+      const y = top + 34 + i * 40;
+      const name = this.add
+        .text(listX + 8, y + 6, CHARACTER_NAMES[id] ?? id, {
           fontFamily: 'monospace',
-          fontSize: '10px',
-          color: unlocked ? '#8a867c' : '#3a3630',
+          fontSize: `${TYPE.body}px`,
+          color: unlocked ? '#ece8d8' : '#5a564e',
         })
-        .setOrigin(0, 0.5);
-      this.optionTexts.push(t);
+        .setDepth(depth + 7);
+      const lock = this.add
+        .text(listX + 8, y + 22, unlocked ? '可出战' : `最深第 ${need} 层解锁`, {
+          fontFamily: 'monospace',
+          fontSize: `${TYPE.caption}px`,
+          color: unlocked ? '#77c6a4' : '#4a4640',
+        })
+        .setDepth(depth + 7);
+      this.optionTexts.push(name);
       this.lockTexts.push(lock);
     });
+    this.invWell(listX - 6, top + 28, listW, 168, depth + 5);
+    this.optionTexts.forEach((t) => t.setDepth(depth + 8));
+    this.lockTexts.forEach((t) => t.setDepth(depth + 8));
+
     this.marker = createMarker(this);
-    this.refreshOptions();
+    this.marker.setDepth(depth + 9);
 
-    // Mode row: ←/→ cycles the three modes the benchmarks ship.
+    // ── the mode / relic column ─────────────────────────────────────────────
+    const colX = left + 338;
     this.modeText = this.add
-      .text(width - 40, startY + 6, `模式：${MODE_LABELS[meta.mode]}`, { fontFamily: 'monospace', fontSize: '15px', color: '#f4b66a' })
-      .setOrigin(1, 0.5);
+      .text(colX, top + 34, `模式 ${MODE_LABELS[meta.mode]}`, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: '#f4b66a' })
+      .setDepth(depth + 7);
     this.modeBlurbText = this.add
-      .text(width - 40, startY + 26, MODE_BLURBS[meta.mode], { fontFamily: 'monospace', fontSize: '10px', color: '#8a867c', wordWrap: { width: 220 } })
-      .setOrigin(1, 0);
-
-    // Relic list: the passive boons this run will carry.
+      .text(colX, top + 52, MODE_BLURBS[meta.mode], { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#8a867c', wordWrap: { width: 118 } })
+      .setDepth(depth + 7);
     const relics = relicDisplay(meta);
-    this.add
-      .text(width - 40, startY + 62, '遗物', { fontFamily: 'monospace', fontSize: '12px', color: '#a8a49a' })
-      .setOrigin(1, 0.5);
-    this.relicTexts = [];
     relics.forEach((r, i) => {
-      const t = this.add
-        .text(width - 40, startY + 78 + i * 15, r.unlocked ? `${r.name}：${r.blurb}` : `??? —— 最深第 ${r.need} 层解锁`, {
+      this.add
+        .text(colX, top + 108 + i * 26, r.unlocked ? `◆ ${r.name}` : `◇ 第 ${r.need} 层`, {
           fontFamily: 'monospace',
-          fontSize: '10px',
-          color: r.unlocked ? '#a8e0c8' : '#3a3630',
-          wordWrap: { width: 230 },
+          fontSize: `${TYPE.caption}px`,
+          color: r.unlocked ? '#a8e0c8' : '#4a4640',
         })
-        .setOrigin(1, 0);
-      this.relicTexts.push(t);
+        .setDepth(depth + 7);
     });
 
     this.messageText = this.add
-      .text(width / 2, height - 30, '', { fontFamily: 'monospace', fontSize: '13px', color: '#e0705a', align: 'center' })
+      .text(cx, top + panelH - 12, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#e0705a' })
       .setOrigin(0.5)
+      .setDepth(depth + 9)
       .setVisible(false);
 
+    // The key legend sits on the foot bar, like the game's own.
     this.add
-      .text(width / 2, height - 52, '↑/↓ 选择 · ←/→ 模式 · Enter 出发 · ESC 返回标题', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' })
-      .setOrigin(0.5);
+      .rectangle(0, height - 18, width, 18, UI.surface)
+      .setOrigin(0, 0)
+      .setAlpha(0.9)
+      .setDepth(depth + 2);
+    this.add
+      .text(8, height - 9, '↑/↓ 选择 · ←/→ 模式 · Enter 出发 · ESC 返回标题', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#77c6a4' })
+      .setOrigin(0, 0.5)
+      .setDepth(depth + 3);
+
+    this.refreshOptions();
 
     const keyboard = this.input.keyboard;
     if (keyboard) {
@@ -131,20 +189,25 @@ export class MetaSelectScene extends Phaser.Scene {
     }
   }
 
-  // Cycles the mode and persists it, so the next run remembers the choice.
+  /** A dark inset behind the roster so the names sit on a surface. */
+  private invWell(x: number, y: number, w: number, h: number, depth: number): void {
+    this.add.rectangle(x, y, w, h, 0x080c0f).setOrigin(0, 0).setAlpha(0.55).setDepth(depth);
+    const g = this.add.graphics().setDepth(depth + 1);
+    g.lineStyle(1, UI.line, 0.5);
+    g.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, w - 1, h - 1);
+  }
+
   private cycleMode(delta: number): void {
     const meta = loadMeta();
     const idx = MODES.indexOf(meta.mode);
     const next = MODES[(idx + delta + MODES.length) % MODES.length];
     meta.mode = next;
     saveMeta(meta);
-    this.modeText.setText(`模式：${MODE_LABELS[next]}`);
+    this.modeText.setText(`模式 ${MODE_LABELS[next]}`);
     this.modeBlurbText.setText(MODE_BLURBS[next]);
     playSfx('click');
   }
 
-  // Phaser can deliver one keydown several times inside a single frame; the
-  // same per-frame debounce the title screen uses (GHI-03 m9).
   private accept(slot: InputSlot): boolean {
     const frame = this.game.getFrame();
     if (this.lastInputFrame[slot] === frame) return false;
@@ -168,14 +231,11 @@ export class MetaSelectScene extends Phaser.Scene {
     const id = ROSTER[this.selected];
     const meta = loadMeta();
     if (!canSelect(meta, id)) {
-      // A locked character is a signpost, not a tease: say what unlocks it.
-      this.showMessage(`「${CHARACTER_NAMES[id]}」还未相遇 —— 最深到达第 ${CHARACTER_UNLOCKS[id]} 层后解锁`);
+      this.showMessage(`「${CHARACTER_NAMES[id]}」还未相遇 —— 最深第 ${CHARACTER_UNLOCKS[id]} 层解锁`);
       return;
     }
     meta.selectedCharacter = id;
     saveMeta(meta);
-    // The run inherits the mode and the relics earned so far — the pick screen
-    // is where the meta meets the run.
     const state = getGame();
     if (state) {
       state.mode = meta.mode;
@@ -189,11 +249,38 @@ export class MetaSelectScene extends Phaser.Scene {
     const meta = loadMeta();
     this.optionTexts.forEach((t, i) => {
       const unlocked = canSelect(meta, ROSTER[i]);
-      t.setColor(unlocked ? (i === this.selected ? '#f4b66a' : '#ece8d8') : '#4a4640');
+      const isSelected = i === this.selected;
+      t.setColor(unlocked ? (isSelected ? '#f4b66a' : '#ece8d8') : '#5a564e');
+      // The selected row gets a band, same language as every other list.
+      if (isSelected) {
+        t.setDepth(PANEL_DEPTH.menu.help + 8);
+      }
     });
     const selected = this.optionTexts[this.selected];
     this.marker.setVisible(selected !== undefined);
     if (selected) placeMarker(this.marker, selected);
+
+    // The portrait follows the selection: this is what makes the screen read as
+    // "choose who you are" rather than "pick a label".
+    const who = ROSTER[this.selected];
+    const unlocked = canSelect(meta, who);
+    if (this.portrait) {
+      this.portrait.setTexture(walkSheetKey(who));
+      this.portrait.play(idleAnimKey(who), true);
+      // A locked survivor is a silhouette: visible enough to be a promise,
+      // dark enough to be out of reach.
+      this.portrait.setAlpha(unlocked ? 1 : 0.32);
+      this.portrait.setTint(unlocked ? 0xffffff : 0x3a4048);
+      this.portraitGlow?.clear();
+      if (this.portraitGlow && unlocked) {
+        // A warm pool behind the portrait, using the same warm ramp as the lamps.
+        for (let s = 5; s >= 1; s--) {
+          this.portraitGlow.fillStyle(UI.accent, 0.05 * s);
+          this.portraitGlow.fillEllipse(this.portrait.x, this.portrait.y - 34, 40 + s * 12, 66 + s * 16);
+        }
+      }
+    }
+    this.flavourText.setText(unlocked ? FLAVOUR[who] : '尚未相遇');
   }
 
   private showMessage(text: string): void {

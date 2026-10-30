@@ -4,6 +4,7 @@
 import type Phaser from 'phaser';
 
 import type { CharacterKey } from './artpack';
+import { PALETTE } from './palette.ts';
 // A side-view walk cycle for the corridor's characters.
 //
 // Every character in this game was drawn facing the camera. In a side-scroller
@@ -420,19 +421,30 @@ export interface CharacterColors {
 }
 type RGB = [number, number, number];
 
+const rgb = (c: number): [number, number, number] => [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff];
+
+// The four palettes, on the project palette (see render/palette.ts).
+//
+// Each character used to carry twelve hand-picked colours unrelated to anything
+// else on screen, so a figure could land a value lighter or darker than the wall
+// behind it by accident. The 2D-art rules this project follows say a character
+// must be separated from its background in VALUE, and each material gets three
+// values at most - so every colour below comes from the shared ramps, and the
+// survivor's jacket is the teal family, the one ramp that is neither stone nor
+// skin. That is what makes the player findable against a stone wall.
 export const PLAYER_COLORS: CharacterColors = {
-  outline: [0x0e, 0x14, 0x18],
-  cloth: [0x77, 0xc6, 0xa4],
-  clothDark: [0x4e, 0x8f, 0x78],
-  clothLight: [0xa8, 0xdc, 0xc4],
-  trouser: [0x6a, 0x60, 0x4c],
-  trouserDark: [0x46, 0x3f, 0x33],
-  boot: [0x18, 0x24, 0x2c],
-  skin: [0xd9, 0xb4, 0x8f],
-  skinDark: [0xb5, 0x8a, 0x67],
-  hair: [0x24, 0x2a, 0x30],
-  pack: [0x5a, 0x4a, 0x38],
-  packDark: [0x3a, 0x30, 0x24],
+  outline: rgb(PALETTE.ink),
+  cloth: rgb(PALETTE.clothHigh),
+  clothDark: rgb(PALETTE.cloth),
+  clothLight: rgb(0xa8dcC4),
+  trouser: rgb(PALETTE.stoneLight),
+  trouserDark: rgb(PALETTE.stone),
+  boot: rgb(PALETTE.shadow),
+  skin: rgb(PALETTE.skinLight),
+  skinDark: rgb(PALETTE.skin),
+  hair: rgb(PALETTE.shadow),
+  pack: rgb(PALETTE.lightDeep),
+  packDark: rgb(PALETTE.shadow),
 };
 
 // The other three share the skeleton and differ only in palette, the way
@@ -440,18 +452,18 @@ export const PLAYER_COLORS: CharacterColors = {
 // without any of them being a repaint of another.
 export const ALIN_COLORS: CharacterColors = {
   ...PLAYER_COLORS,
-  cloth: [0x5a, 0x8a, 0xb5],
-  clothDark: [0x3e, 0x64, 0x89],
-  clothLight: [0x8a, 0xb0, 0xd4],
-  hair: [0x1a, 0x1e, 0x26],
+  cloth: rgb(PALETTE.stoneLight),
+  clothDark: rgb(PALETTE.stone),
+  clothLight: rgb(PALETTE.dust),
+  hair: rgb(PALETTE.ink),
 };
 
 export const XIAOZHOU_COLORS: CharacterColors = {
   ...PLAYER_COLORS,
-  cloth: [0xb5, 0x85, 0x5a],
-  clothDark: [0x8a, 0x62, 0x42],
-  clothLight: [0xd4, 0xa8, 0x7e],
-  hair: [0x2e, 0x22, 0x18],
+  cloth: rgb(PALETTE.lightHigh),
+  clothDark: rgb(PALETTE.light),
+  clothLight: rgb(PALETTE.lightHot),
+  hair: rgb(PALETTE.shadow),
 };
 
 // The night threat is not a person, so it gets no skin: the husk palette is dark

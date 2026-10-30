@@ -108,3 +108,75 @@ export function buildRoomDepth(scene: Phaser.Scene, opts: RoomDepthOpts): Phaser
 
   return out;
 }
+
+// ── foreground ─────────────────────────────────────────────────────────────
+// The layer the room never had, and the single cheapest way to make a side view
+// read as a place with depth: dark shapes in FRONT of the player.
+//
+// Every 2D side-scroller that looks like a game does this - a beam across the top
+// of the frame, debris along the bottom edge, something at the left or right
+// margin. It gives the camera a position inside the room instead of looking at a
+// painted wall, and it costs nothing but a few dark rectangles.
+//
+// Kept to the frame's edges on purpose: foreground that covers the middle eats
+// the player's ability to see what they are walking into.
+const FG = 0x02040a;
+
+export interface ForegroundOpts {
+  width: number;
+  height: number;
+  /** the wall/floor seam */
+  wallBottom: number;
+  /** deterministic per floor so the debris does not reshuffle on reload */
+  seed: number;
+}
+
+/** A cheap deterministic hash -> 0..1, no dependency on the game's RNG. */
+function h01(n: number): number {
+  const x = Math.sin(n * 127.1) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+export function buildForeground(scene: Phaser.Scene, opts: ForegroundOpts): Phaser.GameObjects.GameObject[] {
+  const { width, height, wallBottom, seed } = opts;
+  const out: Phaser.GameObjects.GameObject[] = [];
+  // Depth 30: above the player (10), the light pools (20 is below this) and the
+  // vignette's lower bands. Foreground has to be in front of everything or it is
+  // not foreground.
+  const FG_DEPTH = 26;
+
+  // 1. The ceiling overhang: a beam across the top, with a few hangers. It crops
+  //    the top of the wall and makes the room feel enclosed.
+  out.push(scene.add.rectangle(0, 0, width, 14, FG).setOrigin(0, 0).setAlpha(0.92).setDepth(FG_DEPTH));
+  for (let x = 40; x < width; x += 118) {
+    const h = 8 + Math.round(h01(seed + x) * 10);
+    out.push(scene.add.rectangle(x, 0, 3, 14 + h, FG).setOrigin(0, 0).setAlpha(0.92).setDepth(FG_DEPTH));
+  }
+
+  // 2. Floor debris along the bottom edge: low, irregular, and never taller than
+  //    the player's knees, so it frames the walk without hiding it.
+  let x = 0;
+  let i = 0;
+  while (x < width) {
+    const w = 18 + Math.round(h01(seed + i * 7.3) * 46);
+    const h = 4 + Math.round(h01(seed + i * 3.1) * 12);
+    out.push(
+      scene.add.rectangle(x, height - h, w, h, FG).setOrigin(0, 0).setAlpha(0.9).setDepth(FG_DEPTH),
+    );
+    // A slightly taller lump every few pieces, so the edge is not a sawtooth.
+    if (h01(seed + i * 11.7) > 0.72) {
+      const tallW = 10 + Math.round(h01(seed + i) * 16);
+      const tallH = 10 + Math.round(h01(seed + i * 5.5) * 16);
+      out.push(scene.add.rectangle(x + 4, height - tallH, tallW, tallH, FG).setOrigin(0, 0).setAlpha(0.9).setDepth(FG_DEPTH));
+    }
+    x += w + 6 + Math.round(h01(seed + i * 2.2) * 26);
+    i++;
+  }
+
+  // 3. Side margins: a narrow dark edge at the left and right of the frame. In a
+  //    scrolling camera these read as the near walls of the room you are in.
+  out.push(scene.add.rectangle(0, 0, 10, wallBottom, FG).setOrigin(0, 0).setAlpha(0.55).setDepth(FG_DEPTH));
+  out.push(scene.add.rectangle(width - 10, 0, 10, wallBottom, FG).setOrigin(0, 0).setAlpha(0.55).setDepth(FG_DEPTH));
+
+  return out;
+}

@@ -80,7 +80,7 @@ import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
 import { addGlow, buildLightLayer, type LightLayer } from '../render/lighting';
-import { buildRoomDepth } from '../render/roomDepth';
+import { buildForeground, buildRoomDepth } from '../render/roomDepth';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
@@ -1024,6 +1024,14 @@ export class GameScene extends Phaser.Scene {
       // Cold daylight through the glass, as an ADD glow: the ellipse halo this
       // replaced read as a beige shape painted on the wall rather than as light.
       this.floorObjects.push(addGlow(this, cx - 8, 116, 62, 0.22, 3));
+      // The shaft: the window's light falling down the wall and pooling on the
+      // floor. A tall, narrow glow is the cheapest honest way to draw a beam in
+      // a side view - it gives the frame its brightest pixels, which is what
+      // makes the eye read "a light source in the room" rather than "a lit
+      // rectangle on a wall".
+      const shaft = addGlow(this, cx - 8, 168, 52, 0.34, 3);
+      shaft.setScale(0.42, 1.55);
+      this.floorObjects.push(shaft);
       this.floorObjects.push(this.add.image(cx - 8, 116, 'tile_window').setOrigin(0.5));
     }
 
@@ -1064,6 +1072,12 @@ export class GameScene extends Phaser.Scene {
       }),
     );
 
+    // The foreground layer last: ceiling beam, floor debris, side margins. This
+    // is what puts the camera inside the room instead of in front of a backdrop.
+    this.floorObjects.push(
+      ...buildForeground(this, { width: FLOOR_WIDTH, height: FLOOR_HEIGHT, wallBottom: wallH, seed: 7 }),
+    );
+
     // OVERHAUL Art Pass: the lighting layer over the dorm too — the bed and the
     // workbench are where the player works, so they get the warm pools.
     this.lightLayer?.destroy();
@@ -1102,6 +1116,10 @@ export class GameScene extends Phaser.Scene {
       drawCorridorRoom({ scene: this, g, floor, roomX: r * ROOM_WIDTH, floorY: wallH, room: r, objects: props });
     }
     this.floorObjects.push(g, ...props);
+
+    this.floorObjects.push(
+      ...buildForeground(this, { width: FLOOR_WIDTH, height: FLOOR_HEIGHT, wallBottom: wallH, seed: floor * 31 }),
+    );
 
     // OVERHAUL Art Pass 2: the same depth cues as the dorm, with the
     // stairwells as this floor's light sources.

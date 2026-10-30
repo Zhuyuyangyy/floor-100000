@@ -1,4 +1,6 @@
 import Phaser from 'phaser';
+
+import { PALETTE } from '../render/palette.ts';
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../core/design';
 import { getGame, startNewGame } from '../core/session';
 import {
@@ -488,12 +490,25 @@ export class GameScene extends Phaser.Scene {
     for (const spot of encounterSpots(state.runSeed, floor)) {
       if (shouldSkip(state, spot.id)) continue;
       const x = nudgeSpotX(spot.x, taken, INTERACT_DISTANCE + 8);
-      const color = spot.isBoss ? 0xe56d63 : 0xf4b66a;
-      const dot = this.add.circle(x, y, 9, color, 0.9).setDepth(6);
+      const color = spot.isBoss ? UI.danger : UI.accent;
+      // A dark backing plate under the dot, plus a slow breath.
+      //
+      // The markers are the game's core hook - "walk to the question mark" - and
+      // they were a bare orange disc with an ink '?' on it. Against the wall
+      // dressing that is now behind them (conduits, vents, signage) a disc with
+      // no edge can disappear; the dark plate guarantees a silhouette whatever is
+      // behind it, and the breath is what makes the eye find it while walking
+      // past. Same rule as the character's rim light: if it matters, it needs a
+      // guaranteed edge.
+      const plate = this.add.circle(x, y, 11, PALETTE.ink, 0.85).setDepth(6);
+      const dot = this.add.circle(x, y, 9, color, 1).setDepth(7);
       const label = this.add
         .text(x, y, '?', { fontFamily: 'monospace', fontSize: '13px', color: '#0b0f12' })
         .setOrigin(0.5)
-        .setDepth(7);
+        .setDepth(8);
+      // A 1.9s breath on the plate only, so the disc reads as a beacon without
+      // the label jittering.
+      this.tweens.add({ targets: plate, scale: 1.28, duration: 1900, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
       this.spotMarkers.set(spot.id, { x, isBoss: spot.isBoss, dot, label });
     }
     if (shopX !== null) {

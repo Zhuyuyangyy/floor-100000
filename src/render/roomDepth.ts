@@ -409,8 +409,31 @@ export function buildWallDressing(scene: Phaser.Scene, opts: DressingOpts): Phas
     }
   }
 
+  // Horizontal conduit runs across the whole floor.
+  //
+  // A grid analysis of the finished screen found the flattest region was the
+  // MIDDLE of the wall - 32-34% of those cells in one colour - which is exactly
+  // where the player walks and what the eye rests on. The vertical pipes were
+  // spread by a seeded step, so whole stretches had nothing on them. A
+  // horizontal run cannot leave a gap: it crosses every column, and it reads as
+  // building services rather than as decoration.
+  const runs = [0.22, 0.42, 0.62];
+  for (let ri = 0; ri < runs.length; ri++) {
+    const y = Math.round(8 + (wallBottom - 8) * runs[ri]);
+    out.push(scene.add.rectangle(0, y, width, 5, PALETTE.ink).setOrigin(0, 0).setAlpha(0.8).setDepth(D));
+    out.push(scene.add.rectangle(0, y, width, 1, PALETTE.dust).setOrigin(0, 0).setAlpha(0.55).setDepth(D + 1));
+    // Clamps every few metres, so the run has rhythm instead of being a stripe.
+    for (let x = 20; x < width; x += 84) {
+      out.push(scene.add.rectangle(x, y - 2, 4, 9, PALETTE.stoneLight).setOrigin(0, 0).setAlpha(0.9).setDepth(D + 1));
+      out.push(scene.add.rectangle(x, y - 2, 1, 9, PALETTE.ink).setOrigin(0, 0).setAlpha(0.5).setDepth(D + 2));
+    }
+  }
+
   // Vent grilles and junction boxes at varied heights.
-  for (let i = 0; i < 14; i++) {
+  // 14 of these across 1280px left the middle of the wall measurably empty - an
+  // edge-density grid put whole cells at 2-4% - so there are twice as many now,
+  // spread by a seeded hash that fills the gaps instead of clustering.
+  for (let i = 0; i < 30; i++) {
     const x = 40 + Math.round(hh(seed + i * 17.3) * (width - 80));
     if (!clear(x)) continue;
     const y = top + 20 + Math.round(hh(seed + i * 5.9) * (bottom - top - 60));
@@ -430,7 +453,7 @@ export function buildWallDressing(scene: Phaser.Scene, opts: DressingOpts): Phas
 
   // Faded signage: pale rectangles with a couple of dark strokes. They read as
   // notices at a glance and cost nothing.
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 12; i++) {
     const x = 90 + Math.round(hh(seed + i * 23.1) * (width - 180));
     if (!clear(x)) continue;
     const y = 48 + Math.round(hh(seed + i * 3.7) * 70);

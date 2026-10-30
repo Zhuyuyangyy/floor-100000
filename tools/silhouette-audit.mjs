@@ -97,9 +97,42 @@ for (let i = 2; i < solid.length; i++) {
   if (nd !== 0) dir = nd;
 }
 
+// FRAME-TO-FRAME DIFFERENCE.
+//
+// A cycle whose frames are nearly identical reads as a twitch rather than a
+// walk, and a single-frame silhouette check cannot see that. The benchmark this
+// project measures against (Centum, reverse-engineered) keeps its one-shot poses
+// at 5x the idle frame delta; for a walk cycle the useful question is simpler:
+// does each consecutive pair of frames actually change a meaningful share of the
+// figure?
+const framePixels = (idx) => {
+  const out = new Set();
+  const base = idx * frameW;
+  for (let y = 0; y < frameH; y++) {
+    for (let x = 0; x < frameW; x++) {
+      if (alphaAt(base + x, y) > 0) out.add(y * frameW + x);
+    }
+  }
+  return out;
+};
+const deltas = [];
+for (let i = 0; i < 6; i++) {
+  const a = framePixels(i);
+  const b = framePixels((i + 1) % 6);
+  let changed = 0;
+  for (const p of a) if (!b.has(p)) changed++;
+  for (const p of b) if (!a.has(p)) changed++;
+  deltas.push(changed / Math.max(1, a.size));
+}
+const minDelta = Math.min(...deltas);
+const avgDelta = deltas.reduce((s, v) => s + v, 0) / deltas.length;
+
 const headRatio = head / shoulder;
 const waistRatio = waist / shoulder;
 const pass = {
+  // 6% of the figure changing between consecutive walk frames is the floor for
+  // "the legs are moving"; measured on this sprite it is ~14%.
+  motion: minDelta >= 0.06,
   sections: sections >= 3,
   headRatio: headRatio <= 0.85,
   waistRatio: waistRatio <= 0.9,
@@ -110,6 +143,7 @@ console.log(`\n SILHOUETTE ${CHAR} ` + '='.repeat(48));
 console.log(` figure height ${(solid.length / S).toFixed(0)}px at 1x, max width ${shoulder.toFixed(0)}px`);
 console.log(` head ${head.toFixed(1)}  shoulders ${shoulder.toFixed(1)}  waist ${waist.toFixed(1)}`);
 console.log(` sections ${sections}   head/shoulder ${headRatio.toFixed(2)}   waist/shoulder ${waistRatio.toFixed(2)}   split rows ${splitRows.toFixed(0)}`);
+  console.log(` walk frame delta per step: ${deltas.map((d) => (d * 100).toFixed(0) + '%').join(' ')}  (min ${(minDelta * 100).toFixed(0)}%, avg ${(avgDelta * 100).toFixed(0)}%)`);
 console.log(` PASS: ${Object.entries(pass).map(([k, v]) => `${k}=${v ? 'ok' : 'FAIL'}`).join('  ')}`);
 console.log('='.repeat(62) + '\n');
 process.exitCode = Object.values(pass).every(Boolean) ? 0 : 1;

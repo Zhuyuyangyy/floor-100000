@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 
 import { addGlow } from './lighting';
+import { PALETTE } from './palette.ts';
 
 // OVERHAUL Art Pass 2: room depth.
 //
@@ -277,4 +278,46 @@ export function buildSurfaceDetail(scene: Phaser.Scene, opts: SurfaceDetailOpts)
   }
 
   return out;
+}
+
+// ── ceiling fixtures ──────────────────────────────────────────────────────
+// Fluorescent strips hanging from the ceiling, the way the reference render has
+// them. Two jobs at once: they give the frame a bright band at the top (which is
+// what makes the vertical luminance profile read as a room instead of a wash),
+// and they explain where the light in the room comes from. A corridor lit by
+// nothing but wall lamps looks like a diorama.
+export interface CeilingLightOpts {
+  width: number;
+  seed: number;
+  /** y of the ceiling line */
+  top: number;
+}
+
+export function buildCeilingLights(scene: Phaser.Scene, opts: CeilingLightOpts): Phaser.GameObjects.GameObject[] {
+  const { width, seed, top } = opts;
+  const out: Phaser.GameObjects.GameObject[] = [];
+  const spacing = 224;
+  for (let i = 0; x_ok(i); i++) {
+    const x = 112 + i * spacing;
+    if (x > width - 60) break;
+    const w = h(seed + i * 4.1) > 0.5 ? 46 : 34;
+    // The housing: a dark bar with a bright tube inside it. The tube is the
+    // brightest thing in the frame on purpose - it is the light source.
+    out.push(scene.add.rectangle(x - w / 2, top, w, 5, PALETTE.shadow).setOrigin(0, 0).setDepth(3));
+    out.push(scene.add.rectangle(x - w / 2 + 2, top + 1, w - 4, 3, PALETTE.lightHot).setOrigin(0, 0).setDepth(3));
+    // Its spill: a wide flat glow under the tube. Flattened so it reads as light
+    // falling from a strip rather than a point.
+    const glow = addGlow(scene, x, top + 12, 56, 0.42, 4);
+    glow.setScale(1.5, 0.8);
+    out.push(glow);
+    // Two thin hangers up to the ceiling.
+    out.push(scene.add.rectangle(x - w / 2 + 6, top - 8, 1, 8, PALETTE.ink).setOrigin(0, 0).setDepth(3));
+    out.push(scene.add.rectangle(x + w / 2 - 7, top - 8, 1, 8, PALETTE.ink).setOrigin(0, 0).setDepth(3));
+  }
+  return out;
+}
+
+/** Kept as a named predicate so the loop reads as intent, not arithmetic. */
+function x_ok(_i: number): boolean {
+  return true;
 }

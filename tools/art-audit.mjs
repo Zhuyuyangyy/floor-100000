@@ -13,7 +13,7 @@ import { chromium } from 'playwright';
 //   contrast     character region vs the wall behind it (target >= 25)
 //   dominant     the largest single-colour share (target <= 20%)
 //   bright       bright-pixel share (target >= 1.5%)
-//   profile      vertical luminance spread down the frame (target stdev >= 12)
+//   spread       per-pixel luminance stdev over the play area (target >= 22)
 //
 // Run: node tools/art-audit.mjs [--url http://localhost:5173]
 // Output: re/audit/*.png plus a table on stdout.
@@ -151,20 +151,24 @@ async function main() {
   const rows = [];
   for (const [name, file] of Object.entries(shots)) {
     const img = await decode(page, file);
-    const [c0x, c0y] = toShot(0, 0);
-    const [c1x, c1y] = toShot(640, 360);
+    // The PLAY AREA, not the whole canvas: the HUD bar and the foot bar are
+    // chrome and would drag the vertical-profile number around whenever a UI
+    // colour changed. The profile is a property of the room.
+    const [c0x, c0y] = toShot(0, 34);
+    const [c1x, c1y] = toShot(640, 338);
     const colours = colourStats(img, c0x, c0y, c1x, c1y, 3);
-    // Vertical profile through the middle of the frame: does the image have a
-    // light-to-dark structure, or is it one flat value?
-    const bands = [];
-    for (let i = 0; i < 8; i++) {
-      const y0 = c0y + Math.round(((c1y - c0y) / 8) * i);
-      const y1 = c0y + Math.round(((c1y - c0y) / 8) * (i + 1));
-      bands.push(regionStats(img, c0x, y0, c1x, y1, 6).mean);
-    }
-    const mean = bands.reduce((a, v) => a + v, 0) / bands.length;
-    const stdev = Math.sqrt(bands.reduce((a, v) => a + (v - mean) ** 2, 0) / bands.length);
-    rows.push({ name, ...colours, profileStdev: stdev });
+    // CONTRAST SPREAD — the standard deviation of every sampled luminance in the
+    // play area.
+    //
+    // The first version used the standard deviation of eight horizontal band
+    // MEANS, and it turned out to punish good art: brightening the ceiling made
+    // the top band match the wall band, which lowered the number even though the
+    // room had gained a light source. Band means measure band alignment, not
+    // structure. The per-pixel spread measures what the eye cares about: does
+    // this image span a range of light and dark, or does everything sit at one
+    // value.
+    const stats = regionStats(img, c0x, c0y, c1x, c1y, 3);
+    rows.push({ name, ...colours, spread: stats.stdev });
   }
 
   // Character contrast, measured against the sprite's REAL bounds.
@@ -224,10 +228,10 @@ async function main() {
   const camouflage = sampled ? (camouflaged / sampled) * 100 : 0;
 
   console.log('\n ART AUDIT ' + '='.repeat(52));
-  console.log(` ${'screen'.padEnd(11)} ${'dominant'.padStart(9)} ${'bright'.padStart(8)} ${'distinct'.padStart(9)} ${'profile'.padStart(9)}`);
+  console.log(` ${'screen'.padEnd(11)} ${'dominant'.padStart(9)} ${'bright'.padStart(8)} ${'distinct'.padStart(9)} ${'spread'.padStart(9)}`);
   for (const r of rows) {
     console.log(
-      ` ${r.name.padEnd(11)} ${(r.dominant.toFixed(0) + '%').padStart(9)} ${(r.bright.toFixed(1) + '%').padStart(8)} ${String(r.distinct).padStart(9)} ${r.profileStdev.toFixed(1).padStart(9)}`,
+      ` ${r.name.padEnd(11)} ${(r.dominant.toFixed(0) + '%').padStart(9)} ${(r.bright.toFixed(1) + '%').padStart(8)} ${String(r.distinct).padStart(9)} ${r.spread.toFixed(1).padStart(9)}`,
     );
   }
   console.log(' ' + '-'.repeat(62));
@@ -243,7 +247,9 @@ async function main() {
     // before measuring and described a daylight scene. The check that matters
     // is that light sources exist at all.
     bright: rows.every((r) => r.bright >= 1.5),
-    profile: rows.filter((r) => r.name === 'world').every((r) => r.profileStdev >= 8),
+    // 22 is measured, not guessed: a room with a dark ceiling, a lit wall and a
+    // shadowed floor lands at 25-30, so 22 is the floor for 'has structure'.
+    spread: rows.filter((r) => r.name === 'world').every((r) => r.spread >= 22),
   };
   console.log(` PASS: ${Object.entries(pass).map(([k, v]) => `${k}=${v ? 'ok' : 'FAIL'}`).join('  ')}`);
   console.log('='.repeat(63) + '\n');

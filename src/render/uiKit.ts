@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 
+import { PALETTE, ROLE, STAT_COLOR } from './palette.ts';
+
 // OVERHAUL UI: the design system the in-game interface was missing.
 //
 // The audit that prompted this: the inventory panel measured 46% of the screen
@@ -52,35 +54,42 @@ export const TYPE = {
 // ── the colour roles ────────────────────────────────────────────────────────
 // Roles, not raw hex at the call site: a stat bar, a warning and a value all
 // need to be changed together, and they were not.
+// Colour roles, on the project palette (render/palette.ts).
+//
+// This module used to carry its own hex table, which is how a UI ends up looking
+// like a different game from the world behind it: the panel surface was one
+// blue-black and the room's shadow was another, so the two never quite matched.
+// Every colour below is a palette role now, and the accent is the same warm ramp
+// the lamps use - which is why an amber selection and an amber lamp feel related.
 export const UI = {
   /** panel and bar fill — translucent so the world reads through */
-  surface: 0x0b0f12,
+  surface: ROLE.surface,
   surfaceAlpha: 0.88,
   /** one step lighter, for headers and inset wells */
-  surfaceRaised: 0x18242c,
+  surfaceRaised: ROLE.surfaceRaised,
   /** the hairline between rows and around wells */
-  line: 0x2c3f4e,
+  line: ROLE.line,
   /** body text */
-  text: 0xece8d8,
+  text: ROLE.text,
   /** de-emphasised text: hints, units, locked rows */
-  textDim: 0x8a867c,
+  textDim: ROLE.textDim,
   /** the warm accent: titles, selection, gold */
-  accent: 0xf4b66a,
+  accent: ROLE.accent,
   /** the teal accent: safe things, positive deltas */
-  good: 0x77c6a4,
+  good: ROLE.good,
   /** the red accent: damage, blockers, danger */
-  danger: 0xe56d63,
+  danger: ROLE.danger,
   /** bar troughs */
-  trough: 0x1a2228,
+  trough: PALETTE.ink,
 } as const;
 
 // The four survival stats each own a colour, so a glance at the bar tells you
 // which stat is failing without reading the label.
 export const STAT_COLORS: Record<string, number> = {
-  hp: 0xd8665f,
-  hunger: 0xd8a35f,
-  thirst: 0x5fa8d8,
-  energy: 0x8fd86a,
+  hp: STAT_COLOR.hp,
+  hunger: STAT_COLOR.hunger,
+  thirst: STAT_COLOR.thirst,
+  energy: STAT_COLOR.energy,
 };
 
 // ── primitives ──────────────────────────────────────────────────────────────

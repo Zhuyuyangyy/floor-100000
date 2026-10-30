@@ -251,6 +251,8 @@ export class GameScene extends Phaser.Scene {
   private craftMarker!: Phaser.GameObjects.Image;
   private craftSelected = 0;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
+  /** the warm pool the player carries; only visible once night falls */
+  private playerLight?: Phaser.GameObjects.Image;
   // OVERHAUL Art Pass: the floor's lighting layer (warm pools, cool ambient,
   // stepped vignette). Rebuilt per floor; destroyed with the floor.
   private lightLayer?: LightLayer;
@@ -364,6 +366,16 @@ export class GameScene extends Phaser.Scene {
       .setAlpha(0)
       .setDepth(NIGHT_DEPTH)
       .setName('night-overlay');
+
+    // A light the player carries, bright enough to read the floor by.
+    //
+    // Once night actually rendered, the character's contrast against the wall
+    // fell from 24.7 to 9.8 - visible, but not comfortably. Raising the sprite
+    // above the darkening would make the player glow like a lamp; leaving it
+    // dark makes the game hard to play. A warm pool that travels with them does
+    // neither: it is the flashlight a person would actually carry, and it keeps
+    // the room dark around them.
+    this.playerLight = addGlow(this, FLOOR_WIDTH / 2, PLAYER_FEET_Y - 40, 54, 0, LIGHT_DEPTH);
 
     this.drawFloor();
 
@@ -1707,7 +1719,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private applyNightLighting(): void {
-    this.nightOverlay.setAlpha(nightOverlayAlpha(getGame()));
+    const night = nightOverlayAlpha(getGame());
+    this.nightOverlay.setAlpha(night);
+    if (this.playerLight) {
+      // Full strength at the darkest setting, off in daylight. Kept below the
+      // lamp upgrade's brightness so crafting a lamp still visibly pays.
+      this.playerLight.setAlpha(Math.min(0.5, night * 0.62));
+    }
     // OVERHAUL Art Pass: the pools breathe, so the light is alive rather than
     // a painted-on decal.
     this.lightLayer?.update(this.time.now, this.game.loop.delta);
@@ -2651,6 +2669,10 @@ export class GameScene extends Phaser.Scene {
     // The shadow is its own objects (three stacked ellipses), so it has to be
     // carried along instead of being a child of the sprite.
     for (const o of this.playerShadow) (o as Phaser.GameObjects.Rectangle).x = state.player.x;
+    // The carry light rides with the player for the same reason the shadow does:
+    // it is not a child of the sprite, and it is what keeps the floor readable
+    // once night falls.
+    if (this.playerLight) this.playerLight.x = state.player.x;
 
     // The walk cycle carries all the vertical motion now — the poses' own hip
     // bob, not a sine wave bolted on top. What is left to do here is pick the

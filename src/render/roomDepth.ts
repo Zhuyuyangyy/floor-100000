@@ -321,3 +321,41 @@ export function buildCeilingLights(scene: Phaser.Scene, opts: CeilingLightOpts):
 function x_ok(_i: number): boolean {
   return true;
 }
+
+// ── contact shadows ───────────────────────────────────────────────────────
+// Every object in a side view needs a shadow where it meets the floor, and none
+// of them had one. That single omission is why props read as stickers applied to
+// a backdrop and why the player looks like they are hovering: without a contact
+// shadow nothing is anchored to the ground plane.
+//
+// Drawn as a flattened dark ellipse at the feet, wider than the object is tall,
+// with the alpha falling off toward its tips so it reads as shadow rather than
+// as a painted oval.
+export function addContactShadow(
+  scene: Phaser.Scene,
+  x: number,
+  feetY: number,
+  width: number,
+  depth = 2,
+  alpha = 0.5,
+): Phaser.GameObjects.GameObject[] {
+  const out: Phaser.GameObjects.GameObject[] = [];
+  const w = Math.max(8, width);
+  // Three nested ellipses: the middle is the darkest and the outer two fade, so
+  // the edge is soft without a gradient texture per object.
+  const layers: ReadonlyArray<readonly [number, number]> = [
+    [1, alpha * 0.4],
+    [0.72, alpha * 0.7],
+    [0.45, alpha],
+  ];
+  for (const [scale, a] of layers) {
+    out.push(
+      scene.add
+        .rectangle(x, feetY - 1, w * scale, Math.max(2, w * 0.13 * scale), PALETTE.ink)
+        .setOrigin(0.5, 0.5)
+        .setAlpha(a)
+        .setDepth(depth),
+    );
+  }
+  return out;
+}

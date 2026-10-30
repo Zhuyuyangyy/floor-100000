@@ -80,7 +80,7 @@ import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
 import { addGlow, buildLightLayer, type LightLayer } from '../render/lighting';
-import { buildCeilingLights, buildForeground, buildRoomDepth, buildSurfaceDetail } from '../render/roomDepth';
+import { addContactShadow, buildCeilingLights, buildForeground, buildRoomDepth, buildSurfaceDetail } from '../render/roomDepth';
 import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
@@ -242,6 +242,8 @@ export class GameScene extends Phaser.Scene {
   // OVERHAUL Art Pass: the floor's lighting layer (warm pools, cool ambient,
   // stepped vignette). Rebuilt per floor; destroyed with the floor.
   private lightLayer?: LightLayer;
+  /** the player's contact shadow, moved with them every frame */
+  private playerShadow: Phaser.GameObjects.GameObject[] = [];
   private upgradeBoard!: Phaser.GameObjects.Text;
   private keyC!: Phaser.Input.Keyboard.Key;
   private keyM!: Phaser.Input.Keyboard.Key;
@@ -396,6 +398,10 @@ export class GameScene extends Phaser.Scene {
     // screen, not always the player — the unlocked neighbours are the replay
     // engine's payload.
     const who = this.metaSelectedCharacter();
+    // The contact shadow belongs to the player, so it is tracked and moved with
+    // them every frame (see updatePlayerShadow). Without it the figure reads as
+    // hovering: nothing in a side view is anchored to the floor without one.
+    this.playerShadow = addContactShadow(this, state.player.x, PLAYER_FEET_Y + 2, 26, 2, 0.55);
     this.player = this.add.sprite(state.player.x, PLAYER_FEET_Y, walkSheetKey(who)).setOrigin(0.5, 1);
     this.player.play(idleAnimKey(who));
     this.floorObjects.push(this.player);
@@ -481,6 +487,7 @@ export class GameScene extends Phaser.Scene {
     if (shopX !== null) {
       // The trader: a pack and a price tag, drawn as the walk sheet's own
       // silhouette so he belongs to the same world.
+      this.floorObjects.push(...addContactShadow(this, shopX, PLAYER_FEET_Y + 2, 26, 2, 0.5));
       const trader = this.add.sprite(shopX, PLAYER_FEET_Y, walkSheetKey('npc_alin')).setOrigin(0.5, 1).setDepth(5);
       trader.play(idleAnimKey('npc_alin'));
       const tag = this.add
@@ -1175,6 +1182,7 @@ export class GameScene extends Phaser.Scene {
       // key would be an invisible container, not a plain one. The interaction box
       // is unchanged either way — hit detection still goes through c.x and
       // INTERACT_DISTANCE.
+      this.floorObjects.push(...addContactShadow(this, c.x, y, 44, 2, 0.45));
       const box = this.add.image(c.x, y - 4, key ?? '').setOrigin(0.5, 1);
       // The props are ~80px tall now rather than 16-32, so the label has to sit
       // above the prop instead of at a fixed offset from the floor line — at the
@@ -1782,8 +1790,11 @@ export class GameScene extends Phaser.Scene {
       // play() a sprite sits on frame 0 forever, which reads as a frozen mannequin
       // rather than someone waiting to talk to you.
       sprite.play(idleAnimKey(who));
+      // Same contact shadow as the player, so an NPC stands on the floor rather
+      // than hovering a few pixels above it.
+      const shadow = addContactShadow(this, npc.x, PLAYER_FEET_Y + 2, 26, 2, 0.5);
       const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
-      this.floorObjects.push(sprite, nameLabel);
+      this.floorObjects.push(...shadow, sprite, nameLabel);
     }
   }
 
@@ -2427,6 +2438,9 @@ export class GameScene extends Phaser.Scene {
     const dx = this.speedX * (delta / 1000);
     if (dx !== 0) movePlayerX(state, dx);
     this.player.x = state.player.x;
+    // The shadow is its own objects (three stacked ellipses), so it has to be
+    // carried along instead of being a child of the sprite.
+    for (const o of this.playerShadow) (o as Phaser.GameObjects.Rectangle).x = state.player.x;
 
     // The walk cycle carries all the vertical motion now — the poses' own hip
     // bob, not a sine wave bolted on top. What is left to do here is pick the

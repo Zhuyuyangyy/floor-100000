@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 
 import { bakeWalkSheets } from './walkcycle';
+import { PALETTE } from './palette.ts';
 
 // Procedural pixel-art factory for 《第100000层：末日宿舍》.
 //
@@ -15,13 +16,21 @@ import { bakeWalkSheets } from './walkcycle';
 // The six project colours from docs/05_ART_GUIDE.md §2. Not every entry is used
 // by a drawer below — cream and danger are carried by the text and stat-bar
 // colours elsewhere — but the set is the documented palette, so it stays whole.
+// The same six roles the art guide names, now pointing at the project palette
+// (render/palette.ts) instead of carrying their own hexes.
+//
+// This is the last module that had a private colour table. When it did, a tile
+// baked here could be a value off from the wall it was drawn on top of, and
+// nothing in the codebase could tell - which is exactly the class of drift that
+// makes a game look assembled from parts. The roles keep their names so every
+// drawer below still reads the same.
 const COLOR = {
-  building: 0x18242c, // dark blue-grey (mortar / outlines / boots)
-  wall: 0x354650, // wall grey
-  lamp: 0xf4b66a, // lamp orange (light, warmth, handles)
-  danger: 0xe56d63, // danger red (threat, blood, warnings)
-  safe: 0x77c6a4, // safe teal (purified water, allies, go-up)
-  cream: 0xece8d8, // text cream (skin, paper, highlights)
+  building: PALETTE.ink, // mortar / outlines / boots
+  wall: PALETTE.stone, // wall grey
+  lamp: PALETTE.lightHigh, // warmth, handles
+  danger: 0xe56d63, // danger red: the one hue the palette deliberately lacks
+  safe: PALETTE.clothHigh, // teal: purified water, allies, go-up
+  cream: 0xece8d8, // text cream, paper, highlights
 } as const;
 
 

@@ -35,12 +35,41 @@ export interface CorridorContext {
 
 // Palette additions, kept local so the shared pixelArt palette stays the single
 // source for the tiles and furniture these rooms are built from.
-const PIPE = 0x6a747c;
-const PIPE_DARK = 0x44505a;
-const HAZARD = 0xb08a3a;
-const CLOTH = 0x9a9484;
-const CLOTH_DARK = 0x7a746a;
-const CONCRETE = 0x4a545c;
+// The corridor props' colours, on the project palette.
+//
+// These were six hand-picked hexes plus another twenty written inline at the
+// draw calls, which made this file the last place in the project where a prop
+// could be a value off from the wall it sits against. Every colour below is a
+// palette role or a named mix of two, so a crate, a pipe and the wall behind it
+// all belong to the same value structure.
+import { PALETTE } from './palette.ts';
+
+const PIPE = PALETTE.stoneLight;
+const PIPE_DARK = PALETTE.stone;
+const HAZARD = PALETTE.light; // the warning stripe reads as warm, not yellow
+const CLOTH = PALETTE.dust;
+const CLOTH_DARK = PALETTE.stoneLight;
+const CONCRETE = PALETTE.stone;
+/** the void: the darkest value, used for gaps and shadowed interiors */
+const VOID = PALETTE.ink;
+/** a prop's shadow side, one step under its base */
+const SHADE = PALETTE.shadow;
+/** bleached bone/paper */
+const BONE = PALETTE.dust;
+/** rusted metal, the only warm-metal value in the palette */
+const RUST = PALETTE.lightDeep;
+const RUST_DARK = 0x54391f; // one step under RUST; kept literal until the palette grows
+const RUST_LIGHT = PALETTE.light;
+/** glass: the vending machine's front, and the one cool highlight on the floor */
+const GLASS = PALETTE.stoneLight;
+const GLASS_LIGHT = PALETTE.dust;
+/** painted steel fixtures (lockers, cabinet doors) */
+const STEEL = PALETTE.stoneLight;
+const STEEL_DARK = PALETTE.stone;
+/** the teal the project uses for anything safe or purified */
+const SAFE = PALETTE.clothHigh;
+/** a warm dark for interior gaps behind doors */
+const GAP = 0x3a2818; // stays literal: warmer than any palette shadow on purpose
 
 // A deterministic per-room pick, so a room's dressing is stable across visits
 // and across a scene restart. No Math.random: world dressing is world state.
@@ -52,13 +81,13 @@ function variant(floor: number, room: number, count: number): number {
 // A wall lamp plus its pool of light. Used by most themes, at different spacing.
 function lamp(ctx: CorridorContext, x: number, warm = 1): void {
   const { g, floorY } = ctx;
-  g.fillStyle(0xf4b66a, 0.1 * warm);
+  g.fillStyle(PALETTE.lightHigh, 0.1 * warm);
   g.fillRect(x - 30, floorY - 150, 60, 50);
-  g.fillStyle(0xf4b66a, 0.16 * warm);
+  g.fillStyle(PALETTE.lightHigh, 0.16 * warm);
   g.fillRect(x - 20, floorY - 136, 40, 36);
-  g.fillStyle(0x6a4a2a, 1);
+  g.fillStyle(RUST, 1);
   g.fillRect(x - 2, floorY - 148, 4, 10);
-  g.fillStyle(0xf4b66a, 1);
+  g.fillStyle(PALETTE.lightHigh, 1);
   g.fillRect(x - 5, floorY - 138, 10, 4);
 }
 
@@ -72,35 +101,35 @@ function drawWorkerDorms(ctx: CorridorContext): void {
   // Number plate above the door. Its offset is the door's height plus a gap, not a
   // fixed 36 — the door used to be 16px and the plate sat well clear of it, but at
   // 56px a fixed 36 puts the plate printed across the door.
-  g.fillStyle(0x0b0f12, 1);
+  g.fillStyle(VOID, 1);
   g.fillRect(doorX - 8, floorY - 66, 16, 9);
-  g.fillStyle(0xb8b09a, 1);
+  g.fillStyle(BONE, 1);
   g.fillRect(doorX - 6, floorY - 64, 12, 5);
-  g.fillStyle(0x3a444c, 1);
+  g.fillStyle(CONCRETE, 1);
   g.fillRect(doorX - 4, floorY - 63, 3, 1);
   g.fillRect(doorX - 4, floorY - 61, 5, 1);
 
   // Doormat, worn.
-  g.fillStyle(0x1a2026, 1);
+  g.fillStyle(SHADE, 1);
   g.fillRect(doorX - 16, floorY, 32, 4);
-  g.fillStyle(0x2a3238, 1);
+  g.fillStyle(PALETTE.shadow, 1);
   g.fillRect(doorX - 14, floorY, 28, 2);
 
   // Laundry on a line, hanging at a slightly different height each room.
   const lineY = floorY - 118 - variant(ctx.floor, room, 3) * 8;
-  g.fillStyle(0x1a2026, 1);
+  g.fillStyle(SHADE, 1);
   g.fillRect(roomX + 150, lineY, 84, 1);
   for (let i = 0; i < 2; i++) {
     const hx = roomX + 168 + i * 30;
     const hang = 16 + variant(ctx.floor, room + i, 3) * 6;
     g.fillStyle(i === 0 ? CLOTH : CLOTH_DARK, 1);
     g.fillRect(hx, lineY + 1, 14, hang);
-    g.fillStyle(0x0b0f12, 0.35);
+    g.fillStyle(VOID, 0.35);
     g.fillRect(hx, lineY + 1 + hang - 3, 14, 3);
   }
 
   // Shoes left outside the door.
-  g.fillStyle(0x14181e, 1);
+  g.fillStyle(VOID, 1);
   g.fillRect(doorX - 12, floorY - 3, 7, 3);
   g.fillRect(doorX - 3, floorY - 3, 7, 3);
 
@@ -127,27 +156,27 @@ function drawStorage(ctx: CorridorContext): void {
   // One crate on its side, as if someone left in a hurry.
   if (variant(ctx.floor, room + 5, 3) === 0) {
     const cx = roomX + 176;
-    g.fillStyle(0x14181e, 0.5);
+    g.fillStyle(VOID, 0.5);
     g.fillRect(cx - 10, floorY - 4, 22, 4);
-    g.fillStyle(0x6a4a3a, 1);
+    g.fillStyle(RUST, 1);
     g.fillRect(cx - 10, floorY - 12, 22, 12);
-    g.fillStyle(0x54391f, 1);
+    g.fillStyle(RUST_DARK, 1);
     g.fillRect(cx - 10, floorY - 12, 22, 2);
     g.fillRect(cx - 10, floorY - 4, 22, 2);
-    g.fillStyle(0x8a6438, 1);
+    g.fillStyle(RUST_LIGHT, 1);
     g.fillRect(cx - 4, floorY - 9, 10, 2);
   }
 
   // Cobweb in the room's top corner.
   const wx = roomX + (room % 2 === 0 ? 8 : ROOM_WIDTH - 8);
-  g.lineStyle(1, 0x8a8474, 0.35);
+  g.lineStyle(1, PALETTE.dust, 0.35);
   for (let i = 0; i < 3; i++) {
     g.lineBetween(wx, 10, wx + (room % 2 === 0 ? 26 - i * 7 : -26 + i * 7), 10 + i * 9);
     g.lineBetween(wx, 10, wx + (room % 2 === 0 ? 12 + i * 6 : -12 - i * 6), 10 + 22 - i * 5);
   }
 
   // Dust on the floor band.
-  g.fillStyle(0x4a545c, 0.5);
+  g.fillStyle(PALETTE.stone, 0.5);
   for (let i = 0; i < 5; i++) {
     g.fillRect(roomX + 24 + i * 47, floorY + 18 + variant(ctx.floor, room + i, 4) * 6, 2, 1);
   }
@@ -181,9 +210,9 @@ function drawMaintenance(ctx: CorridorContext): void {
   g.fillRect(dropX, 96, 5, floorY - 96);
   g.fillStyle(PIPE_DARK, 1);
   g.fillRect(dropX + 4, 96, 1, floorY - 96);
-  g.fillStyle(0x9aa0a6, 1);
+  g.fillStyle(STEEL, 1);
   g.fillCircle(dropX + 2, 150, 6);
-  g.fillStyle(0x3a444c, 1);
+  g.fillStyle(CONCRETE, 1);
   g.fillCircle(dropX + 2, 150, 2);
 
   // Wall machinery, drawn rather than textured.
@@ -195,34 +224,34 @@ function drawMaintenance(ctx: CorridorContext): void {
   // opens. Drawn panels read as building machinery instead: flat, riveted, no
   // hazard decal, and a different silhouette from the real prop.
   for (const px of [roomX + 96, roomX + 236]) {
-    g.fillStyle(0x14181e, 1);
+    g.fillStyle(VOID, 1);
     g.fillRect(px, 176, 34, 40); // cabinet
-    g.fillStyle(0x2a3238, 1);
+    g.fillStyle(PALETTE.shadow, 1);
     g.fillRect(px + 2, 178, 30, 36); // face
-    g.fillStyle(0x3a444c, 1);
+    g.fillStyle(CONCRETE, 1);
     for (let r = 0; r < 3; r++) g.fillRect(px + 4 + r * 11, 182, 2, 2); // rivets
-    g.fillStyle(0x14181e, 1);
+    g.fillStyle(VOID, 1);
     g.fillRect(px + 5, 192, 24, 12); // vent louvre
-    g.fillStyle(0x2a3238, 1);
+    g.fillStyle(PALETTE.shadow, 1);
     for (let v = 0; v < 4; v++) g.fillRect(px + 6 + v * 6, 194, 4, 8);
   }
   // Conduit run along the skirting.
-  g.fillStyle(0x1a2026, 1);
+  g.fillStyle(SHADE, 1);
   g.fillRect(roomX, floorY - 10, ROOM_WIDTH, 3);
-  g.fillStyle(0x2a3238, 1);
+  g.fillStyle(PALETTE.shadow, 1);
   for (let x = 6; x < ROOM_WIDTH; x += 12) g.fillRect(roomX + x, floorY - 9, 6, 1);
 
   // Water tank on the floor, with a hazard stripe in front of it.
   ctx.objects.push(ctx.scene.add.image(roomX + 300, floorY, 'furn_watertank').setOrigin(0.5, 1));
-  g.fillStyle(0x14181e, 0.5);
+  g.fillStyle(VOID, 0.5);
   g.fillRect(roomX + 282, floorY - 3, 38, 3);
   for (let i = 0; i < 6; i++) {
-    g.fillStyle(i % 2 === 0 ? HAZARD : 0x14181e, 1);
+    g.fillStyle(i % 2 === 0 ? HAZARD : VOID, 1);
     g.fillRect(roomX + 280 + i * 6, floorY, 6, 3);
   }
 
   // Stencil marking on the wall, so the room is not only machinery.
-  g.fillStyle(0x77c6a4, 0.5);
+  g.fillStyle(SAFE, 0.5);
   g.fillRect(roomX + 40, 150, 3, 14);
   g.fillRect(roomX + 47, 150, 3, 14);
   g.fillRect(roomX + 40, 157, 10, 3);
@@ -239,15 +268,15 @@ function drawCanteen(ctx: CorridorContext): void {
   // Hanging lamps in a row, the one warm thing on this floor.
   for (let i = 0; i < 3; i++) {
     const lx = roomX + 60 + i * 96;
-    g.fillStyle(0x1a2026, 1);
+    g.fillStyle(SHADE, 1);
     g.fillRect(lx, 8, 1, 46);
-    g.fillStyle(0xf4b66a, 0.09);
+    g.fillStyle(PALETTE.lightHigh, 0.09);
     g.fillRect(lx - 26, 54, 52, 44);
-    g.fillStyle(0xf4b66a, 0.15);
+    g.fillStyle(PALETTE.lightHigh, 0.15);
     g.fillRect(lx - 16, 62, 32, 36);
-    g.fillStyle(0x6a4a2a, 1);
+    g.fillStyle(RUST, 1);
     g.fillRect(lx - 6, 54, 12, 5);
-    g.fillStyle(0xf4b66a, 1);
+    g.fillStyle(PALETTE.lightHigh, 1);
     g.fillRect(lx - 5, 59, 10, 3);
   }
 
@@ -257,63 +286,63 @@ function drawCanteen(ctx: CorridorContext): void {
   // with furn_shelf because a 16px prop would read as clutter on the counter
   // instead of as wall furniture.
   const shelfTop = floorY - 74;
-  g.fillStyle(0x14181e, 0.45);
+  g.fillStyle(VOID, 0.45);
   g.fillRect(cx - 4, shelfTop - 4, 158, 48);
   for (let board = 0; board < 2; board++) {
     const by = shelfTop + board * 22;
-    g.fillStyle(0x54391f, 1);
+    g.fillStyle(RUST_DARK, 1);
     g.fillRect(cx, by + 14, 150, 3);
-    g.fillStyle(0x6a4a3a, 1);
+    g.fillStyle(RUST, 1);
     g.fillRect(cx, by + 14, 150, 1);
     for (let i = 0; i < 6; i++) {
       if (variant(ctx.floor, room + board * 6 + i, 4) === 0) continue; // gaps where stock ran out
       const ix = cx + 8 + i * 24;
       const ih = 8 + variant(ctx.floor, room + i, 3) * 4;
-      g.fillStyle(i % 3 === 0 ? 0x3a86a8 : i % 3 === 1 ? 0x8a6438 : 0x7a746a, 1);
+      g.fillStyle(i % 3 === 0 ? GLASS : i % 3 === 1 ? RUST_LIGHT : PALETTE.stoneLight, 1);
       g.fillRect(ix, by + 14 - ih, 12, ih);
-      g.fillStyle(0x0b0f12, 0.3);
+      g.fillStyle(VOID, 0.3);
       g.fillRect(ix, by + 14 - ih, 12, 1);
     }
   }
 
   g.fillStyle(CONCRETE, 1);
   g.fillRect(cx, floorY - 30, 150, 30);
-  g.fillStyle(0x5a646c, 1);
+  g.fillStyle(STEEL_DARK, 1);
   g.fillRect(cx, floorY - 30, 150, 3);
-  g.fillStyle(0x2a3238, 1);
+  g.fillStyle(PALETTE.shadow, 1);
   g.fillRect(cx, floorY - 12, 150, 2);
-  g.fillStyle(0x14181e, 0.5);
+  g.fillStyle(VOID, 0.5);
   g.fillRect(cx - 3, floorY - 3, 156, 3);
   // Serving well cut into the counter top.
-  g.fillStyle(0x14181e, 0.55);
+  g.fillStyle(VOID, 0.55);
   g.fillRect(cx + 96, floorY - 26, 44, 8);
 
   // Trays and a jug left on the counter.
-  g.fillStyle(0x8a8474, 1);
+  g.fillStyle(PALETTE.dust, 1);
   g.fillRect(cx + 18, floorY - 36, 18, 6);
-  g.fillStyle(0x6a645a, 1);
+  g.fillStyle(STEEL_DARK, 1);
   g.fillRect(cx + 18, floorY - 32, 18, 2);
-  g.fillStyle(0x3a86a8, 1);
+  g.fillStyle(GLASS, 1);
   g.fillRect(cx + 52, floorY - 40, 8, 10);
-  g.fillStyle(0xbfe6f0, 1);
+  g.fillStyle(GLASS_LIGHT, 1);
   g.fillRect(cx + 54, floorY - 38, 3, 3);
 
   // Benches on the floor side.
   for (let i = 0; i < 2; i++) {
     const bx = roomX + 214 + i * 52;
-    g.fillStyle(0x54391f, 1);
+    g.fillStyle(RUST_DARK, 1);
     g.fillRect(bx, floorY - 12, 40, 4);
-    g.fillStyle(0x3a2818, 1);
+    g.fillStyle(GAP, 1);
     g.fillRect(bx + 3, floorY - 8, 3, 8);
     g.fillRect(bx + 34, floorY - 8, 3, 8);
   }
 
   // A menu board, mostly blank.
-  g.fillStyle(0x0b0f12, 1);
+  g.fillStyle(VOID, 1);
   g.fillRect(roomX + 250, 150, 54, 40);
-  g.fillStyle(0x2a3238, 1);
+  g.fillStyle(PALETTE.shadow, 1);
   g.fillRect(roomX + 254, 154, 46, 32);
-  g.fillStyle(0x8a8474, 0.7);
+  g.fillStyle(PALETTE.dust, 0.7);
   g.fillRect(roomX + 258, 160, 30, 2);
   g.fillRect(roomX + 258, 166, 22, 2);
   g.fillRect(roomX + 258, 172, 26, 2);
@@ -327,10 +356,10 @@ function drawCanteen(ctx: CorridorContext): void {
 // until the room stops being readable — the class difference has to come from
 // what is in the room, not from how little of it you can see.
 export const CORRIDOR_TINT: Record<number, { color: number; alpha: number }> = {
-  2: { color: 0x3a4a56, alpha: 0.16 }, // worker housing: cold, faintly warmed by the doors
-  3: { color: 0x1a222a, alpha: 0.26 }, // store room: the dimmest of the four
-  4: { color: 0x24323c, alpha: 0.16 }, // maintenance: cold steel
-  5: { color: 0x3a3428, alpha: 0.14 }, // canteen: the warmest, because it was the social floor
+  2: { color: PALETTE.stone, alpha: 0.16 }, // worker housing: cold, faintly warmed by the doors
+  3: { color: PALETTE.shadow, alpha: 0.26 }, // store room: the dimmest of the four
+  4: { color: PALETTE.stone, alpha: 0.16 }, // maintenance: cold steel
+  5: { color: PALETTE.lightDeep, alpha: 0.14 }, // canteen: the warmest, because it was the social floor
 };
 
 const THEMES: Record<number, (ctx: CorridorContext) => void> = {

@@ -1,14 +1,12 @@
 import Phaser from 'phaser';
 
-/** 24-bit colour to the '#rrggbb' a Phaser text style wants. */
-const hex = (c: number): string => `#${c.toString(16).padStart(6, '0')}`;
 
 import { CHARACTER_NAMES, CHARACTER_UNLOCKS, canSelect, loadMeta, saveMeta } from '../systems/metaProgress';
 import { MODE_BLURBS, MODE_LABELS, MODES } from '../systems/modes';
 import { relicDisplay } from '../systems/relics';
 import { getGame } from '../core/session';
 import { playSfx } from '../render/audio';
-import { PALETTE, TEXT } from '../render/palette.ts';
+import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { buildPanel, createMarker, PANEL_DEPTH, placeMarker } from '../render/panels';
 import { buildPanelHeader, TYPE, UI } from '../render/uiKit';
 import { idleAnimKey, walkSheetKey } from '../render/walkcycle';
@@ -83,7 +81,7 @@ export class MetaSelectScene extends Phaser.Scene {
     const top = height / 2 - panelH / 2;
     const depth = PANEL_DEPTH.menu.help;
 
-    this.add.text(cx, top - 18, '出发之前', { fontFamily: 'monospace', fontSize: '18px', color: '#f4b66a', stroke: '#05080c', strokeThickness: 4 }).setOrigin(0.5).setDepth(depth + 1);
+    this.add.text(cx, top - 18, '出发之前', { fontFamily: 'monospace', fontSize: '18px', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 4 }).setOrigin(0.5).setDepth(depth + 1);
 
     for (const o of buildPanel(this, cx, height / 2, panelW, panelH, 'green', depth)) o.setDepth(o.depth);
     for (const o of buildPanelHeader(this, left, top, panelW, '幸存者', UI.good, depth + 5)) this.add.existing(o as Phaser.GameObjects.GameObject);
@@ -101,7 +99,7 @@ export class MetaSelectScene extends Phaser.Scene {
     this.portrait.play(idleAnimKey('player'));
 
     this.flavourText = this.add
-      .text(portraitX, portraitFeet + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#a8a49a', align: 'center', wordWrap: { width: 110 } })
+      .text(portraitX, portraitFeet + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary), align: 'center', wordWrap: { width: 110 } })
       .setOrigin(0.5, 0)
       .setDepth(depth + 7);
 
@@ -142,10 +140,10 @@ export class MetaSelectScene extends Phaser.Scene {
     // ── the mode / relic column ─────────────────────────────────────────────
     const colX = left + 338;
     this.modeText = this.add
-      .text(colX, top + 34, `模式 ${MODE_LABELS[meta.mode]}`, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: '#f4b66a' })
+      .text(colX, top + 34, `模式 ${MODE_LABELS[meta.mode]}`, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
       .setDepth(depth + 7);
     this.modeBlurbText = this.add
-      .text(colX, top + 52, MODE_BLURBS[meta.mode], { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#8a867c', wordWrap: { width: 118 } })
+      .text(colX, top + 52, MODE_BLURBS[meta.mode], { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim), wordWrap: { width: 118 } })
       .setDepth(depth + 7);
     const relics = relicDisplay(meta);
     relics.forEach((r, i) => {
@@ -159,7 +157,7 @@ export class MetaSelectScene extends Phaser.Scene {
     });
 
     this.messageText = this.add
-      .text(cx, top + panelH - 12, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#e0705a' })
+      .text(cx, top + panelH - 12, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn) })
       .setOrigin(0.5)
       .setDepth(depth + 9)
       .setVisible(false);
@@ -171,7 +169,7 @@ export class MetaSelectScene extends Phaser.Scene {
       .setAlpha(0.9)
       .setDepth(depth + 2);
     this.add
-      .text(8, height - 9, '↑/↓ 选择 · ←/→ 模式 · Enter 出发 · ESC 返回标题', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#77c6a4' })
+      .text(8, height - 9, '↑/↓ 选择 · ←/→ 模式 · Enter 出发 · ESC 返回标题', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0, 0.5)
       .setDepth(depth + 3);
 

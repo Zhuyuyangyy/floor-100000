@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 
-import { PALETTE } from '../render/palette.ts';
+import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../core/design';
 import { getGame, startNewGame } from '../core/session';
 import {
@@ -503,7 +503,7 @@ export class GameScene extends Phaser.Scene {
       const plate = this.add.circle(x, y, 11, PALETTE.ink, 0.85).setDepth(6);
       const dot = this.add.circle(x, y, 9, color, 1).setDepth(7);
       const label = this.add
-        .text(x, y, '?', { fontFamily: 'monospace', fontSize: '13px', color: '#0b0f12' })
+        .text(x, y, '?', { fontFamily: 'monospace', fontSize: '13px', color: hex(PALETTE.ink) })
         .setOrigin(0.5)
         .setDepth(8);
       // A 1.9s breath on the plate only, so the disc reads as a beacon without
@@ -518,7 +518,7 @@ export class GameScene extends Phaser.Scene {
       const trader = this.add.sprite(shopX, PLAYER_FEET_Y, walkSheetKey('npc_alin')).setOrigin(0.5, 1).setDepth(5);
       trader.play(idleAnimKey('npc_alin'));
       const tag = this.add
-        .text(shopX, PLAYER_FEET_Y - 108, '行商', { fontFamily: 'monospace', fontSize: '11px', color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 4, y: 2 } })
+        .text(shopX, PLAYER_FEET_Y - 108, '行商', { fontFamily: 'monospace', fontSize: '11px', color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 4, y: 2 } })
         .setOrigin(0.5)
         .setDepth(6);
       this.spotMarkers.set('shop', { x: shopX, isBoss: false, dot: trader as unknown as Phaser.GameObjects.Arc, label: tag });
@@ -597,7 +597,7 @@ export class GameScene extends Phaser.Scene {
     // what the rest of this panel means.
     this.encounterObjects.push(
       this.add
-        .text(left + panelW - 10, top + 10, `${state.player.gold} 金`, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: '#f4b66a' })
+        .text(left + panelW - 10, top + 10, `${state.player.gold} 金`, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
         .setOrigin(1, 0.5)
         .setDepth(depth + 6),
     );
@@ -625,7 +625,7 @@ export class GameScene extends Phaser.Scene {
           .text(left + panelW - 20, y + 20, canBuy ? 'Enter 买入' : '金币不足', {
             fontFamily: 'monospace',
             fontSize: `${TYPE.caption}px`,
-            color: canBuy ? '#77c6a4' : '#e8907c',
+            color: canBuy ? hex(PALETTE.clothHigh) : hex(TEXT.warn),
           })
           .setOrigin(1, 0.5)
           .setDepth(depth + 7),
@@ -639,7 +639,7 @@ export class GameScene extends Phaser.Scene {
     this.encounterObjects.push(...buildPanelWell(this, left + 8, footY, panelW - 16, 22, depth + 5));
     this.encounterObjects.push(
       this.add
-        .text(left + 16, footY + 11, 'S 卖出背包里的一件  ·  ESC 离开', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#a8a49a' })
+        .text(left + 16, footY + 11, 'S 卖出背包里的一件  ·  ESC 离开', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
         .setOrigin(0, 0.5)
         .setDepth(depth + 7),
     );
@@ -804,7 +804,7 @@ export class GameScene extends Phaser.Scene {
         .text(left + panelW - 12, top + 44, `${combat.monster.hp}/${combat.monster.maxHp} · 第 ${combat.turn} 回合`, {
           fontFamily: 'monospace',
           fontSize: `${TYPE.caption}px`,
-          color: '#8a867c',
+          color: hex(TEXT.dim),
         })
         .setOrigin(1, 0)
         .setDepth(depth + 7),
@@ -819,7 +819,7 @@ export class GameScene extends Phaser.Scene {
     tail.forEach((line, i) => {
       this.encounterObjects.push(
         this.add
-          .text(left + 20, logTop + 8 + i * 17, line, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: i === tail.length - 1 ? '#ece8d8' : '#8a867c', wordWrap: { width: panelW - 40 } })
+          .text(left + 20, logTop + 8 + i * 17, line, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim), wordWrap: { width: panelW - 40 } })
           .setDepth(depth + 7),
       );
     });
@@ -840,11 +840,11 @@ export class GameScene extends Phaser.Scene {
       }
       this.encounterObjects.push(
         this.add
-          .text(left + 22, y + 12, label, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: selected ? '#f4b66a' : '#ece8d8' })
+          .text(left + 22, y + 12, label, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary) })
           .setOrigin(0, 0.5)
           .setDepth(depth + 7),
         this.add
-          .text(left + panelW - 22, y + 12, `${key} · ${note}`, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#8a867c' })
+          .text(left + panelW - 22, y + 12, `${key} · ${note}`, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
           .setOrigin(1, 0.5)
           .setDepth(depth + 7),
       );
@@ -852,7 +852,7 @@ export class GameScene extends Phaser.Scene {
 
     this.encounterObjects.push(
       this.add
-        .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 出招 · ESC 撤退', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#77c6a4' })
+        .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 出招 · ESC 撤退', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
         .setOrigin(0.5)
         .setDepth(depth + 7),
     );
@@ -995,7 +995,7 @@ export class GameScene extends Phaser.Scene {
           .text(outLeft + 20, outTop + 38 + i * 17, line, {
             fontFamily: 'monospace',
             fontSize: `${TYPE.caption}px`,
-            color: i === tail.length - 1 ? '#ece8d8' : '#8a867c',
+            color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim),
             wordWrap: { width: outW - 40 },
           })
           .setDepth(outDepth + 7),
@@ -1003,7 +1003,7 @@ export class GameScene extends Phaser.Scene {
     });
     this.encounterObjects.push(
       this.add
-        .text(cx, outTop + outH - 12, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#8a867c' })
+        .text(cx, outTop + outH - 12, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
         .setOrigin(0.5)
         .setDepth(outDepth + 7),
     );
@@ -1048,7 +1048,7 @@ export class GameScene extends Phaser.Scene {
         .text(left + 20, top + 50, enc.encounter.message, {
           fontFamily: 'monospace',
           fontSize: `${TYPE.body}px`,
-          color: '#ece8d8',
+          color: hex(TEXT.primary),
           wordWrap: { width: panelW - 40 },
         })
         .setOrigin(0, 0.5)
@@ -1069,7 +1069,7 @@ export class GameScene extends Phaser.Scene {
             .text(left + 24, y + 13, CHOICE_LABELS[choice], {
               fontFamily: 'monospace',
               fontSize: `${TYPE.body}px`,
-              color: selected ? '#f4b66a' : '#a8a49a',
+              color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.secondary),
             })
             .setOrigin(0, 0.5)
             .setDepth(depth + 7),
@@ -1077,7 +1077,7 @@ export class GameScene extends Phaser.Scene {
       });
       this.encounterObjects.push(
         this.add
-          .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确认 · ESC 离开', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#8a867c' })
+          .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确认 · ESC 离开', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
           .setOrigin(0.5)
           .setDepth(depth + 7),
       );
@@ -1120,19 +1120,19 @@ export class GameScene extends Phaser.Scene {
     const isBoss = enc.encounter.kind === 'boss';
     this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.dialogue));
     this.encounterObjects.push(
-      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: 'monospace', fontSize: '16px', color: isBoss ? '#e8907c' : '#f4b66a' }).setOrigin(0.5),
+      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: 'monospace', fontSize: '16px', color: isBoss ? hex(TEXT.warn) : hex(PALETTE.lightHigh) }).setOrigin(0.5),
     );
     this.encounterObjects.push(
-      this.add.text(left + 20, top + 44, result.message, { fontFamily: 'monospace', fontSize: '13px', color: '#ece8d8', wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+      this.add.text(left + 20, top + 44, result.message, { fontFamily: 'monospace', fontSize: '13px', color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
     );
     const loot = result.items.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、');
     if (loot) {
       this.encounterObjects.push(
-        this.add.text(left + 20, top + 96, `获得：${loot}`, { fontFamily: 'monospace', fontSize: '13px', color: '#a8e0c8', wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+        this.add.text(left + 20, top + 96, `获得：${loot}`, { fontFamily: 'monospace', fontSize: '13px', color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
       );
     }
     this.encounterObjects.push(
-      this.add.text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: '11px', color: '#8a867c' }).setOrigin(0.5),
+      this.add.text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: '11px', color: hex(TEXT.dim) }).setOrigin(0.5),
     );
     if (state.status === 'lost') {
       this.scene.start('End');
@@ -1322,12 +1322,12 @@ export class GameScene extends Phaser.Scene {
   private drawExits(floor: number): void {
     if (hasUpExit(floor)) {
       const stairs = this.add.tileSprite(UP_EXIT_X - 16, FLOOR_HEIGHT - FLOOR_BAND, 32, FLOOR_BAND, 'tile_stairs_up').setOrigin(0, 0);
-      const upLabel = this.add.text(UP_EXIT_X, FLOOR_HEIGHT - 104, '↑ 上楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#77c6a4' }).setOrigin(0.5);
+      const upLabel = this.add.text(UP_EXIT_X, FLOOR_HEIGHT - 104, '↑ 上楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
       this.floorObjects.push(stairs, upLabel);
     }
     if (hasDownExit(floor)) {
       const stairs = this.add.tileSprite(DOWN_EXIT_X - 16, FLOOR_HEIGHT - FLOOR_BAND, 32, FLOOR_BAND, 'tile_stairs_down').setOrigin(0, 0);
-      const downLabel = this.add.text(DOWN_EXIT_X, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#f4b66a' }).setOrigin(0.5);
+      const downLabel = this.add.text(DOWN_EXIT_X, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
       this.floorObjects.push(stairs, downLabel);
     }
   }
@@ -1346,7 +1346,7 @@ export class GameScene extends Phaser.Scene {
       // above the prop instead of at a fixed offset from the floor line — at the
       // old spot it would be printed straight across the middle of the crate.
       const label = this.add
-        .text(c.x, y - 4 - box.displayHeight - 8, c.label, { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' })
+        .text(c.x, y - 4 - box.displayHeight - 8, c.label, { fontFamily: 'monospace', fontSize: '11px', color: hex(TEXT.primary) })
         .setOrigin(0.5);
       this.containerObjs.set(c.id, { box, label });
       this.floorObjects.push(box, label);
@@ -1384,7 +1384,7 @@ export class GameScene extends Phaser.Scene {
   private drawBed(): void {
     const y = FLOOR_HEIGHT - 64;
     const bed = this.add.image(BED_X, y + 4, 'furn_bed').setOrigin(0.5, 1);
-    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
+    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: 'monospace', fontSize: '11px', color: hex(TEXT.primary) }).setOrigin(0.5);
     this.floorObjects.push(bed, bedLabel);
   }
 
@@ -1420,14 +1420,14 @@ export class GameScene extends Phaser.Scene {
 
     // Floor badge: the one number that is always the answer to "where am I".
     this.floorBadge = this.add
-      .text(8, HUD_BAR_H / 2, '1F', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: '#0b0f12' })
+      .text(8, HUD_BAR_H / 2, '1F', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(PALETTE.ink) })
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(103);
     this.add
       .rectangle(6, HUD_BAR_H / 2, 26, 15, UI.accent)
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(102);
 
     this.clockText = this.add
-      .text(38, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#ece8d8' })
+      .text(38, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(103);
     this.refreshClock();
 
@@ -1438,7 +1438,7 @@ export class GameScene extends Phaser.Scene {
       void col;
       this.statLabels.push(
         this.add
-          .text(HUD_STAT_X + i * HUD_STAT_PITCH, HUD_BAR_H / 2, s.label, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#ece8d8' })
+          .text(HUD_STAT_X + i * HUD_STAT_PITCH, HUD_BAR_H / 2, s.label, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
           .setOrigin(0, 0.5).setScrollFactor(0).setDepth(103),
       );
     });
@@ -1446,24 +1446,24 @@ export class GameScene extends Phaser.Scene {
 
     // Gold and score, right-aligned in their own columns.
     this.goldText = this.add
-      .text(DESIGN_WIDTH - 8, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#f4b66a' })
+      .text(DESIGN_WIDTH - 8, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
       .setOrigin(1, 0.5).setScrollFactor(0).setDepth(103);
     this.scoreText = this.add
-      .text(DESIGN_WIDTH - 62, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#a8e0c8' })
+      .text(DESIGN_WIDTH - 62, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
       .setOrigin(1, 0.5).setScrollFactor(0).setDepth(103);
 
     // The daily objective gets its own slim line under the bar: it is the
     // answer to "what am I doing today", so it should not be a corner chip.
     const goalY = HUD_BAR_H + 8;
     this.goalText = this.add
-      .text(8, goalY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#f4b66a' })
+      .text(8, goalY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // Centred on the CAMERA viewport, not the floor: FLOOR_WIDTH is the 1280px
     // world, but a scrollFactor-0 object is positioned in screen space, so
     // FLOOR_WIDTH/2 (=640) sat half outside the 640px canvas.
     this.feedbackText = this.add
-      .text(DESIGN_WIDTH / 2, HUD_BAR_H + 26, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: '#f4b66a', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
+      .text(DESIGN_WIDTH / 2, HUD_BAR_H + 26, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
       .setOrigin(0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // Red rather than amber: this is a standing blocker, not news. It sits below
@@ -1473,7 +1473,7 @@ export class GameScene extends Phaser.Scene {
         DESIGN_WIDTH / 2,
         HUD_BAR_H + 46,
         `背包已满 · 使用、制作或交易腾出格子，否则搜刮会留在原处；能叠进已有堆的物品仍可拾取`,
-        { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#e8907c', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } },
+        { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } },
       )
       .setOrigin(0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
 
@@ -1483,7 +1483,7 @@ export class GameScene extends Phaser.Scene {
     footLine.fillStyle(UI.line, 0.9);
     footLine.fillRect(0, DESIGN_HEIGHT - HUD_FOOT_H, DESIGN_WIDTH, 1);
     this.hintText = this.add
-      .text(8, DESIGN_HEIGHT - HUD_FOOT_H / 2, 'A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#a8e0c8' })
+      .text(8, DESIGN_HEIGHT - HUD_FOOT_H / 2, 'A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // The low-HP vignette: pure red wash whose alpha is the pulse function's
@@ -1513,7 +1513,7 @@ export class GameScene extends Phaser.Scene {
     if (key !== this.lastGoalKey) {
       this.lastGoalKey = key;
       this.goalText.setText(`目标 ${label}${done ? ' ✓' : ''}`);
-      this.goalText.setColor(done ? '#a8e0c8' : '#f4b66a');
+      this.goalText.setColor(done ? hex(TEXT.highlight) : hex(PALETTE.lightHigh));
     }
     this.scoreText.setText(`${runScore(state)}分`);
     this.goldText?.setText(`${state.player.gold}金`);
@@ -1544,7 +1544,7 @@ export class GameScene extends Phaser.Scene {
     // The most urgent bar's label turns red, so the critical slot is findable
     // without reading four numbers.
     const urgent = mostUrgentStat(getGame().player);
-    this.statLabels.forEach((t, i) => t.setColor(STAT_BARS[i].key === urgent ? '#e8907c' : '#a8a49a'));
+    this.statLabels.forEach((t, i) => t.setColor(STAT_BARS[i].key === urgent ? hex(TEXT.warn) : hex(TEXT.secondary)));
     this.refreshGoalHud();
   }
 
@@ -1567,7 +1567,7 @@ export class GameScene extends Phaser.Scene {
     this.invObjects.push(...buildPanelHeader(this, left, top, panelW, '背包', UI.good, depth + 5));
     this.invObjects.push(
       this.add
-        .text(left + panelW - 10, top + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#a8e0c8' })
+        .text(left + panelW - 10, top + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
         .setOrigin(1, 0.5)
         .setDepth(depth + 6),
     );
@@ -1599,7 +1599,7 @@ export class GameScene extends Phaser.Scene {
         .setScale(2)
         .setDepth(depth + 6);
       const badge = this.add
-        .text(x + CELL - 3, y + CELL - 3, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#ece8d8', stroke: '#0b0f12', strokeThickness: 3 })
+        .text(x + CELL - 3, y + CELL - 3, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
         .setOrigin(1, 1)
         .setDepth(depth + 7);
       this.invCells.push(cell);
@@ -1613,18 +1613,18 @@ export class GameScene extends Phaser.Scene {
     const DETAIL_W = left + panelW - 12 - DETAIL_X;
     this.invObjects.push(...buildPanelWell(this, DETAIL_X, GRID_Y, DETAIL_W, 3 * (CELL + GAP) - GAP, depth + 5));
     this.invDetailName = this.add
-      .text(DETAIL_X + 8, GRID_Y + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: '#f4b66a' })
+      .text(DETAIL_X + 8, GRID_Y + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(PALETTE.lightHigh) })
       .setDepth(depth + 7);
     this.invDetailMeta = this.add
-      .text(DETAIL_X + 8, GRID_Y + 28, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#8a867c' })
+      .text(DETAIL_X + 8, GRID_Y + 28, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
       .setDepth(depth + 7);
     this.invDetailBody = this.add
-      .text(DETAIL_X + 8, GRID_Y + 46, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: '#ece8d8', wordWrap: { width: DETAIL_W - 16 } })
+      .text(DETAIL_X + 8, GRID_Y + 46, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: DETAIL_W - 16 } })
       .setDepth(depth + 7);
     this.invObjects.push(this.invDetailName, this.invDetailMeta, this.invDetailBody);
 
     const footer = this.add
-      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#77c6a4' })
+      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5, 0.5)
       .setDepth(depth + 6);
     this.invObjects.push(footer, this.invMarker);
@@ -1705,8 +1705,8 @@ export class GameScene extends Phaser.Scene {
   private drawWorkbench(): void {
     const y = FLOOR_HEIGHT - 64;
     const bench = this.add.image(CRAFT_X, y + 4, 'furn_workbench').setOrigin(0.5, 1);
-    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
-    this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
+    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: 'monospace', fontSize: '11px', color: hex(TEXT.primary) }).setOrigin(0.5);
+    this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: 'monospace', fontSize: '11px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
     this.floorObjects.push(bench, benchLabel, this.upgradeBoard);
     this.refreshUpgradeBoard();
   }
@@ -1729,7 +1729,7 @@ export class GameScene extends Phaser.Scene {
     this.craftObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.craft));
     // OVERHAUL UI: header strip instead of a centred title floating on a slab.
     this.craftObjects.push(...buildPanelHeader(this, left, top, panelW, '工作台 · 制作', UI.accent, PANEL_DEPTH.game.craft + 5));
-    const title = this.add.text(cx, top + 18, '', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
+    const title = this.add.text(cx, top + 18, '', { fontFamily: 'monospace', fontSize: '16px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
     this.craftObjects.push(title);
 
     // OVERHAUL UI: row bands + a status column.
@@ -1742,12 +1742,12 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < 4; i++) {
       const rowY = top + 30 + i * CRAFT_ROW_PITCH;
       const band = this.add.rectangle(left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.34).setDepth(PANEL_DEPTH.game.craft + 5);
-      const name = this.add.text(left + 18, rowY + 9, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: '#ece8d8' }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-      const status = this.add.text(left + panelW - 16, rowY + 9, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#a8e0c8' }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      const name = this.add.text(left + 18, rowY + 9, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      const status = this.add.text(left + panelW - 16, rowY + 9, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
       this.craftRows.push({ band, name, status });
       this.craftObjects.push(band, name, status);
     }
-    const footer = this.add.text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#77c6a4' }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+    const footer = this.add.text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
     this.craftObjects.push(footer, this.craftMarker);
 
     applyPanelDepth(this.craftObjects, PANEL_DEPTH.game.craft);
@@ -1784,17 +1784,17 @@ export class GameScene extends Phaser.Scene {
           .map(([id, n]) => `${getItem(id as ItemId).displayName}×${n}`)
           .join(' ');
         row.name.setText(`${recipe.displayName}  ${cost}`);
-        row.name.setColor(selected ? '#f4b66a' : '#ece8d8');
+        row.name.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
         const built = hasUpgrade(state, entry.id!);
         const ok = canCraft(state, entry.id!).ok;
         row.status.setText(built ? '已建' : ok ? '可制作' : '材料不足');
-        row.status.setColor(built ? '#77c6a4' : ok ? '#f4b66a' : '#8a867c');
+        row.status.setColor(built ? hex(PALETTE.clothHigh) : ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
       } else {
         const can = countItem(state.player.inventory, 'dirty_water') >= 1;
         row.name.setText('净化  脏水→净水');
-        row.name.setColor(selected ? '#f4b66a' : '#ece8d8');
+        row.name.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
         row.status.setText(can ? '可净化' : '缺脏水');
-        row.status.setColor(can ? '#77c6a4' : '#8a867c');
+        row.status.setColor(can ? hex(PALETTE.clothHigh) : hex(TEXT.dim));
       }
     }
     const selectedRow = this.craftRows[this.craftSelected];
@@ -1823,12 +1823,12 @@ export class GameScene extends Phaser.Scene {
 
     this.pauseObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.pause));
     this.pauseObjects.push(...buildPanelHeader(this, left, top, panelW, '已暂停', UI.accent, PANEL_DEPTH.game.pause + 5));
-    const title = this.add.text(cx, top + 20, '', { fontFamily: 'monospace', fontSize: '16px', color: '#f4b66a' }).setOrigin(0.5);
-    const controls = this.add.text(cx, top + 50, 'A/D 移动 · E 交互 · I 背包 · C 制作', { fontFamily: 'monospace', fontSize: '11px', color: '#77c6a4' }).setOrigin(0.5);
+    const title = this.add.text(cx, top + 20, '', { fontFamily: 'monospace', fontSize: '16px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
+    const controls = this.add.text(cx, top + 50, 'A/D 移动 · E 交互 · I 背包 · C 制作', { fontFamily: 'monospace', fontSize: '11px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
     this.pauseObjects.push(title, controls, this.pauseMarker);
 
     PAUSE_OPTIONS.forEach((label, i) => {
-      const t = this.add.text(cx, top + 92 + i * 28, label, { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#ece8d8' }).setOrigin(0.5);
+      const t = this.add.text(cx, top + 92 + i * 28, label, { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: hex(TEXT.primary) }).setOrigin(0.5);
       this.pauseOptionTexts.push(t);
       this.pauseObjects.push(t);
     });
@@ -1951,7 +1951,7 @@ export class GameScene extends Phaser.Scene {
       // Same contact shadow as the player, so an NPC stands on the floor rather
       // than hovering a few pixels above it.
       const shadow = addContactShadow(this, npc.x, PLAYER_FEET_Y + 2, 26, 2, 0.5);
-      const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: 'monospace', fontSize: '11px', color: '#ece8d8' }).setOrigin(0.5);
+      const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: 'monospace', fontSize: '11px', color: hex(TEXT.primary) }).setOrigin(0.5);
       this.floorObjects.push(...shadow, sprite, nameLabel);
     }
   }
@@ -1984,7 +1984,7 @@ export class GameScene extends Phaser.Scene {
     // Create with placeholder content so each text's canvas/frame exists up front
     // (setText on a never-rendered empty text throws in Phaser 4).
     this.dialogueTitle = this.add
-      .text(left + 10, top + 10, '对话', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: '#ece8d8' })
+      .text(left + 10, top + 10, '对话', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
       .setOrigin(0, 0.5)
       .setDepth(depth + 6);
     this.dialogueObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 34, depth + 5));
@@ -1992,7 +1992,7 @@ export class GameScene extends Phaser.Scene {
     // and a name left out of the list stays on screen after the panel closes.
     this.dialogueObjects.push(this.dialogueTitle);
     this.dialogueMessage = this.add
-      .text(cx, top + 45, '……', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: '#ece8d8', align: 'center', wordWrap: { width: panelW - 44 } })
+      .text(cx, top + 45, '……', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: panelW - 44 } })
       .setOrigin(0.5)
       .setDepth(depth + 7);
     this.dialogueObjects.push(this.dialogueMessage);
@@ -2008,7 +2008,7 @@ export class GameScene extends Phaser.Scene {
       this.dialogueObjects.push(band, rule);
       const icon = this.add.image(left + 30, rowY + 12, 'blank').setOrigin(0.5).setDepth(depth + 7);
       const t = this.add
-        .text(left + 46, rowY + 12, '……', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: '#ece8d8' })
+        .text(left + 46, rowY + 12, '……', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
         .setOrigin(0, 0.5)
         .setDepth(depth + 7);
       this.dialogueOptionIcons.push(icon);
@@ -2016,7 +2016,7 @@ export class GameScene extends Phaser.Scene {
       this.dialogueObjects.push(icon, t);
     }
     const footer = this.add
-      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#77c6a4' })
+      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5)
       .setDepth(depth + 7);
     this.dialogueObjects.push(footer, this.dialogueMarker);
@@ -2090,7 +2090,7 @@ export class GameScene extends Phaser.Scene {
       if (option.icon) icon.setTexture(itemIconKey(option.icon)).setVisible(true);
       else icon.setVisible(false);
       const selected = i === d.selected;
-      this.dialogueOptions[i].setColor(selected ? '#f4b66a' : '#ece8d8');
+      this.dialogueOptions[i].setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
       const b = this.dialogueBands[i];
       if (b) {
         b.band.setAlpha(selected ? 0.14 : 0);

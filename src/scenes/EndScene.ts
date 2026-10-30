@@ -4,7 +4,7 @@ import { getGame, startNewGame } from '../core/session';
 import { deathCause } from '../systems/SurvivalSystem';
 import { clearSave } from '../systems/SaveSystem';
 import { ART_BANNER_WIN_KEY, ART_BANNER_LOSE_KEY, TITLE_BG_KEY } from '../render/artpack';
-import { PALETTE } from '../render/palette.ts';
+import { PALETTE, ROLE, TEXT, hex } from '../render/palette.ts';
 import { buildPanelHeader, buildPanelWell } from '../render/uiKit';
 import { buildPanel, PANEL_DEPTH } from '../render/panels';
 import { depthRecord, runScore } from '../systems/progress';
@@ -66,8 +66,8 @@ export class EndScene extends Phaser.Scene {
       .text(cx, top - 74, headline, {
         fontFamily: 'monospace',
         fontSize: '26px',
-        color: won ? '#77c6a4' : '#e56d63',
-        stroke: '#05080c',
+        color: won ? hex(PALETTE.clothHigh) : hex(ROLE.danger),
+        stroke: hex(PALETTE.ink),
         strokeThickness: 6,
       })
       .setOrigin(0.5)
@@ -95,7 +95,7 @@ export class EndScene extends Phaser.Scene {
       this.add.existing(o as Phaser.GameObjects.GameObject);
     }
     this.add
-      .text(cx, top + 39, reason, { fontFamily: 'monospace', fontSize: '12px', color: '#ece8d8' })
+      .text(cx, top + 39, reason, { fontFamily: 'monospace', fontSize: '12px', color: hex(TEXT.primary) })
       .setOrigin(0.5)
       .setDepth(depth + 7);
 
@@ -113,20 +113,20 @@ export class EndScene extends Phaser.Scene {
     rows.forEach(([label, value, highlight], i) => {
       const y = top + 70 + i * 26;
       this.add
-        .text(left + 22, y, label, { fontFamily: 'monospace', fontSize: '12px', color: '#8a867c' })
+        .text(left + 22, y, label, { fontFamily: 'monospace', fontSize: '12px', color: hex(TEXT.dim) })
         .setOrigin(0, 0.5)
         .setDepth(depth + 7);
       this.add
         .text(left + panelW - 22, y, value, {
           fontFamily: 'monospace',
           fontSize: '13px',
-          color: highlight ? '#a8e0c8' : '#ece8d8',
+          color: highlight ? hex(TEXT.highlight) : hex(TEXT.primary),
         })
         .setOrigin(1, 0.5)
         .setDepth(depth + 7);
       if (highlight) {
         this.add
-          .text(left + panelW - 26, y + 1, '纪录', { fontFamily: 'monospace', fontSize: '10px', color: '#f4b66a' })
+          .text(left + panelW - 26, y + 1, '纪录', { fontFamily: 'monospace', fontSize: '10px', color: hex(PALETTE.lightHigh) })
           .setOrigin(1, 0.5)
           .setDepth(depth + 8);
       }
@@ -134,7 +134,7 @@ export class EndScene extends Phaser.Scene {
 
     if (won) {
       this.add
-        .text(cx, top + panelH - 44, '正式胜利条件为抵达第 100000 层', { fontFamily: 'monospace', fontSize: '10px', color: '#8a867c' })
+        .text(cx, top + panelH - 44, '正式胜利条件为抵达第 100000 层', { fontFamily: 'monospace', fontSize: '10px', color: hex(TEXT.dim) })
         .setOrigin(0.5)
         .setDepth(depth + 7);
     }
@@ -145,7 +145,7 @@ export class EndScene extends Phaser.Scene {
       this.add.existing(o as Phaser.GameObjects.GameObject);
     }
     this.add
-      .text(cx, footY, '按 回车 重新开始', { fontFamily: 'monospace', fontSize: '12px', color: '#77c6a4' })
+      .text(cx, footY, '按 回车 重新开始', { fontFamily: 'monospace', fontSize: '12px', color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5)
       .setDepth(depth + 7);
 

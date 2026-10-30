@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 
-import { PALETTE, ROLE, STAT_COLOR } from './palette.ts';
+import { PALETTE, ROLE, STAT_COLOR, TEXT, hex } from './palette.ts';
 
 // OVERHAUL UI: the design system the in-game interface was missing.
 //
@@ -167,7 +167,7 @@ export function buildPanelHeader(
   // The title.
   out.push(
     scene.add
-      .text(titleX ?? left + 10, top + h / 2, title, { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: '#ece8d8' })
+      .text(titleX ?? left + 10, top + h / 2, title, { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
       .setOrigin(0, 0.5)
       .setDepth(depth + 1),
   );
@@ -235,7 +235,7 @@ export function buildListRow(
     out.push(scene.add.image(x + 14, cy, opts.iconKey).setOrigin(0.5).setDepth(depth + 1));
     textX = x + 26;
   }
-  const labelColor = opts.dim ? '#6b6862' : opts.selected ? '#f4b66a' : '#ece8d8';
+  const labelColor = opts.dim ? '#6b6862' : opts.selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary);
   out.push(
     scene.add
       .text(textX, cy, opts.label, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: labelColor })
@@ -245,7 +245,7 @@ export function buildListRow(
   if (opts.value !== undefined) {
     out.push(
       scene.add
-        .text(x + w - 8, cy, opts.value, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: opts.dim ? '#6b6862' : '#a8e0c8' })
+        .text(x + w - 8, cy, opts.value, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: opts.dim ? '#6b6862' : hex(TEXT.highlight) })
         .setOrigin(1, 0.5)
         .setDepth(depth + 1),
     );

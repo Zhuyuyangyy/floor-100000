@@ -112,7 +112,16 @@ export const TEXT = {
   dim: 0x8a867c,
   disabled: 0x82796b,
   disabledDeep: 0x6e685c,
+  /** the picked row, and anything asking to be read first */
+  highlight: 0xa8e0c8,
+  /** "this will hurt you" - softer than ROLE.danger so it can sit on body text */
+  warn: 0xe8907c,
 } as const;
+
+/** 24-bit colour to the '#rrggbb' string a Phaser text style wants. */
+export function hex(c: number): string {
+  return `#${c.toString(16).padStart(6, '0')}`;
+}
 
 export const ROLE = {
   /** the void behind everything */

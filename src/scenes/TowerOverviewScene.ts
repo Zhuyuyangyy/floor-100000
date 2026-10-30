@@ -33,7 +33,7 @@ import { describeFloorContents } from '../systems/LootSystem';
 import { saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, PANEL_DEPTH, type PanelObject } from '../render/panels';
-import { PALETTE } from '../render/palette.ts';
+import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import type { GameState } from '../core/gameTypes';
 
 // TowerOverviewScene — the three-level map (docs/B2_TOWER_ARCHITECTURE.md):
@@ -236,32 +236,32 @@ export class TowerOverviewScene extends Phaser.Scene {
   // scrollFactor(0), so the world zoom never scales or moves it.
   private buildHud(): void {
     this.hudText = this.add
-      .text(12, 8, '', { fontFamily: 'monospace', fontSize: `${TYPE_TITLE}px`, color: '#f4b66a', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
+      .text(12, 8, '', { fontFamily: 'monospace', fontSize: `${TYPE_TITLE}px`, color: hex(PALETTE.lightHigh), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
       .setScrollFactor(0)
       .setDepth(100);
     this.stateText = this.add
-      .text(12, 26, '', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 2 } })
+      .text(12, 26, '', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 2 } })
       .setScrollFactor(0)
       .setDepth(100);
     this.infoText = this.add
-      .text(DESIGN_WIDTH - 12, 12, '', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 4 }, align: 'right' })
+      .text(DESIGN_WIDTH - 12, 12, '', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 4 }, align: 'right' })
       .setOrigin(1, 0)
       .setScrollFactor(0)
       .setDepth(100);
     this.hintText = this.add
-      .text(12, DESIGN_HEIGHT - 22, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
+      .text(12, DESIGN_HEIGHT - 22, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
       .setScrollFactor(0)
       .setDepth(100);
     // Colour legend for the sector grid. The map's whole language is colour, so
     // the four states have to be spelled out rather than guessed at.
     this.legendGfx = this.add.graphics().setScrollFactor(0).setDepth(102);
     this.legendText = this.add
-      .text(DESIGN_WIDTH - 12, DESIGN_HEIGHT - 22, '', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#a8e0c8' })
+      .text(DESIGN_WIDTH - 12, DESIGN_HEIGHT - 22, '', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight) })
       .setOrigin(1, 0)
       .setScrollFactor(0)
       .setDepth(102);
     this.messageText = this.add
-      .text(DESIGN_WIDTH / 2, DESIGN_HEIGHT - 22, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#e0705a', backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } })
+      .text(DESIGN_WIDTH / 2, DESIGN_HEIGHT - 22, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } })
       .setOrigin(0.5, 0)
       .setScrollFactor(0)
       .setDepth(101)
@@ -271,7 +271,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     // this band is free at every level — unlike the bottom one, which the control
     // hint and the legend already share.
     this.tierText = this.add
-      .text(DESIGN_WIDTH / 2, 12, '', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
+      .text(DESIGN_WIDTH / 2, 12, '', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
       .setOrigin(0.5, 0)
       .setScrollFactor(0)
       .setDepth(100)
@@ -286,14 +286,14 @@ export class TowerOverviewScene extends Phaser.Scene {
     for (let s = 0; s < SECTOR_COUNT; s += 10) {
       this.sectorLabels.push(
         this.add
-          .text(0, 0, String(s * SECTOR_SIZE + 1), { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#a8e0c8', backgroundColor: '#0b0f12cc', padding: { x: 2, y: 1 } })
+          .text(0, 0, String(s * SECTOR_SIZE + 1), { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 2, y: 1 } })
           .setOrigin(1, 0)
           .setDepth(5),
       );
     }
     this.endpointLabels = [
       this.add
-        .text(0, 0, '起点 第1层', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#77c6a4', backgroundColor: '#0b0f12cc', padding: { x: 2, y: 1 } })
+        .text(0, 0, '起点 第1层', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.clothHigh), backgroundColor: '#0b0f12cc', padding: { x: 2, y: 1 } })
         .setOrigin(0, 0)
         .setDepth(5),
       this.add
@@ -313,14 +313,14 @@ export class TowerOverviewScene extends Phaser.Scene {
 
     this.detailObjects.push(...buildPanel(this, cx, cy, w, h, 'yellow', PANEL_DEPTH.tower.detail));
     this.detailTitle = this.add
-      .text(cx, top + 22, '', { fontFamily: 'monospace', fontSize: `${TYPE_TITLE}px`, color: '#f4b66a' })
+      .text(cx, top + 22, '', { fontFamily: 'monospace', fontSize: `${TYPE_TITLE}px`, color: hex(PALETTE.lightHigh) })
       .setOrigin(0.5);
     this.detailRows = [];
     for (let i = 0; i < 5; i++) {
-      this.detailRows.push(this.add.text(left + 26, top + 54 + i * 20, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#ece8d8' }));
+      this.detailRows.push(this.add.text(left + 26, top + 54 + i * 20, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: hex(TEXT.primary) }));
     }
     this.detailAction = this.add
-      .text(cx, top + h - 20, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: '#77c6a4' })
+      .text(cx, top + h - 20, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5);
     this.detailObjects.push(this.detailTitle, ...this.detailRows, this.detailAction);
     applyPanelDepth(this.detailObjects, PANEL_DEPTH.tower.detail);
@@ -638,7 +638,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     // scene used to read the loot table instead, so it advertised 布料 in floor 1's
     // cabinet on every seed and kept listing contents already emptied.
     this.detailRows[4].setText(describeFloorContents(this.state, floor));
-    this.detailAction.setText(enterable.ok ? '按 Enter 进入' : '需先通过实际通路抵达').setColor(enterable.ok ? '#77c6a4' : '#e0705a');
+    this.detailAction.setText(enterable.ok ? '按 Enter 进入' : '需先通过实际通路抵达').setColor(enterable.ok ? hex(PALETTE.clothHigh) : hex(TEXT.warn));
   }
 
   // ── input ───────────────────────────────────────────────────────────────

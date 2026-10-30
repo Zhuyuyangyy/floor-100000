@@ -549,6 +549,17 @@ function run(cv: PixelCanvas, xc: number, halfW: number, y: number, fill: RGB): 
 }
 
 /** One run per scanline of the bone, width interpolating w0→w1. */
+// Blend two RGB triples. Used to derive a material's lit and shadow steps from
+// its base colour, so a palette that only defines a base still gets three values
+// and every material shades the same way.
+function mixRgb(from: RGB, to: RGB, t: number): RGB {
+  return [
+    Math.round(from[0] + (to[0] - from[0]) * t),
+    Math.round(from[1] + (to[1] - from[1]) * t),
+    Math.round(from[2] + (to[2] - from[2]) * t),
+  ];
+}
+
 function taperedLimb(cv: PixelCanvas, a: Point, b: Point, w0: number, w1: number, fill: RGB): void {
   const y0 = Math.round(Math.min(a.y, b.y));
   const y1 = Math.round(Math.max(a.y, b.y));
@@ -626,11 +637,30 @@ function drawLeg(cv: PixelCanvas, pose: Pose, which: 'a' | 'b', col: CharacterCo
   const knee = joint(pose.hip, THIGH, leg.thigh);
   const ankle = joint(knee, SHIN, leg.thigh - leg.knee);
   const trouser = far ? col.trouserDark : col.trouser;
-  // Art pass: the legs were 7/5 half-width — the dump read as two wires under a
-  // rectangle. Thigh 9/7, shin 7/5.5: still slim enough for a survivor, thick
-  // enough to read as a leg with a trouser on it.
+  // THREE VALUES PER MATERIAL, which is the rule the art research sets: base,
+  // one step lighter on the lit edge, one step darker on the shadow edge. The
+  // legs were a single flat colour while the jacket already had two, and that
+  // inconsistency is a large part of why the figure read as assembled rather
+  // than drawn.
   taperedLimb(cv, pose.hip, knee, 9, 7, trouser);
   taperedLimb(cv, knee, ankle, 7, 5.5, trouser);
+  // The lit edge: a single column one pixel in from the leading side of the
+  // thigh and shin. On the near leg only — the far leg is behind the body and
+  // takes the shadow value instead, which is what gives the stride depth.
+  if (!far) {
+    const lit = mixRgb(trouser, col.clothLight, 0.28);
+    const shade = mixRgb(trouser, col.outline, 0.45);
+    for (let y = Math.round(pose.hip.y) + 1; y < Math.round(ankle.y) - 1; y++) {
+      // Follow the bone: interpolate x along the hip->knee->ankle path.
+      const kneeY = Math.round(knee.y);
+      const cx = y <= kneeY
+        ? pose.hip.x + ((y - pose.hip.y) / Math.max(1, knee.y - pose.hip.y)) * (knee.x - pose.hip.x)
+        : knee.x + ((y - knee.y) / Math.max(1, ankle.y - knee.y)) * (ankle.x - knee.x);
+      const halfW = (y <= kneeY ? 9 - ((y - pose.hip.y) / Math.max(1, knee.y - pose.hip.y)) * 2 : 7 - ((y - knee.y) / Math.max(1, ankle.y - knee.y)) * 1.5) / 2;
+      cv.set(Math.round(cx + halfW - 1), y, lit);
+      cv.set(Math.round(cx - halfW + 1), y, shade);
+    }
+  }
   boot(cv, ankle, knee, col);
 }
 

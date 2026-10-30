@@ -66,6 +66,13 @@ export const ENV_FLOOR_KEY = 'env-floor';
 export const TILE_DOOR_KEY = 'tile_door';
 export const TILE_WINDOW_KEY = 'tile_window';
 
+// The title screen's painted background — the owner's dorm-corridor render.
+// It is the first thing anyone sees, so it is the one place in this project
+// where a painted image outranks the procedural art: a title screen sells a
+// mood, and a 1672x941 render does that better than any column of rectangles
+// this codebase could generate. Gameplay stays pixel art.
+export const TITLE_BG_KEY = 'title-dorm';
+
 export const ENV_FILES: Record<string, string> = {
   [ENV_WALL_KEY]: 'wall.png',
   [ENV_FLOOR_KEY]: 'floor.png',

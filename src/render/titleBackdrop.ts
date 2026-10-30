@@ -43,6 +43,89 @@ export interface TitleBackdrop {
   destroy(): void;
 }
 
+// ── the painted title backdrop ───────────────────────────────────────────────
+// The owner's dorm-corridor render as the first thing anyone sees. A title
+// screen sells a mood, and a painted 1672x941 image does that better than any
+// column of rectangles this codebase could generate — so the photo path is the
+// default and the procedural tower below is the fallback for a build without
+// the asset.
+//
+// The scrim is not decoration: the render is busy and the menu text sits over
+// its centre-left, so a stepped dark band goes behind the text. Stepped, not a
+// gradient — same rule as the rest of the project's pixel work.
+export function buildPhotoTitleBackdrop(scene: Phaser.Scene, textureKey: string, seed = 1): TitleBackdrop {
+  const { width, height } = scene.cameras.main;
+  const group: Phaser.GameObjects.GameObject[] = [];
+
+  // The image covers the canvas exactly: the asset is 16:9 and so is the game.
+  //
+  // LINEAR filtering, explicitly: the game runs with pixelArt:true, which sets
+  // NEAREST on every texture. A 1672x941 painting downscaled to 640x360 with
+  // nearest sampling comes out as colour noise — the whole point of a painted
+  // backdrop is that it is smooth, so this one texture opts out.
+  const bg = scene.add.image(width / 2, height / 2, textureKey).setDepth(-30);
+  bg.setDisplaySize(width, height);
+  const src = scene.textures.get(textureKey);
+  src.setFilter(Phaser.Textures.FilterMode.LINEAR);
+  group.push(bg);
+
+  // The scrim's job is text legibility, nothing else. The render is already
+  // dark (measured: average luminance 26, 79% of it under 40) and the cream
+  // text sits at 232 — so a heavy full-canvas wash just throws the painting
+  // away. One panel behind the text column, plus the faintest overall lift.
+  const SCRIM = 0x05080c;
+  // Text legibility is carried by the text's own stroke (cream on a 2px dark
+  // edge), not by burying the painting — measured, the panel at 0.5 halved the
+  // far window and the wet floor, which are the two things that make the image
+  // read as a building at night. 0.32 is enough for the stroke to sit on.
+  group.push(
+    scene.add.rectangle(width / 2, height * 0.5, width * 0.66, height * 0.74, SCRIM).setAlpha(0.32).setDepth(-29),
+  );
+  group.push(scene.add.rectangle(width / 2, height / 2, width, height, SCRIM).setAlpha(0.06).setDepth(-29));
+
+  // A gentle vignette on the sides so the eye lands centre.
+  for (const [x, w, originX] of [
+    [0, 0.12, 0],
+    [1, 0.12, 1],
+  ] as const) {
+    group.push(
+      scene.add
+        .rectangle(width * x, height / 2, width * w, height, SCRIM)
+        .setAlpha(0.22)
+        .setOrigin(originX, 0.5)
+        .setDepth(-29),
+    );
+  }
+
+  // Ash over the top: the one moving element, so the screen is not a still.
+  const ash: Ash[] = [];
+  const rng = makeRng(deriveSeed(seed, 'title-photo-ash'));
+  for (let i = 0; i < 70; i++) {
+    const size = rng.chance(0.28) ? 2 : 1;
+    const rect = scene.add
+      .rectangle(rng.nextInt(0, width), rng.nextInt(0, height), size, size, ASH_COLORS[rng.nextInt(0, ASH_COLORS.length)])
+      .setAlpha(0.2 + rng.nextFloat() * 0.35)
+      .setOrigin(0, 0)
+      .setDepth(-28);
+    ash.push({ rect, speed: 7 + rng.nextFloat() * 14, sway: 5 + rng.nextFloat() * 12, phase: rng.nextInt(0, 6000) });
+    group.push(rect);
+  }
+
+  return {
+    update(time, delta) {
+      const dt = Math.min(delta, 50) / 1000;
+      for (const a of ash) {
+        a.rect.y -= a.speed * dt;
+        if (a.rect.y < -4) a.rect.y = height + 4;
+        a.rect.x += Math.sin(time / 900 + a.phase) * a.sway * dt;
+      }
+    },
+    destroy() {
+      for (const o of group) o.destroy();
+    },
+  };
+}
+
 interface WindowLight {
   rect: Phaser.GameObjects.Rectangle;
   /** seconds-scale phase so the flickers never sync up */
@@ -104,15 +187,23 @@ export function buildTitleBackdrop(scene: Phaser.Scene, seed = 1): TitleBackdrop
   // A column of floor bands on the right, narrow enough that the menu text on
   // the left keeps its clean air. Bands get slightly narrower toward the top so
   // the silhouette reads as a tapering tower, not a rectangle.
+  //
+  // BUG FIXED: the bands were being drawn at SCREEN coordinates (towerX + inset)
+  // into a texture only towerW+16 wide, so almost every rect fell outside the
+  // canvas and generateTexture produced an empty column — only the window rects
+  // survived, which is why the title read as confetti in the dark. The bake now
+  // draws in texture-local coordinates, and the texture is placed by the scene.
   const bands = Math.ceil(height / BAND_H) + 2;
   const towerH = bands * BAND_H;
+  const TEX_W = towerW;
+  /** how far each band is inset from the texture's left edge */
+  const bandInset = (band: number): number => Math.round((band / bands) * 14);
 
   const g = scene.make.graphics({ x: 0, y: 0 }, false);
   for (let i = 0; i < bands; i++) {
-    const t = i / bands;
-    const inset = Math.round(t * 14);
-    const x = towerX + inset;
-    const w = towerW - inset * 2;
+    const inset = bandInset(i);
+    const x = inset;
+    const w = TEX_W - inset * 2;
     g.fillStyle(TOWER_BODY, 1);
     g.fillRect(x, i * BAND_H, w, BAND_H);
     // A one-pixel lip on each band's bottom edge gives the stacked-floor read.
@@ -123,34 +214,40 @@ export function buildTitleBackdrop(scene: Phaser.Scene, seed = 1): TitleBackdrop
       g.fillStyle(TOWER_CROWN, 1);
       g.fillRect(x, i * BAND_H, w, 1);
     }
+    // Vertical seams: the tower is poured concrete, not a smooth column, and the
+    // seams are what sell the material at this size.
+    if (i % 5 === 0) {
+      g.fillStyle(TOWER_EDGE, 1);
+      g.fillRect(x + 4, i * BAND_H, 1, BAND_H * 5);
+      g.fillRect(x + w - 5, i * BAND_H, 1, BAND_H * 5);
+    }
   }
-  // Vertical seam lines every few bands: the tower is poured concrete, not a
-  // smooth column, and the seams are what sell the material at this size.
-  g.fillStyle(TOWER_EDGE, 0.5);
-  for (let i = 0; i < bands; i += 5) {
-    g.fillRect(towerX + 14, i * BAND_H, 1, BAND_H * 5);
-    g.fillRect(towerX + towerW - 15, i * BAND_H, 1, BAND_H * 5);
-  }
-  g.generateTexture('title-tower', towerW + 16, towerH);
+  g.generateTexture('title-tower', TEX_W, towerH);
   g.destroy();
-  const tower = scene.add.image(towerX - 8, -BAND_H, 'title-tower').setOrigin(0, 0).setDepth(4);
+  const tower = scene.add.image(towerX, -BAND_H, 'title-tower').setOrigin(0, 0).setDepth(4);
   group.push(tower);
 
   // Window lights: a deterministic subset of (band, slot) pairs, each on its
   // own flicker schedule. Most breathe slowly; a few buzz; a few die for
   // seconds — the post-apocalyptic reading is in the blackouts.
+  //
+  // Positioned from the SAME bandInset() the bake uses, so a window can never
+  // float outside the silhouette, and clamped to the band's profile width.
+  const WINDOW_GAP = 7;
   const lights: WindowLight[] = [];
-  const slots = Math.floor((towerW - 24) / (WINDOW_W + 6));
   for (let band = 1; band < bands - 1; band++) {
+    const inset = bandInset(band);
+    const usable = TEX_W - inset * 2 - 16;
+    const slots = Math.max(1, Math.floor(usable / WINDOW_GAP));
     for (let slot = 0; slot < slots; slot++) {
-      if (!rng.chance(0.34)) continue;
-      const t = band / bands;
-      const inset = Math.round(t * 10);
-      const x = towerX + inset + 10 + slot * (WINDOW_W + 6);
-      const y = band * BAND_H + Math.floor((BAND_H - WINDOW_H) / 2);
+      if (!rng.chance(0.3)) continue;
+      const x = towerX + inset + 8 + slot * WINDOW_GAP;
+      const y = -BAND_H + band * BAND_H + Math.floor((BAND_H - WINDOW_H) / 2);
       const roll = rng.nextFloat();
       const color = roll < 0.62 ? WINDOW_WARM : roll < 0.9 ? WINDOW_COLD : WINDOW_RED;
-      const rect = scene.add.rectangle(x, y, WINDOW_W, WINDOW_H, color, 0.9).setOrigin(0, 0).setDepth(5);
+      // setAlpha, not the constructor's fillAlpha: Phaser 4 ignores that
+      // argument and these were painting as solid bright squares.
+      const rect = scene.add.rectangle(x, y, WINDOW_W, WINDOW_H, color).setAlpha(0.75).setOrigin(0, 0).setDepth(5);
       lights.push({
         rect,
         phase: rng.nextInt(0, 6000),

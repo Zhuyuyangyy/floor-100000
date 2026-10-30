@@ -4,7 +4,8 @@ import { devEntry } from '../core/devMode';
 import { clearSave, hasSave } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, createMarker, PANEL_DEPTH, placeMarker, type PanelObject } from '../render/panels';
-import { buildTitleBackdrop, type TitleBackdrop } from '../render/titleBackdrop';
+import { buildPhotoTitleBackdrop, buildTitleBackdrop, type TitleBackdrop } from '../render/titleBackdrop';
+import { TITLE_BG_KEY } from '../render/artpack';
 
 // Title screen: a keyboard-navigable option list — 开始新游戏 / 继续游戏 (when a
 // save exists) / 操作说明. ↑/↓ to move, Enter to choose (docs/03_TASKS.md#p0-08).
@@ -57,8 +58,14 @@ export class MenuScene extends Phaser.Scene {
     // The animated backdrop first, so everything else sits above it. Destroyed
     // on shutdown: a scene restart re-runs create(), and the old tower's window
     // rects would otherwise linger on top of the new ones.
+    //
+    // The painted dorm-corridor render is the default title background — it
+    // says "abandoned building at night" in one frame, which is the whole job.
+    // The procedural tower stays as the fallback for a build without the asset.
     this.backdrop?.destroy();
-    this.backdrop = buildTitleBackdrop(this, 7);
+    this.backdrop = this.textures.exists(TITLE_BG_KEY)
+      ? buildPhotoTitleBackdrop(this, TITLE_BG_KEY, 7)
+      : buildTitleBackdrop(this, 7);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.backdrop?.destroy();
       this.backdrop = undefined;
@@ -67,7 +74,12 @@ export class MenuScene extends Phaser.Scene {
     this.titleText = this.add
       .text(width / 2, 92, '第100000层', { fontFamily: 'monospace', fontSize: '40px', color: '#f4b66a', stroke: '#0b0f12', strokeThickness: 6 })
       .setOrigin(0.5);
-    this.subtitleText = this.add.text(width / 2, 138, '末 日 宿 舍', { fontFamily: 'monospace', fontSize: '22px', color: '#ece8d8' }).setOrigin(0.5);
+    // Every piece of title text carries its own dark stroke: the painted
+    // backdrop behind it is bright in places, and a stroke keeps the text
+    // legible without a scrim heavy enough to bury the painting.
+    this.subtitleText = this.add
+      .text(width / 2, 138, '末 日 宿 舍', { fontFamily: 'monospace', fontSize: '22px', color: '#ece8d8', stroke: '#0b0f12', strokeThickness: 4 })
+      .setOrigin(0.5);
 
     this.entries = [{ label: '开始新游戏', run: () => this.startNew() }];
     if (hasSave()) this.entries.push({ label: '继续游戏', run: () => this.continueRun() });
@@ -94,7 +106,9 @@ export class MenuScene extends Phaser.Scene {
     // restart — without this the help panel accumulates destroyed objects.
     this.helpObjects = [];
     this.entries.forEach((entry, i) => {
-      const t = this.add.text(width / 2, 210 + i * 30, entry.label, { fontFamily: 'monospace', fontSize: '18px', color: '#ece8d8' }).setOrigin(0.5);
+      const t = this.add
+        .text(width / 2, 210 + i * 30, entry.label, { fontFamily: 'monospace', fontSize: '18px', color: '#ece8d8', stroke: '#05080c', strokeThickness: 3 })
+        .setOrigin(0.5);
       this.optionTexts.push(t);
       // Entrance: a fade-in only. An earlier version also settled each entry
       // down 8px, which broke the e2e selection probe — it finds the

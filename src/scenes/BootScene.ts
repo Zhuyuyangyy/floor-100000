@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { generateAllPixelArt } from '../render/pixelArt';
-import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHARACTER_FILES, ENV_FILES, FURNITURE_FILES, ITEM_ICON_FILES } from '../render/artpack';
+import { createCharacterAnimations } from '../render/walkcycle';
+import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHARACTER_FILES, ENV_FILES, FURNITURE_FILES, ITEM_ICON_FILES, TITLE_BG_KEY } from '../render/artpack';
 
 // Bakes all procedural pixel-art textures, loads the licensed UI pack
 // (GHI-04), then shows the title menu (开始新游戏 / 继续游戏 / 操作说明).
@@ -46,12 +47,23 @@ export class BootScene extends Phaser.Scene {
       this.load.image(key, `assets/env/${file}`);
     }
 
+    // The title screen's painted backdrop. MenuScene falls back to the
+    // procedural tower when this texture is missing, so a stripped build still
+    // boots — the load failure just logs.
+    //
+    // The -2x file is the same render pre-resized to 1280x720 — exactly the
+    // canvas's 640x360 at the page's 2x display scale, so the title screen shows
+    // the painting with no resampling at all. Shipping the 1672x941 original and
+    // letting the renderer squeeze it into 640x360 costs visible mush.
+    this.load.image(TITLE_BG_KEY, 'assets/title/dorm-corridor-2x.png');
+
     this.load.image(ART_BANNER_WIN_KEY, 'assets/artpack/banner-win.png');
     this.load.image(ART_BANNER_LOSE_KEY, 'assets/artpack/banner-lose.png');
   }
 
   create(): void {
     generateAllPixelArt(this);
+    createCharacterAnimations(this);
     this.scene.start('Menu');
   }
 }

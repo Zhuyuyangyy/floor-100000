@@ -56,6 +56,22 @@ const BENCH_LIGHT: LightPool = { x: 480, y: 286, radius: 86, strength: 0.95, col
 // middle: strongest at the very bottom (the floor, where a cold wash reads as
 // depth), lighter up the wall, and nothing at all across the top band where the
 // wall art carries its own light.
+// ── depth contract ────────────────────────────────────────────────────────
+// The night overlay used to sit at depth 0, which put it UNDER the wall
+// dressing (1), the aerial haze (2) and every prop (5) - so night measured
+// exactly as bright as day (mean luminance 43.7 vs 43.8). These four constants
+// are the fix, and they are the contract the whole scene now follows:
+//
+//   0-3    background: wall art, dressing, haze
+//   5      props, characters
+//   23     NIGHT - above the world, so night actually darkens the world
+//   24     LIGHT - above the night, so lamps cut through the dark
+//   26     foreground silhouette
+//   90+    HUD and panels
+export const NIGHT_DEPTH = 23;
+export const LIGHT_DEPTH = 24;
+export const DUST_DEPTH = 25;
+
 const AMBIENT_COLOR = 0x24405e;
 const AMBIENT_FLOOR_ALPHA = 0.4;
 const AMBIENT_WALL_ALPHA = 0.16;
@@ -184,7 +200,7 @@ export function buildLightLayer(
     // `strength` is the peak alpha now, not a multiplicative factor: at 1.0 an
     // ADD glow washes the wall to white, so the pools sit around 0.5.
     const base = pool.strength * 0.5;
-    const img = scene.add.image(pool.x, pool.y, glowKey(size)).setBlendMode(Phaser.BlendModes.ADD).setAlpha(base).setDepth(4);
+    const img = scene.add.image(pool.x, pool.y, glowKey(size)).setBlendMode(Phaser.BlendModes.ADD).setAlpha(base).setDepth(LIGHT_DEPTH);
     poolImages.push({ img, base, phase: pool.x * 0.7 % 10 });
     owned.push(img);
   }
@@ -257,7 +273,7 @@ export function buildLightLayer(
       const rect = scene.add
         .rectangle(pool.x + rx, pool.y + ry, h(3) > 0.7 ? 2 : 1, 1, PALETTE.lightHot)
         .setAlpha(0.35 + h(4) * 0.3)
-        .setDepth(5);
+        .setDepth(DUST_DEPTH);
       motes.push({
         rect,
         baseX: pool.x + rx,

@@ -82,7 +82,7 @@ import { WALK_CHARACTERS, attackAnimKey, hurtAnimKey, idleAnimKey, searchAnimKey
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
-import { addGlow, ambienceFor, buildLightLayer, type LightLayer } from '../render/lighting';
+import { addGlow, ambienceFor, buildLightLayer, LIGHT_DEPTH, NIGHT_DEPTH, type LightLayer } from '../render/lighting';
 import {
   addContactShadow,
   buildCeilingLights,
@@ -347,7 +347,22 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(0x22303a);
     this.cameras.main.setBounds(0, 0, FLOOR_WIDTH, FLOOR_HEIGHT);
     this.nightOverlay = this.add
-      .rectangle(FLOOR_WIDTH / 2, FLOOR_HEIGHT / 2, FLOOR_WIDTH, FLOOR_HEIGHT, 0x05070a, 0)
+      .rectangle(FLOOR_WIDTH / 2, FLOOR_HEIGHT / 2, FLOOR_WIDTH, FLOOR_HEIGHT)
+      // THE FILL ALPHA IS THE WHOLE BUG.
+      //
+      // A Phaser Shape carries TWO alphas: the GameObject's `alpha` and the
+      // shape's own `fillAlpha`. This rectangle was created with a positional
+      // fillAlpha of 0, and applyNightLighting() only ever called setAlpha() -
+      // so `alpha` dutifully animated to 0.6 while `fillAlpha` stayed 0 and the
+      // overlay drew nothing at all. Night has never been visible in this game:
+      // measured mean luminance was 43.8 by day and 44.2 at 23:00.
+      //
+      // Created opaque and controlled purely through alpha, with the depth from
+      // the lighting depth contract so it sits above the world and below the
+      // lamps.
+      .setFillStyle(0x05070a, 1)
+      .setAlpha(0)
+      .setDepth(NIGHT_DEPTH)
       .setName('night-overlay');
 
     this.drawFloor();
@@ -1165,13 +1180,13 @@ export class GameScene extends Phaser.Scene {
       const cx = r * ROOM_WIDTH + ROOM_WIDTH / 2;
       // Cold daylight through the glass, as an ADD glow: the ellipse halo this
       // replaced read as a beige shape painted on the wall rather than as light.
-      this.floorObjects.push(addGlow(this, cx - 8, 116, 62, 0.22, 3));
+      this.floorObjects.push(addGlow(this, cx - 8, 116, 62, 0.22, LIGHT_DEPTH));
       // The shaft: the window's light falling down the wall and pooling on the
       // floor. A tall, narrow glow is the cheapest honest way to draw a beam in
       // a side view - it gives the frame its brightest pixels, which is what
       // makes the eye read "a light source in the room" rather than "a lit
       // rectangle on a wall".
-      const shaft = addGlow(this, cx - 8, 168, 52, 0.34, 3);
+      const shaft = addGlow(this, cx - 8, 168, 52, 0.34, LIGHT_DEPTH);
       shaft.setScale(0.42, 1.55);
       this.floorObjects.push(shaft);
       this.floorObjects.push(this.add.image(cx - 8, 116, 'tile_window').setOrigin(0.5));
@@ -1188,7 +1203,7 @@ export class GameScene extends Phaser.Scene {
       // bulb was the one thing that made these read as floating white dots on a
       // wall rather than as lamps. The glow is anchored below the shade and
       // stretched vertically, which is what a cone looks like from the side.
-      const lampGlow = addGlow(this, lampX, 162, 26, 0.5, 4);
+      const lampGlow = addGlow(this, lampX, 162, 26, 0.5, LIGHT_DEPTH);
       lampGlow.setScale(1.05, 1.5);
       this.floorObjects.push(lampGlow);
       g.fillStyle(0x6a4a2a, 1);

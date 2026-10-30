@@ -730,48 +730,81 @@ export class GameScene extends Phaser.Scene {
     const cx = width / 2;
     const cy = height / 2;
     const panelW = 440;
-    const panelH = 230;
+    const panelH = 232;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    const depth = PANEL_DEPTH.game.dialogue;
     const isBoss = combat.kind === 'boss';
 
-    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.dialogue));
+    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
+    // OVERHAUL UI: the fight uses the same header strip, segmented bar and row
+    // bands as every other panel, instead of its own centred title and a flat
+    // two-rectangle HP bar. A boss gets the danger accent on the header rule.
+    this.encounterObjects.push(
+      ...buildPanelHeader(this, left, top, panelW, `${combat.monster.name}${isBoss ? '（守门人）' : ''}`, isBoss ? UI.danger : UI.accent, depth + 5),
+    );
+
+    // The monster's HP as the same segmented bar the HUD uses, so "how much is
+    // left" reads at a glance instead of as a proportion of a strip.
+    const g = this.add.graphics().setDepth(depth + 7);
+    drawStatBar(g, left + 12, top + 30, panelW - 24, 7, combat.monster.hp / combat.monster.maxHp, isBoss ? UI.danger : UI.accent, 24);
+    this.encounterObjects.push(g);
     this.encounterObjects.push(
       this.add
-        .text(cx, top + 18, `${combat.monster.name}${isBoss ? '（守门人）' : ''}`, { fontFamily: 'monospace', fontSize: '16px', color: isBoss ? '#e8907c' : '#f4b66a' })
-        .setOrigin(0.5),
+        .text(left + panelW - 12, top + 44, `${combat.monster.hp}/${combat.monster.maxHp} · 第 ${combat.turn} 回合`, {
+          fontFamily: 'monospace',
+          fontSize: `${TYPE.caption}px`,
+          color: '#8a867c',
+        })
+        .setOrigin(1, 0)
+        .setDepth(depth + 7),
     );
-    // The monster's HP bar — the fight's only clock.
-    const barW = 200;
-    const barX = cx - barW / 2;
-    this.encounterObjects.push(
-      this.add.rectangle(barX, top + 32, barW, 6, 0x0b0f12, 0.9).setOrigin(0, 0),
-      this.add.rectangle(barX, top + 32, Math.max(0, (barW * combat.monster.hp) / combat.monster.maxHp), 6, isBoss ? 0xe56d63 : 0xc96f4a).setOrigin(0, 0),
-      this.add.text(cx, top + 44, `HP ${combat.monster.hp}/${combat.monster.maxHp} · 第 ${combat.turn} 回合`, { fontFamily: 'monospace', fontSize: '11px', color: '#a8a49a' }).setOrigin(0.5),
-    );
-    // The log's tail: the last three lines, so the panel tells the story of the
-    // fight without scrolling.
+
+    // The log's tail: the last three lines, on a dark well so they read as a
+    // record of what happened rather than as more body text.
+    const logTop = top + 56;
+    const logH = 62;
+    this.encounterObjects.push(...buildPanelWell(this, left + 12, logTop, panelW - 24, logH, depth + 5));
     const tail = combat.log.slice(-3);
     tail.forEach((line, i) => {
       this.encounterObjects.push(
-        this.add.text(left + 20, top + 62 + i * 18, line, { fontFamily: 'monospace', fontSize: '12px', color: '#ece8d8', wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+        this.add
+          .text(left + 20, logTop + 8 + i * 17, line, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: i === tail.length - 1 ? '#ece8d8' : '#8a867c', wordWrap: { width: panelW - 40 } })
+          .setDepth(depth + 7),
       );
     });
-    const choices: Array<{ key: string; label: string }> = [
-      { key: 'attack', label: '攻击' },
-      { key: 'guard', label: '格挡（受伤减半 · 回精力）' },
-      { key: 'flee', label: '撤退' },
+
+    // The three actions, as rows with a status column - the key, what it does,
+    // and what it costs. A list of three verbs in a row was the old shape.
+    const choices: ReadonlyArray<readonly [string, string, string]> = [
+      ['攻击', '按 Enter', '造成武器伤害'],
+      ['格挡', '受伤减半', '回 3 精力'],
+      ['撤退', '按 ESC', '逃跑可能失败'],
     ];
-    choices.forEach((c, i) => {
-      const cursor = i === this.combatSelected ? '>' : ' ';
+    choices.forEach(([label, key, note], i) => {
+      const y = top + 126 + i * 26;
+      const selected = i === this.combatSelected;
+      if (selected) {
+        this.encounterObjects.push(this.add.rectangle(left + 12, y, panelW - 24, 24, UI.accent).setOrigin(0, 0).setAlpha(0.14).setDepth(depth + 5));
+        this.encounterObjects.push(this.add.rectangle(left + 12, y, 2, 24, UI.accent).setOrigin(0, 0).setDepth(depth + 6));
+      }
       this.encounterObjects.push(
         this.add
-          .text(left + 24, top + 132 + i * 24, `${cursor} ${c.label}`, { fontFamily: 'monospace', fontSize: '14px', color: i === this.combatSelected ? '#f4b66a' : '#a8a49a' })
-          .setOrigin(0, 0),
+          .text(left + 22, y + 12, label, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: selected ? '#f4b66a' : '#ece8d8' })
+          .setOrigin(0, 0.5)
+          .setDepth(depth + 7),
+        this.add
+          .text(left + panelW - 22, y + 12, `${key} · ${note}`, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#8a867c' })
+          .setOrigin(1, 0.5)
+          .setDepth(depth + 7),
       );
     });
+
     this.encounterObjects.push(
-      this.add.text(cx, top + panelH - 14, '↑/↓ 选择 · Enter 出招 · ESC 撤退', { fontFamily: 'monospace', fontSize: '11px', color: '#8a867c' }).setOrigin(0.5),
+      this.add
+        .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 出招 · ESC 撤退', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: '#77c6a4' })
+        .setOrigin(0.5)
+        .setDepth(depth + 7),
     );
   }
 

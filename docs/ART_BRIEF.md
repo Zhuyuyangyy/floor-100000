@@ -1,144 +1,204 @@
 # 美术交接说明（ART_BRIEF）
 
 **为什么有这份文件**：这个项目的图全部是代码画出来的（程序化像素图），能做到结构正确、能跑、能测，
-但**到不了"好看"**。项目负责人提出自己出图，这份文件就是交接规格——按这里的尺寸和格式出的图，
-**丢进对应文件夹就直接生效，不用改代码**。
+但**到不了"好看"**。项目负责人提出自己出图，这份文件就是交接规格。
 
 ---
 
-## 一、投放位置（放进去就生效）
+## 〇、先说清楚：什么能做，什么做不出来
 
-| 素材 | 放到 | 尺寸 | 说明 |
+**能做到的**：让模型画**一张**干净的角色站姿/侧身像（高分辨率、平涂、粗描边）。
+工具会把它缩小、吸附到项目调色板、拼成 15 帧图集。出来就是能进游戏的手绘角色。
+
+**做不到的**：让模型一次画**15 帧对齐的 64×96 精灵表**。任何模型都做不到——
+帧间不一致、尺寸不对、脚底不齐。之前的提示词就是要这个，所以出不来。
+
+所以流程是反过来：**你出大图 → 工具帮你变成游戏能用的图集。**
+
+```bash
+# 1. 把画好的图放进 art-src/characters/player.png
+# 2. 跑一次
+node tools/ingest-character.mjs player
+# 3. 刷新浏览器
+```
+
+它会打印诊断，比如：
+```
+poses  15
+feet   lowest opaque row 95 of 0..95  (good)
+wrote  src\assets\characters\player.png  (960x96, 15 frames)
+```
+
+如果 `feet` 那行说 `... the sprite will float`，说明脚底下留了空白，裁掉再跑。
+
+---
+
+## 一、投放位置
+
+| 素材 | 先放这里 | 跑完工具后自动出现在 | 尺寸 |
 |---|---|---|---|
-| 角色精灵表 | `src/assets/characters/player.png` | **960×96** | 15 帧 × 64×96，横向一条，透明背景 |
-| 同上 | `npc_alin.png` / `npc_xiaozhou.png` / `wanderer.png` | 960×96 | 同上 |
-| 墙面 | `src/assets/env/wall.png` | **1280×288** | 横向无缝平铺 |
-| 地板 | `src/assets/env/floor.png` | **1280×64** | 横向无缝平铺 |
+| 角色原图 | `art-src/characters/<key>.png` | `src/assets/characters/<key>.png` | **任意**，建议高 768–1024 |
+| 墙面 | — | `src/assets/env/wall.png` | **必须正好 1280×288** |
+| 地板 | — | `src/assets/env/floor.png` | **必须正好 1280×64** |
 
-> **高度必须精确，不是建议。** 代码把墙面贴在 `y=8`、地板贴在 `y=296`（`FLOOR_HEIGHT 360 − FLOOR_BAND 64`）。
-> 所以墙面**必须正好 288 高**（296 − 8），地板**必须正好 64 高**。
+`<key>` 只能是：`player`（幸存者）、`npc_alin`（阿林）、`npc_xiaozhou`（小周）、`wanderer`（流浪者）。
+
+**墙面和地板不用跑工具，直接放进 `src/assets/env/` 就行**，但尺寸是硬约束：
+
+> 代码把墙面贴在 `y=8`、地板贴在 `y=296`（`FLOOR_HEIGHT 360 − FLOOR_BAND 64`）。
+> 所以墙面**必须正好 288 高**，地板**必须正好 64 高**。
 > 少 1px 就是一道露出背景色的缝，多 1px 就盖住地板。
-> （这份简报之前写的是 220/80，那是错的——照那个做会留 76px 的空洞。）
-
-Vite 在构建时用 glob 扫描这两个文件夹（`BootScene.ts` 的 `CUSTOM_CHARACTER_SHEETS` / `CUSTOM_ENV`）。
-**文件不存在 = 用程序化图**，不会报错、不会 404。放了新图，刷新页面就换。
-
-### 角色表的帧顺序（从左到右，必须是这 15 帧）
-
-| 列 | 0-5 | 6-7 | 8-10 | 11-12 | 13-14 |
-|---|---|---|---|---|---|
-| 动作 | 行走循环 | 待机呼吸 | 攻击 | 受击 | 搜刮 |
-
-- 每帧 **64×96**。靴底最低的那个像素必须落在**最后一行的位置**（0 起的第 95 行），
-  这样角色才正好站在地面线上。引擎把精灵原点定在帧底（origin 0.5, 1）并对齐 `PLAYER_FEET_Y`，
-  **帧底以上留 1px 空白，角色就浮空 1px**。
-  （`FOOT_GROUND = 94` 是**脚踝**行，靴子还占一行——所以是 95，不是 94。）
-- 每一帧的空白高度必须一致，不要有的帧高一点
-- 透明背景，**不要**画地面或阴影（阴影由引擎加）
-- 角色朝**右**；引擎会自动翻转
-- 用**纯色块 + 1px 描边**（不要抗锯齿渐变），否则与场景像素风冲突
 
 ---
 
-## 二、生成提示词（直接复制）
+## 二、画角色的 4 条硬要求
 
-下面按"画面主体 + 风格 + 技术约束"三段写。**英文版对多数模型效果更好**，中文版给通义/即梦等国产模型用。
+1. **侧面朝右**，全身，站在画面正中
+2. **背景透明**（或纯白），工具会抠掉 alpha < 90 的像素
+3. **脚在画面最底边**，不留空白
+4. **平涂色块 + 1px 深色描边**，不要渐变、不要抗锯齿
 
-### 1. 墙面（1280×288，横向无缝）
+比例参考：现在的角色是 **88px 高、头 15px**（约 5.5 头身），躯干宽 16–30px。
+你要画得接近这个比例，进游戏才对得上场景。
 
-**English**
-```
-Seamless horizontally tileable pixel art wall texture, side-view interior corridor
-of an abandoned post-apocalyptic dormitory building. Weathered painted concrete,
-peeling paint patches, damp stains running down, thin service pipes and electrical
-conduit, cracked plaster, one faded wall-mounted lamp bracket. Muted cold palette:
-desaturated blue-grey #354650, deep shadow #18242c, faint warm rust accents #6a4a2a.
-Dramatic side lighting from the left, strong contrast between lit and shadowed
-areas. Pixel art, 1-pixel dark outlines, no anti-aliasing, no text, no watermark.
-Aspect ratio 1280:288 (wide strip) - exactly 288 pixels tall, this is load-bearing. Left and right edges must tile seamlessly.
-```
+### 项目的 16 色调色板
 
-**中文**
-```
-横版像素风墙面贴图，可左右无缝平铺。末日废弃宿舍楼的走廊内墙，做旧涂漆混凝土、
-剥落的漆皮、往下淌的水渍、细的走线管和电气线槽、开裂的抹灰、一个褪色的壁灯支架。
-低饱和冷色：蓝灰 #354650、阴影 #18242c、少量暖锈色 #6a4a2a。左侧打光，
-明暗对比强。像素画，1 像素深色描边，不要抗锯齿，不要文字，不要水印。
-比例 1280:288 的横条，**高度必须正好 288 像素**（这是硬约束不是建议），左右两边必须能无缝接上。
-```
+工具会把你的图**吸附到这 16 个颜色**，所以直接用它们画效果最好：
 
-### 2. 地板（1280×80，横向无缝，湿的）
-
-**English**
-```
-Seamless horizontally tileable pixel art floor texture, side-view, wet cracked
-concrete floor of an abandoned building at night. Puddles reflecting warm amber
-lamp light, dark grout seams, scattered debris and dust, subtle specular
-highlights on the wet patches. Same muted cold palette as the wall: #1a2228 base,
-#2c3f4e highlights, warm reflections #f4b66a where light hits water.
-Pixel art, 1-pixel outlines, no anti-aliasing, no text. Aspect ratio 1280:80.
-Left and right edges must tile seamlessly.
-```
-
-**中文**
-```
-横版像素风地板贴图，可左右无缝平铺。夜里废弃建筑的湿裂混凝土地面，水洼映着暖黄灯光、
-深色砖缝、散落的碎屑和灰尘、湿处有高光。和墙同一套低饱和冷色：底色 #1a2228、
-高光 #2c3f4e、灯光照到水面的暖色 #f4b66a。像素画，1 像素描边，不要抗锯齿，不要文字。
-比例 1280:80 的横条，左右两边必须无缝。
-```
-
-### 3. 角色精灵表（960×96，15 帧）
-
-**English**
-```
-Pixel art character sprite sheet, side view facing right, 15 frames in one
-horizontal row, each frame 64x96 pixels, transparent background.
-Character: a survivor in a worn teal-green hooded jacket (#77c6a4), dark brown
-trousers, heavy boots, a canvas backpack on the back, pale skin, dark hair, dust
-and grime on the clothes. Chibi-ish proportions: head roughly 1/5 of body height,
-readable silhouette.
-Frame order: 6-frame walk cycle, 2-frame idle breathing, 3-frame attack (wind-up /
-strike / recover), 2-frame hurt (recoil / settle), 2-frame search (bend forward
-and reach).
-Consistent 1-pixel dark outline (#0e1418) on every frame, no anti-aliasing,
-no shadows, no ground, feet aligned to the same baseline in every frame.
-Flat colours only, limited palette, high internal contrast so the figure reads
-against a dark background.
-```
-
-**中文**
-```
-像素风角色精灵表，侧面朝右，15 帧横向排一行，每帧 64×96 像素，透明背景。
-角色：末日的幸存者，穿旧的青绿色连帽夹克 #77c6a4、深棕长裤、厚重靴子，背上有帆布背包，
-浅肤色、深色头发，衣服上有灰和污渍。偏卡通比例：头约等于身高的五分之一，剪影要清楚。
-帧顺序：6 帧行走循环、2 帧待机呼吸、3 帧攻击（前摇/出手/回收）、2 帧受击（后仰/回收）、
-2 帧搜刮（弯腰前伸）。每帧统一 1 像素深色描边 #0e1418，不要抗锯齿、不要阴影、不要地面，
-每帧脚底在同一水平线上。只用平涂色，色板要少，内部对比要强，保证在深色背景上能看清。
-```
-
-### 4. 可选：另外三个幸存者
-
-把上面第 3 段最后一句"青绿色夹克"换成对应配色，其余全部不变：
-
-| 文件 | 角色 | 替换色 |
-|---|---|---|
-| `npc_alin.png` | 阿林，老邻居 | 土黄色工装夹克 `#c9a45f` |
-| `npc_xiaozhou.png` | 小周，孩子 | 暗红色卫衣 `#b5564e` |
-| `wanderer.png` | 流浪者，怪物 | 灰紫色破布 `#6b5a7a`，脸隐在阴影里 |
+| 用途 | 色值 |
+|---|---|
+| 最深墨色 / 描边 | `#05080b` |
+| 深阴影 | `#14202c` |
+| 石头（墙、金属暗部） | `#2c3f4e` |
+| 石头亮部 | `#47657a` |
+| 灰、灰尘 | `#8a95a0` |
+| 布深 / 布 / 布亮 / 布高光 | `#1e4a44` `#2f6b5e` `#4e9c86` `#77c6a4` |
+| 肤深 / 肤 / 肤亮 | `#6b4630` `#a5714c` `#d9b48f` |
+| 灯光深 / 灯 / 灯亮 / 灯最亮 | `#8a4a1e` `#d98b3c` `#f4b66a` `#ffe4b6` |
 
 ---
 
-## 三、出图后我要做的事（不用你动手）
+## 三、生成提示词（直接复制）
 
-1. 放进 `src/assets/characters/` 或 `src/assets/env/`
-2. 我跑 `tsc` + 单测 + e2e，确认不崩、不丢帧、不位移
-3. 如果尺寸对不上会报错——那时的选择是**我改代码适配你的图**，不是让你重画
+**通用要点**：用"平涂色块 + 粗描边"的描述，**不要说"pixel art 64x96"**——
+那样会出来一团糊。要的是高分辨率的**赛璐璐/平涂插画**，缩小后才干净。
 
-## 四、已知约束（很重要，避免白画）
+### 1. 幸存者（player）——主角
 
-- 画布只有 **640×360**，页面放大 2 倍显示。所以图是**低分辨率像素风**，不是插画
-- **不要用平滑渐变**：会被最近邻采样放大成色带
-- 墙面/地板的**左右两端必须无缝**，否则每 1280px 出现一条竖缝
-- 角色每帧**必须一样大、脚底对齐**，否则走路会上下跳
-- 中文在 10px 以下会糊，所以 UI 字号已经提到 10/12/15；不要指望更小的字号
+**English**
+```
+Full-body character illustration, side view profile, facing right, standing still,
+centered in frame, isolated on a pure white background.
+
+A survivor in an abandoned post-apocalyptic dormitory tower. Worn teal-green hooded
+jacket (#4e9c86 base, #77c6a4 highlights, #2f6b5e shadows), dark grey-brown canvas
+trousers, heavy scuffed boots, a large canvas backpack with a bedroll lashed to the
+top and a compression strap across the middle. Pale sun-starved skin (#d9b48f),
+dark hair, dust and grime on the clothing, a small tear at the elbow. Tired posture,
+shoulders slightly forward, weight on the back foot.
+
+STYLE: flat cel-shaded colour fills, NO gradients, NO texture noise, thick uniform
+1-2px dark outline (#05080b) around the entire silhouette, strong internal contrast
+so the figure reads against a dark background. Limited palette of 12-16 colours.
+Clean vector-like edges. Proportions: roughly 5.5 heads tall, readable silhouette.
+
+NEGATIVE: no text, no watermark, no background scenery, no ground, no shadow on the
+floor, no anti-aliasing, no blur, no 3D rendering, no realistic photo texture,
+do not draw multiple poses, do not draw a sprite sheet.
+```
+
+**中文**
+```
+全身角色插画，正侧面，朝右，站姿，画面居中，纯白背景，人物独立。
+
+末日废弃宿舍楼里的幸存者。做旧的青绿色连帽夹克（底色 #4e9c86、高光 #77c6a4、
+阴影 #2f6b5e）、深灰褐色帆布长裤、磨损的厚靴子、背后一个大帆布背包（顶上捆着铺盖卷、
+中间一条压缩带）。长期不见阳光的苍白皮肤（#d9b48f）、深色头发、衣服上有灰尘和污渍、
+手肘处破了一道口子。疲惫的体态，肩膀略微前倾，重心在后脚。
+
+风格：平涂赛璐璐色块，**不要渐变**，不要纹理噪点，整个剪影外围一圈均匀的
+1–2 像素深色描边（#05080b），内部明暗对比强，让角色在暗背景上能读出来。
+**限定 12–16 色**。边缘干净利落。比例约 5.5 头身，剪影可辨认。
+
+负面：不要文字、不要水印、不要背景、不要地面、不要地上的影子、不要抗锯齿、
+不要模糊、不要 3D 渲染、不要写实照片质感、**不要画多个姿势**、**不要画精灵表**。
+```
+
+### 2. 阿林（npc_alin）——老邻居，比主角壮
+
+把上面第 1 条的**人物描述**换成这段，风格段和负面段完全照抄：
+
+```
+A much older, heavier survivor. Broad shoulders and a thick torso - visibly wider
+than a normal person. Steel-blue worker's overalls (#47657a base, #2c3f4e shadows,
+#3a5570 highlights) worn over a grey undershirt, a tool belt with a wrench, rolled
+up sleeves showing forearms, work gloves tucked in the belt. Grey stubble, deep
+wrinkles, a weathered face, tired but steady eyes. He stands square and planted,
+weight even on both feet, hands loose at his sides.
+
+比例：约 5 头身，**躯干明显比一般人宽**，让他一眼就能和主角区分开。
+```
+
+### 3. 小周（npc_xiaozhou）——孩子，瘦小
+
+```
+A child survivor, roughly twelve years old. Noticeably smaller and slighter than an
+adult - narrow torso, thin limbs, oversized hand-me-down jacket in warm amber and
+ochre (#d98b3c base, #f4b66a highlights, #8a4a1e shadows) that hangs past the hips,
+short trousers, worn sneakers. A small cloth satchel instead of a backpack. Round
+face, messy dark hair, alert posture, standing on the balls of the feet as if ready
+to bolt.
+
+比例：约 4.5 头身，**头相对更大，身体更窄**，这是让孩子读起来像孩子的关键。
+```
+
+### 4. 流浪者（wanderer）——夜里追你的东西
+
+```
+A thin, wrong humanoid figure, almost a silhouette. Very narrow - narrow shoulders,
+long thin limbs, elongated proportions. Ragged dark clothing in deep red-black
+(#2f0f14 base, #4a2028 folds, #6b3038 faint highlights), a hood or draped cloth
+that hides the face entirely, no visible skin. It leans slightly forward, arms
+hanging too long. It should read as a person-shaped absence rather than as a
+character - unsettling, not detailed.
+
+比例：约 6 头身，**极瘦**，剪影比正常人窄一半。
+颜色只用暗红黑系，不要亮色——它在夜里是靠一团暗红的光池被发现的。
+```
+
+---
+
+## 四、如果想要真正的动画（可选，做不到也别勉强）
+
+先交**单张站姿**，游戏会用程序化的腿走路——看着是手绘的，动起来是程序化的。
+这对"人物难看"这件事基本够用。
+
+真想做动画，最现实的是**一排 6 张走循环**（同一角色、同一背景、只改腿和手臂），
+横着拼成一张，工具会自动识别 6 个姿势：
+
+```
+Same character, same lighting, same scale, walk cycle - 6 poses in one horizontal
+row, separated by equal spacing. Pose 1: left foot forward contact. Pose 2: passing.
+Pose 3: right foot forward contact. Pose 4: passing. Pose 5: left foot forward,
+lower. Pose 6: passing, arms swung. Feet must sit on exactly the same baseline in
+every pose. Pure white background, flat cel shading, thick dark outline, no shadows.
+```
+
+工具会打印 `poses 6`，然后走路用手绘的 6 帧、其他动作仍用程序化。
+
+---
+
+## 五、投进去之后
+
+```bash
+node tools/ingest-character.mjs player
+```
+
+再做一次全量验证，确认画面没退化：
+
+```bash
+npx tsc --noEmit
+npx vitest run
+node tools/art-audit.mjs       # 五道门：主色/亮部/分散/边缘密度/角色对比度
+node tools/silhouette-audit.mjs
+```

@@ -253,6 +253,63 @@ def compose(fig: dict, flip: bool) -> np.ndarray:
     return frame
 
 
+def animate(fig: dict, args) -> list:
+    """Derive the 15 animation frames from one painted pose.
+
+    A single pose repeated 15 times makes the character slide across the floor
+    without moving, which is worse than standing still. Splitting the figure at
+    the hip and offsetting the legs per frame is the cheapest thing that reads as
+    a walk at this size: the head, torso and backpack stay locked - so the
+    silhouette never morphs - while the legs shift and the whole figure bobs.
+
+    Frame layout must match src/render/walkcycle.ts:
+      0-5 walk, 6-7 idle, 8-10 attack, 11-12 hurt, 13-14 search.
+    """
+    px = fig["px"]          # (h, w, 4)
+    h, w = px.shape[:2]
+    out = []
+
+    def shift(region: np.ndarray, dx: int, dy: int) -> np.ndarray:
+        """Move a block by (dx, dy) within its own box; the gap stays empty."""
+        rh, rw = region.shape[:2]
+        res = np.zeros_like(region)
+        ys = slice(max(0, dy), min(rh, rh + dy))
+        xs = slice(max(0, dx), min(rw, rw + dx))
+        src_y = slice(max(0, -dy), min(rh, rh - dy))
+        src_x = slice(max(0, -dx), min(rw, rw - dx))
+        res[ys, xs] = region[src_y, src_x]
+        return res
+
+    hip = int(h * 0.52)     # where the legs start, measured on this figure
+
+    def build(leg_dx: int, bob: int, upper_dx: int = 0, upper_dy: int = 0) -> np.ndarray:
+        f = px.copy()
+        # legs: horizontal stride
+        if leg_dx:
+            f[hip:] = shift(px[hip:], leg_dx, 0)
+        # whole figure: vertical bob, applied by shifting everything up
+        if bob:
+            f = shift(f, 0, -bob)
+        # upper body: lean for attack / search
+        if upper_dx or upper_dy:
+            f[:hip] = shift(px[:hip], upper_dx, upper_dy)
+        return f
+
+    walk = [(2, 0), (1, 1), (0, 0), (-1, 1), (-2, 0), (-1, 1)]
+    for leg_dx, bob in walk:
+        out.append(build(leg_dx, bob))
+    for bob in (0, 1):                       # idle: breathe
+        out.append(build(0, bob))
+    for upper_dx in (0, 1, 2):               # attack: wind-up, strike, recover
+        out.append(build(0, 0, upper_dx, 0))
+    for back in (2, 1):                      # hurt: recoil
+        out.append(build(0, 0, -back, 0))
+    for fwd in (1, 2):                       # search: bend in
+        out.append(build(0, 0, fwd, 1))
+
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("key")
@@ -260,6 +317,7 @@ def main() -> int:
     ap.add_argument("--no-flip", action="store_true")
     ap.add_argument("--project-palette", action="store_true")
     ap.add_argument("--debug", action="store_true", help="write intermediate PNGs to re/")
+    ap.add_argument("--static", action="store_true", help="one pose for every frame, no derived motion")
     args = ap.parse_args()
 
     if args.key not in KEYS:
@@ -322,8 +380,6 @@ def main() -> int:
 
     fig = figs[0]
     flip = not args.no_flip
-    frame = compose(fig, flip)
-
     print(f"value    figure range {fig['lum_lo']:.0f}..{fig['lum_hi']:.0f} remapped to "
           f"clear the wall (lum {WALL_LUM:.0f}) by {MARGIN:.0f} -> "
           f"{fig['target_lo']:.0f}..{fig['target_hi']:.0f}")
@@ -331,17 +387,37 @@ def main() -> int:
           f"{'project' if args.project_palette else 'art itself'}; "
           f"{fig['moved_share']*100:.0f}% of pixels moved")
     print(f"facing   {'flipped to face right' if flip else 'left as drawn (--no-flip)'}")
+    frames = [compose(fig, flip)]
+    if not args.static:
+        # animate every frame after the first, so the sheet carries a walk
+        for pose in animate(fig, args)[1:]:
+            f2 = dict(fig)
+            f2["px"] = pose
+            frames.append(compose(f2, flip))
 
-    ys = np.where(frame[:, :, 3] > 0)[0]
+    ys = np.where(frames[0][:, :, 3] > 0)[0]
     feet = int(ys[-1]) if len(ys) else -1
     print(f"feet     lowest opaque row {feet} of 0..{FRAME_H-1}"
           + ("  (good)" if feet == FRAME_H - 1 else f"  <-- {FRAME_H-1-feet}px short, it will float"))
+    print(f"motion   {len(frames)} frames, {len(set(f.tobytes() for f in frames))} distinct"
+          + ("" if len(set(f.tobytes() for f in frames)) > 1 else "  <-- STATIC, the character will not move"))
 
     # STEP 6: the 15-frame sheet. A single figure fills every frame, so the
     # character looks hand-drawn and the procedural art carries the motion.
+    #
+    # Transparent pixels are zeroed in RGB as well as alpha. The nearest-neighbour
+    # resize samples source pixels whose alpha is 0 but whose RGB is not, so the
+    # exported sheet carried 147 distinct RGBA tuples for 14 visible colours -
+    # which is what the create-game-assets QA script reports as "more than 16
+    # colors" and fails the asset on. Zeroing the invisible channel makes the
+    # file's colour count mean what it says.
+    for f in frames:
+        f[:, :, :3][f[:, :, 3] == 0] = 0
+
     sheet = np.zeros((FRAME_H, FRAME_W * FRAMES, 4), dtype=np.uint8)
-    for f in range(FRAMES):
-        sheet[:, f * FRAME_W:(f + 1) * FRAME_W] = frame
+    for i, f in enumerate(frames[:FRAMES]):
+        sheet[:, i * FRAME_W:(i + 1) * FRAME_W] = f
+    sheet[:, :, :3][sheet[:, :, 3] == 0] = 0
 
     out_dir = os.path.join("src", "assets", "characters")
     os.makedirs(out_dir, exist_ok=True)
@@ -349,8 +425,13 @@ def main() -> int:
     Image.fromarray(sheet, "RGBA").save(dst)
     print(f"\nwrote    {dst}  ({FRAME_W*FRAMES}x{FRAME_H}, {FRAMES} frames)")
     if args.debug:
-        Image.fromarray(frame, "RGBA").resize((FRAME_W * 6, FRAME_H * 6), Image.NEAREST).save(
+        Image.fromarray(frames[0], "RGBA").resize((FRAME_W * 6, FRAME_H * 6), Image.NEAREST).save(
             f"re/debug-{args.key}.png")
+        # a contact sheet of all 15 frames, nearest-neighbour, so the cycle can
+        # be read in one image
+        sheet_img = Image.fromarray(sheet, "RGBA")
+        sheet_img.resize((sheet_img.width * 2, sheet_img.height * 2), Image.NEAREST).save(
+            f"re/debug-{args.key}-sheet.png")
     return 0
 
 

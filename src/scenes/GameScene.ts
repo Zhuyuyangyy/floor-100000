@@ -82,7 +82,15 @@ import { WALK_CHARACTERS, attackAnimKey, hurtAnimKey, idleAnimKey, searchAnimKey
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
-import { addGlow, ambienceFor, buildLightLayer, LIGHT_DEPTH, NIGHT_DEPTH, type LightLayer } from '../render/lighting';
+import {
+  ACTOR_DEPTH,
+  addGlow,
+  ambienceFor,
+  buildLightLayer,
+  LIGHT_DEPTH,
+  NIGHT_DEPTH,
+  type LightLayer,
+} from '../render/lighting';
 import {
   addContactShadow,
   buildCeilingLights,
@@ -449,7 +457,14 @@ export class GameScene extends Phaser.Scene {
     // them every frame (see updatePlayerShadow). Without it the figure reads as
     // hovering: nothing in a side view is anchored to the floor without one.
     this.playerShadow = addContactShadow(this, state.player.x, PLAYER_FEET_Y + 2, 26, 2, 0.55);
-    this.player = this.add.sprite(state.player.x, PLAYER_FEET_Y, walkSheetKey(who)).setOrigin(0.5, 1);
+    this.player = this.add
+      .sprite(state.player.x, PLAYER_FEET_Y, walkSheetKey(who))
+      .setOrigin(0.5, 1)
+      // ACTOR_DEPTH, not the default 0. The wall dressing sits at 1-2, the aerial
+      // haze at 2 and the foreground silhouette at 26, so a sprite left at 0 is
+      // painted over by all of them - the player was invisible in the middle of
+      // an empty floor with nothing wrong in the console.
+      .setDepth(ACTOR_DEPTH);
     this.player.play(idleAnimKey(who));
     this.floorObjects.push(this.player);
     this.cameras.main.startFollow(this.player, true, 0.15, 0.15);
@@ -2030,7 +2045,11 @@ export class GameScene extends Phaser.Scene {
   private drawNpcs(): void {
     for (const npc of NPCS) {
       const who = npc.id === 'alin' ? 'npc_alin' : 'npc_xiaozhou';
-      const sprite = this.add.sprite(npc.x, PLAYER_FEET_Y, walkSheetKey(who)).setOrigin(0.5, 1);
+      const sprite = this.add
+        .sprite(npc.x, PLAYER_FEET_Y, walkSheetKey(who))
+        .setOrigin(0.5, 1)
+        // ACTOR_DEPTH, or the wall dressing and the haze paint over them.
+        .setDepth(ACTOR_DEPTH);
       // NPCs stand still, so they breathe on the idle clip. Without an explicit
       // play() a sprite sits on frame 0 forever, which reads as a frozen mannequin
       // rather than someone waiting to talk to you.
@@ -2927,7 +2946,10 @@ export class GameScene extends Phaser.Scene {
     }
     if (!this.wanderer) {
       const spawnX = state.player.x < FLOOR_WIDTH / 2 ? FLOOR_WIDTH - 48 : 48;
-      this.wanderer = this.add.sprite(spawnX, PLAYER_FEET_Y, walkSheetKey('wanderer')).setOrigin(0.5, 1);
+      this.wanderer = this.add
+        .sprite(spawnX, PLAYER_FEET_Y, walkSheetKey('wanderer'))
+        .setOrigin(0.5, 1)
+        .setDepth(ACTOR_DEPTH);
       this.wanderer.play(walkAnimKey('wanderer'));
       this.wandererAI = freshWandererAI(spawnX);
       // A THREAT YOU CANNOT SEE IS NOT A THREAT, IT IS A PUNISHMENT.

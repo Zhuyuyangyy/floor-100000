@@ -71,6 +71,10 @@ const BENCH_LIGHT: LightPool = { x: 480, y: 286, radius: 86, strength: 0.95, col
 export const NIGHT_DEPTH = 23;
 export const LIGHT_DEPTH = 24;
 export const DUST_DEPTH = 25;
+// Anything that acts: the player, the NPCs, the trader, the wanderer. Above the
+// wall dressing (1-2), the haze (2) and the floor clutter (3), below the night
+// overlay (23) so night darkens the actors too.
+export const ACTOR_DEPTH = 5;
 
 const AMBIENT_COLOR = 0x24405e;
 const AMBIENT_FLOOR_ALPHA = 0.4;

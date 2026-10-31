@@ -93,6 +93,20 @@ function mixColor(a: number, b: number, t: number): number {
 // The uniform pass every panel's object list goes through: park it in screen
 // space at `depth`. The frame and fill are skipped, because buildPanel already
 // put them just below it.
+/**
+ * Scroll-lock a panel's objects WITHOUT touching their depths.
+ *
+ * applyPanelDepth does both, which is right for a panel whose parts all share
+ * one depth - but the panels that are rebuilt on every open (shop, combat,
+ * encounter, outcome) give their header, wells and rows their own depths, so
+ * running the full pass would flatten that layering. They still need the lock:
+ * without it their frame sat still and their text slid away with the camera,
+ * which is exactly the stuck empty panel a player hit.
+ */
+export function lockToScreen(objects: ReadonlyArray<Phaser.GameObjects.GameObject>): void {
+  for (const o of objects) (o as Phaser.GameObjects.Image).setScrollFactor(0);
+}
+
 export function applyPanelDepth(objects: PanelObject[], depth: number): void {
   for (const o of objects) {
     o.setScrollFactor(0);
@@ -144,6 +158,15 @@ export function buildPanel(
     fill.push(
       scene.add
         .rectangle(cx, cy - h / 2 + h * ((t0 + t1) / 2), w, h * (t1 - t0) + 1, bandColor, PANEL_FILL_ALPHA)
+        // SCROLL-LOCKED AT CREATION, not left to applyPanelDepth.
+        //
+        // applyPanelDepth is a pass over a panel's object list, and the panels
+        // that are rebuilt on every open (shop, combat, encounter, outcome) push
+        // buildPanel's result into their own array and never run that pass. Their
+        // frame and fill therefore stayed in world space and slid off-screen as
+        // the camera scrolled - which is exactly the "giant empty panel stuck on
+        // the left of the screen" a player hit on floor 2.
+        .setScrollFactor(0)
         .setDepth(depth + PANEL_FILL_OFFSET),
     );
   }
@@ -152,15 +175,17 @@ export function buildPanel(
   // them. Origin (0,0) everywhere so each piece is placed by its top-left. The
   // keys are spelled out rather than built by a helper: a helper's calls read
   // like texture lookups, which defeats the source scan in textureKeys.test.ts.
+  const piece = (x: number, y: number, key: string): Phaser.GameObjects.Image =>
+    scene.add.image(x, y, key).setOrigin(0, 0).setScrollFactor(0);
   const frame: Phaser.GameObjects.Image[] = [
-    scene.add.image(left, top, `ui-frame-${accent}-tl`).setOrigin(0, 0),
-    scene.add.image(left + w - PANEL_SLICE, top, `ui-frame-${accent}-tr`).setOrigin(0, 0),
-    scene.add.image(left, top + h - PANEL_SLICE, `ui-frame-${accent}-bl`).setOrigin(0, 0),
-    scene.add.image(left + w - PANEL_SLICE, top + h - PANEL_SLICE, `ui-frame-${accent}-br`).setOrigin(0, 0),
-    scene.add.image(left + PANEL_SLICE, top, `ui-frame-${accent}-top`).setOrigin(0, 0).setDisplaySize(w - PANEL_SLICE * 2, PANEL_SLICE),
-    scene.add.image(left + PANEL_SLICE, top + h - PANEL_SLICE, `ui-frame-${accent}-bottom`).setOrigin(0, 0).setDisplaySize(w - PANEL_SLICE * 2, PANEL_SLICE),
-    scene.add.image(left, top + PANEL_SLICE, `ui-frame-${accent}-left`).setOrigin(0, 0).setDisplaySize(PANEL_SLICE, h - PANEL_SLICE * 2),
-    scene.add.image(left + w - PANEL_SLICE, top + PANEL_SLICE, `ui-frame-${accent}-right`).setOrigin(0, 0).setDisplaySize(PANEL_SLICE, h - PANEL_SLICE * 2),
+    piece(left, top, `ui-frame-${accent}-tl`),
+    piece(left + w - PANEL_SLICE, top, `ui-frame-${accent}-tr`),
+    piece(left, top + h - PANEL_SLICE, `ui-frame-${accent}-bl`),
+    piece(left + w - PANEL_SLICE, top + h - PANEL_SLICE, `ui-frame-${accent}-br`),
+    piece(left + PANEL_SLICE, top, `ui-frame-${accent}-top`).setDisplaySize(w - PANEL_SLICE * 2, PANEL_SLICE),
+    piece(left + PANEL_SLICE, top + h - PANEL_SLICE, `ui-frame-${accent}-bottom`).setDisplaySize(w - PANEL_SLICE * 2, PANEL_SLICE),
+    piece(left, top + PANEL_SLICE, `ui-frame-${accent}-left`).setDisplaySize(PANEL_SLICE, h - PANEL_SLICE * 2),
+    piece(left + w - PANEL_SLICE, top + PANEL_SLICE, `ui-frame-${accent}-right`).setDisplaySize(PANEL_SLICE, h - PANEL_SLICE * 2),
   ];
   for (const o of frame) o.setDepth(depth + PANEL_FRAME_OFFSET);
 

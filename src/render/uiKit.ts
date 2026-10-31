@@ -161,9 +161,9 @@ export function buildPanelHeader(
   const out: UiObject[] = [];
   const h = 20;
   // The strip itself.
-  out.push(scene.add.rectangle(left, top, w, h, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.96).setDepth(depth));
+  out.push(scene.add.rectangle(left, top, w, h, UI.surfaceRaised).setOrigin(0, 0).setScrollFactor(0).setAlpha(0.96).setDepth(depth));
   // A 2px accent edge on the left, so the header has a leading mark.
-  out.push(scene.add.rectangle(left, top, 2, h, accent).setOrigin(0, 0).setDepth(depth + 1));
+  out.push(scene.add.rectangle(left, top, 2, h, accent).setOrigin(0, 0).setScrollFactor(0).setDepth(depth + 1));
   // The title.
   out.push(
     scene.add
@@ -172,7 +172,7 @@ export function buildPanelHeader(
       .setDepth(depth + 1),
   );
   // The hairline that separates the header from the body.
-  const g = scene.add.graphics().setDepth(depth + 1);
+  const g = scene.add.graphics().setScrollFactor(0).setDepth(depth + 1);
   drawLine(g, left + 2, top + h - 1, w - 2, accent, 0.7);
   out.push(g);
   return out;
@@ -188,8 +188,8 @@ export function buildPanelWell(
   depth: number,
 ): UiObject[] {
   const out: UiObject[] = [];
-  out.push(scene.add.rectangle(left, top, w, h, 0x080c0f).setOrigin(0, 0).setAlpha(0.55).setDepth(depth));
-  const g = scene.add.graphics().setDepth(depth + 1);
+  out.push(scene.add.rectangle(left, top, w, h, 0x080c0f).setOrigin(0, 0).setScrollFactor(0).setAlpha(0.55).setDepth(depth));
+  const g = scene.add.graphics().setScrollFactor(0).setDepth(depth + 1);
   g.lineStyle(1, UI.line, 0.5);
   g.strokeRect(Math.round(left) + 0.5, Math.round(top) + 0.5, Math.round(w) - 1, Math.round(h) - 1);
   out.push(g);
@@ -226,13 +226,13 @@ export function buildListRow(
 
   // The selection band: a full-width wash plus the accent rule on the left.
   if (opts.selected) {
-    out.push(scene.add.rectangle(x, y, w, ROW_H, UI.accent).setOrigin(0, 0).setAlpha(0.13).setDepth(depth));
-    out.push(scene.add.rectangle(x, y, 2, ROW_H, UI.accent).setOrigin(0, 0).setDepth(depth + 1));
+    out.push(scene.add.rectangle(x, y, w, ROW_H, UI.accent).setOrigin(0, 0).setScrollFactor(0).setAlpha(0.13).setDepth(depth));
+    out.push(scene.add.rectangle(x, y, 2, ROW_H, UI.accent).setOrigin(0, 0).setScrollFactor(0).setDepth(depth + 1));
   }
 
   let textX = x + 8;
   if (opts.iconKey) {
-    out.push(scene.add.image(x + 14, cy, opts.iconKey).setOrigin(0.5).setDepth(depth + 1));
+    out.push(scene.add.image(x + 14, cy, opts.iconKey).setOrigin(0.5).setScrollFactor(0).setDepth(depth + 1));
     textX = x + 26;
   }
   const labelColor = opts.dim ? '#6b6862' : opts.selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary);

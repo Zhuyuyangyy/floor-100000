@@ -65,7 +65,7 @@ import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
-import { applyPanelDepth, buildPanel, createMarker, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
+import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import {
   HUD_BAR_H,
   HUD_FOOT_H,
@@ -676,6 +676,9 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0, 0.5)
         .setDepth(depth + 7),
     );
+    // This panel is rebuilt on every open, so it never runs applyPanelDepth -
+    // every object it makes has to be locked here or it slides with the camera.
+    lockToScreen(this.encounterObjects);
   }
 
   private shopBuy(): void {
@@ -889,6 +892,7 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0.5)
         .setDepth(depth + 7),
     );
+    lockToScreen(this.encounterObjects);
   }
 
   // One turn: the engine resolves the round, this method lands the numbers on
@@ -1040,6 +1044,7 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0.5)
         .setDepth(outDepth + 7),
     );
+    lockToScreen(this.encounterObjects);
     // The fight is over: the outcome screen waits for one Enter, then
     // closeCombat clears state.combat and the floor's spots.
     this.combatDone = true;
@@ -1115,6 +1120,7 @@ export class GameScene extends Phaser.Scene {
           .setDepth(depth + 7),
       );
     }
+    lockToScreen(this.encounterObjects);
   }
 
   // Applies a choice: HP is applied here (the system only reports the delta),
@@ -2262,6 +2268,33 @@ export class GameScene extends Phaser.Scene {
   // invoked with the scene as `this` — passing a bare method reference would
   // lose it. Movement is NOT routed through here: it reads
   // cursors.left/right.isDown in update(), so holding a direction key works.
+  /**
+   * Hide every panel object that is visible while no panel is open.
+   *
+   * Returns whether it found anything. This is a recovery path, not normal
+   * operation: if it ever fires, something left a panel behind, and the point is
+   * that the player always has a way out.
+   */
+  private clearStrayPanels(): boolean {
+    const groups: ReadonlyArray<ReadonlyArray<Phaser.GameObjects.GameObject | PanelObject>> = [
+      this.invObjects,
+      this.craftObjects,
+      this.pauseObjects,
+      this.dialogueObjects,
+      this.encounterObjects,
+    ];
+    let found = false;
+    for (const group of groups) {
+      for (const o of group) {
+        const v = o as Phaser.GameObjects.Image;
+        if (!v.visible) continue;
+        v.setVisible(false);
+        found = true;
+      }
+    }
+    return found;
+  }
+
   private guard(slot: GameKey, action: () => void): void {
     const frame = this.game.getFrame();
     if (this.lastInputFrame[slot] === frame) return;
@@ -2297,6 +2330,26 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onEsc(): void {
+    // ESCAPE HATCH FIRST.
+    //
+    // Every branch below is gated on a state flag, so a panel that is DRAWN
+    // while its flag says closed matches none of them - ESC falls through to
+    // togglePause() and the player is stuck looking at a panel that eats the
+    // screen and answers nothing. That is what happened on floor 2: a panel
+    // whose frame had slid off-screen still had its fill and rows visible, the
+    // footer still read "按 E 对话" because no panel was open by the game's own
+    // reckoning, and there was no key that would clear it.
+    if (
+      !this.encounterOpen &&
+      !this.inventoryOpen &&
+      !this.craftingOpen &&
+      !this.dialogueOpen &&
+      !this.pauseOpen &&
+      this.clearStrayPanels()
+    ) {
+      this.flash('面板已清理');
+      return;
+    }
     // OVERHAUL Wave A: ESC mid-fight is the retreat — it runs the flee round
     // rather than walking away for free, so the choice has a cost.
     if (this.encounterOpen && getGame().combat && !this.combatDone) {

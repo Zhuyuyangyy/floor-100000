@@ -42,7 +42,7 @@ IMAGE SIZE: exactly 512x768 pixels. Do not exceed this size.
 **跑一次**（换成对应文件名）：
 
 ```bash
-node tools/ingest-character.mjs player
+python tools/ingest-character.py player
 ```
 
 工具会打印诊断，看到这两行就是对的：

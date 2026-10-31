@@ -12,7 +12,7 @@ art-src/characters/wanderer.png        流浪者（夜里追你的那个）
 **然后跑一次：**
 
 ```bash
-node tools/ingest-character.mjs player
+python tools/ingest-character.py player
 ```
 
 它会：缩小到 64×96、把每个像素吸附到项目的 16 色调色板、拼成 960×96 的 15 帧图集，写到

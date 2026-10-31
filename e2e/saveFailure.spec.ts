@@ -62,17 +62,18 @@ test('a rejected save warns the player instead of losing the run silently', asyn
 
   // Fill localStorage until the browser starts rejecting writes, which is what a
   // full disk or a private window does. The init script runs before any game code.
+  //
+  // The budget starts at ZERO, not at a few kilobytes. With a nonzero budget the
+  // first save or two succeed and the failure lands on a later autosave, which
+  // makes the warning's arrival depend on how long the boot took - and a boot
+  // that loads a painted character sheet takes measurably longer than one that
+  // does not, so the flash had already cleared by the time the poll looked for
+  // it. Failing on the first write removes the timing from the test entirely.
   await page.addInitScript(() => {
-    const original = Storage.prototype.setItem;
-    let budget = 2000; // bytes left before the quota bites
-    Storage.prototype.setItem = function patched(key: string, value: string): void {
-      if (budget <= 0) {
-        const err = new Error('QuotaExceededError');
-        err.name = 'QuotaExceededError';
-        throw err;
-      }
-      budget -= key.length + value.length;
-      original.call(this, key, value);
+    Storage.prototype.setItem = function patched(): void {
+      const err = new Error('QuotaExceededError');
+      err.name = 'QuotaExceededError';
+      throw err;
     };
   });
 

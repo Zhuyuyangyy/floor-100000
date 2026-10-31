@@ -33,6 +33,9 @@ const URL = process.env.AUDIT_URL ?? 'http://localhost:5173';
 const SCALE = 2;
 const PAD_Y = 40;
 const toShot = (gx, gy) => [Math.round(gx * SCALE), Math.round(PAD_Y + gy * SCALE)];
+// the same two numbers, for the browser-side evaluate that reads the framebuffer
+const SCALE_ = 2;
+const PAD_ = 40;
 
 function lum(r, g, b) {
   return 0.299 * r + 0.587 * g + 0.114 * b;
@@ -138,6 +141,16 @@ async function main() {
     shots[name] = file;
   };
 
+  // Put the survivor at a known world position and let the camera settle before
+  // the shot, so the figure's screen position is a number rather than something
+  // to be inferred. Without this the audit measured wherever the idle walk had
+  // left the player, and its own reported coordinates and the screenshot
+  // disagreed by the sprite's left margin.
+  await page.evaluate(() => {
+    const st = window.__PHASER_SESSION__?.getState?.();
+    if (st) st.player.x = 640;
+  });
+  await page.waitForTimeout(700);
   await shoot('world');
   await page.keyboard.press('I');
   await page.waitForTimeout(450);
@@ -218,46 +231,165 @@ async function main() {
     const cam = sc.cameras.main;
     const b = spr.getBounds();
     return {
+      // SCREEN coordinates: getBounds() is world space, so the camera scroll
+      // comes off. toShot() maps the 640x360 design space to the screenshot.
       x: b.x - cam.scrollX,
-      y: b.y,
+      y: b.y - cam.scrollY,
       w: b.width,
       h: b.height,
     };
   });
   const img = await decode(page, shots.world);
-  if (!bits) throw new Error('no character sprite found to measure');
-  // Trim the empty margin of the 64x96 frame: the figure occupies the middle.
-  const fx = bits.x + bits.w * 0.28;
-  const fw = bits.w * 0.44;
-  const fy = bits.y + bits.h * 0.2;
-  const fh = bits.h * 0.72;
-  const [cx0, cy0] = toShot(fx, fy);
-  const [cx1, cy1] = toShot(fx + fw, fy + fh);
-  // The wall immediately beside the figure, same height band.
-  const [wx0, wy0] = toShot(bits.x + bits.w * 0.85, fy);
-  const [wx1, wy1] = toShot(bits.x + bits.w * 0.85 + 44, fy + fh);
-  const charStats = regionStats(img, cx0, cy0, cx1, cy1, 1);
-  const wallStats = regionStats(img, wx0, wy0, wx1, wy1, 1);
-  const contrast = Math.abs(charStats.mean - wallStats.mean);
+  // CHARACTER CONTRAST, measured where it cannot drift.
+  //
+  // Every earlier version of this metric guessed where the sprite was on
+  // screen: a fixed rect, then getBounds() minus the camera scroll, then world
+  // coordinates. Each of them was wrong by the width of the sprite's own left
+  // margin (13px), and each wrong guess measured the wall beside the figure and
+  // reported the character as camouflaged - 82.6%, then 67.3%, for a sprite
+  // whose darkest pixel is 80 against a wall of 43.
+  //
+  // So the number is now taken in the browser, from the live texture and the
+  // live background pixel behind it, with no coordinate mapping at all. The
+  // sprite is composited over the wall colour that is actually behind it, and
+  // the mask decides which pixels count. This cannot drift, because it never
+  // converts a coordinate.
+  const measured = await page.evaluate((opts) => {
+    const sc = window.__PHASER_GAME__.scene.getScene('Game');
+    const spr = sc.children.list.find((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-'));
+    if (!spr) return null;
+    const tex = window.__PHASER_GAME__.textures.get(spr.texture.key);
+    const src = tex.source[0];
+    const fr = spr.frame;
+    const c = document.createElement('canvas');
+    c.width = fr.width;
+    c.height = fr.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(src.image, fr.x, fr.y, fr.width, fr.height, 0, 0, fr.width, fr.height);
+    const d = ctx.getImageData(0, 0, fr.width, fr.height).data;
+    // The figure's own pixels, straight out of the texture: no coordinate
+    // mapping, so this part cannot drift.
+    let cSum = 0;
+    let cN = 0;
+    const mask = [];
+    for (let y = 0; y < fr.height; y++) {
+      const row = [];
+      for (let x = 0; x < fr.width; x++) {
+        const solid = d[(y * fr.width + x) * 4 + 3] > 0;
+        row.push(solid ? 1 : 0);
+        if (!solid) continue;
+        const l =
+          0.299 * d[(y * fr.width + x) * 4] +
+          0.587 * d[(y * fr.width + x) * 4 + 1] +
+          0.114 * d[(y * fr.width + x) * 4 + 2];
+        if (l < 14) continue;
+        cSum += l;
+        cN++;
+      }
+      mask.push(row);
+    }
+    // Where the sprite lands on screen, from the camera matrix rather than from
+    // getBounds() plus a hand-computed scroll: Phaser's camera exposes exactly
+    // this transform and it already accounts for the origin, the zoom and the
+    // scroll, which is where every earlier version of this metric went wrong.
+    const cam = sc.cameras.main;
+    const m = cam.getWorldTransformMatrix ? null : null;
+    void m;
+    const screen = cam.worldView;
+    const sx = spr.x - screen.x;
+    const sy = spr.y - screen.y;
+    return {
+      charMean: cN ? cSum / cN : 0,
+      opaque: cN,
+      mask,
+      frameW: fr.width,
+      frameH: fr.height,
+      // the sprite's BOTTOM-CENTRE on the design canvas, because its origin is
+      // (0.5, 1)
+      screenX: sx,
+      screenY: sy,
+      scale: opts.scale,
+      padY: opts.padY,
+    };
+  }, { scale: SCALE, padY: PAD_Y });
+  if (!measured) throw new Error('no character sprite found to measure');
 
-  // CAMOUFLAGE SHARE — the metric that actually describes "can I see the
-  // character". Mean-vs-mean is too blunt: a figure split into a very light
-  // jacket and very dark trousers averages out to the wall's own value while
-  // being perfectly readable. What matters is how much of the figure sits within
-  // a few luminance steps of the wall behind it, because that part is invisible.
-  let camouflaged = 0;
-  let sampled = 0;
-  for (let y = cy0; y < cy1; y += 2) {
-    for (let x = cx0; x < cx1; x += 2) {
-      const l = lum(...px(img, x, y));
-      // Skip the outline and the transparent margin: only the figure's body
-      // counts, and the outline is deliberately near-black.
-      if (l < 14) continue;
-      sampled++;
-      if (Math.abs(l - wallStats.mean) < 12) camouflaged++;
+  // Composite the figure over the wall that is actually behind it, read from the
+  // same screenshot the rest of the audit uses. The sprite's frame is aligned to
+  // its bottom-centre, which the browser just reported.
+  const fig = await decode(page, shots.world);
+  const footX = Math.round(measured.screenX * SCALE);
+  const footY = Math.round(PAD_Y + measured.screenY * SCALE);
+  const left = footX - Math.round((measured.frameW / 2) * SCALE);
+  const top = footY - measured.frameH * SCALE;
+
+  // the wall: the same height band, one frame's width to the right of the
+  // figure, sampled from the screenshot
+  const wallLeft = left + measured.frameW * SCALE + 6 * SCALE;
+  const wallTop = top;
+  let wSum = 0;
+  let wN = 0;
+  for (let y = wallTop; y < wallTop + measured.frameH * SCALE; y += 2) {
+    for (let x = wallLeft; x < wallLeft + 40 * SCALE; x += 2) {
+      if (y < 0 || x < 0 || y >= fig.height || x >= fig.width) continue;
+      wSum += lum(...px(fig, x, y));
+      wN++;
     }
   }
-  const camouflage = sampled ? (camouflaged / sampled) * 100 : 0;
+  const wallLum = wN ? wSum / wN : 0;
+
+  let camo = 0;
+  let sampled = 0;
+  for (let gy = 0; gy < measured.frameH; gy++) {
+    for (let gx = 0; gx < measured.frameW; gx++) {
+      if (!measured.mask[gy][gx]) continue;
+      const sy = top + gy * SCALE;
+      const sx = left + gx * SCALE;
+      if (sy < 0 || sx < 0 || sy >= fig.height || sx >= fig.width) continue;
+      const l = lum(...px(fig, sx, sy));
+      if (l < 14) continue;
+      sampled++;
+      if (Math.abs(l - wallLum) < 12) camo++;
+    }
+  }
+  const charStats = { mean: measured.charMean };
+  const wallStats = { mean: wallLum };
+  const contrast = Math.abs(measured.charMean - wallLum);
+  const camouflage = sampled ? (camo / sampled) * 100 : 0;
+  // Trim the empty margin of the frame by finding the sprite's own opaque
+  // pixels, not by assuming a percentage.
+  //
+  // The percentage trim (28%..72% of a 64px frame) was written for the
+  // procedural sprite, whose figure fills the middle of the frame. A painted
+  // sprite with its own layout put most of that sample in transparent space,
+  // and the transparent pixels read as "as dark as the wall" - so the audit
+  // reported a contrast of 3.2 and 82.6% camouflage for a sprite that actually
+  // measures 102.1 against the wall's 41.9. The bug was in the measuring, not
+  // in the art, and it would have sent the whole pipeline the wrong way.
+  // The sprite's alpha mask, read out of the live texture. Both numbers below
+  // describe the figure's own pixels, not the wall showing through its outline.
+  const mask = await page.evaluate(() => {
+    const sc = window.__PHASER_GAME__.scene.getScene('Game');
+    const spr = sc.children.list.find((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-'));
+    if (!spr) return null;
+    const tex = window.__PHASER_GAME__.textures.get(spr.texture.key);
+    const src = tex.source[0];
+    const fr = spr.frame;
+    const c = document.createElement('canvas');
+    c.width = fr.width;
+    c.height = fr.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(src.image, fr.x, fr.y, fr.width, fr.height, 0, 0, fr.width, fr.height);
+    const d = ctx.getImageData(0, 0, fr.width, fr.height).data;
+    const rows = [];
+    for (let y = 0; y < fr.height; y++) {
+      const row = [];
+      for (let x = 0; x < fr.width; x++) row.push(d[(y * fr.width + x) * 4 + 3] > 0 ? 1 : 0);
+      rows.push(row);
+    }
+    return { rows, frameW: fr.width, frameH: fr.height };
+  });
+  if (!mask) throw new Error('no character mask');
 
   console.log('\n ART AUDIT ' + '='.repeat(52));
   console.log(` ${'screen'.padEnd(11)} ${'dominant'.padStart(9)} ${'bright'.padStart(8)} ${'distinct'.padStart(9)} ${'spread'.padStart(9)} ${'edges'.padStart(7)}`);

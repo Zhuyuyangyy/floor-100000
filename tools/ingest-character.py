@@ -197,20 +197,39 @@ def process_band(img: Image.Image, x0: int, x1: int, args) -> dict:
     if not opaque.any():
         return None
 
-    # STEP 5b: VALUE SEPARATION - stretch the figure's own luminance range so its
-    # floor clears the background. A muted painting sits at the brightness of the
-    # wall it stands in front of and dissolves, and that is invisible in the
-    # source because there the figure is on white.
+    # STEP 5b: VALUE SEPARATION - move only the tones that are ambiguous.
+    #
+    # Measured on the first painted sprite: character luminance 38.7 against a
+    # wall at 41.9 - a contrast of 3.2 and 82.6% camouflage. A muted painting sits
+    # at the brightness of the wall it stands in front of, and that is invisible in
+    # the source because there the figure is on white.
+    #
+    # A LINEAR stretch of the whole range is the wrong fix and was tried first: it
+    # maps 8..111 to 76..179, adding the same constant to every channel, and adding
+    # a constant preserves hue but destroys saturation - the reference's dark
+    # browns and olives came out washed grey-green.
+    #
+    # What makes a figure readable against a wall is separation in the MIDDLE of
+    # the range. The dark outline below the wall already reads as a dark edge; the
+    # bright highlights are already clear. Only the band within a few steps of the
+    # background is genuinely invisible, so only that band moves, and the painting
+    # keeps its colour everywhere else.
     rgb = small[:, :, :3][opaque].astype(np.float64)
     lum = 0.299 * rgb[:, 0] + 0.587 * rgb[:, 1] + 0.114 * rgb[:, 2]
     lo, hi = np.percentile(lum, 5), np.percentile(lum, 95)
-    span = max(1.0, hi - lo)
+
+    band_lo = max(0.0, WALL_LUM - 18)
+    band_hi = WALL_LUM + 18
+    in_band = (lum >= band_lo) & (lum <= band_hi)
+    if in_band.any():
+        band_lums = lum[in_band]
+        target_lo = WALL_LUM + MARGIN
+        span = max(1.0, band_hi - band_lo)
+        k = (band_lums - band_lo) / span
+        new_lum = target_lo + k * 26
+        rgb[in_band] = np.clip(rgb[in_band] + (new_lum - band_lums)[:, None], 0, 255)
     target_lo = WALL_LUM + MARGIN
-    target_hi = max(target_lo + 40, min(255.0, hi + (target_lo - lo)))
-    k = np.clip((lum - lo) / span, 0, 1)
-    new_lum = target_lo + k * (target_hi - target_lo)
-    delta = (new_lum - lum)[:, None]
-    rgb = np.clip(rgb + delta, 0, 255)
+    target_hi = max(target_lo + 40, hi)
     small[:, :, :3][opaque] = rgb.astype(np.int16)
 
     # STEP 5: lock the palette - the art's own by default
@@ -314,7 +333,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("key")
     ap.add_argument("--band", type=int, default=None)
-    ap.add_argument("--no-flip", action="store_true")
+    ap.add_argument("--flip", action="store_true", help="mirror the figure (only if the source faces left)")
     ap.add_argument("--project-palette", action="store_true")
     ap.add_argument("--debug", action="store_true", help="write intermediate PNGs to re/")
     ap.add_argument("--static", action="store_true", help="one pose for every frame, no derived motion")
@@ -379,14 +398,14 @@ def main() -> int:
         return 0
 
     fig = figs[0]
-    flip = not args.no_flip
+    flip = args.flip
     print(f"value    figure range {fig['lum_lo']:.0f}..{fig['lum_hi']:.0f} remapped to "
           f"clear the wall (lum {WALL_LUM:.0f}) by {MARGIN:.0f} -> "
           f"{fig['target_lo']:.0f}..{fig['target_hi']:.0f}")
     print(f"palette  {fig['lock_size']} colours locked from the "
           f"{'project' if args.project_palette else 'art itself'}; "
           f"{fig['moved_share']*100:.0f}% of pixels moved")
-    print(f"facing   {'flipped to face right' if flip else 'left as drawn (--no-flip)'}")
+    print(f"facing   {'mirrored (--flip)' if flip else 'as drawn (the reference faces right)'}")
     frames = [compose(fig, flip)]
     if not args.static:
         # animate every frame after the first, so the sheet carries a walk

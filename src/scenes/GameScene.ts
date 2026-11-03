@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
+import { playFx } from '../render/fx';
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../core/design';
 import { getGame, startNewGame } from '../core/session';
 import {
@@ -935,6 +936,12 @@ export class GameScene extends Phaser.Scene {
     if (round.playerDamage > 0) {
       combat.monster.hp = Math.max(0, combat.monster.hp - round.playerDamage);
       this.playActionAnim(attackAnimKey('player'), 300);
+      // THE BLOW LANDS. Before this the only sign a hit connected was the
+      // monster's HP bar shrinking - the number changed and nothing on screen
+      // did. The killing blow gets the bigger burst: there is no crit mechanic in
+      // the combat model to key off, and inventing one here would be a lie, but
+      // monsterDead is a real signal and the finish deserves the louder effect.
+      playFx(this, round.monsterDead ? 'crit-hit' : 'hit-spark', state.player.x + 22, PLAYER_FEET_Y - 52, LIGHT_DEPTH);
     }
     if (action === 'guard') {
       state.player.energy = Math.min(GAME_CONFIG.player.energyMax, state.player.energy + GUARD_ENERGY_RESTORE);
@@ -956,6 +963,9 @@ export class GameScene extends Phaser.Scene {
       state.player.hp = Math.max(0, state.player.hp - dmg);
       if (action === 'guard') this.playActionAnim(hurtAnimKey('player'), 400);
       this.cameras.main.shake(160, 0.008);
+      // AND THE PLAYER FEELS IT. Taking damage was a number in the HUD changing;
+      // the flash puts it on the body that took it.
+      playFx(this, 'hit-flash', state.player.x, PLAYER_FEET_Y - 48, LIGHT_DEPTH + 1);
     }
     combat.turn += 1;
     this.refreshStats();
@@ -2659,6 +2669,9 @@ export class GameScene extends Phaser.Scene {
       // 420ms against the clip's 333ms: a frame overrun (scene switch, save,
       // hitch) must not cut the bend in half.
       this.playActionAnim(searchAnimKey('player'), 420);
+      // THE MOMENT OF GETTING IT. A container opened and its contents appeared in
+      // the bag with nothing on screen saying so; the burst is that beat.
+      playFx(this, 'collect-burst', state.player.x + 10, PLAYER_FEET_Y - 50, LIGHT_DEPTH);
       this.flash(`获得 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${ACTION_COSTS.searchContainer} 分钟）`);
       this.chargeTime(ACTION_COSTS.searchContainer);
     }
@@ -2676,6 +2689,8 @@ export class GameScene extends Phaser.Scene {
         this.refreshInventory();
         saveToStorage(state);
         playSfx('pickup');
+        // the same beat as a container, smaller: the item went into the bag
+        playFx(this, 'collect-burst', g.x, PLAYER_FEET_Y - 26, LIGHT_DEPTH);
         this.flash(`拾取 ${getItem(r.took.itemId).displayName}×${r.took.quantity}（-${ACTION_COSTS.pickupGround} 分钟）`);
         this.chargeTime(ACTION_COSTS.pickupGround);
       } else if (r.full) {

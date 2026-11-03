@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { generateAllPixelArt } from '../render/pixelArt';
 import { createCharacterAnimations, FRAME_H, FRAME_W, WALK_CHARACTERS, walkSheetKey } from '../render/walkcycle';
+import { createFxAnims, loadFx } from '../render/fx';
 
 // Drop-in painted art, resolved at BUILD time by Vite's glob so a folder that is
 // empty costs nothing and a missing file can never 404 in the loader.
@@ -39,6 +40,9 @@ export class BootScene extends Phaser.Scene {
     // CC0 1.0, Kenney (kenney.nl) — see THIRD_PARTY_NOTICES.md.
     this.load.image('ui-marker', 'assets/ui/marker.png');
     this.load.image(ART_SLOT_KEY, 'assets/ui/slot.png');
+
+    // pixelfx effect sheets: combat impacts, pickups and the animated lights.
+    loadFx(this);
 
     // The panel frame is eight pieces rather than a nine-slice texture — see the
     // note in render/panels.ts for why Phaser 4 makes a NineSlice unusable here.
@@ -100,6 +104,7 @@ export class BootScene extends Phaser.Scene {
   create(): void {
     generateAllPixelArt(this);
     createCharacterAnimations(this);
+    createFxAnims(this);
     this.scene.start('Menu');
   }
 }

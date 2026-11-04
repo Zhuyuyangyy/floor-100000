@@ -194,6 +194,8 @@ export class GameScene extends Phaser.Scene {
   private wanderer?: Phaser.GameObjects.Sprite;
   /** the dim red pool that makes the wanderer findable in the dark */
   private wandererGlow?: Phaser.GameObjects.Image;
+  /** the hunger/thirst debuff on the player's body, present only while critical */
+  private debuffFx?: Phaser.GameObjects.Sprite;
   private wandererHitAt = Number.NEGATIVE_INFINITY;
   // OVERHAUL: the wanderer's stalk/lunge state machine. Lives beside the sprite
   // because the scene owns the movement it drives.
@@ -2887,6 +2889,23 @@ export class GameScene extends Phaser.Scene {
     // deep bands saturate while the centre stays clear.
     const pulse = lowHpPulse(state.player.hp, GAME_CONFIG.player.hpMax, this.time.now);
     for (const p of this.vignetteParts) p.rect.setAlpha(pulse * p.weight);
+    // STARVING AND PARCHED, ON THE BODY. Hunger and thirst were two numbers in
+    // the HUD; the debuff is now on the survivor. The threshold is the same 25%
+    // the HUD already uses to call a stat urgent (URGENT_THRESHOLDS in
+    // render/feedback.ts), so the body and the interface never disagree about
+    // whether the player is in trouble.
+    const starving =
+      state.player.hunger <= GAME_CONFIG.player.hungerMax * 0.25 ||
+      state.player.thirst <= GAME_CONFIG.player.thirstMax * 0.25;
+    if (starving && !this.debuffFx) {
+      const fx = startFxLoop(this, 'poisoned', state.player.x, PLAYER_FEET_Y - 46, LIGHT_DEPTH + 1);
+      if (fx) this.debuffFx = fx;
+    } else if (!starving && this.debuffFx) {
+      this.debuffFx.destroy();
+      this.debuffFx = undefined;
+    } else if (this.debuffFx) {
+      this.debuffFx.x = state.player.x;
+    }
     // Read after ensureNightEvent so an event rolled this very frame counts.
     const event = state.worldEvents.activeEvent;
     this.refreshClock();

@@ -43,6 +43,8 @@ export interface CorridorContext {
 // palette role or a named mix of two, so a crate, a pipe and the wall behind it
 // all belong to the same value structure.
 import { PALETTE } from './palette.ts';
+import { LIGHT_DEPTH } from './lighting';
+import { startFxLoop } from './fx';
 
 const PIPE = PALETTE.stoneLight;
 const PIPE_DARK = PALETTE.stone;
@@ -279,6 +281,22 @@ function drawCanteen(ctx: CorridorContext): void {
     g.fillStyle(PALETTE.lightHigh, 1);
     g.fillRect(lx - 5, 59, 10, 3);
   }
+
+  // AND FIRE ON THE FLOOR. The canteen is the only warm floor in the tower and
+  // its light was three hanging lamps plus a static glow - a room described as
+  // warm with nothing burning in it. A brazier per room: the flame is a 90-frame
+  // loop, so the light moves, and the floor reads as somewhere people cooked.
+  const brazierX = roomX + ROOM_WIDTH - 92;
+  const brazier = startFxLoop(ctx.scene, 'brazier', brazierX, floorY, LIGHT_DEPTH);
+  if (brazier) ctx.objects.push(brazier);
+  // the bowl and legs, drawn behind the flame
+  g.fillStyle(RUST_DARK, 1);
+  g.fillRect(brazierX - 14, floorY - 12, 28, 4);
+  g.fillRect(brazierX - 10, floorY - 8, 3, 8);
+  g.fillRect(brazierX + 7, floorY - 8, 3, 8);
+  // its pool on the floor
+  g.fillStyle(PALETTE.lightDeep, 0.22);
+  g.fillEllipse(brazierX, floorY + 2, 76, 12);
 
   // Counter, with a bank of service shelves racked on the wall behind it.
   const cx = roomX + 40;

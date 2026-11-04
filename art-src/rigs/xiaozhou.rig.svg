@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="96" viewBox="0 0 64 96"
+     data-codeart="rig.v1" data-anchor="32 95" data-facing="right" data-outline="#05080b">
+  <!-- Xiaozhou rig (codeart2d, no image model). 64x96 frame, ground y=95.
+       A child of about twelve: the head is LARGE relative to the body and the
+       torso NARROW - that ratio is the whole read, so it is built in rather than
+       implied. Oversized hand-me-down jacket in warm amber hanging past the hips,
+       short trousers, worn sneakers, a small cloth satchel instead of a pack.
+       Alert posture, on the balls of the feet.
+
+       Bone layout is shared with the survivor so the walk cycle and every
+       interaction radius stay identical; only the slot sizes and colours differ.
+       Leg L = 34, hip height 37 - the gait stays reachable. -->
+  <style>
+    .c-out{stroke:#05080b;stroke-width:1}
+    .c-jacket{fill:#d98b3c} .c-jacket-hi{fill:#f4b66a} .c-jacket-sh{fill:#8a4a1e}
+    .c-skin{fill:#d9b48f} .c-skin-sh{fill:#a5714c}
+    .c-hair{fill:#05080b}
+    .c-short{fill:#6b4630} .c-short-sh{fill:#2c3f4e}
+    .c-shoe{fill:#8a95a0} .c-shoe-sh{fill:#2c3f4e}
+    .c-bag{fill:#6b4630} .c-bag-sh{fill:#2c3f4e}
+    .c-ink{fill:#05080b}
+  </style>
+
+  <g id="root" data-pivot="32 95">
+    <g id="hips" data-pivot="30 54">
+
+      <!-- ══ back leg (far side) ══ -->
+      <g id="thigh_b" data-pivot="28 54" data-z="10">
+        <rect class="c-short-sh c-out" x="25.75" y="52.5" width="5" height="21" rx="2.5"/>
+        <g id="shin_b" data-pivot="25 73.5">
+          <rect class="c-short-sh c-out" x="23.25" y="72" width="4" height="18" rx="2"/>
+          <g id="foot_b" data-pivot="28 91" data-z="11">
+            <rect class="c-shoe-sh c-out" x="25" y="89.5" width="9" height="4.5" rx="1.5"/>
+          </g>
+        </g>
+      </g>
+
+      <g id="torso" data-pivot="30 58">
+
+        <!-- ══ small satchel, not a pack ══ -->
+        <g id="pack" data-pivot="24 58" data-z="8">
+          <rect class="c-bag c-out" x="19" y="44" width="11" height="10" rx="2.5"/>
+          <rect class="c-bag-sh" x="19" y="50" width="11" height="4"/>
+          <rect class="c-ink" x="19" y="47" width="11" height="1.5"/>
+        </g>
+
+        <!-- ══ back arm ══ -->
+        <g id="arm_b" data-pivot="27 39" data-z="5">
+          <rect class="c-jacket-sh c-out" x="24.75" y="37.5" width="4.5" height="7" rx="2"/>
+          <g id="fore_b" data-pivot="27 45">
+            <rect class="c-skin-sh c-out" x="25" y="43.5" width="4" height="6" rx="2"/>
+          </g>
+        </g>
+
+        <!-- ══ torso: the oversized jacket ══ -->
+        <rect data-z="30" class="c-jacket c-out" x="25" y="32" width="13" height="24" rx="3"/>
+        <rect data-z="31" class="c-jacket-hi" x="26" y="34" width="3" height="20"/>
+        <rect data-z="32" class="c-jacket-sh" x="34" y="34" width="3" height="20"/>
+        <!-- hem past the hips -->
+        <rect data-z="33" class="c-jacket-sh c-out" x="24" y="50" width="15" height="6" rx="2"/>
+
+        <!-- ══ head: big for the body ══ -->
+        <g id="head" data-pivot="32 32" data-z="40">
+          <circle class="c-skin c-out" cx="32" cy="21" r="11"/>
+          <!-- hair: a messy mop -->
+          <rect data-z="41" class="c-hair c-out" x="21" y="8" width="21" height="6" rx="3"/>
+          <rect data-z="41" class="c-hair c-out" x="20.5" y="12" width="14" height="6" rx="3"/>
+          <rect data-z="41" class="c-hair c-out" x="20.5" y="16" width="9" height="5" rx="2.5"/>
+          <!-- face -->
+          <rect data-z="42" class="c-ink" x="37" y="17" width="2.5" height="3"/>
+          <rect data-z="43" class="c-skin-sh" x="37" y="22" width="2.5" height="2"/>
+        </g>
+
+        <!-- ══ front arm ══ -->
+        <g id="arm_f" data-pivot="34 39" data-z="60">
+          <rect class="c-jacket c-out" x="31.75" y="37.5" width="4.5" height="7" rx="2"/>
+          <g id="fore_f" data-pivot="34 45">
+            <rect class="c-skin c-out" x="32" y="43.5" width="4" height="6" rx="2"/>
+          </g>
+        </g>
+      </g>
+
+      <!-- ══ front leg ══ -->
+      <g id="thigh_f" data-pivot="32 54" data-z="50">
+        <rect class="c-short c-out" x="29.75" y="52.5" width="5" height="21" rx="2.5"/>
+        <g id="shin_f" data-pivot="29 73.5">
+          <rect class="c-short c-out" x="27.25" y="72" width="4" height="18" rx="2"/>
+          <g id="foot_f" data-pivot="32 91" data-z="51">
+            <rect class="c-shoe c-out" x="29" y="89.5" width="9" height="4.5" rx="1.5"/>
+          </g>
+        </g>
+      </g>
+
+    </g>
+  </g>
+</svg>

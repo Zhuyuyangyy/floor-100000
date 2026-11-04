@@ -1,0 +1,115 @@
+{
+  "schema": "codeart2d.rig_anim.v1",
+  "rig": "xiaozhou.rig.svg",
+  "states": { "idle": "idle", "moving": "walk", "attacking": "attack", "hurt": "hurt", "searching": "search" },
+  "entry_reference": "idle",
+  "clips": {
+
+    "walk": {
+      "frames": 6, "loop": true, "duration_ms": 95, "ease": "linear",
+      "stride_world_units": 12,
+      "events": [{ "t": 0, "name": "step_r" }, { "t": 0.5, "name": "step_l" }],
+      "tracks": {
+        "hips":  { "translate": [[0, [0, 2]], [0.1667, [0, 1]], [0.3333, [0, 0]], [0.5, [0, 1]], [0.6667, [0, 2]], [0.8333, [0, 1]], [1, [0, 2]]] },
+        "torso": { "rotate": [[0, 2], [1, 2]] },
+        "head":  { "rotate": [[0, -1.5], [0.25, 0], [0.5, -1.5], [0.75, 0], [1, -1.5]], "ease": "sine" },
+        "arm_f": { "rotate": [[0, 18], [0.5, -18], [1, 18]], "ease": "sine" },
+        "fore_f": { "rotate": [[0, -8], [0.5, -22], [1, -8]], "ease": "sine" },
+        "arm_b": { "rotate": [[0, -18], [0.5, 18], [1, -18]], "ease": "sine" },
+        "fore_b": { "rotate": [[0, -22], [0.5, -8], [1, -22]], "ease": "sine" },
+        "pack":  { "translate": [[0, [0, 0]], [0.25, [0, 1]], [0.5, [0, 2]], [0.75, [0, 1]], [1, [0, 0]]], "ease": "sine" }
+      },
+      "ik": {
+        "leg_f": { "bones": ["thigh_f", "shin_f"], "end": "foot_f", "pole": [1, 0],
+                   "gait": { "phase": 0.0, "stance": 0.6, "lift": 2.5, "roll": 12, "x": 32.5 } },
+        "leg_b": { "bones": ["thigh_b", "shin_b"], "end": "foot_b", "pole": [1, 0],
+                   "gait": { "phase": 0.5, "stance": 0.6, "lift": 2.5, "roll": 12, "x": 28.5 } }
+      }
+    },
+
+    "idle": {
+      "frames": 2, "loop": true, "duration_ms": [560, 560], "ease": "sine",
+      "tracks": {
+        "torso": { "translate": [[0, [0, 0]], [0.5, [0, 1]], [1, [0, 0]]] },
+        "head":  { "rotate": [[0, 0], [0.5, -1.2], [1, 0]] },
+        "arm_f": { "rotate": [[0, 4], [0.5, 6], [1, 4]] },
+        "fore_f": { "rotate": [[0, -6], [0.5, -9], [1, -6]] },
+        "arm_b": { "rotate": [[0, -4], [0.5, -6], [1, -4]] },
+        "pack":  { "translate": [[0, [0, 0]], [0.5, [0, 1]], [1, [0, 0]]] }
+      },
+      "ik": {
+        "leg_f": { "bones": ["thigh_f", "shin_f"], "end": "foot_f", "pole": [1, 0], "target": [[0, [33, 92]]] },
+        "leg_b": { "bones": ["thigh_b", "shin_b"], "end": "foot_b", "pole": [1, 0], "target": [[0, [27, 92]]] }
+      }
+    },
+
+    "attack": {
+      "frames": 3, "loop": false, "duration_ms": [90, 70, 150], "ease": "sine",
+      "tracks": {
+        "torso": { "rotate": [[0, -4], [0.5, 7], [1, 2]] },
+        "hips":  { "translate": [[0, [0, 0]], [0.5, [2, 0]], [1, [0, 0]]] },
+        "head":  { "rotate": [[0, 2], [0.5, -3], [1, 0]] },
+        "arm_f": { "rotate": [[0, -24], [0.5, 48], [1, 8]] },
+        "fore_f": { "rotate": [[0, -42], [0.5, -6], [1, -20]] },
+        "arm_b": { "rotate": [[0, 16], [0.5, -12], [1, 4]] },
+        "pack":  { "rotate": [[0, 0], [0.5, -4], [1, 0]] }
+      },
+      "ik": {
+        "leg_f": { "bones": ["thigh_f", "shin_f"], "end": "foot_f", "pole": [1, 0],
+                   "target": [[0, [32, 92]], [0.5, [36, 92]], [1, [33, 92]]] },
+        "leg_b": { "bones": ["thigh_b", "shin_b"], "end": "foot_b", "pole": [1, 0],
+                   "target": [[0, [29, 92]], [0.5, [26, 92]], [1, [28, 92]]] }
+      }
+    },
+
+    "hurt": {
+      "frames": 2, "loop": false, "duration_ms": [100, 210], "ease": "out",
+      "tracks": {
+        "torso": { "rotate": [[0, 9], [1, 3]] },
+        "head":  { "rotate": [[0, -7], [1, -2]] },
+        "arm_f": { "rotate": [[0, 30], [1, 12]] },
+        "fore_f": { "rotate": [[0, -34], [1, -16]] },
+        "arm_b": { "rotate": [[0, -30], [1, -12]] },
+        "pack":  { "rotate": [[0, -5], [1, -1]] }
+      },
+      "ik": {
+        "leg_f": { "bones": ["thigh_f", "shin_f"], "end": "foot_f", "pole": [1, 0],
+                   "target": [[0, [29, 92]], [1, [32, 92]]] },
+        "leg_b": { "bones": ["thigh_b", "shin_b"], "end": "foot_b", "pole": [1, 0],
+                   "target": [[0, [32, 92]], [1, [30, 92]]] }
+      }
+    },
+
+    "search": {
+      "frames": 2, "loop": false, "duration_ms": [240, 240], "ease": "sine",
+      "tracks": {
+        "torso": { "rotate": [[0, 12], [1, 16]] },
+        "head":  { "rotate": [[0, 8], [1, 12]] },
+        "arm_f": { "rotate": [[0, 34], [1, 46]] },
+        "fore_f": { "rotate": [[0, -16], [1, -28]] },
+        "arm_b": { "rotate": [[0, -16], [1, -24]] },
+        "pack":  { "rotate": [[0, 3], [1, 5]] }
+      },
+      "ik": {
+        "leg_f": { "bones": ["thigh_f", "shin_f"], "end": "foot_f", "pole": [1, 0],
+                   "target": [[0, [34, 92]], [1, [36, 92]]] },
+        "leg_b": { "bones": ["thigh_b", "shin_b"], "end": "foot_b", "pole": [1, 0],
+                   "target": [[0, [28, 92]], [1, [27, 92]]] }
+      }
+    }
+  },
+  "pixel": {
+    "ramps": {
+      "c-jacket": { "hi": "#f4b66a", "mid": "#d98b3c", "lo": "#8a4a1e", "dark": "#05080b", "out": "#05080b" },
+      "c-short":  { "hi": "#8a4a1e", "mid": "#6b4630", "lo": "#2c3f4e", "dark": "#05080b", "out": "#05080b" },
+      "c-skin":   { "hi": "#d9b48f", "mid": "#a5714c", "lo": "#6b4630", "dark": "#05080b", "out": "#05080b" },
+      "c-shoe":   { "hi": "#d98b3c", "mid": "#8a95a0", "lo": "#2c3f4e", "dark": "#05080b", "out": "#05080b" },
+      "c-bag":    { "hi": "#d98b3c", "mid": "#6b4630", "lo": "#2c3f4e", "dark": "#05080b", "out": "#05080b" },
+      "c-tool":   { "hi": "#d98b3c", "mid": "#d98b3c", "lo": "#8a4a1e", "dark": "#05080b", "out": "#05080b" }
+    },
+    "light": [-1, -1],
+    "inner_lines": true,
+    "outline": "#05080b",
+    "outline_mode": "solid"
+  }
+}

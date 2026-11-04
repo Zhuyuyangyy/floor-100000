@@ -34,11 +34,15 @@ export const FX: ReadonlyArray<{ id: string; path: string }> = [
   { id: 'hit-spark', path: 'impacts/hit-spark' },
   { id: 'crit-hit', path: 'impacts/crit-hit' },
   { id: 'hit-flash', path: 'impacts/hit-flash' },
+  { id: 'ground-slam', path: 'impacts/ground-slam' },
   { id: 'collect-burst', path: 'pickups/collect-burst' },
   { id: 'coin-spin', path: 'pickups/coin-spin' },
   { id: 'candle', path: 'fire/candle' },
   { id: 'torch', path: 'fire/torch' },
   { id: 'brazier', path: 'fire/brazier' },
+  { id: 'drip', path: 'water/drip' },
+  { id: 'ripples', path: 'water/ripples' },
+  { id: 'poisoned', path: 'status/poisoned' },
 ];
 
 /** Load every atlas. Call from preload(). */
@@ -192,11 +196,15 @@ export function startFxLoop(
  */
 const FX_META: Record<string, { fps: number; loop: boolean; pivot: { x: number; y: number }; frameSize: [number, number] }> = {
   'hit-spark': { fps: 30, loop: false, pivot: { x: 44, y: 64 }, frameSize: [136, 80] },
-  'crit-hit': { fps: 30, loop: false, pivot: { x: 108, y: 100 }, frameSize: [216, 136] },
-  'hit-flash': { fps: 30, loop: false, pivot: { x: 40, y: 60 }, frameSize: [80, 64] },
-  'collect-burst': { fps: 30, loop: false, pivot: { x: 56, y: 60 }, frameSize: [112, 108] },
-  'coin-spin': { fps: 30, loop: true, pivot: { x: 28, y: 44 }, frameSize: [56, 56] },
-  candle: { fps: 30, loop: true, pivot: { x: 28, y: 70 }, frameSize: [56, 76] },
-  torch: { fps: 30, loop: true, pivot: { x: 36, y: 116 }, frameSize: [72, 120] },
-  brazier: { fps: 30, loop: true, pivot: { x: 56, y: 144 }, frameSize: [112, 148] },
+  'crit-hit': { fps: 30, loop: false, pivot: { x: 84, y: 106 }, frameSize: [216, 136] },
+  'hit-flash': { fps: 30, loop: false, pivot: { x: 40, y: 54 }, frameSize: [80, 64] },
+  'collect-burst': { fps: 30, loop: false, pivot: { x: 56, y: 94 }, frameSize: [112, 108] },
+  'coin-spin': { fps: 30, loop: true, pivot: { x: 28, y: 48 }, frameSize: [56, 56] },
+  candle: { fps: 30, loop: true, pivot: { x: 28, y: 64 }, frameSize: [56, 76] },
+  torch: { fps: 30, loop: true, pivot: { x: 36, y: 94 }, frameSize: [72, 120] },
+  brazier: { fps: 30, loop: true, pivot: { x: 56, y: 136 }, frameSize: [112, 148] },
+  drip: { fps: 30, loop: true, pivot: { x: 36, y: 78 }, frameSize: [72, 88] },
+  ripples: { fps: 30, loop: true, pivot: { x: 68, y: 30 }, frameSize: [136, 52] },
+  'ground-slam': { fps: 30, loop: false, pivot: { x: 144, y: 164 }, frameSize: [288, 208] },
+  poisoned: { fps: 30, loop: true, pivot: { x: 36, y: 54 }, frameSize: [72, 64] },
 };

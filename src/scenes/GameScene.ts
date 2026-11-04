@@ -85,6 +85,7 @@ import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
 import {
   ACTOR_DEPTH,
+  DUST_DEPTH,
   addGlow,
   ambienceFor,
   buildLightLayer,
@@ -273,6 +274,8 @@ export class GameScene extends Phaser.Scene {
   private playerShadow: Phaser.GameObjects.GameObject[] = [];
   /** puddles and drips while a leak event is running on this floor */
   private leakObjects: Phaser.GameObjects.GameObject[] = [];
+  /** where the puddles are, so the drips land in them */
+  private leakPuddleXs: number[] = [];
   private upgradeBoard!: Phaser.GameObjects.Text;
   private keyC!: Phaser.Input.Keyboard.Key;
   private keyM!: Phaser.Input.Keyboard.Key;
@@ -704,6 +707,12 @@ export class GameScene extends Phaser.Scene {
     const r = buy(state, entry.itemId, state.currentFloor);
     playSfx(r.ok ? 'chest' : 'pickup');
     this.flash(r.ok ? r.message : r.reason);
+    // The trade, seen. Gold changing hands was a number in the HUD and a line of
+    // text; the coin spins over the counter while the deal is open.
+    if (r.ok) {
+      const coin = startFxLoop(this, 'coin-spin', state.player.x + 26, PLAYER_FEET_Y - 62, LIGHT_DEPTH);
+      if (coin) this.encounterObjects.push(coin);
+    }
     this.refreshInventory();
     this.refreshStats();
     this.buildShopPanel();
@@ -716,6 +725,10 @@ export class GameScene extends Phaser.Scene {
     const r = sell(state, entry.itemId, state.currentFloor);
     playSfx(r.ok ? 'chest' : 'pickup');
     this.flash(r.ok ? r.message : r.reason);
+    if (r.ok) {
+      const coin = startFxLoop(this, 'coin-spin', state.player.x + 26, PLAYER_FEET_Y - 62, LIGHT_DEPTH);
+      if (coin) this.encounterObjects.push(coin);
+    }
     this.refreshInventory();
     this.refreshStats();
     this.buildShopPanel();
@@ -1812,6 +1825,25 @@ export class GameScene extends Phaser.Scene {
     // The puddles sit on the floor line, which the wall height tells us.
     const floorY = FLOOR_HEIGHT - FLOOR_BAND;
     this.leakObjects = buildLeakEffect(this, { width: FLOOR_WIDTH, floorY, seed: floor * 31 });
+    // remember where the puddles are, so the drips can land in them
+    this.leakPuddleXs = [];
+    for (let i = 0; i < 7; i++) {
+      const hh = (n: number): number => {
+        const v = Math.sin(floor * 31 + i * 7.7 + n) * 10000;
+        return v - Math.floor(v);
+      };
+      this.leakPuddleXs.push(60 + hh(1) * (FLOOR_WIDTH - 120));
+    }
+    // AND IT IS STILL COMING DOWN. The puddles were the whole event: a flooded
+    // floor with water that never moved, which reads as a texture rather than as
+    // a leak. Each puddle now gets a drip falling into it from the ceiling and a
+    // ripple spreading where it lands, so the floor is visibly taking water.
+    for (const px of this.leakPuddleXs) {
+      const drip = startFxLoop(this, 'drip', px, 120, DUST_DEPTH);
+      if (drip) this.leakObjects.push(drip);
+      const ring = startFxLoop(this, 'ripples', px, floorY + 2, DUST_DEPTH);
+      if (ring) this.leakObjects.push(ring);
+    }
     return [];
   }
 
@@ -3006,6 +3038,10 @@ export class GameScene extends Phaser.Scene {
       playSfx('hurt');
       this.cameras.main.shake(160, 0.008);
       this.cameras.main.flash(140, 230, 109, 99); // red damage flash
+      // AND THE FLOOR TAKES IT. The lunge was a number changing and a red screen
+      // wash; the slam puts the impact on the ground where the two of them are
+      // standing, and a lunge lands harder than a walk-by.
+      playFx(this, 'ground-slam', state.player.x, PLAYER_FEET_Y - 6, LIGHT_DEPTH);
       this.flash(`被巡游体击中！HP -${damage}，快回宿舍或换层！`);
       if (state.player.hp <= 0) state.status = 'lost';
     }

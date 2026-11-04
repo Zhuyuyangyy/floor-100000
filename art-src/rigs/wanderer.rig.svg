@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="96" viewBox="0 0 64 96"
+     data-codeart="rig.v1" data-anchor="32 95" data-facing="right" data-outline="#05080b">
+  <!-- Wanderer rig (codeart2d, no image model). 64x96 frame, ground y=95.
+       The thing in the dark. Elongated: about 6 heads tall, and NARROW - the
+       silhouette should be half the width of a person. No face: a hood or draped
+       cloth hides it entirely, no visible skin. Ragged dark clothing in deep
+       red-black. It leans forward and its arms hang too long.
+
+       Bone layout is shared with the survivor so the walk cycle and every
+       interaction radius stay identical; only slot sizes and colours differ.
+       Long limbs: L = 40 against a hip height of 37, so the gait has room. -->
+  <style>
+    .c-out{stroke:#05080b;stroke-width:1}
+    .c-rag{fill:#2f0f14} .c-rag-hi{fill:#4a2028} .c-rag-sh{fill:#1a0a0e}
+    .c-hood{fill:#1a0a0e} .c-hood-hi{fill:#4a2028}
+    .c-ink{fill:#05080b}
+  </style>
+
+  <g id="root" data-pivot="32 95">
+    <g id="hips" data-pivot="30 54">
+
+      <!-- ══ back leg: thin, long, ragged hem ══ -->
+      <g id="thigh_b" data-pivot="28 54" data-z="10">
+        <rect class="c-rag-sh c-out" x="26" y="52.5" width="4.5" height="20" rx="2"/>
+        <g id="shin_b" data-pivot="23 72">
+          <rect class="c-rag-sh c-out" x="21.5" y="70.5" width="4" height="19" rx="2"/>
+          <g id="foot_b" data-pivot="28 91" data-z="11">
+            <rect class="c-rag-sh c-out" x="24" y="89.5" width="9" height="4" rx="1.5"/>
+          </g>
+        </g>
+      </g>
+
+      <g id="torso" data-pivot="30 58">
+
+        <!-- ══ no pack: the ragged cloak IS the silhouette ══ -->
+        <g id="pack" data-pivot="26 58" data-z="8">
+          <!-- the drape hanging off the shoulders, wider at the hem -->
+          <polygon class="c-rag-sh c-out" points="18,32 30,30 32,54 16,52"/>
+          <polygon class="c-rag-sh" points="18,32 30,30 30,36 17,38"/>
+        </g>
+
+        <!-- ══ back arm: too long, hanging past the hip ══ -->
+        <g id="arm_b" data-pivot="28 38" data-z="5">
+          <rect class="c-rag-sh c-out" x="26" y="36.5" width="4" height="11" rx="2"/>
+          <g id="fore_b" data-pivot="28 48">
+            <rect class="c-rag-sh c-out" x="25.75" y="46.5" width="3.5" height="14" rx="1.75"/>
+            <!-- a long thin hand -->
+            <rect class="c-rag-sh c-out" x="25.5" y="59.5" width="4" height="5" rx="2"/>
+          </g>
+        </g>
+
+        <!-- ══ torso: narrow, slightly hunched ══ -->
+        <rect data-z="30" class="c-rag c-out" x="26.5" y="30" width="9" height="25" rx="3"/>
+        <rect data-z="31" class="c-rag-hi" x="27.5" y="32" width="2.5" height="21"/>
+        <rect data-z="32" class="c-rag-sh" x="32.5" y="32" width="2.5" height="21"/>
+        <!-- torn hem -->
+        <polygon data-z="33" class="c-rag-sh c-out" points="26,53 35,53 33,57 28,56"/>
+
+        <!-- ══ head: a hood with nothing inside ══ -->
+        <g id="head" data-pivot="31 30" data-z="40">
+          <circle class="c-hood c-out" cx="31" cy="20" r="8"/>
+          <!-- the hood opening: a void, slightly lighter at the rim -->
+          <ellipse data-z="41" class="c-ink" cx="33" cy="20" rx="4.5" ry="5.5"/>
+          <path data-z="42" class="c-hood-hi" d="M27 15 Q31 12 35 15 L34.5 17 Q31 14.5 28 17 Z"/>
+          <!-- the hood's peak -->
+          <polygon data-z="43" class="c-hood c-out" points="25,16 31,8 36,15 34,17 31,11 27,17"/>
+        </g>
+
+        <!-- ══ front arm: too long ══ -->
+        <g id="arm_f" data-pivot="32 38" data-z="60">
+          <rect class="c-rag c-out" x="30" y="36.5" width="4" height="11" rx="2"/>
+          <g id="fore_f" data-pivot="32 48">
+            <rect class="c-rag c-out" x="29.75" y="46.5" width="3.5" height="14" rx="1.75"/>
+            <rect class="c-rag c-out" x="29.5" y="59.5" width="4" height="5" rx="2"/>
+          </g>
+        </g>
+      </g>
+
+      <!-- ══ front leg: thin, long ══ -->
+      <g id="thigh_f" data-pivot="32 54" data-z="50">
+        <rect class="c-rag c-out" x="30" y="52.5" width="4.5" height="20" rx="2"/>
+        <g id="shin_f" data-pivot="27 72">
+          <rect class="c-rag c-out" x="25.5" y="70.5" width="4" height="19" rx="2"/>
+          <g id="foot_f" data-pivot="32 91" data-z="51">
+            <rect class="c-rag c-out" x="28" y="89.5" width="9" height="4" rx="1.5"/>
+          </g>
+        </g>
+      </g>
+
+    </g>
+  </g>
+</svg>

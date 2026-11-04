@@ -2570,6 +2570,11 @@ export class GameScene extends Phaser.Scene {
         saveToStorage(getGame());
         this.refreshInventory();
         this.refreshStats();
+        // AND IT REGISTERS ON THE BODY. Eating and drinking are the most frequent
+        // actions in a survival game and they were a line of text; the burst is
+        // on the survivor, at their chest, so the stat that moved is the one you
+        // can see move.
+        playFx(this, 'collect-burst', getGame().player.x, PLAYER_FEET_Y - 52, LIGHT_DEPTH + 1);
         this.flash(`使用 ${getItem(stack.itemId).displayName} · ${STAT_LABEL[result.stat!]} +${Math.round(result.amount!)}`);
       } else {
         this.flash(result.reason ?? '无法使用');

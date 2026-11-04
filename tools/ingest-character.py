@@ -233,10 +233,14 @@ def process_band(img: Image.Image, x0: int, x1: int, args) -> dict:
     small[:, :, :3][opaque] = rgb.astype(np.int16)
 
     # STEP 5: lock the palette - the art's own by default
-    if args.project_palette:
-        lock = PROJECT_PALETTE
-    else:
+    # STEP 5: lock the palette - the GAME's, per the brief. The art's own
+    # colours are available with --art-palette, but the brief is explicit that the
+    # lock is to the project palette, and a figure snapped to it sits in the same
+    # world as the scene instead of beside it.
+    if args.art_palette:
         lock = kmeans(small[:, :, :3][opaque].astype(np.float64), 14)
+    else:
+        lock = PROJECT_PALETTE
     snapped = small.copy()
     snapped[:, :, :3][opaque] = snap(small[:, :, :3][opaque].astype(np.float64), lock)
 
@@ -329,12 +333,52 @@ def animate(fig: dict, args) -> list:
     return out
 
 
+def detect_grid(rgba: np.ndarray, mask: np.ndarray, kmin: int = 2, kmax: int = 12) -> tuple:
+    """Find the art-pixel size of a pixel-art source.
+
+    The brief's step 1. The first version of this tool printed "no consistent
+    grid" and moved on, which was a way of not doing the step: a source drawn at
+    2x or 3x has a perfectly good grid, and the 1px runs it measured were the
+    anti-aliased seams BETWEEN cells rather than the cells themselves.
+
+    The test that works: for each candidate cell size k, count how many strong
+    edges land on a multiple of k once the grid is aligned to its best phase. A
+    real grid puts nearly all of them on the lattice; a smooth render scatters
+    them. Returns (best_k, share, phase).
+    """
+    h, w = mask.shape
+    rgb = rgba[:, :, :3].astype(int)
+    strong = []
+    step = max(1, h // 220)
+    for y in range(0, h, step):
+        if not mask[y].any():
+            continue
+        row = rgb[y]
+        m = mask[y]
+        for x in range(1, w):
+            if not (m[x] and m[x - 1]):
+                continue
+            if np.abs(row[x] - row[x - 1]).sum() > 40:
+                strong.append(x)
+    if len(strong) < 40:
+        return (1, 0.0, 0)
+    strong = np.array(strong)
+
+    best = (1, 0.0, 0)
+    for k in range(kmin, kmax + 1):
+        for phase in range(k):
+            share = float(np.sum((strong - phase) % k == 0)) / len(strong)
+            if share > best[1]:
+                best = (k, share, phase)
+    return best
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("key")
     ap.add_argument("--band", type=int, default=None)
     ap.add_argument("--flip", action="store_true", help="mirror the figure (only if the source faces left)")
-    ap.add_argument("--project-palette", action="store_true")
+    ap.add_argument("--art-palette", action="store_true", help="lock to the painting's own colours instead of the game palette")
     ap.add_argument("--debug", action="store_true", help="write intermediate PNGs to re/")
     ap.add_argument("--static", action="store_true", help="one pose for every frame, no derived motion")
     args = ap.parse_args()
@@ -353,26 +397,24 @@ def main() -> int:
     bg = is_background(rgba)
     ink = ~bg
 
-    # STEP 1: is there a pixel grid?
-    ones = total = 0
-    h, w = ink.shape
-    for y in range(int(h * 0.2), int(h * 0.8), 11):
-        row = rgba[y, :, :3].astype(int)
-        diff = np.abs(np.diff(row, axis=0)).sum(axis=1)
-        runs = np.split(diff, np.where(diff > 6)[0] + 1)
-        for r in runs:
-            total += 1
-            if len(r) == 1:
-                ones += 1
-    noise = ones / max(1, total)
+    # STEP 1: find the pixel grid. The brief's first step, and the one this tool
+    # used to skip by reporting that there wasn't one - which was wrong: a source
+    # drawn at 2x or 3x has a perfectly good grid, and what it measured as "noise"
+    # was the anti-aliased seams between cells. Aligning the candidate lattice and
+    # counting the strong edges that land on it separates a real grid from a smooth
+    # render.
+    grid_k, grid_share, grid_phase = detect_grid(rgba, ink)
+    if grid_k > 1 and grid_share > 0.5:
+        print(f"grid     {grid_k}px cells, {grid_share*100:.0f}% of strong edges on the lattice (phase {grid_phase})")
+        print(f"         -> the source is {grid_k}x pixel art, so its cells are already square")
+    else:
+        print(f"grid     no lattice above 50% (best {grid_k}px at {grid_share*100:.0f}%) -> treated as a draft and resampled")
 
     bands = find_bands(ink)
     if args.band is not None and args.band < len(bands):
         bands = [bands[args.band]]
 
     print(f"source   {img.width}x{img.height}, {len(bands)} figure(s)")
-    print(f"grid     {noise*100:.0f}% of colour runs are 1px -> "
-          f"{'no consistent grid; treated as a draft and resampled' if noise > 0.4 else 'a grid is present'}")
 
     figs = []
     for i, (x0, x1) in enumerate(bands):
@@ -402,8 +444,8 @@ def main() -> int:
     print(f"value    figure range {fig['lum_lo']:.0f}..{fig['lum_hi']:.0f} remapped to "
           f"clear the wall (lum {WALL_LUM:.0f}) by {MARGIN:.0f} -> "
           f"{fig['target_lo']:.0f}..{fig['target_hi']:.0f}")
-    print(f"palette  {fig['lock_size']} colours locked from the "
-          f"{'project' if args.project_palette else 'art itself'}; "
+    print(f"palette  {fig['lock_size']} colours locked from "
+          f"{'art itself' if args.art_palette else 'the game'}; "
           f"{fig['moved_share']*100:.0f}% of pixels moved")
     print(f"facing   {'mirrored (--flip)' if flip else 'as drawn (the reference faces right)'}")
     frames = [compose(fig, flip)]

@@ -31,6 +31,8 @@ export interface CorridorContext {
   room: number;
   // Images / sprites this room creates, pushed onto the floor's object list.
   objects: Phaser.GameObjects.GameObject[];
+  /** every flame this room lights, so a blackout can put them out */
+  fixtures?: Phaser.GameObjects.Sprite[];
 }
 
 // Palette additions, kept local so the shared pixelArt palette stays the single
@@ -288,7 +290,10 @@ function drawCanteen(ctx: CorridorContext): void {
   // loop, so the light moves, and the floor reads as somewhere people cooked.
   const brazierX = roomX + ROOM_WIDTH - 92;
   const brazier = startFxLoop(ctx.scene, 'brazier', brazierX, floorY, LIGHT_DEPTH);
-  if (brazier) ctx.objects.push(brazier);
+  if (brazier) {
+    ctx.objects.push(brazier);
+    if (ctx.fixtures) ctx.fixtures.push(brazier);
+  }
   // the bowl and legs, drawn behind the flame
   g.fillStyle(RUST_DARK, 1);
   g.fillRect(brazierX - 14, floorY - 12, 28, 4);

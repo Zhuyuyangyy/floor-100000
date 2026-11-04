@@ -196,6 +196,10 @@ export class GameScene extends Phaser.Scene {
   private wandererGlow?: Phaser.GameObjects.Image;
   /** the hunger/thirst debuff on the player's body, present only while critical */
   private debuffFx?: Phaser.GameObjects.Sprite;
+  /** every flame on this floor, so a blackout can put them out */
+  private lightFixtures: Phaser.GameObjects.Sprite[] = [];
+  private wasBlackout = false;
+  private blackoutAt = 0;
   private wandererHitAt = Number.NEGATIVE_INFINITY;
   // OVERHAUL: the wanderer's stalk/lunge state machine. Lives beside the sprite
   // because the scene owns the movement it drives.
@@ -424,6 +428,11 @@ export class GameScene extends Phaser.Scene {
   private drawFloor(): void {
     const state = getGame();
     const floor = state.currentFloor;
+    // The flames belong to the floor being drawn, so the list is rebuilt with it.
+    // Carrying the previous floor's fixtures forward would leave a blackout
+    // dimming lights that are no longer on screen, and the array would grow every
+    // time the player took the stairs.
+    this.lightFixtures = [];
     // Standing on a floor is what makes it explored (B3-02 §4.3). drawFloor is
     // the single place the player arrives — new game, continue, dev entry and
     // every stairwell — so recording here covers all of them at once.
@@ -1271,7 +1280,10 @@ export class GameScene extends Phaser.Scene {
       // The candle's pivot is its dish (28, 70), so placing it at the shade
       // position puts the flame where the old bulb was.
       const candle = startFxLoop(this, 'candle', lampX, 150, LIGHT_DEPTH);
-      if (candle) this.floorObjects.push(candle);
+      if (candle) {
+        this.floorObjects.push(candle);
+        this.lightFixtures.push(candle);
+      }
       // a small warm pool that tracks the flame's own brightness
       const lampGlow = addGlow(this, lampX, 162, 26, 0.5, LIGHT_DEPTH);
       lampGlow.setScale(1.05, 1.5);
@@ -1306,7 +1318,7 @@ export class GameScene extends Phaser.Scene {
       // Water streaks, panel seams, base stains, tile lines and puddles: the
       // detail that stops the two largest surfaces being flat.
       ...buildSurfaceDetail(this, { width: FLOOR_WIDTH, wallBottom: wallH, height: FLOOR_HEIGHT, seed: 11 }),
-      ...buildCeilingLights(this, { width: FLOOR_WIDTH, seed: 5, top: 16 }),
+      ...buildCeilingLights(this, { width: FLOOR_WIDTH, seed: 5, top: 16, fixtures: this.lightFixtures }),
       // The room's density: pipes, vents, junction boxes and signage on the
       // background plane, debris on the floor line. Without this a floor that
       // measures well still looks empty, because an empty frame can pass every
@@ -1359,7 +1371,7 @@ export class GameScene extends Phaser.Scene {
     // supplies the room's position so nothing has to recompute the layout.
     const props: Phaser.GameObjects.GameObject[] = [];
     for (let r = 0; r < ROOM_COUNT; r++) {
-      drawCorridorRoom({ scene: this, g, floor, roomX: r * ROOM_WIDTH, floorY: wallH, room: r, objects: props });
+      drawCorridorRoom({ scene: this, g, floor, roomX: r * ROOM_WIDTH, floorY: wallH, room: r, objects: props, fixtures: this.lightFixtures });
     }
     this.floorObjects.push(g, ...props);
 
@@ -1377,7 +1389,7 @@ export class GameScene extends Phaser.Scene {
         lightXs: [40, 1240],
       }),
       ...buildSurfaceDetail(this, { width: FLOOR_WIDTH, wallBottom: wallH, height: FLOOR_HEIGHT, seed: floor * 17 }),
-      ...buildCeilingLights(this, { width: FLOOR_WIDTH, seed: floor * 13, top: 16 }),
+      ...buildCeilingLights(this, { width: FLOOR_WIDTH, seed: floor * 13, top: 16, fixtures: this.lightFixtures }),
       ...buildAerialHaze(this, { width: FLOOR_WIDTH, wallBottom: wallH, hazeColor: ambienceFor(floor).color, strength: 0.34 }),
       ...buildWallDressing(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
       ...buildFloorClutter(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
@@ -1806,12 +1818,37 @@ export class GameScene extends Phaser.Scene {
   }
 
   private applyNightLighting(): void {
-    const night = nightOverlayAlpha(getGame());
+    const state = getGame();
+    const night = nightOverlayAlpha(state);
     this.nightOverlay.setAlpha(night);
     if (this.playerLight) {
       // Full strength at the darkest setting, off in daylight. Kept below the
       // lamp upgrade's brightness so crafting a lamp still visibly pays.
       this.playerLight.setAlpha(Math.min(0.5, night * 0.62));
+    }
+    // A BLACKOUT PUTS THE LIGHTS OUT. The event existed only as a darker overlay:
+    // the corridor went to 0.82 alpha while every candle, torch and brazier kept
+    // burning at full strength, which says "it is dark in here" and "nothing has
+    // changed" at the same time. The fixtures now die with it - and they die in
+    // sequence rather than all at once, because a real blackout takes the
+    // circuits out one by one.
+    const blackout = state.worldEvents.activeEvent?.type === 'blackout';
+    if (blackout !== this.wasBlackout) {
+      this.wasBlackout = blackout;
+      this.blackoutAt = this.time.now;
+    }
+    if (blackout) {
+      // each fixture goes dark 260ms after the last, over ~1.3s
+      const step = Math.min(this.lightFixtures.length, Math.floor((this.time.now - this.blackoutAt) / 260));
+      for (let i = 0; i < this.lightFixtures.length; i++) {
+        const want = i < step ? 0 : 1;
+        const cur = this.lightFixtures[i].alpha;
+        // a stutter before it goes: the last two before each one dies flicker
+        const flicker = want === 1 && i >= step - 2 && Math.sin(this.time.now / 40) > 0 ? 0.35 : want;
+        this.lightFixtures[i].setAlpha(cur + (flicker - cur) * 0.25);
+      }
+    } else if (this.lightFixtures.length) {
+      for (const f of this.lightFixtures) f.setAlpha(Math.min(1, f.alpha + 0.12));
     }
     // OVERHAUL Art Pass: the pools breathe, so the light is alive rather than
     // a painted-on decal.

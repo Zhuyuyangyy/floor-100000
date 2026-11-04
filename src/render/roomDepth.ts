@@ -296,6 +296,8 @@ export interface CeilingLightOpts {
   seed: number;
   /** y of the ceiling line */
   top: number;
+  /** filled with every flame this builds, so a blackout can put them out */
+  fixtures?: Phaser.GameObjects.Sprite[];
 }
 
 export function buildCeilingLights(scene: Phaser.Scene, opts: CeilingLightOpts): Phaser.GameObjects.GameObject[] {
@@ -320,7 +322,11 @@ export function buildCeilingLights(scene: Phaser.Scene, opts: CeilingLightOpts):
     // this size reads exactly as a failing tube, and it is placed so its flame
     // sits inside the housing.
     const tube = startFxLoop(scene, 'torch', x, top - 4, LIGHT_DEPTH);
-    if (tube) out.push(tube);
+    if (tube) {
+      out.push(tube);
+      // handed back so the caller can put it out during a blackout
+      if (opts.fixtures) opts.fixtures.push(tube);
+    }
     const glow = addGlow(scene, x, top + 12, 56, 0.42, LIGHT_DEPTH);
     glow.setScale(1.5, 0.8);
     out.push(glow);

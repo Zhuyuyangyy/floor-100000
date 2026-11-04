@@ -2086,6 +2086,10 @@ export class GameScene extends Phaser.Scene {
         this.refreshInventory();
         this.refreshUpgradeBoard();
         playSfx('craft');
+        // The work happens at the bench, so the effect is at the bench. Crafting
+        // was a sound and a line of text with nothing on screen; the burst is
+        // anchored to the station the player is standing at, not to the player.
+        playFx(this, 'collect-burst', CRAFT_X, PLAYER_FEET_Y - 40, LIGHT_DEPTH);
         this.flash(`建造了 ${getRecipe(entry.id!).displayName}（-${ACTION_COSTS.craft} 分钟）`);
         this.chargeTime(ACTION_COSTS.craft);
       } else {
@@ -2098,6 +2102,8 @@ export class GameScene extends Phaser.Scene {
         this.refreshCraft();
         this.refreshInventory();
         playSfx('craft');
+        // Same bench, same beat: purifying water is work done at the station.
+        playFx(this, 'collect-burst', CRAFT_X, PLAYER_FEET_Y - 40, LIGHT_DEPTH);
         // B3-05.2: this used to read 「净化了 1 瓶净水」 whatever the real count was,
         // while purifyWater() converts the whole carry and reports it in
         // `converted`. A player who purified six bottles was told they got one and
@@ -2699,6 +2705,21 @@ export class GameScene extends Phaser.Scene {
     }
     saveToStorage(state);
     playSfx('sleep');
+    // AND THE NIGHT PASSES. Sleeping was a sound effect and a line of text: the
+    // clock jumped eight hours and the frame did not move, so a new day looked
+    // identical to the last one. The screen now goes down and comes back with the
+    // day change behind the dark, which is the only cue that time actually went
+    // anywhere.
+    const cam = this.cameras.main;
+    cam.fadeOut(520, 5, 8, 11);
+    this.time.delayedCall(560, () => {
+      if (!this.scene.isActive()) return;
+      cam.fadeIn(620, 5, 8, 11);
+      this.refreshClock();
+      this.refreshStats();
+      this.applyNightLighting();
+      if (!result.won) this.flash(`睡到第 ${result.newDay} 天 06:00`);
+    });
     if (result.won) this.scene.start('End');
     else this.flash(`睡到第 ${result.newDay} 天 06:00`);
   }

@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
-import { playFx } from '../render/fx';
+import { playFx, startFxLoop } from '../render/fx';
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../core/design';
 import { getGame, startNewGame } from '../core/session';
 import {
@@ -1246,19 +1246,24 @@ export class GameScene extends Phaser.Scene {
     for (let r = 0; r < ROOM_COUNT; r++) {
       const cx = r * ROOM_WIDTH + ROOM_WIDTH / 2;
       const lampX = cx + (r % 2 === 0 ? 96 : -96);
-      // The lamp's glow, shaped like the fixture rather than like a ball.
+      // The fixture is now a pixelfx candle, and the light is its own.
       //
-      // A wall lamp throws light DOWN and out; a circular pool centred on the
-      // bulb was the one thing that made these read as floating white dots on a
-      // wall rather than as lamps. The glow is anchored below the shade and
-      // stretched vertically, which is what a cone looks like from the side.
+      // This used to be a glow image stretched into a cone plus a static
+      // bracket, and the light never moved - a room lit by painted decals. The
+      // candle's flame is a 120-frame loop, so the pool flickers with it, which
+      // is the difference between a texture and a light source.
+      //
+      // The candle's pivot is its dish (28, 70), so placing it at the shade
+      // position puts the flame where the old bulb was.
+      const candle = startFxLoop(this, 'candle', lampX, 150, LIGHT_DEPTH);
+      if (candle) this.floorObjects.push(candle);
+      // a small warm pool that tracks the flame's own brightness
       const lampGlow = addGlow(this, lampX, 162, 26, 0.5, LIGHT_DEPTH);
       lampGlow.setScale(1.05, 1.5);
       this.floorObjects.push(lampGlow);
+      // the bracket, now drawn to sit behind the candle rather than under a bulb
       g.fillStyle(0x6a4a2a, 1);
       g.fillRect(lampX - 2, 142, 4, 8);
-      g.fillStyle(0xf4b66a, 1);
-      g.fillRect(lampX - 5, 150, 10, 4);
     }
 
     // Doors on the room boundaries, standing on the floor line.

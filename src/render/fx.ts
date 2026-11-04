@@ -68,7 +68,12 @@ export function loadFx(scene: Phaser.Scene): void {
  */
 function frameNames(scene: Phaser.Scene, id: string): string[] {
   const tex = scene.textures.get(id);
-  return tex && typeof tex.getFrameNames === 'function' ? tex.getFrameNames() : [];
+  if (!tex || typeof tex.getFrameNames !== 'function') return [];
+  // Phaser adds a __BASE frame to every texture, so the raw list is one longer
+  // than the animation and the last entry is not a real frame. Playing a
+  // startFrame derived from the unfiltered count indexes past the end, and
+  // Phaser's getFirstTick then reads .duration off undefined.
+  return tex.getFrameNames().filter((n) => n !== '__BASE');
 }
 
 /** Build one effect's animation if it is not built yet. */
@@ -157,7 +162,27 @@ export function startFxLoop(
   y: number,
   depth = 24,
 ): Phaser.GameObjects.Sprite | null {
-  return playFx(scene, id, x, y, depth);
+  const sprite = playFx(scene, id, x, y, depth);
+  if (!sprite) return null;
+  // Start each instance on its own frame.
+  //
+  // Every light on a floor is created in the same frame, so they all begin on
+  // frame 0 and flicker in perfect unison - measured on the dorm's four wall
+  // lamps, all four sat on frame 47 together and stepped to 62 together. A row of
+  // flames breathing as one reads as a single animated texture repeated, not as
+  // four fires. The offset is derived from the position, so a floor's lights are
+  // spread but still the same every time it is entered.
+  const total = scene.textures.get(id).frameTotal;
+  if (total > 1) {
+    const hash = (Math.round(sprite.x) * 73 + Math.round(sprite.y) * 151) % 1000;
+    // clamped to the animation's own length, not the texture's frame count
+    const frames = sprite.anims.currentAnim ? sprite.anims.currentAnim.frames.length : total;
+    if (frames > 1) {
+      const start = Math.min(frames - 1, Math.floor((hash / 1000) * frames));
+      sprite.anims.play({ key: id, startFrame: start });
+    }
+  }
+  return sprite;
 }
 
 /**

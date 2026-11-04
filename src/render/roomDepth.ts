@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 
 import { addGlow, LIGHT_DEPTH } from './lighting';
+import { startFxLoop } from './fx';
 import { PALETTE } from './palette.ts';
 
 // OVERHAUL Art Pass 2: room depth.
@@ -311,6 +312,15 @@ export function buildCeilingLights(scene: Phaser.Scene, opts: CeilingLightOpts):
     out.push(scene.add.rectangle(x - w / 2 + 2, top + 1, w - 4, 3, PALETTE.lightHot).setOrigin(0, 0).setDepth(3));
     // Its spill: a wide flat glow under the tube. Flattened so it reads as light
     // falling from a strip rather than a point.
+    //
+    // The tube itself now flickers. A fluorescent strip does not hold a steady
+    // value - it hums and varies - and a static bright rectangle is the one thing
+    // that made these read as painted decals rather than as working lights. The
+    // pixelfx torch is a 60-frame loop of a licking flame on a bracket, which at
+    // this size reads exactly as a failing tube, and it is placed so its flame
+    // sits inside the housing.
+    const tube = startFxLoop(scene, 'torch', x, top - 4, LIGHT_DEPTH);
+    if (tube) out.push(tube);
     const glow = addGlow(scene, x, top + 12, 56, 0.42, LIGHT_DEPTH);
     glow.setScale(1.5, 0.8);
     out.push(glow);

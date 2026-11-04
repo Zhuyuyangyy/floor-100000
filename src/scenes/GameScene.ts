@@ -2820,7 +2820,23 @@ export class GameScene extends Phaser.Scene {
       const we = getGame().worldEvents;
       if (we.activeEvent?.source === 'dwell') we.activeEvent = null;
       saveToStorage(getGame()); // ...so the save that follows includes it
-      this.cameras.main.flash(180, 0, 0, 0); // transition through black
+      // Climbing is the game's whole verb and it was a black flash: no direction,
+      // no distance. The pan now travels with the stairs - up a screen's worth
+      // when climbing, down when descending - so the tower feels like something
+      // you move through rather than a number that changes.
+      const cam = this.cameras.main;
+      cam.flash(260, 0, 0, 0);
+      this.time.delayedCall(120, () => {
+        if (!this.scene.isActive()) return;
+        // a tween on the scroll rather than camera.pan(): pan()'s fourth argument
+        // is not an ease string in Phaser 4 and threw "this.ease is not a function"
+        this.tweens.add({
+          targets: cam,
+          scrollY: cam.scrollY + (direction === 1 ? -DESIGN_HEIGHT : DESIGN_HEIGHT),
+          duration: 480,
+          ease: 'Sine.InOut',
+        });
+      });
     } else {
       this.flash(result.reason === 'top' ? '已到顶层' : '已到尽头');
     }

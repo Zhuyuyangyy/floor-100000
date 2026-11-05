@@ -100,15 +100,15 @@
   },
   "pixel": {
     "ramps": {
-      "c-denim":  { "hi": "#8a95a0", "mid": "#47657a", "lo": "#2c3f4e", "dark": "#05080b", "out": "#05080b" },
-      "c-shirt":  { "hi": "#d98b3c", "mid": "#8a95a0", "lo": "#6b4630", "dark": "#05080b", "out": "#05080b" },
-      "c-skin":   { "hi": "#d9b48f", "mid": "#a5714c", "lo": "#6b4630", "dark": "#05080b", "out": "#05080b" },
-      "c-boot":   { "hi": "#8a4a1e", "mid": "#6b4630", "lo": "#2c3f4e", "dark": "#05080b", "out": "#05080b" },
-      "c-belt":   { "hi": "#d98b3c", "mid": "#6b4630", "lo": "#6b4630", "dark": "#05080b", "out": "#05080b" },
-      "c-tool":   { "hi": "#d98b3c", "mid": "#d98b3c", "lo": "#8a4a1e", "dark": "#05080b", "out": "#05080b" }
+      "c-denim":  { "hi": "#8a95a0", "mid": "#47657a", "lo": "#2c3f4e", "dark": "#2c3f4e", "out": "#05080b" },
+      "c-shirt":  { "hi": "#d98b3c", "mid": "#8a95a0", "lo": "#6b4630", "dark": "#6b4630", "out": "#05080b" },
+      "c-skin":   { "hi": "#d9b48f", "mid": "#a5714c", "lo": "#6b4630", "dark": "#6b4630", "out": "#05080b" },
+      "c-boot":   { "hi": "#8a4a1e", "mid": "#6b4630", "lo": "#2c3f4e", "dark": "#2c3f4e", "out": "#05080b" },
+      "c-belt":   { "hi": "#d98b3c", "mid": "#6b4630", "lo": "#6b4630", "dark": "#6b4630", "out": "#05080b" },
+      "c-tool":   { "hi": "#d98b3c", "mid": "#d98b3c", "lo": "#8a4a1e", "dark": "#8a4a1e", "out": "#05080b" }
     },
     "light": [-1, -1],
-    "inner_lines": true,
+    "inner_lines": false,
     "outline": "#05080b",
     "outline_mode": "solid"
   }

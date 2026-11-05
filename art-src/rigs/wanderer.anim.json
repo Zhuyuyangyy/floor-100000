@@ -100,15 +100,15 @@
   },
   "pixel": {
     "ramps": {
-      "c-rag":    { "hi": "#6b3038", "mid": "#2f0f14", "lo": "#1a0a0e", "dark": "#05080b", "out": "#05080b" },
-      "c-rag-sh": { "hi": "#4a2028", "mid": "#1a0a0e", "lo": "#1a0a0e", "dark": "#05080b", "out": "#05080b" },
-      "c-skin":   { "hi": "#d9b48f", "mid": "#a5714c", "lo": "#6b4630", "dark": "#05080b", "out": "#05080b" },
-      "c-hood":   { "hi": "#4a2028", "mid": "#1a0a0e", "lo": "#1a0a0e", "dark": "#05080b", "out": "#05080b" },
-      "c-ink":    { "hi": "#2f0f14", "mid": "#1a0a0e", "lo": "#1a0a0e", "dark": "#05080b", "out": "#05080b" },
-      "c-tool":   { "hi": "#d98b3c", "mid": "#d98b3c", "lo": "#8a4a1e", "dark": "#05080b", "out": "#05080b" }
+      "c-rag":    { "hi": "#6b3038", "mid": "#2f0f14", "lo": "#1a0a0e", "dark": "#1a0a0e", "out": "#05080b" },
+      "c-rag-sh": { "hi": "#4a2028", "mid": "#1a0a0e", "lo": "#1a0a0e", "dark": "#1a0a0e", "out": "#05080b" },
+      "c-skin":   { "hi": "#d9b48f", "mid": "#a5714c", "lo": "#6b4630", "dark": "#6b4630", "out": "#05080b" },
+      "c-hood":   { "hi": "#4a2028", "mid": "#1a0a0e", "lo": "#1a0a0e", "dark": "#1a0a0e", "out": "#05080b" },
+      "c-ink":    { "hi": "#2f0f14", "mid": "#1a0a0e", "lo": "#1a0a0e", "dark": "#1a0a0e", "out": "#05080b" },
+      "c-tool":   { "hi": "#d98b3c", "mid": "#d98b3c", "lo": "#8a4a1e", "dark": "#8a4a1e", "out": "#05080b" }
     },
     "light": [-1, -1],
-    "inner_lines": true,
+    "inner_lines": false,
     "outline": "#05080b",
     "outline_mode": "solid"
   }

@@ -1,0 +1,26 @@
+{
+  "schema": "codeart2d.rig_anim.v1",
+  "rig": "prop-locker.rig.svg",
+  "states": { "idle": "idle" },
+  "entry_reference": "idle",
+  "clips": {
+    "idle": {
+      "frames": 1, "loop": true, "duration_ms": 1000,
+      "grounded": false,
+      "tracks": {},
+      "ik": {}
+    }
+  },
+  "pixel": {
+    "ramps": {
+      "c-steel":  { "hi": "#8a95a0", "mid": "#47657a", "lo": "#2c3f4e", "dark": "#2c3f4e", "out": "#05080b" },
+      "c-vent":   { "hi": "#2c3f4e", "mid": "#14202c", "lo": "#14202c", "dark": "#05080b", "out": "#05080b" },
+      "c-slot":   { "hi": "#14202c", "mid": "#05080b", "lo": "#05080b", "dark": "#05080b", "out": "#05080b" },
+      "c-rust":   { "hi": "#d98b3c", "mid": "#8a4a1e", "lo": "#6b4630", "dark": "#6b4630", "out": "#05080b" }
+    },
+    "light": [-1, -1],
+    "inner_lines": false,
+    "outline": "#05080b",
+    "outline_mode": "solid"
+  }
+}

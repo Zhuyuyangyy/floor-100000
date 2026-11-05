@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="100" viewBox="0 0 80 100"
+     data-codeart="rig.v1" data-anchor="40 92" data-facing="right" data-outline="#05080b">
+  <!-- Steel locker rig (codeart2d, no image model). 80x96, ground line y=95.
+       Painted steel: a tall two-door cabinet with a vent grille at the top and
+       bottom, a name slot, and riveted hinges. Drawn as a rig rather than as
+       Graphics rects so it gets the same ramp shading and 1px outline the
+       characters do - the rect version was three flat values and read as a
+       coloured box against the wall.
+
+       Slots are named so the ramp table can address them; the doors are separate
+       bones only so a future "open" clip can swing them, they do not move yet. -->
+  <style>
+    .c-out{stroke:#05080b;stroke-width:1}
+    .c-steel{fill:#47657a} .c-steel-hi{fill:#8a95a0} .c-steel-sh{fill:#2c3f4e}
+    .c-vent{fill:#14202c} .c-slot{fill:#05080b}
+    .c-rust{fill:#8a4a1e} .c-ink{fill:#05080b}
+  </style>
+
+  <g id="root" data-pivot="40 95">
+    <g id="body" data-pivot="40 95" data-z="10">
+      <!-- the carcass -->
+      <rect data-z="10" class="c-steel-sh c-out" x="22" y="3" width="36" height="87" rx="2"/>
+      <!-- lit left face, shadow right face: the same three-value rule -->
+      <rect data-z="11" class="c-steel" x="24" y="5" width="32" height="83"/>
+      <rect data-z="12" class="c-steel-hi" x="24" y="5" width="5" height="83"/>
+      <rect data-z="13" class="c-steel-sh" x="51" y="5" width="5" height="83"/>
+      <!-- the seam between the doors -->
+      <rect data-z="14" class="c-ink" x="39" y="5" width="2" height="83"/>
+      <!-- vent grille at the top -->
+      <rect data-z="15" class="c-vent" x="27" y="11" width="26" height="12"/>
+      <rect data-z="16" class="c-steel" x="28" y="13" width="24" height="2"/>
+      <rect data-z="16" class="c-steel" x="28" y="17" width="24" height="2"/>
+      <rect data-z="16" class="c-steel" x="28" y="21" width="24" height="2"/>
+      <!-- name slot -->
+      <rect data-z="17" class="c-slot" x="30" y="29" width="20" height="6"/>
+      <rect data-z="18" class="c-steel-hi" x="31" y="30" width="18" height="1"/>
+      <!-- vent grille at the bottom -->
+      <rect data-z="15" class="c-vent" x="27" y="43" width="26" height="16"/>
+      <rect data-z="16" class="c-steel" x="28" y="45" width="24" height="2"/>
+      <rect data-z="16" class="c-steel" x="28" y="49" width="24" height="2"/>
+      <rect data-z="16" class="c-steel" x="28" y="53" width="24" height="2"/>
+      <!-- handles -->
+      <rect data-z="19" class="c-steel-hi" x="34" y="37" width="3" height="2"/>
+      <rect data-z="19" class="c-steel-hi" x="43" y="37" width="3" height="2"/>
+      <!-- rivets down the seam -->
+      <rect data-z="20" class="c-steel-hi" x="38" y="70" width="2" height="2"/>
+      <rect data-z="20" class="c-steel-hi" x="38" y="76" width="2" height="2"/>
+      <rect data-z="20" class="c-steel-hi" x="38" y="82" width="2" height="2"/>
+      <!-- feet -->
+      <rect data-z="21" class="c-ink" x="22" y="86" width="36" height="6"/>
+      <!-- rust streak, so it is not a new cabinet -->
+      <rect data-z="22" class="c-rust" x="48" y="13" width="2" height="40"/>
+    </g>
+  </g>
+</svg>

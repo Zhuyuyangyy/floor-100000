@@ -15,6 +15,10 @@ import {
   ATTACK_FRAME_START,
   HURT_FRAME_START,
   SEARCH_FRAME_START,
+  DIE_FRAME_START,
+  DIE_FRAMES,
+  PICKUP_FRAME_START,
+  PICKUP_FRAMES,
   ATTACK_FRAME_RATE,
   HURT_FRAME_RATE,
   SEARCH_FRAME_RATE,
@@ -257,15 +261,20 @@ describe('sheet geometry', () => {
     }
   });
 
-  it('stacks the W5 one-shot segments after walk and idle, in order', () => {
+  it('stacks the one-shot segments after walk and idle, in order', () => {
     // The column numbers are the contract with createCharacterAnimations: attack
-    // 8..10, hurt 11..12, search 13..14. Walk keeps 0..7 untouched.
-    expect(TOTAL_FRAMES).toBe(WALK_FRAMES + IDLE_FRAMES + ATTACK_FRAMES + HURT_FRAMES + SEARCH_FRAMES);
-    expect(TOTAL_FRAMES).toBe(15);
+    // 8..10, hurt 11..12, search 13..14, die 15..17, pickup 18..19. Walk keeps
+    // 0..7 untouched.
+    expect(TOTAL_FRAMES).toBe(
+      WALK_FRAMES + IDLE_FRAMES + ATTACK_FRAMES + HURT_FRAMES + SEARCH_FRAMES + DIE_FRAMES + PICKUP_FRAMES,
+    );
+    expect(TOTAL_FRAMES).toBe(20);
     expect(ATTACK_FRAME_START).toBe(WALK_FRAMES + IDLE_FRAMES);
     expect(HURT_FRAME_START).toBe(ATTACK_FRAME_START + ATTACK_FRAMES);
     expect(SEARCH_FRAME_START).toBe(HURT_FRAME_START + HURT_FRAMES);
-    expect(SEARCH_FRAME_START + SEARCH_FRAMES).toBe(TOTAL_FRAMES);
+    expect(DIE_FRAME_START).toBe(SEARCH_FRAME_START + SEARCH_FRAMES);
+    expect(PICKUP_FRAME_START).toBe(DIE_FRAME_START + DIE_FRAMES);
+    expect(PICKUP_FRAME_START + PICKUP_FRAMES).toBe(TOTAL_FRAMES);
   });
 
   it('gives each new action its own animation key and a one-shot rate', () => {

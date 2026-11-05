@@ -35,14 +35,24 @@ export const ATTACK_FRAMES = 3;
 export const HURT_FRAMES = 2;
 export const SEARCH_FRAMES = 2;
 
+// W6 新增：死亡（倒地三段）和拾取（弯腰拾起两段）。
+// 之前死亡复用 hurt 一帧后直接切结算场景，玩家看不到自己怎么倒的；
+// 拾取复用 search，可那是个搜刮容器的姿势，地上捡东西是站着伸手。
+export const DIE_FRAMES = 3;
+export const PICKUP_FRAMES = 2;
+
 /** sheet 中 attack 段的起始列（= 8）。 */
 export const ATTACK_FRAME_START = WALK_FRAMES + IDLE_FRAMES;
 /** sheet 中 hurt 段的起始列（= 11）。 */
 export const HURT_FRAME_START = ATTACK_FRAME_START + ATTACK_FRAMES;
 /** sheet 中 search 段的起始列（= 13）。 */
 export const SEARCH_FRAME_START = HURT_FRAME_START + HURT_FRAMES;
-/** 一张 sheet 的总列数：6 行走 + 2 待机 + 3 攻击 + 2 受击 + 2 搜刮 = 15。 */
-export const TOTAL_FRAMES = SEARCH_FRAME_START + SEARCH_FRAMES;
+/** sheet 中 die 段的起始列（= 15）。 */
+export const DIE_FRAME_START = SEARCH_FRAME_START + SEARCH_FRAMES;
+/** sheet 中 pickup 段的起始列（= 18）。 */
+export const PICKUP_FRAME_START = DIE_FRAME_START + DIE_FRAMES;
+/** 一张 sheet 的总列数：6+2+3+2+2 行走/待机/攻击/受击/搜刮 + 3+2 死亡/拾取 = 20。 */
+export const TOTAL_FRAMES = PICKUP_FRAME_START + PICKUP_FRAMES;
 
 // The ankle row when a foot is planted. The boot fills the last row of the
 // frame, so a foot here means the character is standing on the floor line.
@@ -948,6 +958,15 @@ export function searchAnimKey(who: CharacterKey): string {
   return `search-${who}`;
 }
 
+// W6 新增的两个一次性动作 key。
+export function dieAnimKey(who: CharacterKey): string {
+  return `die-${who}`;
+}
+
+export function pickupAnimKey(who: CharacterKey): string {
+  return `pickup-${who}`;
+}
+
 export const WALK_CHARACTERS: readonly CharacterKey[] = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer'];
 
 // Frames per second for the walk playback. The scene scales timeScale by the
@@ -964,6 +983,10 @@ export const WALK_FRAME_RATE = 8;
 export const ATTACK_FRAME_RATE = 12;
 export const HURT_FRAME_RATE = 8;
 export const SEARCH_FRAME_RATE = 6;
+// W6：死亡 6fps ⇒ 3 帧 500ms，是全身倒地，必须慢到看得清；
+// 拾取 8fps ⇒ 2 帧 250ms，和攻击同长，因为是"伸手-拿到"的一个动作。
+export const DIE_FRAME_RATE = 6;
+export const PICKUP_FRAME_RATE = 8;
 
 // Bakes every character's frames into one horizontal sheet per character.
 //
@@ -1073,6 +1096,34 @@ export function createCharacterAnimations(scene: Phaser.Scene): void {
         frameRate: SEARCH_FRAME_RATE,
         repeat: 0,
       });
+    }
+    // W6: death and pickup. Both repeat:0 - death ends on the fallen pose and
+    // holds it while the end card comes up, pickup returns to idle on its own.
+    {
+      const die = dieAnimKey(who);
+      if (!scene.anims.exists(die)) {
+        scene.anims.create({
+          key: die,
+          frames: scene.anims.generateFrameNumbers(sheet, {
+            start: DIE_FRAME_START,
+            end: DIE_FRAME_START + DIE_FRAMES - 1,
+          }),
+          frameRate: DIE_FRAME_RATE,
+          repeat: 0,
+        });
+      }
+      const pickup = pickupAnimKey(who);
+      if (!scene.anims.exists(pickup)) {
+        scene.anims.create({
+          key: pickup,
+          frames: scene.anims.generateFrameNumbers(sheet, {
+            start: PICKUP_FRAME_START,
+            end: PICKUP_FRAME_START + PICKUP_FRAMES - 1,
+          }),
+          frameRate: PICKUP_FRAME_RATE,
+          repeat: 0,
+        });
+      }
     }
   }
 }

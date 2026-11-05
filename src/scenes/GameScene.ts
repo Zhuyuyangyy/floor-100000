@@ -79,7 +79,17 @@ import {
   drawStatBar,
 } from '../render/uiKit';
 import { ENV_FLOOR_KEY, ENV_WALL_KEY } from '../render/artpack';
-import { WALK_CHARACTERS, attackAnimKey, hurtAnimKey, idleAnimKey, searchAnimKey, walkAnimKey, walkSheetKey } from '../render/walkcycle';
+import {
+  WALK_CHARACTERS,
+  attackAnimKey,
+  dieAnimKey,
+  hurtAnimKey,
+  idleAnimKey,
+  pickupAnimKey,
+  searchAnimKey,
+  walkAnimKey,
+  walkSheetKey,
+} from '../render/walkcycle';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
@@ -2791,8 +2801,11 @@ export class GameScene extends Phaser.Scene {
         this.refreshInventory();
         saveToStorage(state);
         playSfx('pickup');
-        // the same beat as a container, smaller: the item went into the bag
+        // the same beat as a container, smaller: the item went into the bag.
+        // Its own pose, not search: picking something off the floor is standing
+        // and reaching down, not bending into a locker.
         playFx(this, 'collect-burst', g.x, PLAYER_FEET_Y - 26, LIGHT_DEPTH);
+        this.playActionAnim(pickupAnimKey(this.metaSelectedCharacter()), 420);
         this.flash(`拾取 ${getItem(r.took.itemId).displayName}×${r.took.quantity}（-${ACTION_COSTS.pickupGround} 分钟）`);
         this.chargeTime(ACTION_COSTS.pickupGround);
       } else if (r.full) {
@@ -3016,6 +3029,18 @@ export class GameScene extends Phaser.Scene {
 
     if (tick.died || tick.won) {
       saveToStorage(state);
+      // AND THEN YOU FALL. Death used to reuse the hurt pose for a single frame
+      // and cut straight to the end card, so the run's last moment was the HUD.
+      // The survivor now goes down - three frames, 500ms, ending on the fallen
+      // pose - and the end card waits for it. Winning still cuts immediately:
+      // reaching the top is not a fall.
+      if (tick.died) {
+        this.playActionAnim(dieAnimKey(this.metaSelectedCharacter()), 520);
+        this.time.delayedCall(620, () => {
+          if (this.scene.isActive()) this.scene.start('End');
+        });
+        return;
+      }
       this.scene.start('End');
       return;
     }
@@ -3023,6 +3048,13 @@ export class GameScene extends Phaser.Scene {
     this.updateWanderer(delta);
     if (state.status !== 'playing') {
       saveToStorage(state);
+      if (state.status === 'lost') {
+        this.playActionAnim(dieAnimKey(this.metaSelectedCharacter()), 520);
+        this.time.delayedCall(620, () => {
+          if (this.scene.isActive()) this.scene.start('End');
+        });
+        return;
+      }
       this.scene.start('End');
       return;
     }

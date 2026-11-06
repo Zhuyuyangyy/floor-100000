@@ -46,3 +46,15 @@ re/v8.py
 re/dbg-*.py
 re/probe*.mjs
 re/add-clips.py
+
+# incoming art drops and the one-off scripts that normalised them
+re/incoming/
+re/shots*.mjs
+re/strips.py
+re/verify-v3.py
+re/lift-v3.py
+re/binarise-v3.py
+re/feet-v3.py
+re/redo-wanderer.py
+re/wcol.py
+re/alpha.py

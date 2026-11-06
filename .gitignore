@@ -19,3 +19,30 @@ e2e/screenshots/
 
 # brainstorming mockups
 .superpowers/
+
+# extracted third-party references (pixelfx, agent-sprite-forge, gamedev skills)
+re/_ref/
+
+# intermediate rig renders - the assembled sheets in src/assets are the output
+re/*-v[0-9]*/
+re/prop-locker/
+re/*-clips/
+re/_rigtest/
+re/rigtest/
+re/frames/
+
+# diagnostic screenshots and one-off probe scripts from the art rounds.
+# re/ keeps only its reusable tools (re/run-forge.py, re/assemble-*.py).
+re/*.png
+re/*.log
+re/*.txt
+re/audit/
+re/check-*.py
+re/cmp.py
+re/dark.py
+re/lift.py
+re/marg.py
+re/v8.py
+re/dbg-*.py
+re/probe*.mjs
+re/add-clips.py

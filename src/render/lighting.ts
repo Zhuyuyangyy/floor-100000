@@ -71,6 +71,11 @@ const BENCH_LIGHT: LightPool = { x: 480, y: 286, radius: 86, strength: 0.95, col
 export const NIGHT_DEPTH = 23;
 export const LIGHT_DEPTH = 24;
 export const DUST_DEPTH = 25;
+// The neighbouring floors in the cross-section. They sit behind everything on
+// the player's own floor — below the wall art (0-3) — because they are context
+// seen through the building, not surfaces the player stands among. A negative
+// depth is what puts them there; Phaser sorts ascending.
+export const STACK_DEPTH = -10;
 // Anything that acts: the player, the NPCs, the trader, the wanderer. Above the
 // wall dressing (1-2), the haze (2) and the floor clutter (3), below the night
 // overlay (23) so night darkens the actors too.

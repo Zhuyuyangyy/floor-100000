@@ -14,6 +14,8 @@ export function createGameConfig(parent: string): Phaser.Types.Core.GameConfig {
     width: DESIGN_WIDTH,
     height: DESIGN_HEIGHT,
     pixelArt: true,
+    antialias: false,
+    roundPixels: true,
     backgroundColor: '#0b0f12',
     scale: {
       mode: Phaser.Scale.FIT,

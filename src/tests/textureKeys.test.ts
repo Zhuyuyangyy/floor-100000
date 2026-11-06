@@ -54,10 +54,20 @@ const KEY_CALL = /(?:add\.image|add\.sprite|add\.tileSprite|add\.nineslice|setTe
 // A few keys are chosen by an expression rather than written as a literal — the
 // NPC sprite picks between two by id, the item icon and the furniture texture go
 // through itemIconKey() / containerTextureKey(), and the walk sheets are named by
-// walkSheetKey(). Those are enumerated here so the "no unused key" direction
+// walkSheetKey(). The two stair tiles are the newest: the cross-section's flight
+// picks between them by direction, so neither appears inside an add.tileSprite
+// call any more. Those are enumerated here so the "no unused key" direction
 // still covers them. Derived rather than listed, so adding a character to
 // WALK_CHARACTERS cannot leave its sheet flagged as unused.
-const DYNAMIC_KEYS = ['npc_alin', 'npc_xiaozhou', ...Object.keys(ITEM_ICON_FILES), ...FURNITURE_KEYS, ...WALK_CHARACTERS.map(walkSheetKey)];
+const DYNAMIC_KEYS = [
+  'npc_alin',
+  'npc_xiaozhou',
+  'tile_stairs_up',
+  'tile_stairs_down',
+  ...Object.keys(ITEM_ICON_FILES),
+  ...FURNITURE_KEYS,
+  ...WALK_CHARACTERS.map(walkSheetKey),
+];
 
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];

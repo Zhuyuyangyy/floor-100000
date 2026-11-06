@@ -32,14 +32,40 @@ export const NIGHT_RISK_START_MINUTE = 1200;
 // art images rather than 16x16 tiles, and 48px was too short a strip for the
 // drawn concrete to read — the wall band is what shrank to pay for it.
 export const FLOOR_WIDTH = 1280; // 4 rooms x 320px
-export const FLOOR_HEIGHT = 360;
+
+// ── 塔楼剖面 ────────────────────────────────────────────────────────────────
+// The floor used to be 360 tall because one floor filled the whole 16:9 view.
+// It is now 200: the tower shows three to four floors stacked at once, and at
+// 360 the view can only ever hold two of them no matter the zoom, because the
+// view is 16:9 and one floor is 1280x352 — far wider than it is tall.
+//
+// 200 is not arbitrary. The view is 640x360, so the zoom that fits one floor's
+// width (0.5) shows 720 world px of height, which is 3.6 floors. The wall band
+// is 136, which is more than the 96px character with room to spare under the
+// ceiling, so nobody's head pokes into the floor above. tools/build-env.mjs
+// regenerates the wall and floor art at this height — the old 288px wall cannot
+// be cropped to 136 without losing either the conduit run or the skirting.
+export const FLOOR_HEIGHT = 200;
 export const FLOOR_BAND = 64; // walkable ground band at the bottom
+/** how tall the wall band is, derived so the art and the code agree */
+export const WALL_HEIGHT = FLOOR_HEIGHT - FLOOR_BAND;
+
 export const ROOM_COUNT = 4;
 export const ROOM_WIDTH = FLOOR_WIDTH / ROOM_COUNT;
 export const PLAYER_SPEED = 130; // px / second
 // Where the player's feet sit. The props are bottom-aligned further back in the
 // band so the player reads as standing in front of them; this is that offset.
 export const PLAYER_FEET_Y = FLOOR_HEIGHT - 40;
+
+// The camera zoom that fits one floor's width. At 0.5 the view is 1280x720
+// world px, which is 3.6 floors tall — the cross-section the design asks for.
+export const FLOOR_VIEW_ZOOM = 0.5;
+// How many floors are drawn around the player: two above, two below, plus the
+// player's own. The view is 3.6 floors tall, so one above and one below leaves a
+// 120px band of empty black at whichever edge the player is not centred on —
+// five floors of content covers the view with margin at any player position.
+export const STACK_ABOVE = 2;
+export const STACK_BELOW = 2;
 
 // The corridor used to hand the player its top speed on the frame a key went
 // down and take it away the frame it came up, so walking read as dragging a

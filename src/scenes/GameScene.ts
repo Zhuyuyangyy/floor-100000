@@ -8,6 +8,7 @@ import {
   BED_X,
   CRAFT_X,
   DOWN_EXIT_X,
+  FLOOR_VIEW_ZOOM,
   ENTRY_X,
   FLOOR_BAND,
   FLOOR_HEIGHT,
@@ -20,6 +21,8 @@ import {
   ROOM_WIDTH,
   STARTING_FLOOR,
   UP_EXIT_X,
+  STACK_ABOVE,
+  STACK_BELOW,
   WANDERER_DAMAGE,
   WANDERER_HIT_COOLDOWN_MS,
   WANDERER_SPEED,
@@ -96,11 +99,12 @@ import { corridorTint, drawCorridorRoom } from '../render/corridors';
 import {
   ACTOR_DEPTH,
   DUST_DEPTH,
+  LIGHT_DEPTH,
+  NIGHT_DEPTH,
+  STACK_DEPTH,
   addGlow,
   ambienceFor,
   buildLightLayer,
-  LIGHT_DEPTH,
-  NIGHT_DEPTH,
   type LightLayer,
 } from '../render/lighting';
 import {
@@ -435,6 +439,22 @@ export class GameScene extends Phaser.Scene {
   // Floor content is rebuilt in place on floor changes. We avoid scene.restart():
   // its teardown leaves the hidden UI panel text objects with null texture frames
   // in Phaser 4, so setText on them throws once the scene is recreated.
+  /**
+   * The canvas size in CANVAS units, which is what every setScrollFactor(0)
+   * panel is positioned in.
+   *
+   * `cameras.main.width` is world units — canvas divided by the camera zoom. At
+   * zoom 1 the two agree and nothing notices; the cross-section's zoom 0.5 makes
+   * them differ by exactly 2x, which put every panel a canvas-width off-centre
+   * and mostly outside the viewport. The crafting e2e caught it because its
+   * navTo() pairs the arrow marker with the row label by y, and the label had
+   * left the screen.
+   */
+  private viewSize(): { width: number; height: number } {
+    const cam = this.cameras.main;
+    return { width: cam.width * cam.zoom, height: cam.height * cam.zoom };
+  }
+
   private drawFloor(): void {
     const state = getGame();
     const floor = state.currentFloor;
@@ -454,8 +474,19 @@ export class GameScene extends Phaser.Scene {
     } else {
       this.drawCorridor(floor);
     }
-    this.drawExits(floor);
-    this.buildContainers();
+    // AND THE NEIGHBOURS. The cross-section only works if the floors beside the
+    // player's are actually there — the camera is zoomed out to 3.6 floors of
+    // height, so anything not drawn is empty black above and below. They go in
+    // before the exits so the stairs have a landing to arrive at.
+    const lowest = PLAYABLE_FLOORS_V01[0];
+    const highest = PLAYABLE_FLOORS_V01[PLAYABLE_FLOORS_V01.length - 1];
+    for (let d = 1; d <= STACK_ABOVE; d++) {
+      if (floor - d >= lowest) this.drawNeighbourFloor(floor - d, -FLOOR_HEIGHT * d, true, d);
+    }
+    for (let d = 1; d <= STACK_BELOW; d++) {
+      if (floor + d <= highest) this.drawNeighbourFloor(floor + d, FLOOR_HEIGHT * d, false, d);
+    }
+    this.drawExits(floor);    this.buildContainers();
     this.buildGround();
     if (floor === STARTING_FLOOR) {
       this.drawBed();
@@ -492,7 +523,28 @@ export class GameScene extends Phaser.Scene {
       .setDepth(ACTOR_DEPTH);
     this.player.play(idleAnimKey(who));
     this.floorObjects.push(this.player);
-    this.cameras.main.startFollow(this.player, true, 0.15, 0.15);
+    // The tower is a cross-section now, so the camera follows on BOTH axes and
+    // sits at the zoom that fits one floor's width. At 0.5 the view is 1280x720
+    // world px, which is 3.6 floors tall — the floor above, the player's own,
+    // and the floor below with the top of a fourth showing. It used to be zoom
+    // 1 following x only, which could never show more than the floor you were
+    // standing on.
+    const cam = this.cameras.main;
+    cam.setZoom(FLOOR_VIEW_ZOOM);    // The bounds are per-floor, not global. On the bottom floor there is nothing
+    // above it, so the camera must not be allowed to scroll up into the void —
+    // a global bound let it, and the bottom floor showed 200px of empty black
+    // over the dorm. Same at the top of the tower looking down.
+    const topBound = floor <= PLAYABLE_FLOORS_V01[0] ? -FLOOR_BAND : -FLOOR_HEIGHT * (STACK_ABOVE + 1);
+    const bottomBound =
+      floor >= PLAYABLE_FLOORS_V01[PLAYABLE_FLOORS_V01.length - 1]
+        ? FLOOR_HEIGHT + FLOOR_BAND
+        : FLOOR_HEIGHT * (STACK_BELOW + 2);
+    cam.setBounds(-FLOOR_WIDTH * 0.5, topBound, FLOOR_WIDTH * 2, bottomBound - topBound);
+    cam.startFollow(this.player, true, 0.15, 0.15);
+    // Centred on the player the moment the floor is drawn: a follow with
+    // lerp 0.15 takes a third of a second to catch up, and during that time the
+    // camera is still wherever the previous floor left it.
+    cam.centerOn(state.player.x, Math.max(topBound + 180, Math.min(bottomBound - 180, PLAYER_FEET_Y - FLOOR_HEIGHT * 0.5)));
   }
 
   // OVERHAUL: plays a one-shot action clip and holds it for `ms`. The frame
@@ -654,7 +706,7 @@ export class GameScene extends Phaser.Scene {
     for (const o of this.encounterObjects) o.destroy();
     this.encounterObjects = [];
     const state = getGame();
-    const { width, height } = this.cameras.main;
+    const { width, height } = this.viewSize();
     const cx = width / 2;
     const cy = height / 2;
     const panelW = 440;
@@ -862,7 +914,7 @@ export class GameScene extends Phaser.Scene {
     const state = getGame();
     const combat = state.combat;
     if (!combat) return;
-    const { width, height } = this.cameras.main;
+    const { width, height } = this.viewSize();
     const cx = width / 2;
     const cy = height / 2;
     const panelW = 440;
@@ -1070,7 +1122,7 @@ export class GameScene extends Phaser.Scene {
     // Show the outcome for one more Enter, same as the non-combat panel.
     for (const o of this.encounterObjects) o.destroy();
     this.encounterObjects = [];
-    const { width, height } = this.cameras.main;
+    const { width, height } = this.viewSize();
     const cx = width / 2;
     const cy = height / 2;
     // OVERHAUL UI: the outcome uses the same header strip and log well as the
@@ -1124,7 +1176,7 @@ export class GameScene extends Phaser.Scene {
     this.encounterObjects = [];
     const enc = this.encounter;
     if (!enc) return;
-    const { width, height } = this.cameras.main;
+    const { width, height } = this.viewSize();
     const cx = width / 2;
     const cy = height / 2;
     const panelW = 420;
@@ -1208,7 +1260,7 @@ export class GameScene extends Phaser.Scene {
     // Outcome panel: the message, and the item flow the player actually got.
     for (const o of this.encounterObjects) o.destroy();
     this.encounterObjects = [];
-    const { width, height } = this.cameras.main;
+    const { width, height } = this.viewSize();
     const cx = width / 2;
     const cy = height / 2;
     const panelW = 420;
@@ -1425,20 +1477,120 @@ export class GameScene extends Phaser.Scene {
     this.floorObjects.push(...[]); // the layer owns its own objects
   }
 
-  // The stairwells, drawn with the tile_stairs_* textures instead of a flat
-  // block. Three rows of 16px tiles make a readable staircase; the labels sit
-  // above and the tiles stay inside the floor band so nothing shifts.
+  // The stairwells. In the cross-section a stair is not a 32px decal on the
+  // floor any more — it is the thing that joins this floor to the one above or
+  // below it, so it is drawn the full height of a floor and the neighbour's
+  // floor band is where it lands.
   private drawExits(floor: number): void {
     if (hasUpExit(floor)) {
-      const stairs = this.add.tileSprite(UP_EXIT_X - 16, FLOOR_HEIGHT - FLOOR_BAND, 32, FLOOR_BAND, 'tile_stairs_up').setOrigin(0, 0);
+      this.drawStair(UP_EXIT_X, 'up');
       const upLabel = this.add.text(UP_EXIT_X, FLOOR_HEIGHT - 104, '↑ 上楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
-      this.floorObjects.push(stairs, upLabel);
+      this.floorObjects.push(upLabel);
     }
     if (hasDownExit(floor)) {
-      const stairs = this.add.tileSprite(DOWN_EXIT_X - 16, FLOOR_HEIGHT - FLOOR_BAND, 32, FLOOR_BAND, 'tile_stairs_down').setOrigin(0, 0);
+      this.drawStair(DOWN_EXIT_X, 'down');
       const downLabel = this.add.text(DOWN_EXIT_X, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
-      this.floorObjects.push(stairs, downLabel);
+      this.floorObjects.push(downLabel);
     }
+  }
+
+  /**
+   * One stair, drawn from this floor's band to the neighbour's.
+   *
+   * `up` climbs toward -Y (the floor above, which sits at -FLOOR_HEIGHT) and
+   * `down` descends toward +Y. The flight is drawn as a run of treads that
+   * steps monotonically, with a stringer under it and a handrail line, so the
+   * connection between the two floors is visible from anywhere on screen — which
+   * is the whole point of the cross-section: you can see where the stairs go
+   * before you walk to them.
+   */
+  private drawStair(x: number, dir: 'up' | 'down'): void {
+    // The flight itself is the stair tile, unrotated: it runs vertically between
+    // the two landings, which is exactly the tile's own orientation. It used to
+    // be a 32x64 decal sitting on the floor line, which said "there are stairs
+    // here" without saying where they went.
+    const y0 = FLOOR_HEIGHT - FLOOR_BAND;
+    const tile = dir === 'up' ? 'tile_stairs_up' : 'tile_stairs_down';
+    const flight = this.add
+      .tileSprite(x - 16, y0, 32, FLOOR_HEIGHT, tile)
+      .setOrigin(dir === 'up' ? 0 : 0, dir === 'up' ? 1 : 0);
+    const y1 = y0 + (dir === 'up' ? -FLOOR_HEIGHT : FLOOR_HEIGHT);
+
+    const g = this.add.graphics();
+    // The stringer: a slab under the treads so the flight has thickness.
+    g.fillStyle(PALETTE.shadow, 1);
+    g.fillRect(x - 19, Math.min(y0, y1), 38, FLOOR_HEIGHT);
+    // The landing at the far end, meeting the neighbour's floor band.
+    g.fillStyle(PALETTE.stone, 1);
+    g.fillRect(x - 24, y1 - 3, 48, 4);
+    g.fillStyle(PALETTE.ink, 0.6);
+    g.fillRect(x - 24, y1 - 1, 48, 1);
+    // A handrail along the near side, so the flight reads as something you
+    // hold onto on the way up rather than as a striped column.
+    g.lineStyle(1, PALETTE.dust, 0.55);
+    g.beginPath();
+    g.moveTo(x + 14, y0);
+    g.lineTo(x + 14, y1);
+    g.strokePath();
+
+    flight.setDepth(ACTOR_DEPTH - 1);
+    g.setDepth(ACTOR_DEPTH - 1);
+    this.floorObjects.push(flight, g);
+  }
+
+  /**
+   * A neighbouring floor, drawn as context rather than as a playable room.
+   *
+   * The full renderer is deliberately not reused: it builds the light layer, the
+   * containers, the NPCs and the encounter spots, all of which belong to the
+   * floor the player is standing on and would clobber each other if a neighbour
+   * ran them too. A neighbour needs the wall, the floor band, the tint, a door
+   * or two, and the stair opening — enough to read as another floor of the same
+   * building, and no more. It is also drawn further back in depth and under more
+   * haze, so the cross-section has distance rather than reading as three
+   * screenshots stacked.
+   */
+  private drawNeighbourFloor(floor: number, yOffset: number, isAbove: boolean, distance: number): void {
+    const wallH = FLOOR_HEIGHT - FLOOR_BAND;
+    const tint = corridorTint(floor);
+    const objs: Phaser.GameObjects.GameObject[] = [];
+
+    objs.push(this.add.image(0, yOffset + 8, ENV_WALL_KEY).setOrigin(0, 0));
+    objs.push(this.add.image(0, yOffset + wallH, ENV_FLOOR_KEY).setOrigin(0, 0));
+    if (tint) {
+      objs.push(this.add.rectangle(FLOOR_WIDTH / 2, yOffset + 8 + (wallH - 8) / 2, FLOOR_WIDTH, wallH - 8, tint.color, tint.alpha));
+    }
+    const g = this.add.graphics();
+    g.fillStyle(0x0b0f12, 1);
+    g.fillRect(0, yOffset, FLOOR_WIDTH, 8);
+    // doors on the room boundaries, so the floor reads as divided into rooms
+    for (let i = 1; i < ROOM_COUNT; i++) {
+      objs.push(this.add.image(i * ROOM_WIDTH, yOffset + wallH, 'tile_door').setOrigin(0.5, 1));
+    }
+    // the stairwell opening in this floor's ceiling or floor, so the flight
+    // arriving from the player's floor has somewhere to arrive
+    const stairX = isAbove ? DOWN_EXIT_X : UP_EXIT_X;
+    g.fillStyle(PALETTE.ink, 0.85);
+    g.fillRect(stairX - 22, isAbove ? yOffset + wallH - 10 : yOffset, 44, 10);
+    g.fillStyle(PALETTE.stone, 1);
+    g.fillRect(stairX - 20, isAbove ? yOffset + wallH - 8 : yOffset + 2, 40, 6);
+
+    // Aerial perspective, by distance and not by the floor's own ambience: the
+    // first attempt tinted each neighbour with ambienceFor(floor), which made
+    // the floor below lighter and the floor above darker and read as two
+    // different weather rather than as depth. One cool haze that strengthens
+    // with distance is what actually recedes.
+    const haze = this.add.rectangle(
+      FLOOR_WIDTH / 2,
+      yOffset + FLOOR_HEIGHT / 2,
+      FLOOR_WIDTH,
+      FLOOR_HEIGHT,
+      0x1b2836,
+      0.09 * distance,
+    );
+    objs.push(g, haze);
+    for (const o of objs) (o as Phaser.GameObjects.GameObject & { setDepth(n: number): void }).setDepth(STACK_DEPTH);
+    this.floorObjects.push(...objs);
   }
 
   private buildContainers(): void {
@@ -1690,7 +1842,7 @@ export class GameScene extends Phaser.Scene {
     // was one flat colour. It is now an icon grid on the left and a detail pane
     // on the right: the icons carry the identity, the pane carries the words,
     // and neither one is a wall of text.
-    const { width, height } = this.cameras.main;
+    const { width, height } = this.viewSize();
     const panelW = 440;
     const panelH = 236;
     const cx = width / 2;
@@ -1916,7 +2068,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildCraftPanel(): void {
-    const { width, height } = this.cameras.main;
+    const { width, height } = this.viewSize();
     const panelW = 460;
     const panelH = 300;
     const cx = width / 2;
@@ -2011,7 +2163,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildPausePanel(): void {
-    const { width, height } = this.cameras.main;
+    const { width, height } = this.viewSize();
     const panelW = 380;
     const panelH = 220;
     const cx = width / 2;
@@ -2173,7 +2325,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildDialoguePanel(): void {
-    const { width, height } = this.cameras.main;
+    const { width, height } = this.viewSize();
     const panelW = 460;
     const panelH = 260;
     const cx = width / 2;

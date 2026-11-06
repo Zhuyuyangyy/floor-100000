@@ -210,9 +210,13 @@ test('the purifier converts dirty water to clean water', async ({ page }) => {
     const g = (window as unknown as {
       __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean; y: number }> } } | null } };
     }).__PHASER_GAME__;
-    // OVERHAUL UI: the HUD is a bar, so the flash sits at HUD_BAR_H(30) + 26 = 56.
+    // OVERHAUL UI: the HUD is a bar, so the flash sits at HUD_BAR_H + 26. The
+    // row is derived from the constant rather than written as a literal: it used
+    // to be 56, which was right for a 30px bar and silently wrong the moment the
+    // design canvas went to 1280x720 and the bar doubled.
+    const HUD_BAR_H = 60;
     for (const o of g?.scene.getScene('Game')?.children.list ?? []) {
-      if (o.type === 'Text' && o.visible && Math.abs(o.y - 56) < 2) return o.text ?? '';
+      if (o.type === 'Text' && o.visible && Math.abs(o.y - (HUD_BAR_H + 26)) < 2) return o.text ?? '';
     }
     return '';
   });

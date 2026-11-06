@@ -29,8 +29,12 @@ export type UiObject =
 /** everything snaps to this */
 export const UI_UNIT = 4;
 /** tall enough to hold a 9px label and a 4px bar */
-export const HUD_BAR_H = 30;
-export const HUD_FOOT_H = 20;
+// The HUD bar and foot bar heights. They scale with the design canvas: at
+// 640x360 these were 30 and 20, and the cross-section raised the canvas to
+// 1280x720, so they double with everything else. Left at the old values the
+// 20-30px HUD text would overflow a 30px bar.
+export const HUD_BAR_H = 60;
+export const HUD_FOOT_H = 40;
 
 // ── the type scale ──────────────────────────────────────────────────────────
 // Only three sizes. The old UI mixed 11/12/13/16/18/22/40 with no rule, which
@@ -44,11 +48,11 @@ export const HUD_FOOT_H = 20;
 // and titles 15, which is the smallest this script stays readable at.
 export const TYPE = {
   /** panel and HUD titles */
-  title: 15,
+  title: 30,
   /** body rows, values */
-  body: 12,
+  body: 24,
   /** captions, hints, the smallest legal text */
-  caption: 10,
+  caption: 20,
 } as const;
 
 // ── the colour roles ────────────────────────────────────────────────────────

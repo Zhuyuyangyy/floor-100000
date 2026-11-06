@@ -47,9 +47,9 @@ import type { GameState } from '../core/gameTypes';
 // The camera carries the zoom and vertical scroll; content lives in world
 // coordinates so picking stays exact at every zoom level.
 
-const TYPE_TITLE = 16;
-const TYPE_BODY = 13;
-const TYPE_AUX = 11;
+const TYPE_TITLE = 32;
+const TYPE_BODY = 26;
+const TYPE_AUX = 22;
 
 type MapKey = 'up' | 'down' | 'left' | 'right' | 'enter' | 'esc';
 

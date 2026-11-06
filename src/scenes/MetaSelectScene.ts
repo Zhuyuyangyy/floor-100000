@@ -81,7 +81,7 @@ export class MetaSelectScene extends Phaser.Scene {
     const top = height / 2 - panelH / 2;
     const depth = PANEL_DEPTH.menu.help;
 
-    this.add.text(cx, top - 18, '出发之前', { fontFamily: 'monospace', fontSize: '18px', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 4 }).setOrigin(0.5).setDepth(depth + 1);
+    this.add.text(cx, top - 18, '出发之前', { fontFamily: 'monospace', fontSize: '36pxpx', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 4 }).setOrigin(0.5).setDepth(depth + 1);
 
     for (const o of buildPanel(this, cx, height / 2, panelW, panelH, 'green', depth)) o.setDepth(o.depth);
     for (const o of buildPanelHeader(this, left, top, panelW, '幸存者', UI.good, depth + 5)) this.add.existing(o as Phaser.GameObjects.GameObject);

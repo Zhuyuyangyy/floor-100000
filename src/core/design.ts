@@ -1,6 +1,20 @@
 // Fixed internal design resolution for the 2D pixel game (16:9).
-export const DESIGN_WIDTH = 640;
-export const DESIGN_HEIGHT = 360;
+//
+// 1280x720, not 640x360. The tower is a cross-section that shows 3.6 floors at
+// once, and the only way to fit that in a 16:9 view is for the view to be
+// 1280x720 world px — one floor's width by 3.6 floors' height. At 640x360 that
+// same view needs a camera zoom of 0.5, and a camera zoom resamples the whole
+// world through the renderer's filter, which came out LINEAR no matter what was
+// set on the textures: a 15-colour figure rendered as 291 colours with #d9b48f
+// arriving as #cdaa88. At zoom 1 there is no resample at all and the pixel art
+// is exact.
+//
+// The cost is that text is now specified in canvas pixels rather than in
+// half-canvas pixels, so every fontSize doubled to keep the same size on screen
+// — the canvas is displayed 1:1 in a 1280x720 window where it used to be
+// displayed 2x.
+export const DESIGN_WIDTH = 1280;
+export const DESIGN_HEIGHT = 720;
 
 export interface IntegerScale {
   scale: number;

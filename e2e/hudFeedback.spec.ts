@@ -74,17 +74,22 @@ test('the flash renders on top of an open panel', async ({ page }) => {
   const canvas = page.locator('canvas');
   const box = (await canvas.boundingBox()) as Box | null;
   expect(box, 'the canvas has no box').not.toBeNull();
-  // The canvas is the 640x360 design resolution scaled by Scale.FIT, so game
-  // coordinates map straight onto it. The clip covers the flash's row and nothing
-  // that moves on its own: the clock is at y=12, the stat bars at x=12..118, and
-  // the panel's own title is static. page.screenshot() takes page coordinates, so
-  // the canvas offset is added back.
-  const scale = box!.width / 640;
+  // The canvas is the design resolution scaled by Scale.FIT, so game
+  // coordinates map onto it by that factor. The divisor is the design width, not
+  // a literal 640 — the design resolution went to 1280x720 for the
+  // cross-section, and a hardcoded 640 made `scale` twice the truth and put the
+  // clip somewhere the flash never is. page.screenshot() takes page coordinates,
+  // so the canvas offset is added back.
+  //
+  // The clip covers the flash's own row (HUD_BAR_H 60 + 26 = 86) and nothing that
+  // moves on its own: the clock is high in the bar, the stat bars are to the
+  // right, and the panel's own title is static.
+  const scale = box!.width / 1280;
   const clip = {
     x: box!.x + 180 * scale,
-    y: box!.y + 42 * scale,
-    width: 280 * scale,
-    height: 28 * scale,
+    y: box!.y + 72 * scale,
+    width: 420 * scale,
+    height: 34 * scale,
   };
   const withFlash = await page.screenshot({ clip });
   // Shot while the flash is still up, so the evidence shows it rather than the
@@ -134,17 +139,22 @@ test('all three HUD feedback objects clear the deepest panel', async ({ page }) 
       __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; y: number; depth: number }> } } | null } };
     }).__PHASER_GAME__;
     const list = g?.scene.getScene('Game')?.children.list ?? [];
-    // Matched by content, not by y alone: the fourth stat label sits at y=85, one
-    // pixel from the bag-full warning at y=86, and a y-probe silently returns the
-    // wrong object.
-    // OVERHAUL UI: the HUD is a bar now, so the three feedback objects have
-    // fixed rows of their own — flash at HUD_BAR_H(30) + 26 = 56, the bag-full
-    // warning below it, and the hint centred on the foot bar at
-    // 360 - HUD_FOOT_H(20)/2 = 350. Matched by content as well, because a bare
-    // y-probe here once read a panel's copy of the same string.
-    const flash = list.find((o) => o.type === 'Text' && Math.abs(o.y - 56) < 2);
+    // Matched by content, not by y alone: the fourth stat label sits close to the
+    // bag-full warning, and a y-probe silently returns the wrong object.
+    //
+    // The rows are derived from the same constants buildHud uses rather than
+    // written as literals. They used to be literals — flash at 56 and the hint at
+    // 350 — and both were silently wrong the moment the design canvas went from
+    // 640x360 to 1280x720, because the hint is anchored to the foot bar and the
+    // foot bar moved with the canvas.
+    const HUD_BAR_H = 60;
+    const HUD_FOOT_H = 40;
+    const DESIGN_HEIGHT = 720;
+    const flash = list.find((o) => o.type === 'Text' && Math.abs(o.y - (HUD_BAR_H + 26)) < 2);
     const bagFull = list.find((o) => o.type === 'Text' && (o.text ?? '').includes('否则搜刮会留在原处'));
-    const hint = list.find((o) => o.type === 'Text' && Math.abs(o.y - 350) < 2 && (o.text ?? '').includes('ESC 菜单'));
+    const hint = list.find(
+      (o) => o.type === 'Text' && Math.abs(o.y - (DESIGN_HEIGHT - HUD_FOOT_H / 2)) < 2 && (o.text ?? '').includes('ESC 菜单'),
+    );
     return { flash: flash?.depth, bagFull: bagFull?.depth, hint: hint?.depth };
   });
 

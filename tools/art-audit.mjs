@@ -25,17 +25,32 @@ mkdirSync(OUT, { recursive: true });
 
 const URL = process.env.AUDIT_URL ?? 'http://localhost:5173';
 
-// The game canvas is 640x360 and the page shows it at 2x inside a 1280x800
-// viewport with 40px letterbox bars. Every sample below converts game
-// coordinates to screenshot coordinates with this map, because reading a
-// 1280x800 shot at game coordinates silently samples the wrong pixels - a
-// mistake that cost this project a whole iteration.
-const SCALE = 2;
-const PAD_Y = 40;
-const toShot = (gx, gy) => [Math.round(gx * SCALE), Math.round(PAD_Y + gy * SCALE)];
-// the same two numbers, for the browser-side evaluate that reads the framebuffer
-const SCALE_ = 2;
-const PAD_ = 40;
+// How the game canvas maps onto the screenshot. It is MEASURED from the page,
+// not hardcoded: it used to be written as "the canvas is 640x360 and the page
+// shows it at 2x with 40px bars", and that was true until the cross-section
+// raised the design resolution to 1280x720, at which point the same constants
+// sampled a region half the size and twice as far down and the character read
+// 64% camouflaged. Reading the rect means a resolution change cannot silently
+// break the measurement again.
+let SCALE = 1;
+let PAD_X = 0;
+let PAD_Y = 0;
+
+async function measureCanvas(page) {
+  const m = await page.evaluate(() => {
+    const c = document.querySelector('canvas');
+    if (!c) return null;
+    const r = c.getBoundingClientRect();
+    return { rectX: r.x, rectY: r.y, rectW: r.width, rectH: r.height, canvasW: c.width, canvasH: c.height };
+  });
+  if (!m) throw new Error('no canvas to measure');
+  SCALE = m.rectW / m.canvasW;
+  PAD_X = m.rectX;
+  PAD_Y = m.rectY;
+  return m;
+}
+
+const toShot = (gx, gy) => [Math.round(PAD_X + gx * SCALE), Math.round(PAD_Y + gy * SCALE)];
 
 function lum(r, g, b) {
   return 0.299 * r + 0.587 * g + 0.114 * b;
@@ -135,6 +150,10 @@ async function main() {
   await page.waitForTimeout(1200);
 
   const shots = {};
+  // Measure the canvas's place on the page before anything is sampled: every
+  // coordinate below goes through SCALE / PAD_X / PAD_Y, and they are only
+  // correct once this has run.
+  await measureCanvas(page);
   const shoot = async (name) => {
     const file = join(OUT, `${name}.png`);
     await page.screenshot({ path: file });
@@ -293,11 +312,17 @@ async function main() {
     // this transform and it already accounts for the origin, the zoom and the
     // scroll, which is where every earlier version of this metric went wrong.
     const cam = sc.cameras.main;
-    const m = cam.getWorldTransformMatrix ? null : null;
-    void m;
     const screen = cam.worldView;
-    const sx = spr.x - screen.x;
-    const sy = spr.y - screen.y;
+    // The camera's zoom is part of the world->canvas transform. Without it the
+    // sprite's canvas position is off by exactly the zoom factor, which is how
+    // the cross-section made this audit read 62.4% camouflage on a figure whose
+    // own pixels are 0%: it was sampling the neighbour floor's wall a floor
+    // above the character and calling it the figure. The zoom is 1 now that the
+    // design resolution is 1280x720, but the factor stays in the math so a
+    // future zoom cannot silently break the measurement again.
+    const z = cam.zoom || 1;
+    const sx = (spr.x - screen.x) * z;
+    const sy = (spr.y - screen.y) * z;
     return {
       charMean: cN ? cSum / cN : 0,
       opaque: cN,
@@ -310,6 +335,7 @@ async function main() {
       screenY: sy,
       scale: opts.scale,
       padY: opts.padY,
+      zoom: z,
     };
   }, { scale: SCALE, padY: PAD_Y });
   if (!measured) throw new Error('no character sprite found to measure');
@@ -318,18 +344,22 @@ async function main() {
   // same screenshot the rest of the audit uses. The sprite's frame is aligned to
   // its bottom-centre, which the browser just reported.
   const fig = await decode(page, shots.world);
+  const Z = measured.zoom;
   const footX = Math.round(measured.screenX * SCALE);
   const footY = Math.round(PAD_Y + measured.screenY * SCALE);
-  const left = footX - Math.round((measured.frameW / 2) * SCALE);
-  const top = footY - measured.frameH * SCALE;
+  // The frame is scaled by the camera zoom like everything else in the world.
+  const frameW = measured.frameW * Z * SCALE;
+  const frameH = measured.frameH * Z * SCALE;
+  const left = Math.round(footX - frameW / 2);
+  const top = Math.round(footY - frameH);
 
   // the wall: the same height band, one frame's width to the right of the
   // figure, sampled from the screenshot
-  const wallLeft = left + measured.frameW * SCALE + 6 * SCALE;
+  const wallLeft = Math.round(left + frameW + 6 * SCALE);
   const wallTop = top;
   let wSum = 0;
   let wN = 0;
-  for (let y = wallTop; y < wallTop + measured.frameH * SCALE; y += 2) {
+  for (let y = wallTop; y < wallTop + frameH; y += 2) {
     for (let x = wallLeft; x < wallLeft + 40 * SCALE; x += 2) {
       if (y < 0 || x < 0 || y >= fig.height || x >= fig.width) continue;
       wSum += lum(...px(fig, x, y));
@@ -343,8 +373,8 @@ async function main() {
   for (let gy = 0; gy < measured.frameH; gy++) {
     for (let gx = 0; gx < measured.frameW; gx++) {
       if (!measured.mask[gy][gx]) continue;
-      const sy = top + gy * SCALE;
-      const sx = left + gx * SCALE;
+      const sy = Math.round(top + gy * Z * SCALE);
+      const sx = Math.round(left + gx * Z * SCALE);
       if (sy < 0 || sx < 0 || sy >= fig.height || sx >= fig.width) continue;
       const l = lum(...px(fig, sx, sy));
       if (l < 14) continue;

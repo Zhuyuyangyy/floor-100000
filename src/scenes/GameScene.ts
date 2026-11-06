@@ -132,8 +132,8 @@ const CRAFT_ROW_PITCH = 24;
 // HUD type scale (docs/05_ART_GUIDE.md §2: no size too small to read). Title 16 /
 // body 13 / auxiliary 11 — all integer pixels, since any fractional size would be
 // resampled and blur the pixel look.
-const TYPE_BODY = 13;
-const TYPE_AUX = 11;
+const TYPE_BODY = 26;
+const TYPE_AUX = 22;
 
 // Row pitch for the four HUD stat bars. 15px gives an 11px label plus a 7px bar
 // with breathing room; 13px was too cramped to read at a glance.
@@ -149,9 +149,10 @@ const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: stri
 // Columns on the shared 4px grid: floor badge, clock, four stat bars (label +
 // bar each), then the right-aligned score and gold. These are computed once
 // here rather than sprinkled through buildHud, so moving a column is one edit.
-const HUD_STAT_X = 100;
-const HUD_STAT_PITCH = 84;
-const HUD_STAT_BAR_W = 52;
+// All doubled with the design canvas (640x360 -> 1280x720).
+const HUD_STAT_X = 200;
+const HUD_STAT_PITCH = 168;
+const HUD_STAT_BAR_W = 104;
 const PAUSE_OPTIONS = ['继续游戏', '塔楼地图', '重新开始', '返回标题'];
 
 // OVERHAUL: the daily objective's one-line label, per goal kind.
@@ -628,7 +629,7 @@ export class GameScene extends Phaser.Scene {
       const plate = this.add.circle(x, y, 11, PALETTE.ink, 0.85).setDepth(6);
       const dot = this.add.circle(x, y, 9, color, 1).setDepth(7);
       const label = this.add
-        .text(x, y, '?', { fontFamily: 'monospace', fontSize: '13px', color: hex(PALETTE.ink) })
+        .text(x, y, '?', { fontFamily: 'monospace', fontSize: '26pxpx', color: hex(PALETTE.ink) })
         .setOrigin(0.5)
         .setDepth(8);
       // A 1.9s breath on the plate only, so the disc reads as a beacon without
@@ -643,7 +644,7 @@ export class GameScene extends Phaser.Scene {
       const trader = this.add.sprite(shopX, PLAYER_FEET_Y, walkSheetKey('npc_alin')).setOrigin(0.5, 1).setDepth(5);
       trader.play(idleAnimKey('npc_alin'));
       const tag = this.add
-        .text(shopX, PLAYER_FEET_Y - 108, '行商', { fontFamily: 'monospace', fontSize: '11px', color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 4, y: 2 } })
+        .text(shopX, PLAYER_FEET_Y - 108, '行商', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 4, y: 2 } })
         .setOrigin(0.5)
         .setDepth(6);
       this.spotMarkers.set('shop', { x: shopX, isBoss: false, dot: trader as unknown as Phaser.GameObjects.Arc, label: tag });
@@ -1270,19 +1271,19 @@ export class GameScene extends Phaser.Scene {
     const isBoss = enc.encounter.kind === 'boss';
     this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.dialogue));
     this.encounterObjects.push(
-      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: 'monospace', fontSize: '16px', color: isBoss ? hex(TEXT.warn) : hex(PALETTE.lightHigh) }).setOrigin(0.5),
+      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: 'monospace', fontSize: '32pxpx', color: isBoss ? hex(TEXT.warn) : hex(PALETTE.lightHigh) }).setOrigin(0.5),
     );
     this.encounterObjects.push(
-      this.add.text(left + 20, top + 44, result.message, { fontFamily: 'monospace', fontSize: '13px', color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+      this.add.text(left + 20, top + 44, result.message, { fontFamily: 'monospace', fontSize: '26pxpx', color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
     );
     const loot = result.items.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、');
     if (loot) {
       this.encounterObjects.push(
-        this.add.text(left + 20, top + 96, `获得：${loot}`, { fontFamily: 'monospace', fontSize: '13px', color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+        this.add.text(left + 20, top + 96, `获得：${loot}`, { fontFamily: 'monospace', fontSize: '26pxpx', color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
       );
     }
     this.encounterObjects.push(
-      this.add.text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: '11px', color: hex(TEXT.dim) }).setOrigin(0.5),
+      this.add.text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.dim) }).setOrigin(0.5),
     );
     if (state.status === 'lost') {
       this.scene.start('End');
@@ -1607,7 +1608,7 @@ export class GameScene extends Phaser.Scene {
       // above the prop instead of at a fixed offset from the floor line — at the
       // old spot it would be printed straight across the middle of the crate.
       const label = this.add
-        .text(c.x, y - 4 - box.displayHeight - 8, c.label, { fontFamily: 'monospace', fontSize: '11px', color: hex(TEXT.primary) })
+        .text(c.x, y - 4 - box.displayHeight - 8, c.label, { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.primary) })
         .setOrigin(0.5);
       this.containerObjs.set(c.id, { box, label });
       this.floorObjects.push(box, label);
@@ -1645,7 +1646,7 @@ export class GameScene extends Phaser.Scene {
   private drawBed(): void {
     const y = FLOOR_HEIGHT - 64;
     const bed = this.add.image(BED_X, y + 4, 'furn_bed').setOrigin(0.5, 1);
-    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: 'monospace', fontSize: '11px', color: hex(TEXT.primary) }).setOrigin(0.5);
+    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.primary) }).setOrigin(0.5);
     this.floorObjects.push(bed, bedLabel);
   }
 
@@ -2055,8 +2056,8 @@ export class GameScene extends Phaser.Scene {
   private drawWorkbench(): void {
     const y = FLOOR_HEIGHT - 64;
     const bench = this.add.image(CRAFT_X, y + 4, 'furn_workbench').setOrigin(0.5, 1);
-    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: 'monospace', fontSize: '11px', color: hex(TEXT.primary) }).setOrigin(0.5);
-    this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: 'monospace', fontSize: '11px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.primary) }).setOrigin(0.5);
+    this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
     this.floorObjects.push(bench, benchLabel, this.upgradeBoard);
     this.refreshUpgradeBoard();
   }
@@ -2079,7 +2080,7 @@ export class GameScene extends Phaser.Scene {
     this.craftObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.craft));
     // OVERHAUL UI: header strip instead of a centred title floating on a slab.
     this.craftObjects.push(...buildPanelHeader(this, left, top, panelW, '工作台 · 制作', UI.accent, PANEL_DEPTH.game.craft + 5));
-    const title = this.add.text(cx, top + 18, '', { fontFamily: 'monospace', fontSize: '16px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
+    const title = this.add.text(cx, top + 18, '', { fontFamily: 'monospace', fontSize: '32pxpx', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
     this.craftObjects.push(title);
 
     // OVERHAUL UI: row bands + a status column.
@@ -2173,8 +2174,8 @@ export class GameScene extends Phaser.Scene {
 
     this.pauseObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.pause));
     this.pauseObjects.push(...buildPanelHeader(this, left, top, panelW, '已暂停', UI.accent, PANEL_DEPTH.game.pause + 5));
-    const title = this.add.text(cx, top + 20, '', { fontFamily: 'monospace', fontSize: '16px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
-    const controls = this.add.text(cx, top + 50, 'A/D 移动 · E 交互 · I 背包 · C 制作', { fontFamily: 'monospace', fontSize: '11px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    const title = this.add.text(cx, top + 20, '', { fontFamily: 'monospace', fontSize: '32pxpx', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
+    const controls = this.add.text(cx, top + 50, 'A/D 移动 · E 交互 · I 背包 · C 制作', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
     this.pauseObjects.push(title, controls, this.pauseMarker);
 
     PAUSE_OPTIONS.forEach((label, i) => {
@@ -2311,7 +2312,7 @@ export class GameScene extends Phaser.Scene {
       // Same contact shadow as the player, so an NPC stands on the floor rather
       // than hovering a few pixels above it.
       const shadow = addContactShadow(this, npc.x, PLAYER_FEET_Y + 2, 26, 2, 0.5);
-      const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: 'monospace', fontSize: '11px', color: hex(TEXT.primary) }).setOrigin(0.5);
+      const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.primary) }).setOrigin(0.5);
       this.floorObjects.push(...shadow, sprite, nameLabel);
     }
   }

@@ -57,9 +57,16 @@ export const PLAYER_SPEED = 130; // px / second
 // band so the player reads as standing in front of them; this is that offset.
 export const PLAYER_FEET_Y = FLOOR_HEIGHT - 40;
 
-// The camera zoom that fits one floor's width. At 0.5 the view is 1280x720
-// world px, which is 3.6 floors tall — the cross-section the design asks for.
-export const FLOOR_VIEW_ZOOM = 0.5;
+// The camera zoom. It is 1, and it must stay 1.
+//
+// The cross-section's view is 1280x720 world px — one floor's width by 3.6
+// floors' height — which is exactly the design canvas at zoom 1, so no scaling
+// happens anywhere and the pixel art is exact. It used to be 0.5, back when the
+// canvas was 640x360, and a camera zoom resamples the world through the
+// renderer's filter: the figure came out as 291 colours from a 15-colour sheet,
+// #d9b48f arriving as #cdaa88, and 40% of it inside the wall's camouflage band.
+// Raising the design resolution instead of zooming is what removed the resample.
+export const FLOOR_VIEW_ZOOM = 1;
 // How many floors are drawn around the player: two above, two below, plus the
 // player's own. The view is 3.6 floors tall, so one above and one below leaves a
 // 120px band of empty black at whichever edge the player is not centred on —

@@ -56,6 +56,11 @@ export interface PlayerState {
   hunger: number;
   thirst: number;
   energy: number;
+  // Body heat, 0..100, 100 being warm. It drains toward the floor's cold and is
+  // restored by standing in a warmth source's radius. Optional so saves written
+  // before the environment system stay loadable — a missing one is re-created on
+  // the next tick. See systems/EnvironmentSystem.ts.
+  bodyTemp?: number;
   inventory: Inventory;
   // Reserved by docs/02_TECH_SPEC.md §4 for v0.2 equipment; no v0.1 system reads
   // or writes it beyond the initial null (GHI-03 n3).

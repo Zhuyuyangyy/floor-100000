@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { validateGameState } from '../systems/SaveSystem';
+import { BODY_TEMP_MAX, bodyTempOf } from '../systems/EnvironmentSystem';
 import { bumpFlag, flagKey, setFlag } from '../systems/WorldFlags';
 
 // The flag store is optional, so the save validator has to accept both shapes:
@@ -31,5 +32,29 @@ describe('save validation accepts the flag store', () => {
     const s = createNewGame(1);
     s.flags = 7 as unknown as Record<string, number>;
     expect(validateGameState(s).some((e) => e === 'flags 无效')).toBe(true);
+  });
+});
+
+describe('save validation accepts body heat', () => {
+  it('a save with no bodyTemp at all is valid', () => {
+    const s = createNewGame(1);
+    delete s.player.bodyTemp;
+    expect(validateGameState(s)).toEqual([]);
+    // and the system re-creates it rather than treating it as missing data
+    expect(bodyTempOf(s)).toBe(BODY_TEMP_MAX);
+  });
+
+  it('a save with bodyTemp is valid', () => {
+    const s = createNewGame(1);
+    s.player.bodyTemp = 62;
+    expect(validateGameState(s)).toEqual([]);
+  });
+
+  it('an out-of-range bodyTemp is rejected', () => {
+    const s = createNewGame(1);
+    s.player.bodyTemp = BODY_TEMP_MAX + 1;
+    expect(validateGameState(s).some((e) => e.includes('bodyTemp'))).toBe(true);
+    s.player.bodyTemp = -1;
+    expect(validateGameState(s).some((e) => e.includes('bodyTemp'))).toBe(true);
   });
 });

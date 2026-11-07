@@ -74,6 +74,68 @@ export const FLOOR_VIEW_ZOOM = 1;
 export const STACK_ABOVE = 2;
 export const STACK_BELOW = 2;
 
+// ── 楼层环境 ────────────────────────────────────────────────────────────────
+// The tower's five floors used to differ by a wall tint and a prop set, which
+// made them five colour schemes rather than five places. The environment model
+// gives each floor a temperature, a humidity, a danger rating and a set of
+// warmth sources, and body heat is a real stat that responds to them.
+//
+// This War of Mine's scene loop runs TickTemperature and TickHeaters alongside
+// ProcessSleep and ProcessSickness (docs/reference/TWOM_MECHANICS.md §3); ours
+// decayed three bars and had no temperature at all. The brazier on floor 5
+// already had a 90-frame animation — it was a light, never a heater.
+//
+//   cold      how fast body heat drains per game hour on this floor
+//   humidity  0..1; raises the cold drain and slows the warmth recovery
+//   danger    0..1; how likely a floor is to host the night event
+//   warmth    the heat sources the floor is drawn with
+export interface FloorEnvironment {
+  /** the floor's own name, for the HUD line */
+  label: string;
+  /** body-heat drain per game hour */
+  cold: number;
+  humidity: number;
+  danger: number;
+  /** whether this floor can host a wanderer at night */
+  hostile: boolean;
+}
+
+export const FLOOR_ENVIRONMENT: Record<number, FloorEnvironment> = {
+  1: { label: '宿舍', cold: 0.6, humidity: 0.1, danger: 0.0, hostile: false },
+  2: { label: '邻居宿舍', cold: 1.6, humidity: 0.2, danger: 0.3, hostile: true },
+  3: { label: '储物层', cold: 2.4, humidity: 0.6, danger: 0.5, hostile: true },
+  4: { label: '维修层', cold: 3.2, humidity: 0.7, danger: 0.8, hostile: true },
+  5: { label: '食堂', cold: 2.0, humidity: 0.5, danger: 0.6, hostile: true },
+};
+
+export function environmentFor(floor: number): FloorEnvironment {
+  return FLOOR_ENVIRONMENT[floor] ?? FLOOR_ENVIRONMENT[2];
+}
+
+// A warmth source: where it stands and how far its heat reaches. The brazier on
+// floor 5 is the strongest, the dorm's candles the weakest — which is why the
+// canteen reads as the floor you want to come back to.
+export interface WarmthSource {
+  x: number;
+  /** world px; body heat recovers inside this radius */
+  radius: number;
+  /** body-heat points per game hour recovered at the centre */
+  power: number;
+}
+
+export const WARMTH_SOURCES: Record<number, WarmthSource[]> = {
+  // the dorm: three wall candles, weak but present, so home is survivable
+  1: [
+    { x: 236, radius: 70, power: 4 },
+    { x: 640, radius: 70, power: 4 },
+    { x: 1044, radius: 70, power: 4 },
+  ],
+  // the canteen: one brazier per room, the strongest heat in the tower
+  5: [
+    { x: 1188, radius: 150, power: 14 },
+  ],
+};
+
 // The corridor used to hand the player its top speed on the frame a key went
 // down and take it away the frame it came up, so walking read as dragging a
 // sticker across the backdrop. These ramp the speed instead. Braking is quicker

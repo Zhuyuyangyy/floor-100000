@@ -4,6 +4,7 @@ import { devEntry } from '../core/devMode';
 import type { GameState } from '../core/gameTypes';
 import { modeDecayMult } from './modes';
 import { hungerLossMult } from './relics';
+import { tickEnvironment, type EnvironmentTick } from './EnvironmentSystem';
 
 // Time & survival rules (docs/01_GDD.md §5-6, config/game-balance.json).
 // Pure & deterministic: Phaser only feeds the real-time delta; these functions
@@ -36,10 +37,11 @@ export interface TimeTick {
   dayChanged: boolean;
   died: boolean;
   won: boolean;
+  /** body heat's transition this tick, if any */
+  environment?: EnvironmentTick;
 }
 
 const NONE: TimeTick = { gameMinutes: 0, dayChanged: false, died: false, won: false };
-
 export function formatClock(minuteOfDay: number): string {
   const m = ((Math.floor(minuteOfDay) % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
   const hh = String(Math.floor(m / 60)).padStart(2, '0');
@@ -90,17 +92,21 @@ function advanceGameMinutes(state: GameState, gameMinutes: number): TimeTick {
   if (dayChanged) state.worldEvents.activeEvent = null; // fresh roll each day
 
   applyDecay(state, gameMinutes);
+  // Body heat rides the same clock as the other three bars, so standing on floor
+  // 4 for twenty minutes costs the same whether those minutes were walked or
+  // spent searching a container (B3-03).
+  const env = tickEnvironment(state, gameMinutes);
 
   if (state.player.hp <= 0) {
     state.player.hp = 0;
     state.status = 'lost';
-    return { gameMinutes, dayChanged, died: true, won: false };
+    return { gameMinutes, dayChanged, died: true, won: false, environment: env };
   }
   if (devEntry().legacyWin && isLegacyVictory(state)) {
     state.status = 'won';
-    return { gameMinutes, dayChanged, died: false, won: true };
+    return { gameMinutes, dayChanged, died: false, won: true, environment: env };
   }
-  return { gameMinutes, dayChanged, died: false, won: false };
+  return { gameMinutes, dayChanged, died: false, won: false, environment: env };
 }
 
 // Advances the clock by a real-time delta, applies survival decay, and resolves

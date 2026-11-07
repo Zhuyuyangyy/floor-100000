@@ -43,6 +43,13 @@ import { ensureNightEvent } from '../systems/EventSystem';
 import { armNextRoll, dwellRollDue, ensureDwell, isDwellExempt, rollDwellEvent, tickDwell } from '../systems/dwellPressure';
 import { freshWandererAI, stepWandererAI, type WandererAI } from '../systems/wandererAI';
 import { ensureDailyGoal, grantDailyGoalReward, isDailyGoalDone } from '../systems/dailyGoals';
+import {
+  BODY_TEMP_MAX,
+  COLD_THRESHOLD,
+  bodyTempOf,
+  environmentLabel,
+  warmthAt,
+} from '../systems/EnvironmentSystem';
 import { recordDepth, runScore } from '../systems/progress';
 import { CHARACTER_NAMES, applyDepth, loadMeta, saveMeta, unlockFromDepth } from '../systems/metaProgress';
 import type { CharacterKey } from '../render/artpack';
@@ -144,6 +151,11 @@ const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: stri
   { key: 'thirst', label: '渴', color: 0x6aa8e5 },
   { key: 'energy', label: '精', color: 0x77c6a4 },
 ];
+
+// Body heat gets its own readout rather than a fifth bar: it is the one stat a
+// floor owns, so it reads as "where you are" as much as "how you are". The bar
+// would have said the latter and hidden the former.
+const TEMP_LABEL = '温';
 
 // ── HUD layout (OVERHAUL UI) ────────────────────────────────────────────────
 // Columns on the shared 4px grid: floor badge, clock, four stat bars (label +
@@ -252,6 +264,8 @@ export class GameScene extends Phaser.Scene {
   private floorBadge?: Phaser.GameObjects.Text;
   private goldText?: Phaser.GameObjects.Text;
   private goalText?: Phaser.GameObjects.Text;
+  /** the floor's environment line, right of the daily objective */
+  private environmentText?: Phaser.GameObjects.Text;
   private scoreText?: Phaser.GameObjects.Text;
   /** the low-HP edge warning: bands with their own base weights */
   private vignetteParts: Array<{ rect: Phaser.GameObjects.Rectangle; weight: number }> = [];
@@ -1716,10 +1730,17 @@ export class GameScene extends Phaser.Scene {
 
     // The daily objective gets its own slim line under the bar: it is the
     // answer to "what am I doing today", so it should not be a corner chip.
+    // The floor's environment rides the same line — it is the other half of that
+    // answer, and putting it anywhere else made the five floors read as five
+    // colour schemes.
     const goalY = HUD_BAR_H + 8;
     this.goalText = this.add
       .text(8, goalY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
       .setOrigin(0, 0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+
+    this.environmentText = this.add
+      .text(DESIGN_WIDTH - 8, goalY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.dust) })
+      .setOrigin(1, 0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // Centred on the CAMERA viewport, not the floor: FLOOR_WIDTH is the 1280px
     // world, but a scrollFactor-0 object is positioned in screen space, so
@@ -1835,6 +1856,30 @@ export class GameScene extends Phaser.Scene {
     const urgent = mostUrgentStat(getGame().player);
     this.statLabels.forEach((t, i) => t.setColor(STAT_BARS[i].key === urgent ? hex(TEXT.warn) : hex(TEXT.secondary)));
     this.refreshGoalHud();
+  }
+
+  /**
+   * The environment line refreshes on its own, not from refreshStats.
+   *
+   * refreshStats early-returns when the four bars have not moved, and the
+   * environment changes without any of them moving - walking from floor 4 onto
+   * floor 5's brazier changes the heat and nothing else. Calling it from the
+   * frame loop instead is what keeps the line honest.
+   */
+  private refreshEnvironmentHud(): void {
+    if (!this.environmentText) return;
+    const state = getGame();
+    const temp = bodyTempOf(state);
+    // The readout says what the heat is doing, not just the number: "回暖中" next
+    // to a brazier is the feedback that standing here was the right call.
+    const heat = warmthAt(state.currentFloor, state.player.x);
+    let mood: string;
+    if (heat > 0 && temp < BODY_TEMP_MAX) mood = '回暖中';
+    else if (temp <= COLD_THRESHOLD) mood = '寒冷';
+    else if (temp >= 85) mood = '暖和';
+    else mood = '微凉';
+    this.environmentText.setText(`${TEMP_LABEL} ${Math.round(temp)} ${mood} · ${environmentLabel(state.currentFloor)}`);
+    this.environmentText.setColor(temp <= COLD_THRESHOLD ? hex(TEXT.warn) : hex(PALETTE.dust));
   }
 
   private buildInventoryPanel(): void {
@@ -3158,6 +3203,18 @@ export class GameScene extends Phaser.Scene {
     const event = state.worldEvents.activeEvent;
     this.refreshClock();
     this.refreshStats();
+    this.refreshEnvironmentHud();
+    // Body heat crosses its thresholds slowly, so the message fires on the
+    // transition rather than every frame while cold. It is the floor telling you
+    // to move, which is the whole point of the stat.
+    if (tick.environment?.becameFreezing) {
+      this.flash('体温过低！靠近火源，否则会失温');
+      playSfx('danger');
+    } else if (tick.environment?.becameCold) {
+      this.flash('越来越冷了——这层没有热源');
+    } else if (tick.environment?.warmedUp) {
+      this.flash('缓过来了');
+    }
     this.applyNightLighting();
 
     // GHI-03 M3: the clock and the survival decay only ever advance here, and

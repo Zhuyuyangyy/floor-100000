@@ -1,6 +1,7 @@
 import { PLAYABLE_FLOORS_V01, SAVE_KEY, SCHEMA_VERSION } from '../core/constants';
 import { getItem, isItemId } from '../data/items';
 import { STAT_MAX } from './InventorySystem';
+import { BODY_TEMP_MAX } from './EnvironmentSystem';
 import type { ActiveEvent, FloorVisit, GameState } from '../core/gameTypes';
 
 // Save protocol (docs/02_TECH_SPEC.md §6). Deserialization never throws: a bad
@@ -164,6 +165,15 @@ export function validateGameState(data: unknown): string[] {
     }
     if (player.equipped !== null && (typeof player.equipped !== 'string' || !isItemId(player.equipped))) {
       errors.push('player.equipped 无效');
+    }
+    // Body heat. Optional, like the flag store: a save written before the
+    // environment system loads without it and the value is re-created on the
+    // next tick. Present must be in range.
+    if (player.bodyTemp !== undefined) {
+      const v = player.bodyTemp;
+      if (typeof v !== 'number' || Number.isNaN(v) || v < 0 || v > BODY_TEMP_MAX) {
+        errors.push('player.bodyTemp 超出范围');
+      }
     }
     if (!isStringArray(player.homeUpgrades)) errors.push('player.homeUpgrades 无效');
     const inv = player.inventory as Record<string, unknown> | undefined;

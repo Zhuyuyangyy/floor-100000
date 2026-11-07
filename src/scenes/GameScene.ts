@@ -50,6 +50,7 @@ import {
   environmentLabel,
   warmthAt,
 } from '../systems/EnvironmentSystem';
+import { ailmentLabel, inflict } from '../systems/SicknessSystem';
 import { recordDepth, runScore } from '../systems/progress';
 import { CHARACTER_NAMES, applyDepth, loadMeta, saveMeta, unlockFromDepth } from '../systems/metaProgress';
 import type { CharacterKey } from '../render/artpack';
@@ -156,6 +157,14 @@ const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: stri
 // floor owns, so it reads as "where you are" as much as "how you are". The bar
 // would have said the latter and hidden the former.
 const TEMP_LABEL = '温';
+
+// Ailment labels, so the HUD and the item flash name the same thing the same way.
+const AILMENT_LABEL: Record<string, string> = {
+  cold: '冻伤',
+  fever: '发烧',
+  wound: '受伤',
+  food_poisoning: '食物中毒',
+};
 
 // ── HUD layout (OVERHAUL UI) ────────────────────────────────────────────────
 // Columns on the shared 4px grid: floor badge, clock, four stat bars (label +
@@ -1878,8 +1887,12 @@ export class GameScene extends Phaser.Scene {
     else if (temp <= COLD_THRESHOLD) mood = '寒冷';
     else if (temp >= 85) mood = '暖和';
     else mood = '微凉';
-    this.environmentText.setText(`${TEMP_LABEL} ${Math.round(temp)} ${mood} · ${environmentLabel(state.currentFloor)}`);
-    this.environmentText.setColor(temp <= COLD_THRESHOLD ? hex(TEXT.warn) : hex(PALETTE.dust));
+    // An ailment outranks the weather on this line: being ill is more urgent than
+    // being chilly, and this line is the only place either is stated.
+    const ill = ailmentLabel(state);
+    const envPart = ill ? `${ill} · ${environmentLabel(state.currentFloor)}` : environmentLabel(state.currentFloor);
+    this.environmentText.setText(`${TEMP_LABEL} ${Math.round(temp)} ${mood} · ${envPart}`);
+    this.environmentText.setColor(temp <= COLD_THRESHOLD || ill !== '' ? hex(TEXT.warn) : hex(PALETTE.dust));
   }
 
   private buildInventoryPanel(): void {
@@ -2783,7 +2796,10 @@ export class GameScene extends Phaser.Scene {
         // on the survivor, at their chest, so the stat that moved is the one you
         // can see move.
         playFx(this, 'collect-burst', getGame().player.x, PLAYER_FEET_Y - 52, LIGHT_DEPTH + 1);
-        this.flash(`使用 ${getItem(stack.itemId).displayName} · ${STAT_LABEL[result.stat!]} +${Math.round(result.amount!)}`);
+        // The item's stat gain, and what it cleared: a medkit that closes a
+        // wound says so, because that is the reason it was reached for.
+        const cured = result.cured?.length ? ` · 治好${result.cured.map((c) => AILMENT_LABEL[c]).join('、')}` : '';
+        this.flash(`使用 ${getItem(stack.itemId).displayName} · ${STAT_LABEL[result.stat!]} +${Math.round(result.amount!)}${cured}`);
       } else {
         this.flash(result.reason ?? '无法使用');
       }
@@ -3215,6 +3231,16 @@ export class GameScene extends Phaser.Scene {
     } else if (tick.environment?.warmedUp) {
       this.flash('缓过来了');
     }
+    // An ailment announces itself on the crossing, not every frame it lasts: the
+    // message is news, and news that repeats is noise.
+    if (tick.sickness?.critical.length) {
+      this.flash(`${AILMENT_LABEL[tick.sickness.critical[0]]}恶化！需要治疗`);
+      playSfx('danger');
+    } else if (tick.sickness?.worsened.length) {
+      this.flash(`你${AILMENT_LABEL[tick.sickness.worsened[0]]}了——状态会掉得更快`);
+    } else if (tick.sickness?.recovered.length) {
+      this.flash(`${AILMENT_LABEL[tick.sickness.recovered[0]]}好了`);
+    }
     this.applyNightLighting();
 
     // GHI-03 M3: the clock and the survival decay only ever advance here, and
@@ -3376,6 +3402,11 @@ export class GameScene extends Phaser.Scene {
     if (Math.abs(this.wanderer.x - state.player.x) <= 12 && this.time.now - this.wandererHitAt >= WANDERER_HIT_COOLDOWN_MS) {
       this.wandererHitAt = this.time.now;
       state.player.hp = Math.max(0, state.player.hp - damage);
+      // AND IT LEAVES A WOUND. A hit used to be HP leaving and nothing else, so
+      // the only thing wrong with you afterwards was a smaller number. Now every
+      // hit opens a wound that outlasts it, and a lunge opens a deeper one — the
+      // ailment is what makes the night cost something the next day too.
+      inflict(state, 'wound', ai!.state === 'lunge' ? 55 : 30, absoluteMinute(state));
       this.refreshStats();
       this.playActionAnim(hurtAnimKey('player'), 400);
       playSfx('hurt');

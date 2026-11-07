@@ -3,6 +3,7 @@ import { createNewGame } from '../core/gameState';
 import { validateGameState } from '../systems/SaveSystem';
 import { BODY_TEMP_MAX, bodyTempOf } from '../systems/EnvironmentSystem';
 import { bumpFlag, flagKey, setFlag } from '../systems/WorldFlags';
+import { inflict } from '../systems/SicknessSystem';
 
 // The flag store is optional, so the save validator has to accept both shapes:
 // a save written before the system (absent) and one after (numbers). Rejecting
@@ -56,5 +57,31 @@ describe('save validation accepts body heat', () => {
     expect(validateGameState(s).some((e) => e.includes('bodyTemp'))).toBe(true);
     s.player.bodyTemp = -1;
     expect(validateGameState(s).some((e) => e.includes('bodyTemp'))).toBe(true);
+  });
+});
+
+describe('save validation accepts ailments', () => {
+  it('a save with no ailments at all is valid', () => {
+    const s = createNewGame(1);
+    delete s.player.ailments;
+    expect(validateGameState(s)).toEqual([]);
+  });
+
+  it('a save with ailments is valid', () => {
+    const s = createNewGame(1);
+    inflict(s, 'wound', 40, 0);
+    expect(validateGameState(s)).toEqual([]);
+  });
+
+  it('an unknown ailment id is rejected', () => {
+    const s = createNewGame(1);
+    s.player.ailments = [{ id: 'plague' as unknown as 'wound', severity: 10, sinceMinute: 0 }];
+    expect(validateGameState(s).some((e) => e.includes('未知病症'))).toBe(true);
+  });
+
+  it('an out-of-range severity is rejected', () => {
+    const s = createNewGame(1);
+    s.player.ailments = [{ id: 'wound', severity: 101, sinceMinute: 0 }];
+    expect(validateGameState(s).some((e) => e.includes('severity'))).toBe(true);
   });
 });

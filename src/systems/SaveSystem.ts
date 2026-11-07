@@ -2,6 +2,7 @@ import { PLAYABLE_FLOORS_V01, SAVE_KEY, SCHEMA_VERSION } from '../core/constants
 import { getItem, isItemId } from '../data/items';
 import { STAT_MAX } from './InventorySystem';
 import { BODY_TEMP_MAX } from './EnvironmentSystem';
+import { AILMENTS } from './SicknessSystem';
 import type { ActiveEvent, FloorVisit, GameState } from '../core/gameTypes';
 
 // Save protocol (docs/02_TECH_SPEC.md §6). Deserialization never throws: a bad
@@ -173,6 +174,21 @@ export function validateGameState(data: unknown): string[] {
       const v = player.bodyTemp;
       if (typeof v !== 'number' || Number.isNaN(v) || v < 0 || v > BODY_TEMP_MAX) {
         errors.push('player.bodyTemp 超出范围');
+      }
+    }
+    // Ailments. Optional for the same reason: a save written before the sickness
+    // system loads with none, which is the correct reading of a healthy run.
+    if (player.ailments !== undefined) {
+      if (!Array.isArray(player.ailments)) errors.push('player.ailments 无效');
+      else {
+        for (const a of player.ailments) {
+          const id = (a as { id?: unknown }).id;
+          const sev = (a as { severity?: unknown }).severity;
+          if (typeof id !== 'string' || !(id in AILMENTS)) errors.push(`player.ailments.${String(id)} 未知病症`);
+          else if (typeof sev !== 'number' || Number.isNaN(sev) || sev < 0 || sev > 100) {
+            errors.push(`player.ailments.${id}.severity 超出范围`);
+          }
+        }
       }
     }
     if (!isStringArray(player.homeUpgrades)) errors.push('player.homeUpgrades 无效');

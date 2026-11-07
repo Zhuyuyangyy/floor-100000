@@ -5,6 +5,7 @@ import type { GameState } from '../core/gameTypes';
 import { modeDecayMult } from './modes';
 import { hungerLossMult } from './relics';
 import { tickEnvironment, type EnvironmentTick } from './EnvironmentSystem';
+import { tickSickness, type SicknessTick } from './SicknessSystem';
 
 // Time & survival rules (docs/01_GDD.md §5-6, config/game-balance.json).
 // Pure & deterministic: Phaser only feeds the real-time delta; these functions
@@ -39,6 +40,8 @@ export interface TimeTick {
   won: boolean;
   /** body heat's transition this tick, if any */
   environment?: EnvironmentTick;
+  /** what the ailments did this tick, if anything */
+  sickness?: SicknessTick;
 }
 
 const NONE: TimeTick = { gameMinutes: 0, dayChanged: false, died: false, won: false };
@@ -96,17 +99,19 @@ function advanceGameMinutes(state: GameState, gameMinutes: number): TimeTick {
   // 4 for twenty minutes costs the same whether those minutes were walked or
   // spent searching a container (B3-03).
   const env = tickEnvironment(state, gameMinutes);
+  // Ailments ride it too, and they read the body heat the same tick just set.
+  const sick = tickSickness(state, gameMinutes);
 
   if (state.player.hp <= 0) {
     state.player.hp = 0;
     state.status = 'lost';
-    return { gameMinutes, dayChanged, died: true, won: false, environment: env };
+    return { gameMinutes, dayChanged, died: true, won: false, environment: env, sickness: sick };
   }
   if (devEntry().legacyWin && isLegacyVictory(state)) {
     state.status = 'won';
-    return { gameMinutes, dayChanged, died: false, won: true, environment: env };
+    return { gameMinutes, dayChanged, died: false, won: true, environment: env, sickness: sick };
   }
-  return { gameMinutes, dayChanged, died: false, won: false, environment: env };
+  return { gameMinutes, dayChanged, died: false, won: false, environment: env, sickness: sick };
 }
 
 // Advances the clock by a real-time delta, applies survival decay, and resolves

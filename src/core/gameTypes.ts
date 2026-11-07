@@ -23,6 +23,25 @@ export type ItemCategory = 'consumable' | 'material' | 'tool';
 
 export type StatKey = 'hp' | 'hunger' | 'thirst' | 'energy';
 
+// Ailments: the middle ground between "fine" and "dead".
+//
+// Before this the run had no state between healthy and lost — hunger, thirst,
+// cold and wounds all drained a bar and then took HP, so the only feedback was a
+// number falling. This War of Mine distinguishes DwellerSickness from
+// DwellerSicknessNoEffect in its diary (docs/reference/TWOM_MECHANICS.md §1), and
+// its scene loop runs ProcessSickness alongside ProcessSleep: an ailment is a
+// condition the survivor carries, not a faster way to lose.
+export type AilmentId = 'cold' | 'fever' | 'wound' | 'food_poisoning';
+
+/** One active ailment and how far it has progressed, 0..100. */
+export interface Ailment {
+  id: AilmentId;
+  /** 0..100; at 100 the ailment starts costing HP directly */
+  severity: number;
+  /** game-minute it began, for the HUD's "病了 X 小时" */
+  sinceMinute: number;
+}
+
 export interface ItemEffect {
   stat: StatKey;
   amount: number;
@@ -61,6 +80,9 @@ export interface PlayerState {
   // before the environment system stay loadable — a missing one is re-created on
   // the next tick. See systems/EnvironmentSystem.ts.
   bodyTemp?: number;
+  // Active ailments. Optional for the same reason: a save written before the
+  // sickness system loads with none, which is the correct reading.
+  ailments?: Ailment[];
   inventory: Inventory;
   // Reserved by docs/02_TECH_SPEC.md §4 for v0.2 equipment; no v0.1 system reads
   // or writes it beyond the initial null (GHI-03 n3).

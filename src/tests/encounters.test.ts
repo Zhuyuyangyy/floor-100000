@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import type { GameState } from '../core/gameTypes';
 import { addItem, countItem } from '../systems/InventorySystem';
+import { hasFlag, flagKey } from '../systems/WorldFlags';
 import {
   ENCOUNTER_TABLE,
   markResolved,
@@ -287,6 +288,16 @@ describe('shouldSkip / markResolved 与非法选择', () => {
     expect(shouldSkip(s, 'spot_a')).toBe(true);
     expect(s.encounters!['spot_a']).toBe('loot:take');
     expect(shouldSkip(s, 'spot_b')).toBe(false);
+    // flag 也立了：别的系统问「解决了吗」不必 import 本模块
+    expect(hasFlag(s, flagKey.encounter('spot_a'))).toBe(true);
+  });
+
+  it('旧存档只有 encounters 没有 flag 时仍判定为已解决', () => {
+    // flag 之前的存档。桥接的意义就在于不因为换了记号就重放一次遭遇。
+    const s = createNewGame(1);
+    s.encounters = { spot_a: 'loot:take' };
+    expect(s.flags).toBeUndefined();
+    expect(shouldSkip(s, 'spot_a')).toBe(true);
   });
 
   it('encounters 缺字段（旧存档）时 markResolved 懒初始化', () => {

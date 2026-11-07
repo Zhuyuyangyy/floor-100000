@@ -8,6 +8,7 @@ import type { Rng } from '../core/rng';
 import { PLAYABLE_FLOORS_V01 } from '../core/constants';
 import type { GameState, ItemId } from '../core/gameTypes';
 import { addItem, countItem, removeItem } from './InventorySystem';
+import { hasFlag, setFlag, flagKey } from './WorldFlags';
 
 export type EncounterKind = 'loot' | 'ambush' | 'trader' | 'note' | 'cache' | 'boss';
 
@@ -132,14 +133,23 @@ export function rollEncounter(state: GameState, floor: number, spotId: string): 
 }
 
 // 该 spotId 是否已解决（encounters 由 Lead 预置，旧存档可能缺字段）。
+//
+// 同时认 flag：markResolved 现在两个地方都写，flag 是给「只想问一句解决了没」
+// 的调用方用的——他们不必为了一个布尔值 import 本模块。旧存档只有
+// encounters 没有 flag，所以这里仍要回落到查表。
 export function shouldSkip(state: GameState, spotId: string): boolean {
+  if (hasFlag(state, flagKey.encounter(spotId))) return true;
   return state.encounters?.[spotId] !== undefined;
 }
 
 // 写入解决结果；state.encounters 可能 undefined，先懒初始化。
+//
+// encounters 保留 resultKey 这个字符串负载，它是真的有用（结算面板要显示选了
+// 哪条路），所以不搬进数字 flag；flag 只承担「已解决」这个布尔事实。
 export function markResolved(state: GameState, spotId: string, resultKey: string): void {
   if (!state.encounters) state.encounters = {};
   state.encounters[spotId] = resultKey;
+  setFlag(state, flagKey.encounter(spotId));
 }
 
 const INVALID_RESULT: EncounterResult = {

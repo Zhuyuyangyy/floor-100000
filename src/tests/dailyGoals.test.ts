@@ -4,6 +4,7 @@ import { ensureDailyGoal, grantDailyGoalReward, isDailyGoalDone } from '../syste
 import type { DailyGoalKind } from '../systems/dailyGoals';
 import { addItem, countItem, removeItem } from '../systems/InventorySystem';
 import { createNewGame } from '../core/gameState';
+import { hasFlag, flagKey } from '../systems/WorldFlags';
 import type { FloorVisit } from '../core/gameTypes';
 
 // OVERHAUL W3：每日目标。钉死四类不变量——seeded 确定性、跨天重 roll 且当天
@@ -156,13 +157,41 @@ describe('grantDailyGoalReward', () => {
     expect(countItem(s.player.inventory, 'ration_pack')).toBe(rationsBefore + 1);
   });
 
-  it('已结算（done）不再发，即使此刻仍然达标', () => {
+  it('已结算不再发，即使此刻仍然达标', () => {
     const s = createNewGame(7);
     s.dailyGoal = { day: s.day, kind: 'upgrade', target: 1, done: true };
     s.player.homeUpgrades.push('rain_collector');
     expect(isDailyGoalDone(s)).toBe(true); // 纯判定与结算状态无关
     expect(grantDailyGoalReward(s)).toBe(false);
     expect(s.records!.bestScore).toBe(0);
+  });
+
+  it('done=true 但 flag 缺失（旧存档）不重复发', () => {
+    // flag 之前的存档只用 done=true 表达「已结算」。换标记后若不做迁移，
+    // 这份存档会在下一次 tick 再领一次。done=true 而 flag 不存在即视为已结。
+    const s = createNewGame(7);
+    s.dailyGoal = { day: s.day, kind: 'upgrade', target: 1, done: true };
+    s.player.homeUpgrades.push('rain_collector');
+    expect(s.flags).toBeUndefined();
+    expect(grantDailyGoalReward(s)).toBe(false);
+    expect(s.records!.bestScore).toBe(0);
+    // 并且迁移写下了 flag，之后与正常路径一致
+    expect(hasFlag(s, flagKey.once(`goal-paid:${s.day}`))).toBe(true);
+  });
+
+  it('done 与「已结算」是两个语义：done=false 也可能已结算', () => {
+    // 这是拆分的目的。过去 done 一个字段扛两个意思，无法表达「达标了、也发了，
+    // 但 done 还没置位」这种中间态；现在 flag 管发没发，done 只做展示。
+    const s = createNewGame(7);
+    s.dailyGoal = { day: s.day, kind: 'upgrade', target: 1, done: false };
+    s.player.homeUpgrades.push('rain_collector');
+    expect(grantDailyGoalReward(s)).toBe(true);
+    expect(s.dailyGoal!.done).toBe(true);
+    // 手动把 done 拨回 false：已结算的事实不受影响，不会二次发放
+    s.dailyGoal!.done = false;
+    expect(isDailyGoalDone(s)).toBe(true);
+    expect(grantDailyGoalReward(s)).toBe(false);
+    expect(s.records!.bestScore).toBe(80);
   });
 
   it('旧存档路径：records 缺失时懒初始化（deepestFloor 兜底为当前楼层）', () => {

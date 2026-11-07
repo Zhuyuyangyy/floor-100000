@@ -3124,8 +3124,11 @@ export class GameScene extends Phaser.Scene {
     // reward fires once, with the fanfare, so finishing it feels like an event
     // rather than a silent counter.
     ensureDailyGoal(state);
-    if (isDailyGoalDone(state) && !state.dailyGoal?.done) {
-      grantDailyGoalReward(state);
+    // The fanfare fires on the transition, not on the state: grantDailyGoalReward
+    // is itself idempotent (a flag guards it), so this only decides whether to
+    // make noise. Reading the return value rather than re-deriving the condition
+    // keeps the two from drifting apart.
+    if (isDailyGoalDone(state) && grantDailyGoalReward(state)) {
       playSfx('goal');
       this.flash('今日目标完成！分数 +' + GAME_CONFIG.overhaul.dailyGoalRewardScore + '，获得口粮×1');
     }

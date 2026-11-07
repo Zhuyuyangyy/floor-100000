@@ -115,6 +115,15 @@ function validateOverhaulBlocks(s: Record<string, unknown>): string[] {
       if (typeof v !== 'string') errors.push(`encounters.${k} 无效`);
     }
   }
+  // World flags. Absent is fine - a save written before the system loads without
+  // one and the store is created on the next write. Present must be numbers.
+  const flags = s.flags;
+  if (flags !== undefined) {
+    if (!isRecord(flags)) errors.push('flags 无效');
+    else for (const [k, v] of Object.entries(flags)) {
+      if (typeof v !== 'number' || !Number.isFinite(v)) errors.push(`flags.${k} 无效`);
+    }
+  }
   return errors;
 }
 

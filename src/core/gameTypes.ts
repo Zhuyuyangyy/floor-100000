@@ -162,6 +162,10 @@ export interface GameState {
   // OVERHAUL Wave C2: how many paid shortcuts this run has taken — the price
   // inflation counter.
   shortcuts?: number;
+  // World flags: one flat place to answer "has this happened yet". Optional so
+  // saves written before the system existed stay loadable — a missing one is
+  // created on the next write. See systems/WorldFlags.ts for why this exists.
+  flags?: Record<string, number>;
   status: GameStatus;
 }
 

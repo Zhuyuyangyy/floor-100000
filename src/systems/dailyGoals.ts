@@ -3,6 +3,7 @@ import type { Rng } from '../core/rng';
 import { GAME_CONFIG } from '../core/config';
 import { PLAYABLE_FLOORS_V01 } from '../core/constants';
 import { addItem, countItem } from './InventorySystem';
+import { hasFlag, once, setFlag, flagKey } from './WorldFlags';
 import type { GameState } from '../core/gameTypes';
 
 // OVERHAUL W3（docs/OVERHAUL_M1.md）：每日目标。
@@ -102,15 +103,22 @@ export function isDailyGoalDone(state: GameState): boolean {
 // 结算奖励：达标且未结算过 → 发 1 次（records.bestScore +dailyGoalRewardScore，
 // 背包 +1 压缩口粮），返回 true；否则 false。
 //
-// 「只发一次」的标记复用 dailyGoal.done：records 的契约字段只有
-// deepestFloor / bestScore（Lead 预置，W3 不改 core/gameTypes.ts），不能加
-// rewarded 标记，因此约定 done=true 表示「已完成并已结算」。首次进入本函数
-// 时 goal.done 必为 false（rollDailyGoal 置 false），所以它同时承担「未发过」
-// 的职责，二次调用直接返回 false，无法刷分。
+// 「只发一次」现在走 flag（once:goal-paid:<day>），不再复用 dailyGoal.done。
+// 过去 done 一个字段扛两个语义——「目标已完成」和「奖励已结算」——因为
+// records 的契约字段只有 deepestFloor / bestScore，加不进 rewarded。现在 flag
+// 有地方放了，两个语义分开：done 只回答「结算过了吗」，是否达标由
+// isDailyGoalDone 实时判定（玩家可能在结算后喝掉达标用的净水，那时 done 仍为
+// true 但已达标为 false，两者本就不该绑死）。
 export function grantDailyGoalReward(state: GameState): boolean {
   const goal = state.dailyGoal;
-  if (!goal || goal.done) return false;
+  if (!goal) return false;
   if (!isDailyGoalDone(state)) return false;
+  // 同一天只结算一次。flag 带上 day，跨天自动失效，不需要清理昨天的标记。
+  const paidKey = flagKey.once(`goal-paid:${goal.day}`);
+  // 旧存档迁移：flag 之前，「已结算」只由 done=true 表达。那份存档若没有对应
+  // flag，说明它是在换标记之前结过账的——不迁移就会因为换了记号再发一次。
+  if (goal.done && !hasFlag(state, paidKey)) setFlag(state, paidKey);
+  if (!once(state, paidKey)) return false;
 
   goal.done = true;
 
@@ -122,9 +130,9 @@ export function grantDailyGoalReward(state: GameState): boolean {
   }
   state.records.bestScore += GAME_CONFIG.overhaul.dailyGoalRewardScore;
 
-  // 背包满时口粮加不进来（addItem 报 overflow）。此时不撤回分数也不退回
-  // done：done 已置位，重复调用返回 false，玩家不会因为「捡不起来」被卡在
-  // 可重复领取的状态里；满包提示交给 HUD（W4/W5）。
+  // 背包满时口粮加不进来（addItem 报 overflow）。此时不撤回分数也不退标记：
+  // flag 已置位，重复调用返回 false，玩家不会因为「捡不起来」被卡在可重复
+  // 领取的状态里；满包提示交给 HUD（W4/W5）。
   addItem(state.player.inventory, 'ration_pack', 1);
   return true;
 }

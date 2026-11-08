@@ -31,6 +31,13 @@ describe('createNewGame', () => {
     expect(s.player.thirst).toBe(p.thirstStart);
     expect(s.player.energy).toBe(p.energyStart);
   });
+
+  it('starts with low stress and an empty diary', () => {
+    const s = createNewGame(42);
+    expect(s.player.stress).toBe(20);
+    expect(s.diary).toEqual([]);
+    expect(s.shelterPlan).toBeUndefined();
+  });
 });
 
 describe('addToInventory stacking', () => {

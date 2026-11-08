@@ -3,7 +3,7 @@ import { getItem, isItemId } from '../data/items';
 import { STAT_MAX } from './InventorySystem';
 import { BODY_TEMP_MAX } from './EnvironmentSystem';
 import { AILMENTS } from './SicknessSystem';
-import type { ActiveEvent, FloorVisit, GameState } from '../core/gameTypes';
+import type { ActiveEvent, DiaryEvent, FloorVisit, GameState, ShelterPlan } from '../core/gameTypes';
 
 // Save protocol (docs/02_TECH_SPEC.md §6). Deserialization never throws: a bad
 // save returns a graceful error so the UI can show "存档损坏" and keep the
@@ -81,6 +81,58 @@ function validateDwell(value: unknown): string | null {
   return null;
 }
 
+const DIARY_KINDS: DiaryEvent['kind'][] = [
+  'returned_from_scavenge',
+  'late_return',
+  'combat_wounded',
+  'shelter_rested',
+  'shelter_treated',
+  'shelter_repaired',
+  'neighbor_cared',
+  'shelter_attacked',
+];
+const SHELTER_ACTIONS: ShelterPlan['action'][] = ['rest', 'treat', 'repair', 'care'];
+
+function validateDiary(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (!Array.isArray(value)) return 'diary 无效';
+  if (value.length > 64) return 'diary 超过 64 条上限';
+  for (const [index, raw] of value.entries()) {
+    if (!isRecord(raw)) return `diary.${index} 无效`;
+    if (typeof raw.id !== 'string' || raw.id.length === 0) return `diary.${index}.id 无效`;
+    if (typeof raw.day !== 'number' || !Number.isInteger(raw.day) || raw.day < 1) return `diary.${index}.day 无效`;
+    if (typeof raw.minute !== 'number' || !Number.isInteger(raw.minute) || raw.minute < 0 || raw.minute >= 1440) {
+      return `diary.${index}.minute 无效`;
+    }
+    if (typeof raw.floor !== 'number' || !Number.isInteger(raw.floor)) return `diary.${index}.floor 无效`;
+    if (!DIARY_KINDS.includes(raw.kind as DiaryEvent['kind'])) return `diary.${index}.kind 无效`;
+    if (!isStringArray(raw.actorIds)) return `diary.${index}.actorIds 无效`;
+    if (!Array.isArray(raw.itemChanges)) return `diary.${index}.itemChanges 无效`;
+    for (const change of raw.itemChanges) {
+      if (!isRecord(change) || typeof change.itemId !== 'string' || !isItemId(change.itemId)) {
+        return `diary.${index}.itemChanges.itemId 无效`;
+      }
+      if (typeof change.quantity !== 'number' || !Number.isInteger(change.quantity) || change.quantity === 0) {
+        return `diary.${index}.itemChanges.quantity 无效`;
+      }
+    }
+    if (typeof raw.stressDelta !== 'number' || !Number.isFinite(raw.stressDelta)) {
+      return `diary.${index}.stressDelta 无效`;
+    }
+    if (typeof raw.message !== 'string') return `diary.${index}.message 无效`;
+  }
+  return null;
+}
+
+function validateShelterPlan(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (!isRecord(value)) return 'shelterPlan 无效';
+  if (typeof value.day !== 'number' || !Number.isInteger(value.day) || value.day < 1) return 'shelterPlan.day 无效';
+  if (!SHELTER_ACTIONS.includes(value.action as ShelterPlan['action'])) return 'shelterPlan.action 无效';
+  if (typeof value.resolved !== 'boolean') return 'shelterPlan.resolved 无效';
+  return null;
+}
+
 // OVERHAUL: the three additive state blocks. Optional so pre-overhaul saves
 // load; when present each must be well-formed because systems read them
 // without guards.
@@ -126,6 +178,10 @@ function validateOverhaulBlocks(s: Record<string, unknown>): string[] {
       if (typeof v !== 'number' || !Number.isFinite(v)) errors.push(`flags.${k} 无效`);
     }
   }
+  const diaryError = validateDiary(s.diary);
+  if (diaryError) errors.push(diaryError);
+  const shelterError = validateShelterPlan(s.shelterPlan);
+  if (shelterError) errors.push(shelterError);
   return errors;
 }
 
@@ -163,6 +219,9 @@ export function validateGameState(data: unknown): string[] {
       if (typeof v !== 'number' || Number.isNaN(v) || v < 0 || v > STAT_MAX[key]) {
         errors.push(`player.${key} 超出范围`);
       }
+    }
+    if (player.stress !== undefined && (typeof player.stress !== 'number' || Number.isNaN(player.stress) || player.stress < 0 || player.stress > 100)) {
+      errors.push('player.stress 超出范围');
     }
     if (player.equipped !== null && (typeof player.equipped !== 'string' || !isItemId(player.equipped))) {
       errors.push('player.equipped 无效');
@@ -248,6 +307,8 @@ export function deserialize(json: string): SaveResult {
   if (typeof state.player.gold !== 'number' || !Number.isFinite(state.player.gold)) {
     state.player.gold = 0;
   }
+  if (state.player.stress === undefined) state.player.stress = 20;
+  if (state.diary === undefined) state.diary = [];
   return { ok: true, state };
 }
 

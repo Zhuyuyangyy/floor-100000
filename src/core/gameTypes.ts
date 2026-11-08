@@ -23,6 +23,36 @@ export type ItemCategory = 'consumable' | 'material' | 'tool';
 
 export type StatKey = 'hp' | 'hunger' | 'thirst' | 'energy';
 
+export type DiaryEventKind =
+  | 'returned_from_scavenge'
+  | 'late_return'
+  | 'combat_wounded'
+  | 'shelter_rested'
+  | 'shelter_treated'
+  | 'shelter_repaired'
+  | 'neighbor_cared'
+  | 'shelter_attacked';
+
+export interface DiaryEvent {
+  id: string;
+  day: number;
+  minute: number;
+  floor: number;
+  kind: DiaryEventKind;
+  actorIds: string[];
+  itemChanges: Array<{ itemId: ItemId; quantity: number }>;
+  stressDelta: number;
+  message: string;
+}
+
+export type ShelterAction = 'rest' | 'treat' | 'repair' | 'care';
+
+export interface ShelterPlan {
+  day: number;
+  action: ShelterAction;
+  resolved: boolean;
+}
+
 // Ailments: the middle ground between "fine" and "dead".
 //
 // Before this the run had no state between healthy and lost — hunger, thirst,
@@ -75,6 +105,8 @@ export interface PlayerState {
   hunger: number;
   thirst: number;
   energy: number;
+  /** Cross-day emotional pressure, 0..100. Optional for pre-shelter saves. */
+  stress?: number;
   // Body heat, 0..100, 100 being warm. It drains toward the floor's cold and is
   // restored by standing in a warmth source's radius. Optional so saves written
   // before the environment system stay loadable — a missing one is re-created on
@@ -173,6 +205,10 @@ export interface GameState {
   npcStates: Record<string, string>;
   visitedFloors: Record<number, FloorVisit>;
   worldEvents: { history: string[]; activeEvent: ActiveEvent | null; dwell?: DwellState };
+  /** Recent facts the player has lived through. Optional for legacy saves. */
+  diary?: DiaryEvent[];
+  /** The one shelter decision currently being resolved, if any. */
+  shelterPlan?: ShelterPlan;
   // OVERHAUL (docs/OVERHAUL_M1.md): the day's rolled objective. Optional so
   // saves written before the system existed stay loadable.
   dailyGoal?: { day: number; kind: 'water' | 'containers' | 'upgrade' | 'floor'; target: number; done: boolean };

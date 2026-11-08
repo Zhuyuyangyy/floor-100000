@@ -58,6 +58,7 @@ export function createNewGame(seed: number): GameState {
       hunger: p.hungerStart,
       thirst: p.thirstStart,
       energy: p.energyStart,
+      stress: 20,
       inventory: inventoryFromStartingItems(cfg.inventory.slotCount, cfg.inventory.startingItems),
       equipped: null,
       homeUpgrades: [],
@@ -68,6 +69,7 @@ export function createNewGame(seed: number): GameState {
     npcStates: {},
     visitedFloors: {},
     worldEvents: { history: [], activeEvent: null },
+    diary: [],
     // OVERHAUL (docs/OVERHAUL_M1.md): the day's objective, the cross-run
     // records, and the resolved encounter spots. Initialised here so a new run
     // has them from the first frame; old saves simply lack them and the systems

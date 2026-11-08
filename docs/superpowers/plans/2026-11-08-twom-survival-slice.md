@@ -29,7 +29,7 @@
 - Modify: `src/core/gameTypes.ts`
 - Modify: `src/core/gameState.ts`
 - Test: `src/tests/gameState.test.ts`
-- Test: `src/tests/SaveSystem.test.ts`
+- Test: `src/tests/save.test.ts`
 
 **Interfaces:**
 - Add `DiaryEventKind`, `DiaryEvent`, `ShelterAction`, `ShelterPlan` exactly as defined in `docs/plans/2026-11-08-twom-survival-slice-design.md`.
@@ -55,7 +55,7 @@ it('accepts saves that omit the new optional fields', () => {
   delete legacy.player.stress;
   delete legacy.diary;
   delete legacy.shelterPlan;
-  expect(validateSave(legacy)).toEqual({ ok: true, value: legacy });
+  expect(validateGameState(legacy)).toEqual([]);
 });
 ```
 
@@ -72,7 +72,7 @@ Expected: PASS, with existing save tests unchanged.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/core/gameTypes.ts src/core/gameState.ts src/tests/gameState.test.ts src/tests/SaveSystem.test.ts
+git add src/core/gameTypes.ts src/core/gameState.ts src/tests/gameState.test.ts src/tests/save.test.ts
 git commit -m "feat: add diary stress and shelter state contracts"
 ```
 

@@ -1,0 +1,100 @@
+{
+  "floor": 1,
+  "background": {
+    "file": "01-固定背景/第1层-固定背景-2880x200.png",
+    "width": 2880,
+    "height": 200,
+    "segments": 9,
+    "segmentWidth": 320
+  },
+  "props": [
+    {
+      "file": "02-物品与家具/墙钟.png",
+      "width": 29,
+      "height": 36,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/干涸水龙头.png",
+      "width": 34,
+      "height": 36,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/旧衣挂架.png",
+      "width": 58,
+      "height": 57,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/空搪瓷杯.png",
+      "width": 17,
+      "height": 15,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-bed.png",
+      "width": 150,
+      "height": 74,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-cabinet.png",
+      "width": 76,
+      "height": 96,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-lamp.png",
+      "width": 28,
+      "height": 42,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-shelf.png",
+      "width": 96,
+      "height": 89,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-sink.png",
+      "width": 150,
+      "height": 90,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-workbench.png",
+      "width": 150,
+      "height": 95,
+      "format": "PNG RGBA"
+    }
+  ],
+  "animations": [
+    {
+      "folder": "03-动画/供水恢复-水滴",
+      "frameWidth": 16,
+      "frameHeight": 21,
+      "frameCount": 4,
+      "fps": 6,
+      "loop": true,
+      "origin": {
+        "x": 8,
+        "y": 0
+      }
+    },
+    {
+      "folder": "03-动画/储物柜-开启",
+      "frameWidth": 96,
+      "frameHeight": 102,
+      "frameCount": 4,
+      "fps": 6,
+      "loop": false,
+      "origin": {
+        "x": 48,
+        "y": 98
+      }
+    }
+  ],
+  "layout": "本层布局-素材示例.json",
+  "preview": "00-预览/第1层-参考分层拼装预览.png"
+}

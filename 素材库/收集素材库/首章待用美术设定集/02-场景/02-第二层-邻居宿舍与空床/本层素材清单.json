@@ -1,0 +1,69 @@
+{
+  "floor": 2,
+  "background": {
+    "file": "01-固定背景/第2层-固定背景-2880x200.png",
+    "width": 2880,
+    "height": 200,
+    "segments": 9,
+    "segmentWidth": 320
+  },
+  "props": [
+    {
+      "file": "02-物品与家具/床头柜.png",
+      "width": 43,
+      "height": 53,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/无人空床.png",
+      "width": 120,
+      "height": 64,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-bed.png",
+      "width": 150,
+      "height": 74,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-cabinet.png",
+      "width": 76,
+      "height": 96,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-lamp.png",
+      "width": 28,
+      "height": 42,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-notice.png",
+      "width": 88,
+      "height": 67,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-shelf.png",
+      "width": 96,
+      "height": 89,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/面包.png",
+      "width": 26,
+      "height": 18,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/饭票.png",
+      "width": 24,
+      "height": 15,
+      "format": "PNG RGBA"
+    }
+  ],
+  "animations": [],
+  "layout": "本层布局-素材示例.json",
+  "preview": "00-预览/第2层-参考分层拼装预览.png"
+}

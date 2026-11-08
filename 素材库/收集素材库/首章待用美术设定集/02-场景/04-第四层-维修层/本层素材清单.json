@@ -1,0 +1,100 @@
+{
+  "floor": 4,
+  "background": {
+    "file": "01-固定背景/第4层-固定背景-2880x200.png",
+    "width": 2880,
+    "height": 200,
+    "segments": 9,
+    "segmentWidth": 320
+  },
+  "props": [
+    {
+      "file": "02-物品与家具/供水阀门管道.png",
+      "width": 160,
+      "height": 64,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/净水滤芯.png",
+      "width": 25,
+      "height": 34,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/压力表.png",
+      "width": 35,
+      "height": 37,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/工具架.png",
+      "width": 98,
+      "height": 87,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-fusebox.png",
+      "width": 62,
+      "height": 84,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-lamp.png",
+      "width": 28,
+      "height": 42,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-pipes.png",
+      "width": 160,
+      "height": 63,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-shelf.png",
+      "width": 96,
+      "height": 89,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-tank.png",
+      "width": 80,
+      "height": 105,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-workbench.png",
+      "width": 150,
+      "height": 95,
+      "format": "PNG RGBA"
+    }
+  ],
+  "animations": [
+    {
+      "folder": "03-动画/供水阀门-操作",
+      "frameWidth": 160,
+      "frameHeight": 65,
+      "frameCount": 4,
+      "fps": 6,
+      "loop": false,
+      "origin": {
+        "x": 80,
+        "y": 22
+      }
+    },
+    {
+      "folder": "03-动画/维修电箱-开启",
+      "frameWidth": 80,
+      "frameHeight": 94,
+      "frameCount": 4,
+      "fps": 6,
+      "loop": false,
+      "origin": {
+        "x": 40,
+        "y": 90
+      }
+    }
+  ],
+  "layout": "本层布局-素材示例.json",
+  "preview": "00-预览/第4层-参考分层拼装预览.png"
+}

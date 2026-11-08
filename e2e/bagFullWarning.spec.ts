@@ -89,24 +89,59 @@ test.describe('B3-02.1 bag-full feedback', () => {
     }
   }
 
+  // The player keeps sliding for a moment after the key is released - movement
+  // is a speed ramp, not a switch - and an interaction fired mid-slide can miss
+  // the radius. Wait until x stops changing rather than assuming it already has.
+  async function settle(page: Page, timeout = 1500): Promise<void> {
+    let last = (await readState(page)).player.x;
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(80);
+      const now = (await readState(page)).player.x;
+      if (Math.abs(now - last) < 0.5) return;
+      last = now;
+    }
+  }
+
+  // Polls a real game-state predicate in short steps. Used after every keypress
+  // so a slow runner costs exactly as long as it needs, not a guessed constant.
+  async function pollUntil(page: Page, check: () => Promise<boolean>, timeout: number): Promise<boolean> {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      if (await check()) return true;
+      await page.waitForTimeout(60);
+    }
+    return check();
+  }
+
   async function openContainer(page: Page, floor: number, id: string, x: number): Promise<void> {
     const opened = async (): Promise<boolean> =>
       ((await readState(page)).visitedFloors[floor]?.openedContainers ?? []).includes(id);
     await walkTo(page, x);
-    for (let i = 0; i < 8; i++) {
+    await settle(page);
+    // This used to press E, wait a fixed 220ms, and repeat eight times. That was
+    // enough locally and not on the CI runner, where the spec died with
+    // "could not open 3/crate_metal" - all eight presses had landed before the
+    // key was being handled. Wait for the state to change instead.
+    for (let i = 0; i < 10; i++) {
       if (await opened()) return;
       await page.keyboard.press('E');
-      await page.waitForTimeout(220);
+      if (await pollUntil(page, opened, 1500)) return;
+      await walkTo(page, x); // slid past the radius: step back and try again
     }
     throw new Error(`could not open ${floor}/${id}`);
   }
 
   async function takeStairs(page: Page, dir: 'up' | 'down', expectedFloor: number): Promise<void> {
-    await walkTo(page, dir === 'up' ? UP_EXIT_X : DOWN_EXIT_X);
-    for (let i = 0; i < 8; i++) {
-      if ((await readState(page)).currentFloor === expectedFloor) return;
+    const exitX = dir === 'up' ? UP_EXIT_X : DOWN_EXIT_X;
+    const onFloor = async (): Promise<boolean> => (await readState(page)).currentFloor === expectedFloor;
+    await walkTo(page, exitX);
+    await settle(page);
+    for (let i = 0; i < 10; i++) {
+      if (await onFloor()) return;
       await page.keyboard.press('E');
-      await page.waitForTimeout(220);
+      if (await pollUntil(page, onFloor, 1500)) return;
+      await walkTo(page, exitX);
     }
     throw new Error(`could not go ${dir} to floor ${expectedFloor}`);
   }

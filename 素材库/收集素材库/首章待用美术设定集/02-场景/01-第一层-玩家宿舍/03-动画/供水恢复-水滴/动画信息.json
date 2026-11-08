@@ -1,0 +1,17 @@
+{
+  "name": "供水恢复-水滴",
+  "frameWidth": 16,
+  "frameHeight": 21,
+  "frameCount": 4,
+  "fps": 6,
+  "loop": true,
+  "origin": {
+    "x": 8,
+    "y": 0
+  },
+  "spriteSheet": "4帧横向.png",
+  "frames": "帧/00.png 至 帧/03.png",
+  "preview": "动画预览.gif",
+  "previewRepeats": true,
+  "notes": "仅在供水恢复后启用；停水时隐藏。原点对准水龙头出水口下方。"
+}

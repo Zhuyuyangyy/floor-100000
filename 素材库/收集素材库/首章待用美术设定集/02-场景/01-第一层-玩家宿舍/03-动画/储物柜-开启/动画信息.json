@@ -1,0 +1,17 @@
+{
+  "name": "储物柜-开启",
+  "frameWidth": 96,
+  "frameHeight": 102,
+  "frameCount": 4,
+  "fps": 6,
+  "loop": false,
+  "origin": {
+    "x": 48,
+    "y": 98
+  },
+  "spriteSheet": "4帧横向.png",
+  "frames": "帧/00.png 至 帧/03.png",
+  "preview": "动画预览.gif",
+  "previewRepeats": true,
+  "notes": "一次性开启；关闭可逆序播放。使用本动画第 00 帧作为关闭状态，避免与旧静态图切换跳变。"
+}

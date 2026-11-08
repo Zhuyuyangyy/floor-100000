@@ -1,0 +1,17 @@
+{
+  "name": "木箱-开启",
+  "frameWidth": 84,
+  "frameHeight": 100,
+  "frameCount": 4,
+  "fps": 6,
+  "loop": false,
+  "origin": {
+    "x": 42,
+    "y": 96
+  },
+  "spriteSheet": "4帧横向.png",
+  "frames": "帧/00.png 至 帧/03.png",
+  "preview": "动画预览.gif",
+  "previewRepeats": true,
+  "notes": "一次性开启；使用本动画第 00 帧作为关闭状态。"
+}

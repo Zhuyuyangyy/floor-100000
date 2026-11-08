@@ -1,0 +1,88 @@
+{
+  "floor": 3,
+  "background": {
+    "file": "01-固定背景/第3层-固定背景-2880x200.png",
+    "width": 2880,
+    "height": 200,
+    "segments": 9,
+    "segmentWidth": 320
+  },
+  "props": [
+    {
+      "file": "02-物品与家具/搬运手推车.png",
+      "width": 112,
+      "height": 92,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/旧电池.png",
+      "width": 28,
+      "height": 28,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/木箱堆.png",
+      "width": 126,
+      "height": 90,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/空货架.png",
+      "width": 100,
+      "height": 99,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-lamp.png",
+      "width": 28,
+      "height": 42,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-metal.png",
+      "width": 74,
+      "height": 50,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-shelf.png",
+      "width": 96,
+      "height": 89,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-wood.png",
+      "width": 74,
+      "height": 58,
+      "format": "PNG RGBA"
+    }
+  ],
+  "animations": [
+    {
+      "folder": "03-动画/木箱-开启",
+      "frameWidth": 84,
+      "frameHeight": 100,
+      "frameCount": 4,
+      "fps": 6,
+      "loop": false,
+      "origin": {
+        "x": 42,
+        "y": 96
+      }
+    },
+    {
+      "folder": "03-动画/金属箱-开启",
+      "frameWidth": 100,
+      "frameHeight": 94,
+      "frameCount": 4,
+      "fps": 6,
+      "loop": false,
+      "origin": {
+        "x": 50,
+        "y": 88
+      }
+    }
+  ],
+  "layout": "本层布局-素材示例.json",
+  "preview": "00-预览/第3层-参考分层拼装预览.png"
+}

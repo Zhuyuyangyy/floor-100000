@@ -1,0 +1,17 @@
+{
+  "name": "验收台-指示灯",
+  "frameWidth": 150,
+  "frameHeight": 117,
+  "frameCount": 4,
+  "fps": 4,
+  "loop": true,
+  "origin": {
+    "x": 75,
+    "y": 112
+  },
+  "spriteSheet": "4帧横向.png",
+  "frames": "帧/00.png 至 帧/03.png",
+  "preview": "动画预览.gif",
+  "previewRepeats": true,
+  "notes": "红色指示灯循环：暗、较亮、亮、较亮；固定桌体。"
+}

@@ -19,6 +19,13 @@ async function waitForScene(page: Page, key: string): Promise<void> {
 }
 
 test('lingering on a floor rolls dwell pressure', async ({ page }) => {
+  // The roll needs 60 game-minutes of dwell. At full speed that is ~20 real
+  // seconds, but the frame delta is clamped (MAX_FRAME_MS), so a slow, GPU-less
+  // runner stretches the same 60 minutes well past that. The wait below already
+  // allows 90s; the test itself was still on the default 30s, so the two
+  // contradicted each other and the spec failed on CI while passing locally.
+  test.setTimeout(180_000);
+
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
 

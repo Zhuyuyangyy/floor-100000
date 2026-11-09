@@ -21,11 +21,12 @@ export function makeDiaryEvent(
   input: Omit<DiaryEvent, 'id' | 'day' | 'minute'>,
 ): DiaryEvent {
   const sequence = state.diary?.length ?? 0;
+  const minute = Math.floor(state.gameMinuteOfDay);
   return {
     ...input,
-    id: `day-${state.day}-minute-${state.gameMinuteOfDay}-${input.kind}-${sequence}`,
+    id: `day-${state.day}-minute-${minute}-${input.kind}-${sequence}`,
     day: state.day,
-    minute: state.gameMinuteOfDay,
+    minute,
   };
 }
 

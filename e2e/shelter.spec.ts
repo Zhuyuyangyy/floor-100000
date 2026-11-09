@@ -67,6 +67,21 @@ test.describe('first-floor shelter loop', () => {
     expect(state?.player.stress).toBeLessThan(20);
     expect(state?.diary?.some((event) => event.kind === 'shelter_rested')).toBe(true);
     await page.screenshot({ path: 'e2e/screenshots/shelter-next-day.png' });
+
+    await page.reload();
+    await page.waitForFunction(() => {
+      const g = window.__PHASER_GAME__;
+      return !!g && g.scene.getScenes(true).some((scene) => scene.scene.key === 'Menu');
+    });
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(150);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => {
+      const g = window.__PHASER_GAME__;
+      return !!g && g.scene.getScenes(true).some((scene) => scene.scene.key === 'Game');
+    });
+    const resumed = await page.evaluate(() => window.__PHASER_SESSION__?.getState());
+    expect(resumed?.day).toBe(2);
     expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
   });
 });

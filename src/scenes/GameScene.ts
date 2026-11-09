@@ -38,7 +38,7 @@ import {
 import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
 import { countItem, isBagFull, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
-import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, isNight, sleep, spendTime } from '../systems/SurvivalSystem';
+import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, isNight, spendTime } from '../systems/SurvivalSystem';
 import { ensureNightEvent } from '../systems/EventSystem';
 import { armNextRoll, dwellRollDue, ensureDwell, isDwellExempt, rollDwellEvent, tickDwell } from '../systems/dwellPressure';
 import { freshWandererAI, stepWandererAI, type WandererAI } from '../systems/wandererAI';
@@ -51,6 +51,8 @@ import {
   warmthAt,
 } from '../systems/EnvironmentSystem';
 import { ailmentLabel, inflict } from '../systems/SicknessSystem';
+import { recentDiary } from '../systems/DiarySystem';
+import { availableShelterActions, finishNight, resolveShelterAction } from '../systems/ShelterSystem';
 import { recordDepth, runScore } from '../systems/progress';
 import { CHARACTER_NAMES, applyDepth, loadMeta, saveMeta, unlockFromDepth } from '../systems/metaProgress';
 import type { CharacterKey } from '../render/artpack';
@@ -130,7 +132,7 @@ import { getItem } from '../data/items';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
 import { trade } from '../systems/TradeSystem';
-import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId } from '../core/gameTypes';
+import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId, ShelterAction } from '../core/gameTypes';
 
 const INVENTORY_SLOTS = 12;
 // Row pitch for the inventory list: 20px fits a full-size 16x16 icon with a 2px
@@ -202,6 +204,12 @@ const CHOICE_LABELS: Record<EncounterChoice, string> = {
   leave: '离开',
   read: '读纸条',
 };
+const SHELTER_ROWS: Array<{ action: ShelterAction; label: string; value: string }> = [
+  { action: 'rest', label: '休息', value: '恢复精力 · 压力 -6' },
+  { action: 'treat', label: '治疗', value: '医疗包 · 处理伤势' },
+  { action: 'repair', label: '修理', value: '木材×2 + 胶带×1' },
+  { action: 'care', label: '照顾邻居', value: '口粮×1 · 压力 -12' },
+];
 type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 's' | 'f' | 'up' | 'down';
 type DirKeys = {
   up: Phaser.Input.Keyboard.Key;
@@ -292,6 +300,12 @@ export class GameScene extends Phaser.Scene {
   // OVERHAUL Wave C1: the shop panel's cursor.
   private shopSelected = 0;
   private shopEntries: ShopEntry[] = [];
+  // First-floor shelter decision panel: the cursor is visual state, while the
+  // selected action itself is committed through ShelterSystem.
+  private shelterOpen = false;
+  private shelterSelected = 0;
+  private shelterObjects: PanelObject[] = [];
+  private shelterMarker!: Phaser.GameObjects.Image;
   private feedbackTimer?: Phaser.Time.TimerEvent;
   private lastClock = '';
   private lastStats = '';
@@ -392,6 +406,8 @@ export class GameScene extends Phaser.Scene {
     this.dialogueOptions = [];
     this.dialogueOptionIcons = [];
     this.dialogueMarker = createMarker(this);
+    this.shelterObjects = [];
+    this.shelterMarker = createMarker(this);
     // 重新开始 runs while the pause menu is still open, and these flags survive a
     // restart. Left set, update() early-returns forever and every panel handler
     // refuses to run, so the restarted game looks frozen.
@@ -401,6 +417,8 @@ export class GameScene extends Phaser.Scene {
     this.craftSelected = 0;
     this.dialogueOpen = false;
     this.dialogue = null;
+    this.shelterOpen = false;
+    this.shelterSelected = 0;
     this.pauseOpen = false;
     this.pauseSelected = 0;
     this.wanderer = undefined;
@@ -1828,10 +1846,11 @@ export class GameScene extends Phaser.Scene {
     const goal = state.dailyGoal;
     const done = goal ? isDailyGoalDone(state) : false;
     const label = goal ? GOAL_LABELS[goal.kind](goal.target) : '';
-    const key = `${goal?.day ?? 0}|${goal?.kind ?? ''}|${goal?.target ?? 0}|${String(done)}`;
+    const stress = Math.round(state.player.stress ?? 20);
+    const key = `${goal?.day ?? 0}|${goal?.kind ?? ''}|${goal?.target ?? 0}|${String(done)}|${stress}`;
     if (key !== this.lastGoalKey) {
       this.lastGoalKey = key;
-      this.goalText.setText(`目标 ${label}${done ? ' ✓' : ''}`);
+      this.goalText.setText(`目标 ${label}${done ? ' ✓' : ''} · 压力 ${stress}`);
       this.goalText.setColor(done ? hex(TEXT.highlight) : hex(PALETTE.lightHigh));
     }
     this.scoreText.setText(`${runScore(state)}分`);
@@ -1851,7 +1870,7 @@ export class GameScene extends Phaser.Scene {
   private refreshStats(): void {
     const p = getGame().player;
     const values = [p.hp, p.hunger, p.thirst, p.energy];
-    const key = values.map((v) => Math.round(v)).join(',');
+    const key = `${values.map((v) => Math.round(v)).join(',')}|${Math.round(p.stress ?? 20)}`;
     if (key === this.lastStats) return;
     this.lastStats = key;
     this.barsGfx.clear();
@@ -2287,7 +2306,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onToggleCrafting(): void {
-    if (this.inventoryOpen || this.dialogueOpen || this.pauseOpen) return;
+    if (this.inventoryOpen || this.dialogueOpen || this.pauseOpen || this.shelterOpen) return;
     if (!this.craftingOpen && getGame().currentFloor !== STARTING_FLOOR) {
       this.flash('只能在宿舍工作台制作');
       return;
@@ -2614,6 +2633,7 @@ export class GameScene extends Phaser.Scene {
       this.pauseObjects,
       this.dialogueObjects,
       this.encounterObjects,
+      this.shelterObjects,
     ];
     let found = false;
     for (const group of groups) {
@@ -2652,12 +2672,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onToggleMap(): void {
-    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen) return;
+    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
     this.openTowerOverview();
   }
 
   private onToggleInventory(): void {
-    if (this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen) return;
+    if (this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
     this.toggleInventory();
   }
 
@@ -2677,6 +2697,7 @@ export class GameScene extends Phaser.Scene {
       !this.craftingOpen &&
       !this.dialogueOpen &&
       !this.pauseOpen &&
+      !this.shelterOpen &&
       this.clearStrayPanels()
     ) {
       this.flash('面板已清理');
@@ -2700,6 +2721,10 @@ export class GameScene extends Phaser.Scene {
       this.closeEncounter();
       return;
     }
+    if (this.shelterOpen) {
+      this.closeShelter();
+      return;
+    }
     if (this.inventoryOpen) this.toggleInventory();
     else if (this.craftingOpen) this.toggleCrafting();
     else if (this.dialogueOpen) this.dialogueBack();
@@ -2707,6 +2732,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onNavUp(): void {
+    if (this.shelterOpen && !getGame().shelterPlan?.resolved) {
+      this.shelterSelected = Math.max(0, this.shelterSelected - 1);
+      this.buildShelterPanel();
+      return;
+    }
     // OVERHAUL Wave C1: the shop's cursor.
     if (this.encounterOpen && !getGame().combat && !this.encounter) {
       this.shopSelected = Math.max(0, this.shopSelected - 1);
@@ -2735,6 +2765,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onNavDown(): void {
+    if (this.shelterOpen && !getGame().shelterPlan?.resolved) {
+      this.shelterSelected = Math.min(SHELTER_ROWS.length - 1, this.shelterSelected + 1);
+      this.buildShelterPanel();
+      return;
+    }
     // OVERHAUL Wave C1: the shop's cursor.
     if (this.encounterOpen && !getGame().combat && !this.encounter) {
       this.shopSelected = Math.min(this.shopEntries.length - 1, this.shopSelected + 1);
@@ -2766,6 +2801,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onUse(): void {
+    if (this.shelterOpen) {
+      this.activateShelterChoice();
+      return;
+    }
     // OVERHAUL Wave A: the fight's turn key. Once the outcome screen is up,
     // Enter closes it; until then it plays the selected action.
     if (this.encounterOpen && getGame().combat) {
@@ -2817,6 +2856,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onInteract(): void {
+    if (this.shelterOpen) {
+      this.onUse();
+      return;
+    }
     if (this.inventoryOpen || this.craftingOpen || this.pauseOpen) return;
     if (this.dialogueOpen) {
       this.closeDialogue();
@@ -2914,6 +2957,7 @@ export class GameScene extends Phaser.Scene {
     if (this.encounterOpen && combat) return '↑/↓ 选择 · Enter 出招 · ESC 撤退';
     if (this.encounterOpen && this.encounter) return '↑/↓ 选择 · Enter 确认 · ESC 离开';
     if (this.encounterOpen) return '↑/↓ 选择 · Enter 买入 · S 卖出 · ESC 离开';
+    if (this.shelterOpen) return getGame().shelterPlan?.resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回';
     if (this.inventoryOpen) return '↑/↓ 选择 · Enter 使用 · I 关闭';
     if (this.craftingOpen) return '↑/↓ 选择 · Enter 制作 · C 关闭';
     if (this.dialogueOpen) return '↑/↓ 选择 · Enter 确定 · ESC 返回';
@@ -2927,30 +2971,125 @@ export class GameScene extends Phaser.Scene {
 
   private attemptSleep(): void {
     const state = getGame();
-    const result = sleep(state);
+    if (!isNight(state.gameMinuteOfDay)) {
+      this.flash('还太早，20:00 后才能安排夜间行动');
+      return;
+    }
+    this.openShelter();
+  }
+
+  private openShelter(): void {
+    const state = getGame();
+    if (!state.shelterPlan?.resolved && availableShelterActions(state).length === 0) {
+      this.flash('今晚没有可安排的 shelter 行动');
+      return;
+    }
+    const existing = state.shelterPlan?.action;
+    this.shelterSelected = existing ? Math.max(0, SHELTER_ROWS.findIndex((row) => row.action === existing)) : 0;
+    this.shelterOpen = true;
+    this.buildShelterPanel();
+  }
+
+  private closeShelter(): void {
+    this.shelterOpen = false;
+    for (const object of this.shelterObjects) {
+      if (object !== this.shelterMarker) object.destroy();
+    }
+    this.shelterObjects = [];
+    this.shelterMarker.setVisible(false);
+  }
+
+  private buildShelterPanel(): void {
+    for (const object of this.shelterObjects) {
+      if (object !== this.shelterMarker) object.destroy();
+    }
+    this.shelterObjects = [];
+    const state = getGame();
+    const { width, height } = this.viewSize();
+    const panelW = 500;
+    const panelH = 300;
+    const cx = width / 2;
+    const cy = height / 2;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+    const depth = PANEL_DEPTH.game.dialogue;
+    const resolved = state.shelterPlan?.resolved === true;
+
+    this.shelterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
+    this.shelterObjects.push(...buildPanelHeader(this, left, top, panelW, '夜间安排 · 宿舍', UI.good, depth + 5));
+    this.shelterObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 44, depth + 5));
+    const stress = Math.round(state.player.stress ?? 20);
+    const latest = recentDiary(state, 1)[0];
+    this.shelterObjects.push(
+      this.add.text(left + 24, top + 40, `压力 ${stress}/100${latest ? ` · 上次：${latest.message}` : ' · 今天还没有记录'}`, {
+        fontFamily: 'monospace',
+        fontSize: `${TYPE.caption}px`,
+        color: hex(stress >= 70 ? TEXT.warn : TEXT.primary),
+        wordWrap: { width: panelW - 48 },
+      }).setOrigin(0, 0.5).setDepth(depth + 6),
+    );
+    const rowsTop = top + 80;
+    for (const [index, row] of SHELTER_ROWS.entries()) {
+      const objects = buildListRow(this, left + 16, rowsTop + index * 26, panelW - 32, depth + 6, {
+        label: row.label,
+        value: row.value,
+        selected: index === this.shelterSelected,
+        dim: resolved && state.shelterPlan?.action !== row.action,
+      });
+      this.shelterObjects.push(...objects);
+      const label = objects.find((object) => object instanceof Phaser.GameObjects.Text && object.text === row.label) as Phaser.GameObjects.Text | undefined;
+      if (index === this.shelterSelected && label) {
+        placeMarker(this.shelterMarker, label);
+        this.shelterMarker.setDepth(depth + 8).setVisible(true).setScrollFactor(0);
+      }
+    }
+    this.shelterObjects.push(
+      this.add.text(cx, top + panelH - 14, resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回', {
+        fontFamily: 'monospace',
+        fontSize: `${TYPE.caption}px`,
+        color: hex(PALETTE.clothHigh),
+      }).setOrigin(0.5).setDepth(depth + 6),
+    );
+    this.shelterObjects.push(this.shelterMarker);
+    this.assertPanelContent('shelter', this.shelterObjects);
+  }
+
+  private activateShelterChoice(): void {
+    const state = getGame();
+    if (state.shelterPlan?.resolved) {
+      const result = finishNight(state);
+      if (!result.ok) {
+        this.flash(result.reason ?? '今晚还不能睡');
+        return;
+      }
+      this.closeShelter();
+      saveToStorage(state);
+      playSfx('sleep');
+      const cam = this.cameras.main;
+      cam.fadeOut(520, 5, 8, 11);
+      this.time.delayedCall(560, () => {
+        if (!this.scene.isActive()) return;
+        cam.fadeIn(620, 5, 8, 11);
+        this.refreshClock();
+        this.refreshStats();
+        this.applyNightLighting();
+        this.flash(`睡到第 ${result.nextDay} 天 06:00 · 压力 ${Math.round(state.player.stress ?? 20)}`);
+      });
+      if (state.status === 'lost') this.scene.start('End');
+      return;
+    }
+
+    const row = SHELTER_ROWS[this.shelterSelected];
+    if (!row) return;
+    const result = resolveShelterAction(state, row.action);
     if (!result.ok) {
-      this.flash(result.reason);
+      this.flash(result.reason ?? result.message);
       return;
     }
     saveToStorage(state);
-    playSfx('sleep');
-    // AND THE NIGHT PASSES. Sleeping was a sound effect and a line of text: the
-    // clock jumped eight hours and the frame did not move, so a new day looked
-    // identical to the last one. The screen now goes down and comes back with the
-    // day change behind the dark, which is the only cue that time actually went
-    // anywhere.
-    const cam = this.cameras.main;
-    cam.fadeOut(520, 5, 8, 11);
-    this.time.delayedCall(560, () => {
-      if (!this.scene.isActive()) return;
-      cam.fadeIn(620, 5, 8, 11);
-      this.refreshClock();
-      this.refreshStats();
-      this.applyNightLighting();
-      if (!result.won) this.flash(`睡到第 ${result.newDay} 天 06:00`);
-    });
-    if (result.won) this.scene.start('End');
-    else this.flash(`睡到第 ${result.newDay} 天 06:00`);
+    playSfx('click');
+    this.buildShelterPanel();
+    this.flash(`${result.message} 按 Enter 睡觉`);
   }
 
   private nearestContainer(): GeneratedContainer | null {
@@ -3120,7 +3259,7 @@ export class GameScene extends Phaser.Scene {
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
     this.refreshBagFullWarning();
-    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen) return;
+    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
     const state = getGame();
 
     // B3-01 D9: a rejected write used to be silent, so a full disk or a private
@@ -3311,7 +3450,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (this.nearBed(state)) {
-      this.hintText.setText('按 E 睡觉');
+      this.hintText.setText(isNight(state.gameMinuteOfDay) ? '按 E 安排夜间行动' : '床位 · 20:00 后可安排夜间行动');
       return;
     }
     if (this.nearCraftStation(state)) {

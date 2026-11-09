@@ -18,9 +18,11 @@ interface E2EGameState {
     hunger: number;
     thirst: number;
     energy: number;
+    stress?: number;
     homeUpgrades: string[];
     inventory: { slotCount: number; slots: Array<{ itemId: string; quantity: number }> };
   };
+  diary?: Array<{ kind: string; message: string }>;
   visitedFloors: Record<string, { openedContainers: string[]; lootedItems: string[] }>;
   worldEvents: {
     history: string[];

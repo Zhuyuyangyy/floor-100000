@@ -69,7 +69,7 @@ import {
   type EncounterChoice,
 } from '../systems/encounters';
 import { encounterSpots, nudgeSpotX, placeClearX } from '../systems/encounterSpots';
-import { resolveRound, playerCombatant, GUARD_ENERGY_RESTORE, type Combatant } from '../systems/combat';
+import { resolveRound, playerCombatant, GUARD_ENERGY_RESTORE, type CombatAction, type CombatRound, type Combatant } from '../systems/combat';
 import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster } from '../systems/monsters';
 import { guardianDamageMult, lootBonus, moveSpeedMult } from '../systems/relics';
 import { modeGuardianDamageMult } from '../systems/modes';
@@ -1039,6 +1039,23 @@ export class GameScene extends Phaser.Scene {
     lockToScreen(this.encounterObjects);
   }
 
+  // Feedback is deliberately downstream of the pure combat result. It can add
+  // sprites, a short shake, and an action pose, but it never rolls, mutates HP,
+  // or decides whether the turn continues.
+  private playCombatFeedback(round: CombatRound, action: CombatAction): void {
+    const state = getGame();
+    if (round.playerDamage > 0) {
+      playFx(this, 'sword-slash', state.player.x + 28, PLAYER_FEET_Y - 52, LIGHT_DEPTH);
+      if (round.monsterDead) playFx(this, 'crit-hit', state.player.x + 28, PLAYER_FEET_Y - 52, LIGHT_DEPTH + 1);
+    }
+    if (action === 'guard' && round.monsterDamage > 0 && !round.fled) {
+      playFx(this, 'parry', state.player.x + 10, PLAYER_FEET_Y - 50, LIGHT_DEPTH + 1);
+    }
+    if (round.monsterDamage > 0 && !round.fled) {
+      playFx(this, 'hit-flash', state.player.x, PLAYER_FEET_Y - 48, LIGHT_DEPTH + 2);
+    }
+  }
+
   // One turn: the engine resolves the round, this method lands the numbers on
   // state and decides whether the fight continues.
   private activateCombatChoice(): void {
@@ -1060,16 +1077,11 @@ export class GameScene extends Phaser.Scene {
     const round = resolveRound(player, monsterC, action, rng);
     combat.log.push(...round.messages);
     combat.guarding = action === 'guard';
+    this.playCombatFeedback(round, action);
 
     if (round.playerDamage > 0) {
       combat.monster.hp = Math.max(0, combat.monster.hp - round.playerDamage);
       this.playActionAnim(attackAnimKey('player'), 300);
-      // THE BLOW LANDS. Before this the only sign a hit connected was the
-      // monster's HP bar shrinking - the number changed and nothing on screen
-      // did. The killing blow gets the bigger burst: there is no crit mechanic in
-      // the combat model to key off, and inventing one here would be a lie, but
-      // monsterDead is a real signal and the finish deserves the louder effect.
-      playFx(this, round.monsterDead ? 'crit-hit' : 'hit-spark', state.player.x + 22, PLAYER_FEET_Y - 52, LIGHT_DEPTH);
     }
     if (action === 'guard') {
       state.player.energy = Math.min(GAME_CONFIG.player.energyMax, state.player.energy + GUARD_ENERGY_RESTORE);
@@ -1091,9 +1103,6 @@ export class GameScene extends Phaser.Scene {
       state.player.hp = Math.max(0, state.player.hp - dmg);
       if (action === 'guard') this.playActionAnim(hurtAnimKey('player'), 400);
       this.cameras.main.shake(160, 0.008);
-      // AND THE PLAYER FEELS IT. Taking damage was a number in the HUD changing;
-      // the flash puts it on the body that took it.
-      playFx(this, 'hit-flash', state.player.x, PLAYER_FEET_Y - 48, LIGHT_DEPTH + 1);
     }
     combat.turn += 1;
     this.refreshStats();

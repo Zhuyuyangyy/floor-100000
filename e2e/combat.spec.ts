@@ -32,6 +32,13 @@ async function readPlayer(page: Page): Promise<{ hp: number; status: string; gol
   });
 }
 
+async function loadedCombatFx(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const scene = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as { textures?: { exists: (key: string) => boolean } } | null;
+    return ['sword-slash', 'parry', 'hit-flash'].filter((key) => Boolean(scene?.textures?.exists(key)));
+  });
+}
+
 /** Start a run and walk to the first ambush on floor 2. */
 async function startAndClimb(page: Page): Promise<void> {
   await page.goto('/?seed=42');
@@ -96,6 +103,7 @@ test('an ambush opens a fight, and attacking removes monster HP', async ({ page 
   page.on('pageerror', (e) => errors.push(e.message));
 
   await startAndClimb(page);
+  expect(await loadedCombatFx(page)).toEqual(expect.arrayContaining(['sword-slash', 'parry', 'hit-flash']));
   const opened = await openAmbush(page);
   expect(opened, 'no ambush spot on floor 2 for seed 42').toBe(true);
 

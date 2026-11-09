@@ -328,6 +328,13 @@ test('sleeping advances the clock, restores energy and charges the night', async
 
   await setX(page, 1120); // BED_X
   await page.keyboard.press('E');
+  await page.keyboard.press('Enter'); // arrange the default rest action
+  await page.waitForFunction(
+    () => !!window.__PHASER_SESSION__?.getState()?.shelterPlan?.resolved,
+    undefined,
+    { timeout: 5000 },
+  );
+  await page.keyboard.press('E'); // settle the night
   await page.waitForFunction(
     () => {
       const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();

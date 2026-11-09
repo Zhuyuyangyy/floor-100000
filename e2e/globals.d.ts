@@ -23,6 +23,7 @@ interface E2EGameState {
     inventory: { slotCount: number; slots: Array<{ itemId: string; quantity: number }> };
   };
   diary?: Array<{ kind: string; message: string }>;
+  shelterPlan?: { action: string; resolved: boolean };
   visitedFloors: Record<string, { openedContainers: string[]; lootedItems: string[] }>;
   worldEvents: {
     history: string[];

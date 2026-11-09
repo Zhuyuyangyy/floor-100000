@@ -384,7 +384,14 @@ test('the retired day-8 auto-win is off in a normal run and on under ?devwin=1',
     return !!s && s.player.x > 1090;
   }, undefined, { timeout: 20_000 });
   await page.keyboard.up('ArrowRight');
-  await page.keyboard.press('E'); // sleep into day 8
+  await page.keyboard.press('E'); // open the shelter panel
+  await page.keyboard.press('Enter'); // arrange the default rest action
+  await page.waitForFunction(
+    () => !!window.__PHASER_SESSION__?.getState()?.shelterPlan?.resolved,
+    undefined,
+    { timeout: 5000 },
+  );
+  await page.keyboard.press('E'); // settle the night into day 8
 
   await page.waitForFunction(() => {
     const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
@@ -432,7 +439,14 @@ test('?devwin=1 still runs the retired day-8 victory fixture', async ({ page }) 
     return !!s && s.player.x > 1090;
   }, undefined, { timeout: 20_000 });
   await page.keyboard.up('ArrowRight');
-  await page.keyboard.press('E');
+  await page.keyboard.press('E'); // open the shelter panel
+  await page.keyboard.press('Enter'); // arrange the default rest action
+  await page.waitForFunction(
+    () => !!window.__PHASER_SESSION__?.getState()?.shelterPlan?.resolved,
+    undefined,
+    { timeout: 5000 },
+  );
+  await page.keyboard.press('E'); // settle the night and trigger the fixture
 
   await waitForScene(page, 'End');
   expect((await readState(page)).status).toBe('won');

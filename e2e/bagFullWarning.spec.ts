@@ -253,7 +253,7 @@ test.describe('B3-02.1 bag-full feedback', () => {
     await takeStairs(page, 'up', 5);
     await openContainer(page, 5, 'pantry', 1120);
     const refilled = await readState(page);
-    expect(await count(page, 'cloth')).toBeGreaterThanOrEqual(1);
+    expect(await count(page, 'bread')).toBeGreaterThanOrEqual(1);
     expect(refilled.player.inventory.slots.length).toBe(refilled.player.inventory.slotCount);
     await waitForFlag(page, BAG_FULL, true);
 

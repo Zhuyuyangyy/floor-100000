@@ -18,6 +18,7 @@ import {
   hasUpExit,
   movePlayerX,
   stairPosition,
+  stairStyleFor,
   stairTraversalFor,
   stepHorizontalSpeed,
   tryChangeFloor,
@@ -74,30 +75,37 @@ describe('exit availability', () => {
 });
 
 describe('natural stair traversal', () => {
+  it('uses vertical shafts at the chapter endpoints and steep stairs in the middle', () => {
+    expect(stairStyleFor(1, 1)).toBe('vertical');
+    expect(stairStyleFor(2, 1)).toBe('steep');
+    expect(stairStyleFor(3, -1)).toBe('steep');
+    expect(stairStyleFor(4, 1)).toBe('vertical');
+  });
+
   it('does not mutate the floor until the traversal is committed', () => {
     const state = createNewGame(1);
     const traversal = stairTraversalFor(state, 1);
-    expect(traversal).toMatchObject({ from: 1, to: 2, startX: UP_EXIT_X, endX: DOWN_EXIT_X, startY: STAIR_START_Y });
+    expect(traversal).toMatchObject({ from: 1, to: 2, startX: UP_EXIT_X, endX: UP_EXIT_X, startY: STAIR_START_Y });
     expect(state.currentFloor).toBe(1);
     expect(stairPosition(traversal!, 0)).toMatchObject({ x: UP_EXIT_X, progress: 0 });
-    expect(stairPosition(traversal!, traversal!.durationMs / 2).x).toBeCloseTo(640, 5);
+    expect(stairPosition(traversal!, traversal!.durationMs / 2).x).toBeCloseTo(UP_EXIT_X, 5);
 
     const end = stairPosition(traversal!, traversal!.durationMs);
-    expect(end).toMatchObject({ x: DOWN_EXIT_X, y: STAIR_START_Y - STAIR_RISE });
+    expect(end).toMatchObject({ x: UP_EXIT_X, y: STAIR_START_Y - STAIR_RISE });
     const result = completeStairTraversal(state, traversal!);
     expect(result).toEqual({ ok: true, from: 1, to: 2 });
     expect(state.currentFloor).toBe(2);
-    expect(state.player.x).toBe(DOWN_EXIT_X);
+    expect(state.player.x).toBe(UP_EXIT_X);
   });
 
   it('reverses the landing sides when descending', () => {
     const state = createNewGame(1);
     state.currentFloor = 2;
     const traversal = stairTraversalFor(state, -1);
-    expect(traversal).toMatchObject({ startX: DOWN_EXIT_X, endX: UP_EXIT_X, from: 2, to: 1 });
+    expect(traversal).toMatchObject({ startX: DOWN_EXIT_X, endX: DOWN_EXIT_X, from: 2, to: 1 });
     completeStairTraversal(state, traversal!);
     expect(state.currentFloor).toBe(1);
-    expect(state.player.x).toBe(UP_EXIT_X);
+    expect(state.player.x).toBe(DOWN_EXIT_X);
   });
 });
 

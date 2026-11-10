@@ -110,10 +110,10 @@ test('player walks, switches floor via E, and never duplicates', async ({ page }
 
   const afterSwitch = await readState(page);
   expect(afterSwitch.currentFloor).toBe(2);
-  expect(afterSwitch.x).toBe(1240); // landed at floor 2's down stair
+  expect(afterSwitch.x).toBe(40); // landed at floor 2's left stair shaft
   const landedView = await readCameraAndPlayerLight(page);
   expect(landedView.scrollX).toBe(0);
-  expect(landedView.lightX).toBe(1240);
+  expect(landedView.lightX).toBe(40);
   expect(landedView.lightY).toBe(120);
 
   const playerCount = await page.evaluate(() => {

@@ -254,7 +254,7 @@ test.describe('B3-02 full survival journey', () => {
 
     const home = await readState(page);
     expect(home.currentFloor).toBe(1);
-    expect(home.player.x).toBe(40); // floor 1's up-stair landing
+    expect(home.player.x).toBe(1240); // floor 1's down-stair landing
     // Nothing was lost on the way: the bag, the survival stats, the clock.
     expect(home.player.hp).toBe(beforeReturn.player.hp);
     expect(home.player.hunger).toBeLessThanOrEqual(beforeReturn.player.hunger);
@@ -268,7 +268,8 @@ test.describe('B3-02 full survival journey', () => {
     }
     expect(await count(page, 'scrap_metal')).toBe(3);
     expect(await count(page, 'wood')).toBe(2);
-    expect(await count(page, 'cloth')).toBeGreaterThanOrEqual(1);
+    // Cloth is an optional loose pickup; the mixed stair shapes change which
+    // side of a floor the return route crosses, so this journey need not carry it.
 
     // The bag held everything the route picked up — no silent overflow.
     expect(home.player.inventory.slots.length).toBeLessThanOrEqual(home.player.inventory.slotCount);

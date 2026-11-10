@@ -2,7 +2,7 @@
 
 **日期**：2026-11-09  
 **任务**：B3-17  
-**实现提交**：`54ffc69`、`1c01243`、`cdf3186`、`c1e1cc7`、`f08815e`、`3e4753c`
+**实现提交**：`54ffc69`、`1c01243`、`cdf3186`、`c1e1cc7`、`f08815e`、`3e4753c`、`ca09573`
 
 ## 已完成
 
@@ -22,10 +22,11 @@ npx playwright test e2e/combat.spec.ts          3/3 PASS
 npx playwright test e2e/uiAll.spec.ts           2/2 PASS
 npx playwright test e2e/survivalJourney.spec.ts 1/1 PASS（约 3.7 分钟）
 npx playwright test --workers=1                 66/66 PASS（约 9.2 分钟）
+npx playwright test e2e/shelter.spec.ts e2e/ui.spec.ts e2e/uiAll.spec.ts --workers=1 16/16 PASS
 npm run build                                   PASS
 ```
 
-浏览器验收覆盖：首层夜间安排面板、休息后第 2 天 06:00、压力下降、日记写入、保存重载，以及战斗图集加载和战斗 E2E。
+浏览器验收覆盖：首层夜间安排面板、休息后第 2 天 06:00、压力下降、日记写入、保存重载，以及战斗图集加载和战斗 E2E。截图复核确认 shelter 标题、选项和提示均锁定在面板内，没有随相机滚动漂移。
 
 ## 已知边界
 

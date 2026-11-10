@@ -3,9 +3,9 @@ import { createNewGame } from '../core/gameState';
 import {
   DOWN_EXIT_X,
   ENTRY_X,
-  FLOOR_HEIGHT,
   FLOOR_WIDTH,
-  PLAYER_FEET_Y,
+  STAIR_RISE,
+  STAIR_START_Y,
   PLAYER_ACCELERATION,
   PLAYER_DECELERATION,
   PLAYER_SPEED,
@@ -77,13 +77,13 @@ describe('natural stair traversal', () => {
   it('does not mutate the floor until the traversal is committed', () => {
     const state = createNewGame(1);
     const traversal = stairTraversalFor(state, 1);
-    expect(traversal).toMatchObject({ from: 1, to: 2, startX: UP_EXIT_X, endX: DOWN_EXIT_X });
+    expect(traversal).toMatchObject({ from: 1, to: 2, startX: UP_EXIT_X, endX: DOWN_EXIT_X, startY: STAIR_START_Y });
     expect(state.currentFloor).toBe(1);
     expect(stairPosition(traversal!, 0)).toMatchObject({ x: UP_EXIT_X, progress: 0 });
     expect(stairPosition(traversal!, traversal!.durationMs / 2).x).toBeCloseTo(640, 5);
 
     const end = stairPosition(traversal!, traversal!.durationMs);
-    expect(end).toMatchObject({ x: DOWN_EXIT_X, y: PLAYER_FEET_Y - FLOOR_HEIGHT });
+    expect(end).toMatchObject({ x: DOWN_EXIT_X, y: STAIR_START_Y - STAIR_RISE });
     const result = completeStairTraversal(state, traversal!);
     expect(result).toEqual({ ok: true, from: 1, to: 2 });
     expect(state.currentFloor).toBe(2);

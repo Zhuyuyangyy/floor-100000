@@ -20,6 +20,8 @@ import {
   ROOM_COUNT,
   ROOM_WIDTH,
   STARTING_FLOOR,
+  STAIR_RISE,
+  STAIR_START_Y,
   UP_EXIT_X,
   STACK_ABOVE,
   STACK_BELOW,
@@ -569,6 +571,8 @@ export class GameScene extends Phaser.Scene {
       // painted over by all of them - the player was invisible in the middle of
       // an empty floor with nothing wrong in the console.
       .setDepth(ACTOR_DEPTH);
+    this.playerLight?.setName('player-light');
+    this.syncPlayerWorldObjects(state.player.x, STAIR_START_Y);
     this.player.play(idleAnimKey(who));
     this.floorObjects.push(this.player);
     // The tower is a cross-section now, so the camera follows on BOTH axes and
@@ -587,7 +591,10 @@ export class GameScene extends Phaser.Scene {
       floor >= PLAYABLE_FLOORS_V01[PLAYABLE_FLOORS_V01.length - 1]
         ? FLOOR_HEIGHT + FLOOR_BAND
         : FLOOR_HEIGHT * (STACK_BELOW + 2);
-    cam.setBounds(-FLOOR_WIDTH * 0.5, topBound, FLOOR_WIDTH * 2, bottomBound - topBound);
+    // The world width equals the design viewport width. Locking the horizontal
+    // bounds to one floor keeps the full corridor visible when the player lands
+    // at x=40 or x=1240; only the tower's vertical cross-section may scroll.
+    cam.setBounds(0, topBound, FLOOR_WIDTH, bottomBound - topBound);
     cam.startFollow(this.player, true, 0.15, 0.15);
     // Centred on the player the moment the floor is drawn: a follow with
     // lerp 0.15 takes a third of a second to catch up, and during that time the
@@ -616,6 +623,15 @@ export class GameScene extends Phaser.Scene {
     this.wanderer = undefined;
     this.wandererAI = undefined;
     this.clearEncounterSpots();
+  }
+
+  /** Keep the player, carried light and contact shadow on one world position. */
+  private syncPlayerWorldObjects(x: number, y: number): void {
+    this.player.setPosition(x, y);
+    for (const shadow of this.playerShadow) {
+      (shadow as Phaser.GameObjects.Rectangle).setPosition(x, y + 2);
+    }
+    if (this.playerLight) this.playerLight.setPosition(x, y - 40);
   }
 
   // The survivor picked on the meta-select screen, as a walk-sheet key. Falls
@@ -1567,9 +1583,9 @@ export class GameScene extends Phaser.Scene {
     // The flight crosses the shaft from one landing to the opposite landing.
     // That is also the path used by the player during the visible traversal —
     // there is no hidden coordinate jump between floors.
-    const y0 = FLOOR_HEIGHT - FLOOR_BAND;
+    const y0 = STAIR_START_Y;
     const endX = dir === 'up' ? DOWN_EXIT_X : UP_EXIT_X;
-    const y1 = y0 + (dir === 'up' ? -FLOOR_HEIGHT : FLOOR_HEIGHT);
+    const y1 = y0 + (dir === 'up' ? -STAIR_RISE : STAIR_RISE);
 
     const g = this.add.graphics();
     const steps = 18;
@@ -1633,7 +1649,7 @@ export class GameScene extends Phaser.Scene {
     // the stairwell opening in this floor's ceiling or floor, so the flight
     // arriving from the player's floor has somewhere to arrive
     const stairX = isAbove ? DOWN_EXIT_X : UP_EXIT_X;
-    const stairOpeningY = yOffset + wallH - 10;
+    const stairOpeningY = yOffset + STAIR_START_Y - 10;
     g.fillStyle(PALETTE.ink, 0.85);
     g.fillRect(stairX - 22, stairOpeningY, 44, 10);
     g.fillStyle(PALETTE.stone, 1);
@@ -3324,14 +3340,7 @@ export class GameScene extends Phaser.Scene {
     this.speedX = stepHorizontalSpeed(this.speedX, dir, delta) * moveSpeedFactor(state.player) * moveSpeedMult(state.relics ?? []);
     const dx = this.speedX * (delta / 1000);
     if (dx !== 0) movePlayerX(state, dx);
-    this.player.x = state.player.x;
-    // The shadow is its own objects (three stacked ellipses), so it has to be
-    // carried along instead of being a child of the sprite.
-    for (const o of this.playerShadow) (o as Phaser.GameObjects.Rectangle).x = state.player.x;
-    // The carry light rides with the player for the same reason the shadow does:
-    // it is not a child of the sprite, and it is what keeps the floor readable
-    // once night falls.
-    if (this.playerLight) this.playerLight.x = state.player.x;
+    this.syncPlayerWorldObjects(state.player.x, STAIR_START_Y);
 
     // The walk cycle carries all the vertical motion now — the poses' own hip
     // bob, not a sine wave bolted on top. What is left to do here is pick the

@@ -1,13 +1,13 @@
 import {
   DOWN_EXIT_X,
   ENTRY_X,
-  FLOOR_HEIGHT,
   FLOOR_WIDTH,
   INTERACT_DISTANCE,
   PLAYER_ACCELERATION,
   PLAYER_DECELERATION,
   PLAYER_SPEED,
-  PLAYER_FEET_Y,
+  STAIR_RISE,
+  STAIR_START_Y,
   STAIR_TRAVEL_MS,
   UP_EXIT_X,
   PLAYABLE_FLOORS_V01,
@@ -63,8 +63,8 @@ export function stairTraversalFor(state: GameState, direction: 1 | -1): StairTra
     to,
     startX: direction === 1 ? UP_EXIT_X : DOWN_EXIT_X,
     endX: direction === 1 ? DOWN_EXIT_X : UP_EXIT_X,
-    startY: PLAYER_FEET_Y,
-    endY: PLAYER_FEET_Y + (direction === 1 ? -FLOOR_HEIGHT : FLOOR_HEIGHT),
+    startY: STAIR_START_Y,
+    endY: STAIR_START_Y + (direction === 1 ? -STAIR_RISE : STAIR_RISE),
     durationMs: STAIR_TRAVEL_MS,
   };
 }

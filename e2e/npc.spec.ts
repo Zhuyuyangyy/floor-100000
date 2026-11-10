@@ -112,11 +112,11 @@ async function selectInMenu(page: Page, options: string[], target: string): Prom
 
 // Press E and wait for the interaction to take effect, retrying — Phaser's
 // frame-based input occasionally drops a single synthetic keypress.
-async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 5): Promise<void> {
+async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 8): Promise<void> {
   for (let i = 0; i < tries; i++) {
     if (await check()) return;
     await page.keyboard.press('E');
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(250);
   }
   if (!(await check())) throw new Error('interact (E) did not take effect');
 }

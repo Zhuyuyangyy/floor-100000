@@ -1,11 +1,14 @@
 import {
   DOWN_EXIT_X,
   ENTRY_X,
+  FLOOR_HEIGHT,
   FLOOR_WIDTH,
   INTERACT_DISTANCE,
   PLAYER_ACCELERATION,
   PLAYER_DECELERATION,
   PLAYER_SPEED,
+  PLAYER_FEET_Y,
+  STAIR_TRAVEL_MS,
   UP_EXIT_X,
   PLAYABLE_FLOORS_V01,
 } from '../core/constants';
@@ -20,6 +23,23 @@ export type FloorChangeResult =
   | { ok: true; from: number; to: number }
   | { ok: false; reason: 'top' | 'bottom' };
 
+export interface StairTraversal {
+  direction: 1 | -1;
+  from: number;
+  to: number;
+  startX: number;
+  endX: number;
+  startY: number;
+  endY: number;
+  durationMs: number;
+}
+
+export interface StairPosition {
+  x: number;
+  y: number;
+  progress: number;
+}
+
 export function hasUpExit(floor: number): boolean {
   return PLAYABLE_FLOORS_V01.includes(floor + 1);
 }
@@ -30,6 +50,40 @@ export function hasDownExit(floor: number): boolean {
 
 export function floorName(floor: number): string {
   return getFloorTemplate(floor)?.name ?? '未知区域';
+}
+
+/** Build the visible stair path without mutating the game state. */
+export function stairTraversalFor(state: GameState, direction: 1 | -1): StairTraversal | null {
+  const to = state.currentFloor + direction;
+  const allowed = direction === 1 ? hasUpExit(state.currentFloor) : hasDownExit(state.currentFloor);
+  if (!allowed) return null;
+  return {
+    direction,
+    from: state.currentFloor,
+    to,
+    startX: direction === 1 ? UP_EXIT_X : DOWN_EXIT_X,
+    endX: direction === 1 ? DOWN_EXIT_X : UP_EXIT_X,
+    startY: PLAYER_FEET_Y,
+    endY: PLAYER_FEET_Y + (direction === 1 ? -FLOOR_HEIGHT : FLOOR_HEIGHT),
+    durationMs: STAIR_TRAVEL_MS,
+  };
+}
+
+/** Interpolate the player's world position while they are on the stairs. */
+export function stairPosition(traversal: StairTraversal, elapsedMs: number): StairPosition {
+  const progress = Math.max(0, Math.min(1, elapsedMs / traversal.durationMs));
+  return {
+    x: traversal.startX + (traversal.endX - traversal.startX) * progress,
+    y: traversal.startY + (traversal.endY - traversal.startY) * progress,
+    progress,
+  };
+}
+
+/** Commit the floor only after the visible traversal reaches its landing. */
+export function completeStairTraversal(state: GameState, traversal: StairTraversal): FloorChangeResult {
+  const result = tryChangeFloor(state, traversal.direction);
+  if (result.ok) state.player.x = traversal.endX;
+  return result;
 }
 
 // Applies a floor change to state on success (moving the player to the entry

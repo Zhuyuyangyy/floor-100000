@@ -82,6 +82,13 @@ test('player walks, switches floor via E, and never duplicates', async ({ page }
 
   await page.keyboard.press('E');
   await page.waitForFunction(() => {
+    const s = window.__PHASER_SESSION__?.getState();
+    const g = window.__PHASER_GAME__ as unknown as { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; y?: number; texture?: { key: string } }> } } | null } };
+    const player = g.scene.getScene('Game')?.children.list.find((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-'));
+    return !!s && s.currentFloor === 1 && typeof player?.y === 'number' && player.y < 160;
+  }, undefined, { timeout: 1000 });
+  expect((await readState(page)).currentFloor).toBe(1); // commits only on landing
+  await page.waitForFunction(() => {
     const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { currentFloor: number } | null } }).__PHASER_SESSION__?.getState();
     const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; texture?: { key: string } }> } } | null } } }).__PHASER_GAME__;
     const list = g?.scene.getScene('Game')?.children.list ?? [];
@@ -91,7 +98,7 @@ test('player walks, switches floor via E, and never duplicates', async ({ page }
 
   const afterSwitch = await readState(page);
   expect(afterSwitch.currentFloor).toBe(2);
-  expect(afterSwitch.x).toBe(640); // reset to entry point
+  expect(afterSwitch.x).toBe(1240); // landed at floor 2's down stair
 
   const playerCount = await page.evaluate(() => {
     const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; texture?: { key: string } }> } } | null } } }).__PHASER_GAME__;

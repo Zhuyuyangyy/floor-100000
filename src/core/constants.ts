@@ -142,6 +142,8 @@ export const WARMTH_SOURCES: Record<number, WarmthSource[]> = {
 // than starting on purpose: a heavy stop is the half of the feel players notice.
 export const PLAYER_ACCELERATION = 900; // px/s^2, from rest toward top speed
 export const PLAYER_DECELERATION = 1500; // px/s^2, braking or reversing
+/** real-time duration of one visible stair traversal */
+export const STAIR_TRAVEL_MS = 1000;
 
 export const ENTRY_X = FLOOR_WIDTH / 2;
 export const INTERACT_DISTANCE = 44;

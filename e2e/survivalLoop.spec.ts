@@ -82,8 +82,13 @@ async function climbTo(page: Page, target: number): Promise<void> {
     if ((await readState(page)).currentFloor === target) return;
     await setX(page, 40); // UP_EXIT_X
     await page.keyboard.press('E');
-    await page.waitForTimeout(220);
+    await page.waitForFunction(
+      (floor) => window.__PHASER_SESSION__?.getState()?.currentFloor === floor,
+      target,
+      { timeout: 1800 },
+    ).then(() => true).catch(() => false);
   }
+  if ((await readState(page)).currentFloor === target) return;
   throw new Error(`could not climb to ${target} (at ${(await readState(page)).currentFloor})`);
 }
 
@@ -92,8 +97,13 @@ async function descendTo(page: Page, target: number): Promise<void> {
     if ((await readState(page)).currentFloor === target) return;
     await setX(page, 1240); // DOWN_EXIT_X
     await page.keyboard.press('E');
-    await page.waitForTimeout(220);
+    await page.waitForFunction(
+      (floor) => window.__PHASER_SESSION__?.getState()?.currentFloor === floor,
+      target,
+      { timeout: 1800 },
+    ).then(() => true).catch(() => false);
   }
+  if ((await readState(page)).currentFloor === target) return;
   throw new Error(`could not descend to ${target} (at ${(await readState(page)).currentFloor})`);
 }
 

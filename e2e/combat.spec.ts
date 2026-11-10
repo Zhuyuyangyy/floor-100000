@@ -68,7 +68,7 @@ async function startAndClimb(page: Page): Promise<void> {
     if (st) st.player.x = 40;
   });
   await page.keyboard.press('E');
-  await page.waitForTimeout(800);
+  await page.waitForFunction(() => window.__PHASER_SESSION__?.getState()?.currentFloor === 2, undefined, { timeout: 3000 });
 }
 
 /** Open the ambush at whichever spot on this floor rolls one. */

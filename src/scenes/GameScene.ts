@@ -28,10 +28,13 @@ import {
   WANDERER_SPEED,
 } from '../core/constants';
 import {
+  completeStairTraversal,
   currentInteractionZone,
   hasDownExit,
   hasUpExit,
   movePlayerX,
+  stairPosition,
+  stairTraversalFor,
   stepHorizontalSpeed,
   tryChangeFloor,
 } from '../systems/FloorSystem';
@@ -252,6 +255,8 @@ export class GameScene extends Phaser.Scene {
   // class fields, so clearFloor() zeroes this too. Left over, a restarted floor
   // would resume the run already at top speed.
   private speedX = 0;
+  /** transient visual traversal; GameState changes only after landing */
+  private stairClimb?: NonNullable<ReturnType<typeof stairTraversalFor>> & { elapsedMs: number };
   // OVERHAUL: a one-shot action clip (search / attack / hurt) and the time it
   // holds the sprite. Without the hold, the walk/idle selection below would
   // switch back on the very next frame and the clip would never be seen.
@@ -423,6 +428,7 @@ export class GameScene extends Phaser.Scene {
     this.pauseSelected = 0;
     this.wanderer = undefined;
     this.wandererHitAt = Number.NEGATIVE_INFINITY;
+    this.stairClimb = undefined;
     this.lastClock = '';
     this.lastStats = '';
 
@@ -601,6 +607,8 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.stopFollow();
     for (const o of this.floorObjects) o.destroy();
     this.floorObjects = [];
+    for (const shadow of this.playerShadow) shadow.destroy();
+    this.playerShadow = [];
     this.speedX = 0;
     this.containerObjs.clear();
     this.groundObjs.clear();
@@ -1556,37 +1564,41 @@ export class GameScene extends Phaser.Scene {
    * before you walk to them.
    */
   private drawStair(x: number, dir: 'up' | 'down'): void {
-    // The flight itself is the stair tile, unrotated: it runs vertically between
-    // the two landings, which is exactly the tile's own orientation. It used to
-    // be a 32x64 decal sitting on the floor line, which said "there are stairs
-    // here" without saying where they went.
+    // The flight crosses the shaft from one landing to the opposite landing.
+    // That is also the path used by the player during the visible traversal —
+    // there is no hidden coordinate jump between floors.
     const y0 = FLOOR_HEIGHT - FLOOR_BAND;
-    const tile = dir === 'up' ? 'tile_stairs_up' : 'tile_stairs_down';
-    const flight = this.add
-      .tileSprite(x - 16, y0, 32, FLOOR_HEIGHT, tile)
-      .setOrigin(dir === 'up' ? 0 : 0, dir === 'up' ? 1 : 0);
+    const endX = dir === 'up' ? DOWN_EXIT_X : UP_EXIT_X;
     const y1 = y0 + (dir === 'up' ? -FLOOR_HEIGHT : FLOOR_HEIGHT);
 
     const g = this.add.graphics();
-    // The stringer: a slab under the treads so the flight has thickness.
-    g.fillStyle(PALETTE.shadow, 1);
-    g.fillRect(x - 19, Math.min(y0, y1), 38, FLOOR_HEIGHT);
-    // The landing at the far end, meeting the neighbour's floor band.
-    g.fillStyle(PALETTE.stone, 1);
-    g.fillRect(x - 24, y1 - 3, 48, 4);
-    g.fillStyle(PALETTE.ink, 0.6);
-    g.fillRect(x - 24, y1 - 1, 48, 1);
-    // A handrail along the near side, so the flight reads as something you
-    // hold onto on the way up rather than as a striped column.
-    g.lineStyle(1, PALETTE.dust, 0.55);
+    const steps = 18;
+    const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+    // A dark stringer gives the flight a readable silhouette against the wall.
+    g.lineStyle(9, PALETTE.shadow, 0.95);
     g.beginPath();
-    g.moveTo(x + 14, y0);
-    g.lineTo(x + 14, y1);
+    g.moveTo(x, y0);
+    g.lineTo(endX, y1);
     g.strokePath();
+    // Individual treads make the route legible at the zoomed-out tower view.
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const px = lerp(x, endX, t);
+      const py = lerp(y0, y1, t);
+      g.fillStyle(i % 2 === 0 ? PALETTE.stone : PALETTE.dust, 0.95);
+      g.fillRect(Math.round(px - 15), Math.round(py - 2), 30, 4);
+    }
+    // A handrail follows the same slope and ends at both landings.
+    g.lineStyle(2, PALETTE.dust, 0.7);
+    g.beginPath();
+    g.moveTo(x + (dir === 'up' ? 12 : -12), y0 - 8);
+    g.lineTo(endX + (dir === 'up' ? 12 : -12), y1 - 8);
+    g.strokePath();
+    g.fillStyle(PALETTE.stone, 1);
+    g.fillRect(Math.round(endX - 24), Math.round(y1 - 3), 48, 4);
 
-    flight.setDepth(ACTOR_DEPTH - 1);
     g.setDepth(ACTOR_DEPTH - 1);
-    this.floorObjects.push(flight, g);
+    this.floorObjects.push(g);
   }
 
   /**
@@ -1621,10 +1633,11 @@ export class GameScene extends Phaser.Scene {
     // the stairwell opening in this floor's ceiling or floor, so the flight
     // arriving from the player's floor has somewhere to arrive
     const stairX = isAbove ? DOWN_EXIT_X : UP_EXIT_X;
+    const stairOpeningY = yOffset + wallH - 10;
     g.fillStyle(PALETTE.ink, 0.85);
-    g.fillRect(stairX - 22, isAbove ? yOffset + wallH - 10 : yOffset, 44, 10);
+    g.fillRect(stairX - 22, stairOpeningY, 44, 10);
     g.fillStyle(PALETTE.stone, 1);
-    g.fillRect(stairX - 20, isAbove ? yOffset + wallH - 8 : yOffset + 2, 40, 6);
+    g.fillRect(stairX - 20, stairOpeningY + 2, 40, 6);
 
     // Aerial perspective, by distance and not by the floor's own ambience: the
     // first attempt tinted each neighbour with ambienceFor(floor), which made
@@ -2681,16 +2694,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onToggleMap(): void {
-    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
+    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
     this.openTowerOverview();
   }
 
   private onToggleInventory(): void {
-    if (this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
+    if (this.stairClimb || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
     this.toggleInventory();
   }
 
   private onEsc(): void {
+    if (this.stairClimb) return;
     // ESCAPE HATCH FIRST.
     //
     // Every branch below is gated on a state flag, so a panel that is DRAWN
@@ -2810,6 +2824,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onUse(): void {
+    if (this.stairClimb) return;
     if (this.shelterOpen) {
       this.activateShelterChoice();
       return;
@@ -2865,6 +2880,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onInteract(): void {
+    if (this.stairClimb) return;
     if (this.shelterOpen) {
       this.onUse();
       return;
@@ -3178,49 +3194,59 @@ export class GameScene extends Phaser.Scene {
   }
 
   private changeFloor(direction: 1 | -1): void {
-    const result = tryChangeFloor(getGame(), direction);
-    if (result.ok) {
-      this.clearFloor();
-      this.drawFloor(); // records the visit for the floor just entered...
-      // OVERHAUL: a new deepest floor is the run's headline number, so the
-      // record is taken the moment the floor changes rather than at scoring.
-      recordDepth(getGame());
-      // OVERHAUL Wave B: depth is also the meta-progression currency — the
-      // moment a new survivor is earned, the run says so, because "who can I
-      // play next" is the reason to start another run.
-      const meta = loadMeta();
-      const gained = applyDepth(meta, getGame().currentFloor);
-      if (gained.length > 0) {
-        saveMeta(unlockFromDepth(meta, getGame().currentFloor));
-        playSfx('goal');
-        this.flash(`新幸存者解锁：${gained.map((c) => CHARACTER_NAMES[c] ?? c).join('、')}！回标题可更换`);
-      }
-      // B3-15: a dwell-rolled wanderer belongs to the floor it was rolled on.
-      // Leaving is the escape, so the event must not follow the player up the
-      // stairs and squat in the day's single event slot.
-      const we = getGame().worldEvents;
-      if (we.activeEvent?.source === 'dwell') we.activeEvent = null;
-      saveToStorage(getGame()); // ...so the save that follows includes it
-      // Climbing is the game's whole verb and it was a black flash: no direction,
-      // no distance. The pan now travels with the stairs - up a screen's worth
-      // when climbing, down when descending - so the tower feels like something
-      // you move through rather than a number that changes.
-      const cam = this.cameras.main;
-      cam.flash(260, 0, 0, 0);
-      this.time.delayedCall(120, () => {
-        if (!this.scene.isActive()) return;
-        // a tween on the scroll rather than camera.pan(): pan()'s fourth argument
-        // is not an ease string in Phaser 4 and threw "this.ease is not a function"
-        this.tweens.add({
-          targets: cam,
-          scrollY: cam.scrollY + (direction === 1 ? -DESIGN_HEIGHT : DESIGN_HEIGHT),
-          duration: 480,
-          ease: 'Sine.InOut',
-        });
-      });
-    } else {
-      this.flash(result.reason === 'top' ? '已到顶层' : '已到尽头');
+    if (this.stairClimb) return;
+    const traversal = stairTraversalFor(getGame(), direction);
+    if (!traversal) {
+      this.flash(direction === 1 ? '已到顶层' : '已到尽头');
+      return;
     }
+    this.speedX = 0;
+    this.stairClimb = { ...traversal, elapsedMs: 0 };
+    this.player.setFlipX(direction < 0);
+    this.player.play(walkAnimKey(this.metaSelectedCharacter()), true);
+    this.player.anims.timeScale = 1.25;
+    this.flash(direction === 1 ? '沿楼梯上行……' : '沿楼梯下行……');
+  }
+
+  /** Advance the visible stair traversal; floor state changes only at 100%. */
+  private updateStairClimb(delta: number): void {
+    const climb = this.stairClimb;
+    if (!climb) return;
+    climb.elapsedMs = Math.min(climb.durationMs, climb.elapsedMs + Math.max(0, delta));
+    const pose = stairPosition(climb, climb.elapsedMs);
+    this.player.setPosition(pose.x, pose.y);
+    this.player.setFlipX(climb.direction < 0);
+    this.player.anims.timeScale = 1.25;
+    for (const shadow of this.playerShadow) {
+      (shadow as Phaser.GameObjects.Rectangle).setPosition(pose.x, pose.y + 2);
+    }
+    if (this.playerLight) this.playerLight.setPosition(pose.x, pose.y - 40);
+    if (pose.progress < 1) return;
+
+    const state = getGame();
+    const result = completeStairTraversal(state, climb);
+    this.stairClimb = undefined;
+    if (!result.ok) {
+      this.player.setPosition(state.player.x, PLAYER_FEET_Y);
+      this.flash(result.reason === 'top' ? '已到顶层' : '已到尽头');
+      return;
+    }
+
+    this.clearFloor();
+    this.drawFloor(); // records the visit only after the player lands
+    recordDepth(state);
+    const meta = loadMeta();
+    const gained = applyDepth(meta, state.currentFloor);
+    if (gained.length > 0) {
+      saveMeta(unlockFromDepth(meta, state.currentFloor));
+      playSfx('goal');
+      this.flash(`新幸存者解锁：${gained.map((c) => CHARACTER_NAMES[c] ?? c).join('、')}！回标题可更换`);
+    }
+    // Leaving a dwell event's floor is still the escape; the event must not
+    // follow the player across the stairwell.
+    if (state.worldEvents.activeEvent?.source === 'dwell') state.worldEvents.activeEvent = null;
+    saveToStorage(state);
+    this.flash(`到达第 ${state.currentFloor} 层 · 已从楼梯落地`);
   }
 
   // B3-15: rolls dwell pressure and applies the outcome. Pure logic lives in
@@ -3269,6 +3295,10 @@ export class GameScene extends Phaser.Scene {
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
     this.refreshBagFullWarning();
+    if (this.stairClimb) {
+      this.updateStairClimb(delta);
+      return;
+    }
     if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
     const state = getGame();
 

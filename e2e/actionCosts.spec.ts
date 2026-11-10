@@ -80,11 +80,12 @@ const UP_EXIT_X = 40;
 
 async function climbOneFloor(page: Page, expectedFloor: number): Promise<void> {
   await walkLeftTo(page, UP_EXIT_X);
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 10; i++) {
     if ((await readState(page)).currentFloor === expectedFloor) return;
     await page.keyboard.press('E');
     await page.waitForTimeout(250);
   }
+  if ((await readState(page)).currentFloor === expectedFloor) return;
   throw new Error(`never reached floor ${expectedFloor} (at ${(await readState(page)).currentFloor})`);
 }
 

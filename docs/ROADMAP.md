@@ -138,6 +138,7 @@ B2 的世界结构与导航。
 | B3-08 | **场景尺度归一**（B3-07 §5 选项 A）：家具 80→56、门重画 24×56、窗重画 32×40，并立 9 条比例不变量。货箱从比人高 66% 变成 1.17× | [`B3-08_SCENE_SCALE.md`](B3-08_SCENE_SCALE.md) |
 | B3-09 | **UI 收口**：全界面盘点后发现三个真问题——塔楼地图读掉落表所以承诺了没 roll 中的物资（最严重）、第 4 层装饰与可交互电箱同贴图、结束胜利文案描述已废弃规则 | [`B3-09_UI_PASS.md`](B3-09_UI_PASS.md) |
 | B3-17 | **首层 TWOM 式生存纵切片**：事件日记、压力、宿舍夜间决策、睡眠结算与刀剑/招架反馈 | [`plans/2026-11-08-twom-survival-slice-design.md`](plans/2026-11-08-twom-survival-slice-design.md) |
+| B3-18 | **宿舍防御后果**：修门抑制夜袭，未修门的夜袭会造成可解释的 HP/压力/日记后果 | [`B3-18_SHELTER_DEFENSE.md`](B3-18_SHELTER_DEFENSE.md) |
 | B3-04 | 美术包切片与 UI 接入（物品图标 / 面板框 / 物品槽 / 结束横幅 / 家具） | [`ARTPACK_INTEGRATION.md`](ARTPACK_INTEGRATION.md) |
 
 ### 本轮遗留发现（不阻断旅程，待人工定夺）

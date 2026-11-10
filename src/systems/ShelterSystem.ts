@@ -1,6 +1,7 @@
 import { STARTING_FLOOR } from '../core/constants';
 import { GAME_CONFIG } from '../core/config';
 import type { GameState, ShelterAction, ShelterPlan } from '../core/gameTypes';
+import { deriveSeed, makeRng } from '../core/rng';
 import { craft } from './CraftingSystem';
 import { appendDiaryEvent, makeDiaryEvent } from './DiarySystem';
 import { AILMENTS, applyCure, cure, hasAilment } from './SicknessSystem';
@@ -24,6 +25,8 @@ export interface NightResolution {
   stressDelta: number;
   healedAilments: string[];
   events: string[];
+  attacked: boolean;
+  attackDamage: number;
   reason?: string;
 }
 
@@ -36,6 +39,20 @@ const STRESS_DELTA: Record<ShelterAction, number> = {
   repair: -4,
   care: -12,
 };
+
+const SHELTER_ATTACK_CHANCE = 0.25;
+const SHELTER_ATTACK_DAMAGE = 12;
+
+/**
+ * A repaired door closes the shelter loop: it turns the night from a pure
+ * resource decision into a preparation decision with a visible payoff.
+ * The roll is derived from the run seed and the night being settled, so a
+ * replay with the same input sequence produces the same result.
+ */
+export function shouldShelterBeAttacked(runSeed: number, day: number, action: ShelterAction): boolean {
+  if (action === 'repair') return false;
+  return makeRng(deriveSeed(runSeed, day, 'shelter-attack')).chance(SHELTER_ATTACK_CHANCE);
+}
 
 function failure(action: ShelterAction, reason: string): ShelterResolution {
   return { ok: false, action, message: reason, reason, events: [], itemChanges: [], stressDelta: 0 };
@@ -112,17 +129,54 @@ export function resolveShelterAction(state: GameState, action: ShelterAction): S
 
 export function finishNight(state: GameState): NightResolution {
   const plan = state.shelterPlan;
-  if (!plan?.resolved) return { ok: false, hpLost: 0, stressDelta: 0, healedAilments: [], events: [], reason: '今晚还没有安排 shelter 行动' };
+  if (!plan?.resolved) {
+    return {
+      ok: false,
+      hpLost: 0,
+      stressDelta: 0,
+      healedAilments: [],
+      events: [],
+      attacked: false,
+      attackDamage: 0,
+      reason: '今晚还没有安排 shelter 行动',
+    };
+  }
+  const settledDay = state.day;
   const hpBefore = state.player.hp;
   const stressBefore = state.player.stress ?? 20;
   const result = sleep(state);
-  if (!result.ok) return { ok: false, hpLost: 0, stressDelta: 0, healedAilments: [], events: [], reason: result.reason };
+  if (!result.ok) {
+    return {
+      ok: false,
+      hpLost: 0,
+      stressDelta: 0,
+      healedAilments: [],
+      events: [],
+      attacked: false,
+      attackDamage: 0,
+      reason: result.reason,
+    };
+  }
 
   if (state.player.hp <= 0) state.status = 'lost';
   const healedAilments = plan.action === 'rest'
     ? (state.player.ailments ?? []).filter((ailment) => AILMENTS[ailment.id].curedBy === 'sleep').map((ailment) => ailment.id)
     : [];
   for (const id of healedAilments) cure(state, id);
+  const attacked = state.status === 'playing' && shouldShelterBeAttacked(state.runSeed, settledDay, plan.action);
+  const attackDamage = attacked ? Math.min(SHELTER_ATTACK_DAMAGE, state.player.hp) : 0;
+  if (attacked) {
+    state.player.hp = Math.max(0, state.player.hp - SHELTER_ATTACK_DAMAGE);
+    appendDiaryEvent(state, makeDiaryEvent(state, {
+      floor: STARTING_FLOOR,
+      kind: 'shelter_attacked',
+      actorIds: ['player'],
+      itemChanges: [],
+      stressDelta: 10,
+      message: '夜里有人撞门；你庆幸自己还来得及醒来。',
+    }));
+    if (state.player.hp <= 0) state.status = 'lost';
+  }
   state.shelterPlan = undefined;
   return {
     ok: true,
@@ -130,6 +184,8 @@ export function finishNight(state: GameState): NightResolution {
     hpLost: Math.max(0, hpBefore - state.player.hp),
     stressDelta: (state.player.stress ?? 20) - stressBefore,
     healedAilments,
-    events: [`shelter_${plan.action}`],
+    events: [`shelter_${plan.action}`, ...(attacked ? ['shelter_attacked'] : [])],
+    attacked,
+    attackDamage,
   };
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { addToInventory, createNewGame } from '../core/gameState';
 import { inflict } from '../systems/SicknessSystem';
-import { availableShelterActions, finishNight, resolveShelterAction } from '../systems/ShelterSystem';
+import { availableShelterActions, finishNight, resolveShelterAction, shouldShelterBeAttacked } from '../systems/ShelterSystem';
 
 describe('ShelterSystem', () => {
   it('offers the four shelter actions on the starting floor', () => {
@@ -74,5 +74,28 @@ describe('ShelterSystem', () => {
     const result = finishNight(state);
     expect(result.healedAilments).toEqual(['cold']);
     expect(state.player.ailments).toEqual([]);
+  });
+
+  it('replays a shelter attack for the same seed and repair blocks it', () => {
+    expect(shouldShelterBeAttacked(1, 1, 'rest')).toBe(true);
+    expect(shouldShelterBeAttacked(1, 1, 'rest')).toBe(true);
+    expect(shouldShelterBeAttacked(1, 1, 'repair')).toBe(false);
+
+    const attacked = createNewGame(1);
+    attacked.gameMinuteOfDay = 1200;
+    resolveShelterAction(attacked, 'rest');
+    const attackResult = finishNight(attacked);
+    expect(attackResult.attacked).toBe(true);
+    expect(attackResult.attackDamage).toBe(12);
+    expect(attacked.player.hp).toBe(88);
+    expect(attacked.diary?.some((event) => event.kind === 'shelter_attacked')).toBe(true);
+
+    const repaired = createNewGame(1);
+    repaired.gameMinuteOfDay = 1200;
+    repaired.player.inventory.slots.push({ itemId: 'wood', quantity: 2 }, { itemId: 'tape', quantity: 1 });
+    resolveShelterAction(repaired, 'repair');
+    const repairResult = finishNight(repaired);
+    expect(repairResult.attacked).toBe(false);
+    expect(repaired.player.hp).toBe(100);
   });
 });

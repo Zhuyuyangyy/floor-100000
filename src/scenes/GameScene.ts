@@ -3082,7 +3082,8 @@ export class GameScene extends Phaser.Scene {
         this.refreshClock();
         this.refreshStats();
         this.applyNightLighting();
-        this.flash(`睡到第 ${result.nextDay} 天 06:00 · 压力 ${Math.round(state.player.stress ?? 20)}`);
+        const attackNote = result.attacked ? ` · 夜袭 -${result.attackDamage} HP` : '';
+        this.flash(`睡到第 ${result.nextDay} 天 06:00 · 压力 ${Math.round(state.player.stress ?? 20)}${attackNote}`);
       });
       if (state.status === 'lost') this.scene.start('End');
       return;

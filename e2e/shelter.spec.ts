@@ -84,4 +84,48 @@ test.describe('first-floor shelter loop', () => {
     expect(resumed?.day).toBe(2);
     expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
   });
+
+  test('a deterministic unreinforced shelter can be attacked overnight', async ({ page }) => {
+    await page.goto('/?seed=1');
+    await page.waitForFunction(() => {
+      const g = window.__PHASER_GAME__;
+      return !!g && g.scene.getScenes(true).some((scene) => scene.scene.key === 'Menu');
+    });
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => {
+      const g = window.__PHASER_GAME__;
+      return !!g && g.scene.getScenes(true).some((scene) => scene.scene.key === 'MetaSelect');
+    });
+    for (let i = 0; i < 5; i++) {
+      await page.keyboard.press('Enter');
+      const started = await page.waitForFunction(
+        () => {
+          const g = window.__PHASER_GAME__;
+          return !!g && g.scene.getScenes(true).some((scene) => scene.scene.key === 'Game');
+        },
+        undefined,
+        { timeout: 2000 },
+      ).then(() => true).catch(() => false);
+      if (started) break;
+    }
+    await page.waitForFunction(() => {
+      const g = window.__PHASER_GAME__;
+      return !!g && g.scene.getScenes(true).some((scene) => scene.scene.key === 'Game');
+    });
+    await page.evaluate(() => {
+      const state = window.__PHASER_SESSION__?.getState();
+      if (!state) throw new Error('no session state');
+      state.gameMinuteOfDay = 1200;
+      state.player.x = 1120;
+    });
+    await page.keyboard.press('E');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => !!window.__PHASER_SESSION__?.getState()?.shelterPlan?.resolved);
+    await page.keyboard.press('E');
+    await page.waitForFunction(() => window.__PHASER_SESSION__?.getState()?.day === 2);
+
+    const state = await page.evaluate(() => window.__PHASER_SESSION__?.getState());
+    expect(state?.player.hp).toBe(88);
+    expect(state?.diary?.some((event) => event.kind === 'shelter_attacked')).toBe(true);
+  });
 });

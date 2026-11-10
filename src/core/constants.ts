@@ -56,6 +56,11 @@ export const PLAYER_SPEED = 130; // px / second
 // Where the player's feet sit. The props are bottom-aligned further back in the
 // band so the player reads as standing in front of them; this is that offset.
 export const PLAYER_FEET_Y = FLOOR_HEIGHT - 40;
+// One shared stair geometry contract. The player feet, visible treads and
+// neighbouring-floor landing all use these values so the character never
+// appears to float above or sink below the drawn flight.
+export const STAIR_START_Y = PLAYER_FEET_Y;
+export const STAIR_RISE = FLOOR_HEIGHT;
 
 // The camera zoom. It is 1, and it must stay 1.
 //

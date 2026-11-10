@@ -119,7 +119,7 @@
 
 三条刻意的技术决定：
 
-1. **规则与渲染彻底分开**：`systems/` 不 import Phaser，所以 587 个用例能在 1 秒内跑完。
+1. **规则与渲染彻底分开**：`systems/` 不 import Phaser，651 个单测用例无需浏览器也能独立运行。
 2. **随机必须可复现**：全项目禁用 `Math.random()`，一律用 `deriveSeed(seed, day, 用途)` 派生。同种子必然同结果。
 3. **不用物理引擎**：连 Phaser 自带的 Arcade Physics 都没开。移动是手写的速度斜坡（`stepHorizontalSpeed`），2D 横版不需要刚体。
 
@@ -128,11 +128,13 @@
 | 关卡 | 规模 | 命令 |
 | --- | --- | --- |
 | 类型检查 | TypeScript strict，零 `any` 滥用 | `npm run typecheck` |
-| 单元测试 | 42 个文件 / **587 个用例**，约 1 秒 | `npm run test` |
-| 浏览器测试 | 20 个 Playwright spec，用真键盘跑真游戏 | `npm run test:e2e` |
-| CI | 任何分支 push 都跑 typecheck + 单测 | `.github/workflows/ci.yml` |
+| 单元测试 | 47 个文件 / **651 个用例**；本轮实际全部通过 | `npm run test` |
+| 浏览器测试 | 21 个 Playwright spec / 67 个用例，含夹具回归与真实输入旅程 | `npm run test:e2e` |
+| CI | push / PR 运行 typecheck、单测、build、浏览器安装及 E2E | `.github/workflows/ci.yml` |
 
 浏览器测试能读到真实的游戏状态，靠的是 `src/main.ts` 里一个只在开发模式挂载的 `window.__PHASER_GAME__`——生产构建里没有。
+
+部分 E2E 会改写状态作为局部规则夹具，不能代替无注入的真实旅程，更不能代替真人试玩。M1 当前集成结论见[集成审查](docs/M1_INTEGRATION_REVIEW.md)；三名试玩者的空白记录表见[真人试玩协议](docs/M1_PLAYTEST_PROTOCOL.md)。未通过集成门槛的构建不应标为已验收候选版。
 
 ## 本地运行（干净环境）
 

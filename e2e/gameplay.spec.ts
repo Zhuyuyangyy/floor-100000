@@ -15,6 +15,17 @@ async function readState(page: Page): Promise<{ currentFloor: number; x: number 
   });
 }
 
+async function readCameraAndPlayerLight(page: Page): Promise<{ scrollX: number; lightX: number; lightY: number }> {
+  return page.evaluate(() => {
+    const game = window.__PHASER_GAME__ as unknown as {
+      scene: { getScene: (key: string) => { cameras: { main: { scrollX: number } }; children: { list: Array<{ name?: string; x?: number; y?: number }> } } | null };
+    };
+    const scene = game.scene.getScene('Game');
+    const light = scene?.children.list.find((object) => object.name === 'player-light');
+    return { scrollX: scene?.cameras.main.scrollX ?? Number.NaN, lightX: light?.x ?? Number.NaN, lightY: light?.y ?? Number.NaN };
+  });
+}
+
 test('player walks, switches floor via E, and never duplicates', async ({ page }) => {
   const pageErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
@@ -79,6 +90,7 @@ test('player walks, switches floor via E, and never duplicates', async ({ page }
     return !!s && s.player.x < 44;
   }, undefined, { timeout: 20_000 });
   await page.keyboard.up('ArrowLeft');
+  expect((await readCameraAndPlayerLight(page)).scrollX).toBe(0);
 
   await page.keyboard.press('E');
   await page.waitForFunction(() => {
@@ -98,7 +110,11 @@ test('player walks, switches floor via E, and never duplicates', async ({ page }
 
   const afterSwitch = await readState(page);
   expect(afterSwitch.currentFloor).toBe(2);
-  expect(afterSwitch.x).toBe(1240); // landed at floor 2's down stair
+  expect(afterSwitch.x).toBe(40); // landed at floor 2's left stair shaft
+  const landedView = await readCameraAndPlayerLight(page);
+  expect(landedView.scrollX).toBe(0);
+  expect(landedView.lightX).toBe(40);
+  expect(landedView.lightY).toBe(120);
 
   const playerCount = await page.evaluate(() => {
     const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; texture?: { key: string } }> } } | null } } }).__PHASER_GAME__;

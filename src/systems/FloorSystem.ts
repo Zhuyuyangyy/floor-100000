@@ -1,13 +1,13 @@
 import {
   DOWN_EXIT_X,
   ENTRY_X,
-  FLOOR_HEIGHT,
   FLOOR_WIDTH,
   INTERACT_DISTANCE,
   PLAYER_ACCELERATION,
   PLAYER_DECELERATION,
   PLAYER_SPEED,
-  PLAYER_FEET_Y,
+  STAIR_RISE,
+  STAIR_START_Y,
   STAIR_TRAVEL_MS,
   UP_EXIT_X,
   PLAYABLE_FLOORS_V01,
@@ -27,6 +27,8 @@ export interface StairTraversal {
   direction: 1 | -1;
   from: number;
   to: number;
+  style: StairStyle;
+  bendX: number;
   startX: number;
   endX: number;
   startY: number;
@@ -38,6 +40,21 @@ export interface StairPosition {
   x: number;
   y: number;
   progress: number;
+}
+
+export type StairStyle = 'vertical' | 'steep';
+
+/** Authored variation for the first chapter: shafts and steep switchback flights. */
+export function stairStyleFor(floor: number, _direction: 1 | -1): StairStyle {
+  // The middle connections are the cramped, steep industrial stairs; the
+  // dorm and canteen connections stay as direct vertical shafts.
+  if (floor === 2 || floor === 3) return 'steep';
+  return 'vertical';
+}
+
+export function stairBendFor(direction: 1 | -1, style: StairStyle): number {
+  if (style === 'vertical') return 0;
+  return direction === 1 ? 96 : -96;
 }
 
 export function hasUpExit(floor: number): boolean {
@@ -57,14 +74,17 @@ export function stairTraversalFor(state: GameState, direction: 1 | -1): StairTra
   const to = state.currentFloor + direction;
   const allowed = direction === 1 ? hasUpExit(state.currentFloor) : hasDownExit(state.currentFloor);
   if (!allowed) return null;
+  const style = stairStyleFor(state.currentFloor, direction);
   return {
     direction,
     from: state.currentFloor,
     to,
+    style,
+    bendX: stairBendFor(direction, style),
     startX: direction === 1 ? UP_EXIT_X : DOWN_EXIT_X,
-    endX: direction === 1 ? DOWN_EXIT_X : UP_EXIT_X,
-    startY: PLAYER_FEET_Y,
-    endY: PLAYER_FEET_Y + (direction === 1 ? -FLOOR_HEIGHT : FLOOR_HEIGHT),
+    endX: direction === 1 ? UP_EXIT_X : DOWN_EXIT_X,
+    startY: STAIR_START_Y,
+    endY: STAIR_START_Y + (direction === 1 ? -STAIR_RISE : STAIR_RISE),
     durationMs: STAIR_TRAVEL_MS,
   };
 }
@@ -73,7 +93,10 @@ export function stairTraversalFor(state: GameState, direction: 1 | -1): StairTra
 export function stairPosition(traversal: StairTraversal, elapsedMs: number): StairPosition {
   const progress = Math.max(0, Math.min(1, elapsedMs / traversal.durationMs));
   return {
-    x: traversal.startX + (traversal.endX - traversal.startX) * progress,
+    x:
+      traversal.startX +
+      (traversal.endX - traversal.startX) * progress +
+      traversal.bendX * Math.sin(Math.PI * progress),
     y: traversal.startY + (traversal.endY - traversal.startY) * progress,
     progress,
   };

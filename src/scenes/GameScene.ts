@@ -20,6 +20,8 @@ import {
   ROOM_COUNT,
   ROOM_WIDTH,
   STARTING_FLOOR,
+  STAIR_RISE,
+  STAIR_START_Y,
   UP_EXIT_X,
   STACK_ABOVE,
   STACK_BELOW,
@@ -33,7 +35,9 @@ import {
   hasDownExit,
   hasUpExit,
   movePlayerX,
+  stairBendFor,
   stairPosition,
+  stairStyleFor,
   stairTraversalFor,
   stepHorizontalSpeed,
   tryChangeFloor,
@@ -569,6 +573,8 @@ export class GameScene extends Phaser.Scene {
       // painted over by all of them - the player was invisible in the middle of
       // an empty floor with nothing wrong in the console.
       .setDepth(ACTOR_DEPTH);
+    this.playerLight?.setName('player-light');
+    this.syncPlayerWorldObjects(state.player.x, STAIR_START_Y);
     this.player.play(idleAnimKey(who));
     this.floorObjects.push(this.player);
     // The tower is a cross-section now, so the camera follows on BOTH axes and
@@ -587,7 +593,10 @@ export class GameScene extends Phaser.Scene {
       floor >= PLAYABLE_FLOORS_V01[PLAYABLE_FLOORS_V01.length - 1]
         ? FLOOR_HEIGHT + FLOOR_BAND
         : FLOOR_HEIGHT * (STACK_BELOW + 2);
-    cam.setBounds(-FLOOR_WIDTH * 0.5, topBound, FLOOR_WIDTH * 2, bottomBound - topBound);
+    // The world width equals the design viewport width. Locking the horizontal
+    // bounds to one floor keeps the full corridor visible when the player lands
+    // at x=40 or x=1240; only the tower's vertical cross-section may scroll.
+    cam.setBounds(0, topBound, FLOOR_WIDTH, bottomBound - topBound);
     cam.startFollow(this.player, true, 0.15, 0.15);
     // Centred on the player the moment the floor is drawn: a follow with
     // lerp 0.15 takes a third of a second to catch up, and during that time the
@@ -616,6 +625,15 @@ export class GameScene extends Phaser.Scene {
     this.wanderer = undefined;
     this.wandererAI = undefined;
     this.clearEncounterSpots();
+  }
+
+  /** Keep the player, carried light and contact shadow on one world position. */
+  private syncPlayerWorldObjects(x: number, y: number): void {
+    this.player.setPosition(x, y);
+    for (const shadow of this.playerShadow) {
+      (shadow as Phaser.GameObjects.Rectangle).setPosition(x, y + 2);
+    }
+    if (this.playerLight) this.playerLight.setPosition(x, y - 40);
   }
 
   // The survivor picked on the meta-select screen, as a walk-sheet key. Falls
@@ -1542,12 +1560,12 @@ export class GameScene extends Phaser.Scene {
   // floor band is where it lands.
   private drawExits(floor: number): void {
     if (hasUpExit(floor)) {
-      this.drawStair(UP_EXIT_X, 'up');
+      this.drawStair(UP_EXIT_X, 'up', floor);
       const upLabel = this.add.text(UP_EXIT_X, FLOOR_HEIGHT - 104, '↑ 上楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
       this.floorObjects.push(upLabel);
     }
     if (hasDownExit(floor)) {
-      this.drawStair(DOWN_EXIT_X, 'down');
+      this.drawStair(DOWN_EXIT_X, 'down', floor);
       const downLabel = this.add.text(DOWN_EXIT_X, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
       this.floorObjects.push(downLabel);
     }
@@ -1563,39 +1581,54 @@ export class GameScene extends Phaser.Scene {
    * is the whole point of the cross-section: you can see where the stairs go
    * before you walk to them.
    */
-  private drawStair(x: number, dir: 'up' | 'down'): void {
-    // The flight crosses the shaft from one landing to the opposite landing.
-    // That is also the path used by the player during the visible traversal —
-    // there is no hidden coordinate jump between floors.
-    const y0 = FLOOR_HEIGHT - FLOOR_BAND;
-    const endX = dir === 'up' ? DOWN_EXIT_X : UP_EXIT_X;
-    const y1 = y0 + (dir === 'up' ? -FLOOR_HEIGHT : FLOOR_HEIGHT);
+  private drawStair(x: number, dir: 'up' | 'down', floor: number): void {
+    // Some connections are vertical shafts; the industrial middle connections
+    // use a steep switchback with a small landing. Both shapes share the same
+    // deterministic path as stairPosition(), so the character never leaves the
+    // drawn steps.
+    const y0 = STAIR_START_Y;
+    const y1 = y0 + (dir === 'up' ? -STAIR_RISE : STAIR_RISE);
+    const style = stairStyleFor(floor, dir === 'up' ? 1 : -1);
+    const bendX = stairBendFor(dir === 'up' ? 1 : -1, style);
 
     const g = this.add.graphics();
     const steps = 18;
-    const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
-    // A dark stringer gives the flight a readable silhouette against the wall.
+    const xAt = (t: number): number => x + bendX * Math.sin(Math.PI * t);
+    const yAt = (t: number): number => y0 + (y1 - y0) * t;
+    // A dark stringer gives the shaft or switchback a readable silhouette.
     g.lineStyle(9, PALETTE.shadow, 0.95);
     g.beginPath();
     g.moveTo(x, y0);
-    g.lineTo(endX, y1);
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      g.lineTo(xAt(t), yAt(t));
+    }
     g.strokePath();
     // Individual treads make the route legible at the zoomed-out tower view.
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
-      const px = lerp(x, endX, t);
-      const py = lerp(y0, y1, t);
+      const px = xAt(t);
+      const py = yAt(t);
       g.fillStyle(i % 2 === 0 ? PALETTE.stone : PALETTE.dust, 0.95);
       g.fillRect(Math.round(px - 15), Math.round(py - 2), 30, 4);
     }
-    // A handrail follows the same slope and ends at both landings.
+    if (style === 'steep') {
+      const midX = xAt(0.5);
+      const midY = yAt(0.5);
+      g.fillStyle(PALETTE.stone, 1);
+      g.fillRect(Math.round(midX - 28), Math.round(midY - 3), 56, 6);
+    }
+    // A handrail follows the same path and ends at both landings.
     g.lineStyle(2, PALETTE.dust, 0.7);
     g.beginPath();
     g.moveTo(x + (dir === 'up' ? 12 : -12), y0 - 8);
-    g.lineTo(endX + (dir === 'up' ? 12 : -12), y1 - 8);
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      g.lineTo(xAt(t) + (dir === 'up' ? 12 : -12), yAt(t) - 8);
+    }
     g.strokePath();
     g.fillStyle(PALETTE.stone, 1);
-    g.fillRect(Math.round(endX - 24), Math.round(y1 - 3), 48, 4);
+    g.fillRect(Math.round(x - 24), Math.round(y1 - 3), 48, 4);
 
     g.setDepth(ACTOR_DEPTH - 1);
     this.floorObjects.push(g);
@@ -1632,8 +1665,8 @@ export class GameScene extends Phaser.Scene {
     }
     // the stairwell opening in this floor's ceiling or floor, so the flight
     // arriving from the player's floor has somewhere to arrive
-    const stairX = isAbove ? DOWN_EXIT_X : UP_EXIT_X;
-    const stairOpeningY = yOffset + wallH - 10;
+    const stairX = isAbove ? UP_EXIT_X : DOWN_EXIT_X;
+    const stairOpeningY = yOffset + STAIR_START_Y - 10;
     g.fillStyle(PALETTE.ink, 0.85);
     g.fillRect(stairX - 22, stairOpeningY, 44, 10);
     g.fillStyle(PALETTE.stone, 1);
@@ -3324,14 +3357,7 @@ export class GameScene extends Phaser.Scene {
     this.speedX = stepHorizontalSpeed(this.speedX, dir, delta) * moveSpeedFactor(state.player) * moveSpeedMult(state.relics ?? []);
     const dx = this.speedX * (delta / 1000);
     if (dx !== 0) movePlayerX(state, dx);
-    this.player.x = state.player.x;
-    // The shadow is its own objects (three stacked ellipses), so it has to be
-    // carried along instead of being a child of the sprite.
-    for (const o of this.playerShadow) (o as Phaser.GameObjects.Rectangle).x = state.player.x;
-    // The carry light rides with the player for the same reason the shadow does:
-    // it is not a child of the sprite, and it is what keeps the floor readable
-    // once night falls.
-    if (this.playerLight) this.playerLight.x = state.player.x;
+    this.syncPlayerWorldObjects(state.player.x, STAIR_START_Y);
 
     // The walk cycle carries all the vertical motion now — the poses' own hip
     // bob, not a sine wave bolted on top. What is left to do here is pick the

@@ -1,0 +1,30 @@
+{
+  "说明": "固定背景加本层独立对象的素材摆放示例；不代表程序已接入。供水恢复水滴默认隐藏。",
+  "floor": 2,
+  "canvas": {
+    "width": 2880,
+    "height": 200,
+    "playerFootY": 160
+  },
+  "background": "01-固定背景/第2层-固定背景-2880x200.png",
+  "objects": [
+    {
+      "file": "02-物品与家具/无人空床.png",
+      "x": 1364,
+      "y": 154,
+      "origin": "bottom-center"
+    },
+    {
+      "file": "02-物品与家具/面包.png",
+      "x": 1268,
+      "y": 112,
+      "origin": "bottom-center"
+    },
+    {
+      "file": "02-物品与家具/饭票.png",
+      "x": 1292,
+      "y": 112,
+      "origin": "bottom-center"
+    }
+  ]
+}

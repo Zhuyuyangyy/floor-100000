@@ -85,11 +85,18 @@ test('the flash renders on top of an open panel', async ({ page }) => {
   // moves on its own: the clock is high in the bar, the stat bars are to the
   // right, and the panel's own title is static.
   const scale = box!.width / 1280;
+  const flashBounds = await page.evaluate(() => {
+    const game = window.__PHASER_GAME__ as unknown as { scene: { getScene: (key: string) => { children: { list: Array<{ name: string; getBounds(): Box }> } } } };
+    const flash = game.scene.getScene('Game').children.list.find((object) => object.name === 'hud-feedback');
+    if (!flash) throw new Error('missing named HUD feedback');
+    const bounds = flash.getBounds();
+    return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+  });
   const clip = {
-    x: box!.x + 180 * scale,
-    y: box!.y + 72 * scale,
-    width: 420 * scale,
-    height: 34 * scale,
+    x: box!.x + flashBounds.x * scale,
+    y: box!.y + flashBounds.y * scale,
+    width: flashBounds.width * scale,
+    height: flashBounds.height * scale,
   };
   const withFlash = await page.screenshot({ clip });
   // Shot while the flash is still up, so the evidence shows it rather than the
@@ -105,10 +112,10 @@ test('the flash renders on top of an open panel', async ({ page }) => {
   // top band that reports a stat change.
   const shown = await page.evaluate(() => {
     const g = (window as unknown as {
-      __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean; y: number }> } } | null } };
+      __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ name?: string; type: string; text?: string; visible: boolean; y: number }> } } | null } };
     }).__PHASER_GAME__;
     for (const o of g?.scene.getScene('Game')?.children.list ?? []) {
-      if (o.type === 'Text' && o.visible && (o.text ?? '').includes('水分') && o.y < 140) return o.text ?? '';
+      if (o.name === 'hud-feedback' && o.visible) return o.text ?? '';
     }
     return '';
   });
@@ -136,7 +143,7 @@ test('all three HUD feedback objects clear the deepest panel', async ({ page }) 
 
   const depths = await page.evaluate(() => {
     const g = (window as unknown as {
-      __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; y: number; depth: number }> } } | null } };
+      __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ name?: string; type: string; text?: string; y: number; depth: number }> } } | null } };
     }).__PHASER_GAME__;
     const list = g?.scene.getScene('Game')?.children.list ?? [];
     // Matched by content, not by y alone: the fourth stat label sits close to the
@@ -147,14 +154,9 @@ test('all three HUD feedback objects clear the deepest panel', async ({ page }) 
     // 350 — and both were silently wrong the moment the design canvas went from
     // 640x360 to 1280x720, because the hint is anchored to the foot bar and the
     // foot bar moved with the canvas.
-    const HUD_BAR_H = 60;
-    const HUD_FOOT_H = 40;
-    const DESIGN_HEIGHT = 720;
-    const flash = list.find((o) => o.type === 'Text' && Math.abs(o.y - (HUD_BAR_H + 26)) < 2);
-    const bagFull = list.find((o) => o.type === 'Text' && (o.text ?? '').includes('否则搜刮会留在原处'));
-    const hint = list.find(
-      (o) => o.type === 'Text' && Math.abs(o.y - (DESIGN_HEIGHT - HUD_FOOT_H / 2)) < 2 && (o.text ?? '').includes('ESC 菜单'),
-    );
+    const flash = list.find((o) => o.name === 'hud-feedback');
+    const bagFull = list.find((o) => o.name === 'hud-bag-full');
+    const hint = list.find((o) => o.name === 'hud-hint');
     return { flash: flash?.depth, bagFull: bagFull?.depth, hint: hint?.depth };
   });
 

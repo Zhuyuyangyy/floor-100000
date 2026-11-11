@@ -173,6 +173,7 @@ export function buildPanelHeader(
     scene.add
       .text(titleX ?? left + 10, top + h / 2, title, { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
       .setOrigin(0, 0.5)
+      .setScrollFactor(0)
       .setDepth(depth + 1),
   );
   // The hairline that separates the header from the body.
@@ -244,6 +245,7 @@ export function buildListRow(
     scene.add
       .text(textX, cy, opts.label, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: labelColor })
       .setOrigin(0, 0.5)
+      .setScrollFactor(0)
       .setDepth(depth + 1),
   );
   if (opts.value !== undefined) {
@@ -251,6 +253,7 @@ export function buildListRow(
       scene.add
         .text(x + w - 8, cy, opts.value, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: opts.dim ? '#6b6862' : hex(TEXT.highlight) })
         .setOrigin(1, 0.5)
+        .setScrollFactor(0)
         .setDepth(depth + 1),
     );
   }

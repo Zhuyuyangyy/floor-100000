@@ -1,0 +1,17 @@
+{
+  "name": "蓝封箱-开启",
+  "frameWidth": 100,
+  "frameHeight": 89,
+  "frameCount": 4,
+  "fps": 6,
+  "loop": false,
+  "origin": {
+    "x": 50,
+    "y": 83
+  },
+  "spriteSheet": "4帧横向.png",
+  "frames": "帧/00.png 至 帧/03.png",
+  "preview": "动画预览.gif",
+  "previewRepeats": true,
+  "notes": "开启一次后停留末帧；蓝封破开。使用第 00 帧作为关闭状态。"
+}

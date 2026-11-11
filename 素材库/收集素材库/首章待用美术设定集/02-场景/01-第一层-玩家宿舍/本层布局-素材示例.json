@@ -1,0 +1,57 @@
+{
+  "说明": "固定背景加本层独立对象的素材摆放示例；不代表程序已接入。供水恢复水滴默认隐藏。",
+  "floor": 1,
+  "canvas": {
+    "width": 2880,
+    "height": 200,
+    "playerFootY": 160
+  },
+  "background": "01-固定背景/第1层-固定背景-2880x200.png",
+  "objects": [
+    {
+      "file": "02-物品与家具/通用-bed.png",
+      "x": 900,
+      "y": 154,
+      "origin": "bottom-center"
+    },
+    {
+      "file": "03-动画/储物柜-开启/帧/00.png",
+      "x": 1110,
+      "y": 154,
+      "origin": {
+        "x": 48,
+        "y": 98
+      }
+    },
+    {
+      "file": "02-物品与家具/通用-workbench.png",
+      "x": 2260,
+      "y": 154,
+      "origin": "bottom-center"
+    },
+    {
+      "file": "02-物品与家具/干涸水龙头.png",
+      "x": 1320,
+      "y": 122,
+      "origin": "bottom-center"
+    },
+    {
+      "file": "02-物品与家具/空搪瓷杯.png",
+      "x": 1318,
+      "y": 154,
+      "origin": "bottom-center"
+    }
+  ],
+  "conditionalObjects": [
+    {
+      "file": "03-动画/供水恢复-水滴/帧/00.png",
+      "x": 1318,
+      "y": 123,
+      "origin": {
+        "x": 8,
+        "y": 0
+      },
+      "condition": "仅供水恢复时显示"
+    }
+  ]
+}

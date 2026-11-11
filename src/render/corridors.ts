@@ -303,6 +303,18 @@ function drawCanteen(ctx: CorridorContext): void {
   g.fillStyle(PALETTE.lightDeep, 0.22);
   g.fillEllipse(brazierX, floorY + 2, 76, 12);
 
+  // AND THE HEAT IS VISIBLE. Body heat recovers inside the brazier's radius
+  // (core/constants.ts WARMTH_SOURCES), but a radius the player cannot see is a
+  // rule they learn by standing still and watching a number. Three banded rings
+  // at the radius edge, in the same language as the light pools: stepped alpha,
+  // no gradient, so it reads as a pixel-art decal rather than a filter.
+  const heatR = 150;
+  for (let i = 0; i < 3; i++) {
+    const r = heatR - i * 12;
+    g.lineStyle(2, PALETTE.lightDeep, 0.3 - i * 0.08);
+    g.strokeEllipse(brazierX, floorY + 2, r * 2, r * 0.42);
+  }
+
   // Counter, with a bank of service shelves racked on the wall behind it.
   const cx = roomX + 40;
   // Shelf bank: two boards with what is left on them. Drawn rather than tiled

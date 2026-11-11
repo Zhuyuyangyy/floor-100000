@@ -1,0 +1,17 @@
+{
+  "name": "维修电箱-开启",
+  "frameWidth": 80,
+  "frameHeight": 94,
+  "frameCount": 4,
+  "fps": 6,
+  "loop": false,
+  "origin": {
+    "x": 40,
+    "y": 90
+  },
+  "spriteSheet": "4帧横向.png",
+  "frames": "帧/00.png 至 帧/03.png",
+  "preview": "动画预览.gif",
+  "previewRepeats": true,
+  "notes": "单次开启并停留末帧；用第00帧作为关闭状态，关闭可逆序播放。"
+}

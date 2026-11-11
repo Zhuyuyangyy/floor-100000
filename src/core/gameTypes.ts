@@ -23,6 +23,55 @@ export type ItemCategory = 'consumable' | 'material' | 'tool';
 
 export type StatKey = 'hp' | 'hunger' | 'thirst' | 'energy';
 
+export type DiaryEventKind =
+  | 'returned_from_scavenge'
+  | 'late_return'
+  | 'combat_wounded'
+  | 'shelter_rested'
+  | 'shelter_treated'
+  | 'shelter_repaired'
+  | 'neighbor_cared'
+  | 'shelter_attacked';
+
+export interface DiaryEvent {
+  id: string;
+  day: number;
+  minute: number;
+  floor: number;
+  kind: DiaryEventKind;
+  actorIds: string[];
+  itemChanges: Array<{ itemId: ItemId; quantity: number }>;
+  stressDelta: number;
+  message: string;
+}
+
+export type ShelterAction = 'rest' | 'treat' | 'repair' | 'care';
+
+export interface ShelterPlan {
+  day: number;
+  action: ShelterAction;
+  resolved: boolean;
+}
+
+// Ailments: the middle ground between "fine" and "dead".
+//
+// Before this the run had no state between healthy and lost — hunger, thirst,
+// cold and wounds all drained a bar and then took HP, so the only feedback was a
+// number falling. This War of Mine distinguishes DwellerSickness from
+// DwellerSicknessNoEffect in its diary (docs/reference/TWOM_MECHANICS.md §1), and
+// its scene loop runs ProcessSickness alongside ProcessSleep: an ailment is a
+// condition the survivor carries, not a faster way to lose.
+export type AilmentId = 'cold' | 'fever' | 'wound' | 'food_poisoning';
+
+/** One active ailment and how far it has progressed, 0..100. */
+export interface Ailment {
+  id: AilmentId;
+  /** 0..100; at 100 the ailment starts costing HP directly */
+  severity: number;
+  /** game-minute it began, for the HUD's "病了 X 小时" */
+  sinceMinute: number;
+}
+
 export interface ItemEffect {
   stat: StatKey;
   amount: number;
@@ -56,6 +105,16 @@ export interface PlayerState {
   hunger: number;
   thirst: number;
   energy: number;
+  /** Cross-day emotional pressure, 0..100. Optional for pre-shelter saves. */
+  stress?: number;
+  // Body heat, 0..100, 100 being warm. It drains toward the floor's cold and is
+  // restored by standing in a warmth source's radius. Optional so saves written
+  // before the environment system stay loadable — a missing one is re-created on
+  // the next tick. See systems/EnvironmentSystem.ts.
+  bodyTemp?: number;
+  // Active ailments. Optional for the same reason: a save written before the
+  // sickness system loads with none, which is the correct reading.
+  ailments?: Ailment[];
   inventory: Inventory;
   // Reserved by docs/02_TECH_SPEC.md §4 for v0.2 equipment; no v0.1 system reads
   // or writes it beyond the initial null (GHI-03 n3).
@@ -146,6 +205,10 @@ export interface GameState {
   npcStates: Record<string, string>;
   visitedFloors: Record<number, FloorVisit>;
   worldEvents: { history: string[]; activeEvent: ActiveEvent | null; dwell?: DwellState };
+  /** Recent facts the player has lived through. Optional for legacy saves. */
+  diary?: DiaryEvent[];
+  /** The one shelter decision currently being resolved, if any. */
+  shelterPlan?: ShelterPlan;
   // OVERHAUL (docs/OVERHAUL_M1.md): the day's rolled objective. Optional so
   // saves written before the system existed stay loadable.
   dailyGoal?: { day: number; kind: 'water' | 'containers' | 'upgrade' | 'floor'; target: number; done: boolean };
@@ -162,6 +225,10 @@ export interface GameState {
   // OVERHAUL Wave C2: how many paid shortcuts this run has taken — the price
   // inflation counter.
   shortcuts?: number;
+  // World flags: one flat place to answer "has this happened yet". Optional so
+  // saves written before the system existed stay loadable — a missing one is
+  // created on the next write. See systems/WorldFlags.ts for why this exists.
+  flags?: Record<string, number>;
   status: GameStatus;
 }
 

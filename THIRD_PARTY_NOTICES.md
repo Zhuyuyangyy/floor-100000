@@ -46,8 +46,24 @@ Third-party assets bundled with this project, with their licence and provenance.
 
 ---
 
+## pixelfx — MIT
+
+- **Files:** `public/assets/fx/melee/sword-slash/` and
+  `public/assets/fx/impacts/parry/` (the existing `public/assets/fx/` atlases use
+  the same source)
+- **Source:** Patch Pixel, https://github.com/patch-gg/pixelfx
+- **Licence:** MIT License, Copyright © 2026 Patch and Hugo Duprez.
+- **Adapted source:** `src/core/sim.js` and effects that identify Sprite Fusion
+  recipes adapt Hugo Duprez's open-source pixel VFX, Copyright © 2026 Hugo
+  Duprez, MIT License. The current slash/parry sheets were rendered from the
+  pixelfx effect definitions without copying the runtime library into this repo.
+- **Additional notice:** `src/core/act.js` in pixelfx adapts Hollow Crown's
+  timing approach; this project does not vendor that runtime or its characters.
+
+---
+
 ## Everything else
 
 All other art and audio in this repository is original and generated at runtime by
-`src/render/pixelArt.ts` and `src/render/audio.ts` — no other third-party assets
-are bundled.
+`src/render/pixelArt.ts` and `src/render/audio.ts`, except for the Kenney marker,
+owner-supplied art pack, and the pixelfx atlases listed above.

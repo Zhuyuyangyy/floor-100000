@@ -6,6 +6,9 @@ import {
   PLAYER_ACCELERATION,
   PLAYER_DECELERATION,
   PLAYER_SPEED,
+  STAIR_RISE,
+  STAIR_START_Y,
+  STAIR_TRAVEL_MS,
   UP_EXIT_X,
   PLAYABLE_FLOORS_V01,
 } from '../core/constants';
@@ -20,6 +23,40 @@ export type FloorChangeResult =
   | { ok: true; from: number; to: number }
   | { ok: false; reason: 'top' | 'bottom' };
 
+export interface StairTraversal {
+  direction: 1 | -1;
+  from: number;
+  to: number;
+  style: StairStyle;
+  bendX: number;
+  startX: number;
+  endX: number;
+  startY: number;
+  endY: number;
+  durationMs: number;
+}
+
+export interface StairPosition {
+  x: number;
+  y: number;
+  progress: number;
+}
+
+export type StairStyle = 'vertical' | 'steep';
+
+/** Authored variation for the first chapter: shafts and steep switchback flights. */
+export function stairStyleFor(floor: number, _direction: 1 | -1): StairStyle {
+  // The middle connections are the cramped, steep industrial stairs; the
+  // dorm and canteen connections stay as direct vertical shafts.
+  if (floor === 2 || floor === 3) return 'steep';
+  return 'vertical';
+}
+
+export function stairBendFor(direction: 1 | -1, style: StairStyle): number {
+  if (style === 'vertical') return 0;
+  return direction === 1 ? 96 : -96;
+}
+
 export function hasUpExit(floor: number): boolean {
   return PLAYABLE_FLOORS_V01.includes(floor + 1);
 }
@@ -30,6 +67,46 @@ export function hasDownExit(floor: number): boolean {
 
 export function floorName(floor: number): string {
   return getFloorTemplate(floor)?.name ?? '未知区域';
+}
+
+/** Build the visible stair path without mutating the game state. */
+export function stairTraversalFor(state: GameState, direction: 1 | -1): StairTraversal | null {
+  const to = state.currentFloor + direction;
+  const allowed = direction === 1 ? hasUpExit(state.currentFloor) : hasDownExit(state.currentFloor);
+  if (!allowed) return null;
+  const style = stairStyleFor(state.currentFloor, direction);
+  return {
+    direction,
+    from: state.currentFloor,
+    to,
+    style,
+    bendX: stairBendFor(direction, style),
+    startX: direction === 1 ? UP_EXIT_X : DOWN_EXIT_X,
+    endX: direction === 1 ? UP_EXIT_X : DOWN_EXIT_X,
+    startY: STAIR_START_Y,
+    endY: STAIR_START_Y + (direction === 1 ? -STAIR_RISE : STAIR_RISE),
+    durationMs: STAIR_TRAVEL_MS,
+  };
+}
+
+/** Interpolate the player's world position while they are on the stairs. */
+export function stairPosition(traversal: StairTraversal, elapsedMs: number): StairPosition {
+  const progress = Math.max(0, Math.min(1, elapsedMs / traversal.durationMs));
+  return {
+    x:
+      traversal.startX +
+      (traversal.endX - traversal.startX) * progress +
+      traversal.bendX * Math.sin(Math.PI * progress),
+    y: traversal.startY + (traversal.endY - traversal.startY) * progress,
+    progress,
+  };
+}
+
+/** Commit the floor only after the visible traversal reaches its landing. */
+export function completeStairTraversal(state: GameState, traversal: StairTraversal): FloorChangeResult {
+  const result = tryChangeFloor(state, traversal.direction);
+  if (result.ok) state.player.x = traversal.endX;
+  return result;
 }
 
 // Applies a floor change to state on success (moving the player to the entry

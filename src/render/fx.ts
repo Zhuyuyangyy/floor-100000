@@ -34,6 +34,8 @@ export const FX: ReadonlyArray<{ id: string; path: string }> = [
   { id: 'hit-spark', path: 'impacts/hit-spark' },
   { id: 'crit-hit', path: 'impacts/crit-hit' },
   { id: 'hit-flash', path: 'impacts/hit-flash' },
+  { id: 'sword-slash', path: 'melee/sword-slash' },
+  { id: 'parry', path: 'impacts/parry' },
   { id: 'ground-slam', path: 'impacts/ground-slam' },
   { id: 'collect-burst', path: 'pickups/collect-burst' },
   { id: 'coin-spin', path: 'pickups/coin-spin' },
@@ -194,10 +196,12 @@ export function startFxLoop(
  * Phaser discards the JSON once it has parsed the frames. Each entry is exactly
  * `meta.pixelfx` from the corresponding file in public/assets/fx/.
  */
-const FX_META: Record<string, { fps: number; loop: boolean; pivot: { x: number; y: number }; frameSize: [number, number] }> = {
+export const FX_META: Record<string, { fps: number; loop: boolean; pivot: { x: number; y: number }; frameSize: [number, number] }> = {
   'hit-spark': { fps: 30, loop: false, pivot: { x: 44, y: 64 }, frameSize: [136, 80] },
   'crit-hit': { fps: 30, loop: false, pivot: { x: 84, y: 106 }, frameSize: [216, 136] },
   'hit-flash': { fps: 30, loop: false, pivot: { x: 40, y: 54 }, frameSize: [80, 64] },
+  'sword-slash': { fps: 30, loop: false, pivot: { x: 44, y: 92 }, frameSize: [136, 104] },
+  parry: { fps: 30, loop: false, pivot: { x: 100, y: 96 }, frameSize: [200, 112] },
   'collect-burst': { fps: 30, loop: false, pivot: { x: 56, y: 94 }, frameSize: [112, 108] },
   'coin-spin': { fps: 30, loop: true, pivot: { x: 28, y: 48 }, frameSize: [56, 56] },
   candle: { fps: 30, loop: true, pivot: { x: 28, y: 64 }, frameSize: [56, 76] },

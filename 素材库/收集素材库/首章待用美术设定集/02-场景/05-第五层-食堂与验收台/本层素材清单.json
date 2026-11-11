@@ -1,0 +1,94 @@
+{
+  "floor": 5,
+  "background": {
+    "file": "01-固定背景/第5层-固定背景-2880x200.png",
+    "width": 2880,
+    "height": 200,
+    "segments": 9,
+    "segmentWidth": 320
+  },
+  "props": [
+    {
+      "file": "02-物品与家具/空餐盘叠.png",
+      "width": 35,
+      "height": 25,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/红印章.png",
+      "width": 16,
+      "height": 23,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/蓝封箱.png",
+      "width": 84,
+      "height": 60,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-blue-crate.png",
+      "width": 84,
+      "height": 62,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-counter.png",
+      "width": 170,
+      "height": 100,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-lamp.png",
+      "width": 28,
+      "height": 42,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-shelf.png",
+      "width": 96,
+      "height": 89,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/通用-table.png",
+      "width": 160,
+      "height": 72,
+      "format": "PNG RGBA"
+    },
+    {
+      "file": "02-物品与家具/验收工作台.png",
+      "width": 150,
+      "height": 110,
+      "format": "PNG RGBA"
+    }
+  ],
+  "animations": [
+    {
+      "folder": "03-动画/蓝封箱-开启",
+      "frameWidth": 100,
+      "frameHeight": 89,
+      "frameCount": 4,
+      "fps": 6,
+      "loop": false,
+      "origin": {
+        "x": 50,
+        "y": 83
+      }
+    },
+    {
+      "folder": "03-动画/验收台-指示灯",
+      "frameWidth": 150,
+      "frameHeight": 117,
+      "frameCount": 4,
+      "fps": 4,
+      "loop": true,
+      "origin": {
+        "x": 75,
+        "y": 112
+      }
+    }
+  ],
+  "layout": "本层布局-素材示例.json",
+  "preview": "00-预览/第5层-参考分层拼装预览.png"
+}

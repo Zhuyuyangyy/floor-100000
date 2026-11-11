@@ -141,6 +141,23 @@ describe('save validation covers the whole GameState shape (GHI-03 C1)', () => {
   });
 });
 
+describe('shelter slice save compatibility', () => {
+  it('accepts a legacy save that omits stress, diary and shelterPlan', () => {
+    const state = createNewGame(42) as unknown as Record<string, unknown>;
+    const player = state.player as Record<string, unknown>;
+    delete player.stress;
+    delete state.diary;
+    delete state.shelterPlan;
+    expect(validateGameState(state)).toEqual([]);
+  });
+
+  it('rejects a present stress value outside 0..100', () => {
+    const state = createNewGame(42);
+    state.player.stress = 101;
+    expect(validateGameState(state).some((e) => e.includes('stress'))).toBe(true);
+  });
+});
+
 // GHI-03 C2: currentFloor was only checked for being an integer.
 describe('save validation pins currentFloor to the playable range (GHI-03 C2)', () => {
   it('rejects a floor far outside the range', () => {

@@ -1,7 +1,8 @@
 import { GAME_CONFIG } from '../core/config';
 import { getItem } from '../data/items';
-import type { GameState, Inventory, InventoryStack, ItemId, StatKey } from '../core/gameTypes';
+import type { AilmentId, GameState, Inventory, InventoryStack, ItemId, StatKey } from '../core/gameTypes';
 import { waterRestoreMult } from './relics';
+import { applyCure } from './SicknessSystem';
 
 // Inventory rules: 12 slots, stacking, full-bag handling that never loses or
 // silently swallows items, and consumable use with clamped stat effects.
@@ -17,6 +18,8 @@ export interface UseResult {
   stat?: StatKey;
   amount?: number;
   stats?: { hp: number; hunger: number; thirst: number; energy: number };
+  /** ailments the item cleared, if any */
+  cured?: AilmentId[];
 }
 
 function sameMeta(a?: Record<string, string>, b?: Record<string, string>): boolean {
@@ -126,10 +129,16 @@ export function useConsumable(state: GameState, itemId: ItemId): UseResult {
   const restoreMult = item.effect.stat === 'thirst' ? waterRestoreMult(state.relics ?? []) : 1;
   p[item.effect.stat] = Math.min(max, before + item.effect.amount * restoreMult);
   removeItem(state.player.inventory, itemId, 1);
+  // A medkit is not just +40 HP: it is the thing that closes a wound. Without
+  // this the ailment the wanderer's hits open would only ever heal by resting,
+  // and the one item whose whole purpose is medical would not do the one thing
+  // a player reaches for it for.
+  const cured = itemId === 'medkit' ? applyCure(state, 'medkit') : [];
   return {
     ok: true,
     stat: item.effect.stat,
     amount: p[item.effect.stat] - before,
     stats: { hp: p.hp, hunger: p.hunger, thirst: p.thirst, energy: p.energy },
+    cured,
   };
 }

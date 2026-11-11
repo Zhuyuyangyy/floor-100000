@@ -71,7 +71,7 @@ async function nightAlpha(page: Page): Promise<number> {
 async function navTo(page: import('@playwright/test').Page, prefix: string): Promise<void> {
   for (let i = 0; i < 8; i++) {
     const onTarget = await page.evaluate((p) => {
-      const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean; y: number; texture?: { key?: string } }> } } | null } } }).__PHASER_GAME__;
+      const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ name?: string; type: string; text?: string; visible: boolean; y: number; texture?: { key?: string } }> } } | null } } }).__PHASER_GAME__;
       const list = g?.scene.getScene('Game')?.children.list ?? [];
       const marker = list.find((o) => o.type === 'Image' && o.texture?.key === 'ui-marker' && o.visible);
       if (!marker) return false;
@@ -208,15 +208,14 @@ test('the purifier converts dirty water to clean water', async ({ page }) => {
   // of visibility, which is the same trap `bagFullWarning.spec.ts` falls into.
   const shown = await page.evaluate(() => {
     const g = (window as unknown as {
-      __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean; y: number }> } } | null } };
+      __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ name?: string; type: string; text?: string; visible: boolean; y: number }> } } | null } };
     }).__PHASER_GAME__;
     // OVERHAUL UI: the HUD is a bar, so the flash sits at HUD_BAR_H + 26. The
     // row is derived from the constant rather than written as a literal: it used
     // to be 56, which was right for a 30px bar and silently wrong the moment the
     // design canvas went to 1280x720 and the bar doubled.
-    const HUD_BAR_H = 60;
     for (const o of g?.scene.getScene('Game')?.children.list ?? []) {
-      if (o.type === 'Text' && o.visible && Math.abs(o.y - (HUD_BAR_H + 26)) < 2) return o.text ?? '';
+      if (o.name === 'hud-feedback' && o.visible) return o.text ?? '';
     }
     return '';
   });

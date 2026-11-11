@@ -206,6 +206,13 @@ test('sleeping in the dorm advances to the next day', async ({ page }) => {
   });
   await walkRightTo(page, 1090); // to the bed at x=1120
   await page.keyboard.press('E');
+  await page.keyboard.press('Enter'); // arrange the default rest action
+  await page.waitForFunction(
+    () => !!window.__PHASER_SESSION__?.getState()?.shelterPlan?.resolved,
+    undefined,
+    { timeout: 5000 },
+  );
+  await page.keyboard.press('E'); // settle the night
 
   await page.waitForFunction(
     () => {
@@ -257,7 +264,14 @@ test('day 8 no longer auto-wins; the run carries on', async ({ page }) => {
     }
   });
   await walkRightTo(page, 1090);
-  await page.keyboard.press('E'); // sleep into day 8
+  await page.keyboard.press('E'); // open the shelter panel
+  await page.keyboard.press('Enter'); // arrange the default rest action
+  await page.waitForFunction(
+    () => !!window.__PHASER_SESSION__?.getState()?.shelterPlan?.resolved,
+    undefined,
+    { timeout: 5000 },
+  );
+  await page.keyboard.press('E'); // settle the night into day 8
 
   await page.waitForFunction(() => {
     const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();

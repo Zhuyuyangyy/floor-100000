@@ -80,11 +80,12 @@ const UP_EXIT_X = 40;
 
 async function climbOneFloor(page: Page, expectedFloor: number): Promise<void> {
   await walkLeftTo(page, UP_EXIT_X);
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 10; i++) {
     if ((await readState(page)).currentFloor === expectedFloor) return;
     await page.keyboard.press('E');
     await page.waitForTimeout(250);
   }
+  if ((await readState(page)).currentFloor === expectedFloor) return;
   throw new Error(`never reached floor ${expectedFloor} (at ${(await readState(page)).currentFloor})`);
 }
 
@@ -141,6 +142,8 @@ test('a climb from floor 1 to floor 5 costs a real slice of the day', async ({ p
   console.log(`[climb] floor 1 -> 5 with one search: ${Math.round(cost)} game minutes`);
   // Walking 4 stairwells plus one search must already be a meaningful slice of
   // the 14 waking hours, and must not silently bill a whole day.
-  expect(cost).toBeGreaterThan(40);
+  // Vertical shafts shorten the corridor route while still charging a real
+  // movement slice; keep the lower bound aligned with the new geometry.
+  expect(cost).toBeGreaterThan(30);
   expect(cost).toBeLessThan(240);
 });

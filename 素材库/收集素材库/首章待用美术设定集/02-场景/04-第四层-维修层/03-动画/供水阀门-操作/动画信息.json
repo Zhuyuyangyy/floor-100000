@@ -1,0 +1,17 @@
+{
+  "name": "供水阀门-操作",
+  "frameWidth": 160,
+  "frameHeight": 65,
+  "frameCount": 4,
+  "fps": 6,
+  "loop": false,
+  "origin": {
+    "x": 80,
+    "y": 22
+  },
+  "spriteSheet": "4帧横向.png",
+  "frames": "帧/00.png 至 帧/03.png",
+  "preview": "动画预览.gif",
+  "previewRepeats": true,
+  "notes": "操作时正序播放；回位可逆序播放。转轮中心约为原点；不要强制首尾循环。"
+}

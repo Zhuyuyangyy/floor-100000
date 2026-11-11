@@ -20,6 +20,8 @@ import {
   ROOM_COUNT,
   ROOM_WIDTH,
   STARTING_FLOOR,
+  STAIR_RISE,
+  STAIR_START_Y,
   UP_EXIT_X,
   STACK_ABOVE,
   STACK_BELOW,
@@ -28,21 +30,36 @@ import {
   WANDERER_SPEED,
 } from '../core/constants';
 import {
+  completeStairTraversal,
   currentInteractionZone,
   hasDownExit,
   hasUpExit,
   movePlayerX,
+  stairBendFor,
+  stairPosition,
+  stairStyleFor,
+  stairTraversalFor,
   stepHorizontalSpeed,
   tryChangeFloor,
 } from '../systems/FloorSystem';
 import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
 import { countItem, isBagFull, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
-import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, isNight, sleep, spendTime } from '../systems/SurvivalSystem';
+import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, isNight, spendTime } from '../systems/SurvivalSystem';
 import { ensureNightEvent } from '../systems/EventSystem';
 import { armNextRoll, dwellRollDue, ensureDwell, isDwellExempt, rollDwellEvent, tickDwell } from '../systems/dwellPressure';
 import { freshWandererAI, stepWandererAI, type WandererAI } from '../systems/wandererAI';
 import { ensureDailyGoal, grantDailyGoalReward, isDailyGoalDone } from '../systems/dailyGoals';
+import {
+  BODY_TEMP_MAX,
+  COLD_THRESHOLD,
+  bodyTempOf,
+  environmentLabel,
+  warmthAt,
+} from '../systems/EnvironmentSystem';
+import { ailmentLabel, inflict } from '../systems/SicknessSystem';
+import { recentDiary } from '../systems/DiarySystem';
+import { availableShelterActions, finishNight, resolveShelterAction } from '../systems/ShelterSystem';
 import { recordDepth, runScore } from '../systems/progress';
 import { CHARACTER_NAMES, applyDepth, loadMeta, saveMeta, unlockFromDepth } from '../systems/metaProgress';
 import type { CharacterKey } from '../render/artpack';
@@ -59,7 +76,7 @@ import {
   type EncounterChoice,
 } from '../systems/encounters';
 import { encounterSpots, nudgeSpotX, placeClearX } from '../systems/encounterSpots';
-import { resolveRound, playerCombatant, GUARD_ENERGY_RESTORE, type Combatant } from '../systems/combat';
+import { resolveRound, playerCombatant, GUARD_ENERGY_RESTORE, type CombatAction, type CombatRound, type Combatant } from '../systems/combat';
 import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster } from '../systems/monsters';
 import { guardianDamageMult, lootBonus, moveSpeedMult } from '../systems/relics';
 import { modeGuardianDamageMult } from '../systems/modes';
@@ -71,7 +88,6 @@ import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSyste
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import {
-  HUD_BAR_H,
   HUD_FOOT_H,
   STAT_COLORS,
   TYPE,
@@ -119,10 +135,11 @@ import {
   buildWallDressing,
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
+import { HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
 import { trade } from '../systems/TradeSystem';
-import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId } from '../core/gameTypes';
+import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId, ShelterAction } from '../core/gameTypes';
 
 const INVENTORY_SLOTS = 12;
 // Row pitch for the inventory list: 20px fits a full-size 16x16 icon with a 2px
@@ -139,20 +156,30 @@ const TYPE_AUX = 22;
 // with breathing room; 13px was too cramped to read at a glance.
 
 const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: string; color: number }> = [
-  { key: 'hp', label: 'HP', color: 0xe56d63 },
-  { key: 'hunger', label: '饥', color: 0xf4b66a },
-  { key: 'thirst', label: '渴', color: 0x6aa8e5 },
-  { key: 'energy', label: '精', color: 0x77c6a4 },
+  { key: 'hp', label: '生命', color: 0xe56d63 },
+  { key: 'hunger', label: '饥饿', color: 0xf4b66a },
+  { key: 'thirst', label: '口渴', color: 0x6aa8e5 },
+  { key: 'energy', label: '精力', color: 0x77c6a4 },
 ];
+
+// Body heat gets its own readout rather than a fifth bar: it is the one stat a
+// floor owns, so it reads as "where you are" as much as "how you are". The bar
+// would have said the latter and hidden the former.
+const TEMP_LABEL = '体温值';
+
+// Ailment labels, so the HUD and the item flash name the same thing the same way.
+const AILMENT_LABEL: Record<string, string> = {
+  cold: '冻伤',
+  fever: '发烧',
+  wound: '受伤',
+  food_poisoning: '食物中毒',
+};
 
 // ── HUD layout (OVERHAUL UI) ────────────────────────────────────────────────
 // Columns on the shared 4px grid: floor badge, clock, four stat bars (label +
 // bar each), then the right-aligned score and gold. These are computed once
 // here rather than sprinkled through buildHud, so moving a column is one edit.
 // All doubled with the design canvas (640x360 -> 1280x720).
-const HUD_STAT_X = 200;
-const HUD_STAT_PITCH = 168;
-const HUD_STAT_BAR_W = 104;
 const PAUSE_OPTIONS = ['继续游戏', '塔楼地图', '重新开始', '返回标题'];
 
 // OVERHAUL: the daily objective's one-line label, per goal kind.
@@ -181,6 +208,12 @@ const CHOICE_LABELS: Record<EncounterChoice, string> = {
   leave: '离开',
   read: '读纸条',
 };
+const SHELTER_ROWS: Array<{ action: ShelterAction; label: string; value: string }> = [
+  { action: 'rest', label: '休息', value: '恢复精力 · 压力 -6' },
+  { action: 'treat', label: '治疗', value: '医疗包 · 处理伤势' },
+  { action: 'repair', label: '修理', value: '木材×2 + 胶带×1' },
+  { action: 'care', label: '照顾邻居', value: '口粮×1 · 压力 -12' },
+];
 type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 's' | 'f' | 'up' | 'down';
 type DirKeys = {
   up: Phaser.Input.Keyboard.Key;
@@ -223,6 +256,8 @@ export class GameScene extends Phaser.Scene {
   // class fields, so clearFloor() zeroes this too. Left over, a restarted floor
   // would resume the run already at top speed.
   private speedX = 0;
+  /** transient visual traversal; GameState changes only after landing */
+  private stairClimb?: NonNullable<ReturnType<typeof stairTraversalFor>> & { elapsedMs: number };
   // OVERHAUL: a one-shot action clip (search / attack / hurt) and the time it
   // holds the sprite. Without the hold, the walk/idle selection below would
   // switch back on the very next frame and the clip would never be seen.
@@ -232,6 +267,7 @@ export class GameScene extends Phaser.Scene {
   private clockText!: Phaser.GameObjects.Text;
   private barsGfx!: Phaser.GameObjects.Graphics;
   private statLabels: Phaser.GameObjects.Text[] = [];
+  private statValues: Phaser.GameObjects.Text[] = [];
   private invCountText?: Phaser.GameObjects.Text;
   private invCells: Phaser.GameObjects.Rectangle[] = [];
   private invDetailName?: Phaser.GameObjects.Text;
@@ -252,6 +288,8 @@ export class GameScene extends Phaser.Scene {
   private floorBadge?: Phaser.GameObjects.Text;
   private goldText?: Phaser.GameObjects.Text;
   private goalText?: Phaser.GameObjects.Text;
+  /** the floor's environment line, right of the daily objective */
+  private environmentText?: Phaser.GameObjects.Text;
   private scoreText?: Phaser.GameObjects.Text;
   /** the low-HP edge warning: bands with their own base weights */
   private vignetteParts: Array<{ rect: Phaser.GameObjects.Rectangle; weight: number }> = [];
@@ -269,6 +307,12 @@ export class GameScene extends Phaser.Scene {
   // OVERHAUL Wave C1: the shop panel's cursor.
   private shopSelected = 0;
   private shopEntries: ShopEntry[] = [];
+  // First-floor shelter decision panel: the cursor is visual state, while the
+  // selected action itself is committed through ShelterSystem.
+  private shelterOpen = false;
+  private shelterSelected = 0;
+  private shelterObjects: PanelObject[] = [];
+  private shelterMarker!: Phaser.GameObjects.Image;
   private feedbackTimer?: Phaser.Time.TimerEvent;
   private lastClock = '';
   private lastStats = '';
@@ -369,6 +413,8 @@ export class GameScene extends Phaser.Scene {
     this.dialogueOptions = [];
     this.dialogueOptionIcons = [];
     this.dialogueMarker = createMarker(this);
+    this.shelterObjects = [];
+    this.shelterMarker = createMarker(this);
     // 重新开始 runs while the pause menu is still open, and these flags survive a
     // restart. Left set, update() early-returns forever and every panel handler
     // refuses to run, so the restarted game looks frozen.
@@ -378,10 +424,13 @@ export class GameScene extends Phaser.Scene {
     this.craftSelected = 0;
     this.dialogueOpen = false;
     this.dialogue = null;
+    this.shelterOpen = false;
+    this.shelterSelected = 0;
     this.pauseOpen = false;
     this.pauseSelected = 0;
     this.wanderer = undefined;
     this.wandererHitAt = Number.NEGATIVE_INFINITY;
+    this.stairClimb = undefined;
     this.lastClock = '';
     this.lastStats = '';
 
@@ -522,6 +571,8 @@ export class GameScene extends Phaser.Scene {
       // painted over by all of them - the player was invisible in the middle of
       // an empty floor with nothing wrong in the console.
       .setDepth(ACTOR_DEPTH);
+    this.playerLight?.setName('player-light');
+    this.syncPlayerWorldObjects(state.player.x, STAIR_START_Y);
     this.player.play(idleAnimKey(who));
     this.floorObjects.push(this.player);
     // The tower is a cross-section now, so the camera follows on BOTH axes and
@@ -540,7 +591,10 @@ export class GameScene extends Phaser.Scene {
       floor >= PLAYABLE_FLOORS_V01[PLAYABLE_FLOORS_V01.length - 1]
         ? FLOOR_HEIGHT + FLOOR_BAND
         : FLOOR_HEIGHT * (STACK_BELOW + 2);
-    cam.setBounds(-FLOOR_WIDTH * 0.5, topBound, FLOOR_WIDTH * 2, bottomBound - topBound);
+    // The world width equals the design viewport width. Locking the horizontal
+    // bounds to one floor keeps the full corridor visible when the player lands
+    // at x=40 or x=1240; only the tower's vertical cross-section may scroll.
+    cam.setBounds(0, topBound, FLOOR_WIDTH, bottomBound - topBound);
     cam.startFollow(this.player, true, 0.15, 0.15);
     // Centred on the player the moment the floor is drawn: a follow with
     // lerp 0.15 takes a third of a second to catch up, and during that time the
@@ -560,6 +614,8 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.stopFollow();
     for (const o of this.floorObjects) o.destroy();
     this.floorObjects = [];
+    for (const shadow of this.playerShadow) shadow.destroy();
+    this.playerShadow = [];
     this.speedX = 0;
     this.containerObjs.clear();
     this.groundObjs.clear();
@@ -567,6 +623,15 @@ export class GameScene extends Phaser.Scene {
     this.wanderer = undefined;
     this.wandererAI = undefined;
     this.clearEncounterSpots();
+  }
+
+  /** Keep the player, carried light and contact shadow on one world position. */
+  private syncPlayerWorldObjects(x: number, y: number): void {
+    this.player.setPosition(x, y);
+    for (const shadow of this.playerShadow) {
+      (shadow as Phaser.GameObjects.Rectangle).setPosition(x, y + 2);
+    }
+    if (this.playerLight) this.playerLight.setPosition(x, y - 40);
   }
 
   // The survivor picked on the meta-select screen, as a walk-sheet key. Falls
@@ -998,6 +1063,23 @@ export class GameScene extends Phaser.Scene {
     lockToScreen(this.encounterObjects);
   }
 
+  // Feedback is deliberately downstream of the pure combat result. It can add
+  // sprites, a short shake, and an action pose, but it never rolls, mutates HP,
+  // or decides whether the turn continues.
+  private playCombatFeedback(round: CombatRound, action: CombatAction): void {
+    const state = getGame();
+    if (round.playerDamage > 0) {
+      playFx(this, 'sword-slash', state.player.x + 28, PLAYER_FEET_Y - 52, LIGHT_DEPTH);
+      if (round.monsterDead) playFx(this, 'crit-hit', state.player.x + 28, PLAYER_FEET_Y - 52, LIGHT_DEPTH + 1);
+    }
+    if (action === 'guard' && round.monsterDamage > 0 && !round.fled) {
+      playFx(this, 'parry', state.player.x + 10, PLAYER_FEET_Y - 50, LIGHT_DEPTH + 1);
+    }
+    if (round.monsterDamage > 0 && !round.fled) {
+      playFx(this, 'hit-flash', state.player.x, PLAYER_FEET_Y - 48, LIGHT_DEPTH + 2);
+    }
+  }
+
   // One turn: the engine resolves the round, this method lands the numbers on
   // state and decides whether the fight continues.
   private activateCombatChoice(): void {
@@ -1019,16 +1101,11 @@ export class GameScene extends Phaser.Scene {
     const round = resolveRound(player, monsterC, action, rng);
     combat.log.push(...round.messages);
     combat.guarding = action === 'guard';
+    this.playCombatFeedback(round, action);
 
     if (round.playerDamage > 0) {
       combat.monster.hp = Math.max(0, combat.monster.hp - round.playerDamage);
       this.playActionAnim(attackAnimKey('player'), 300);
-      // THE BLOW LANDS. Before this the only sign a hit connected was the
-      // monster's HP bar shrinking - the number changed and nothing on screen
-      // did. The killing blow gets the bigger burst: there is no crit mechanic in
-      // the combat model to key off, and inventing one here would be a lie, but
-      // monsterDead is a real signal and the finish deserves the louder effect.
-      playFx(this, round.monsterDead ? 'crit-hit' : 'hit-spark', state.player.x + 22, PLAYER_FEET_Y - 52, LIGHT_DEPTH);
     }
     if (action === 'guard') {
       state.player.energy = Math.min(GAME_CONFIG.player.energyMax, state.player.energy + GUARD_ENERGY_RESTORE);
@@ -1050,9 +1127,6 @@ export class GameScene extends Phaser.Scene {
       state.player.hp = Math.max(0, state.player.hp - dmg);
       if (action === 'guard') this.playActionAnim(hurtAnimKey('player'), 400);
       this.cameras.main.shake(160, 0.008);
-      // AND THE PLAYER FEELS IT. Taking damage was a number in the HUD changing;
-      // the flash puts it on the body that took it.
-      playFx(this, 'hit-flash', state.player.x, PLAYER_FEET_Y - 48, LIGHT_DEPTH + 1);
     }
     combat.turn += 1;
     this.refreshStats();
@@ -1484,12 +1558,12 @@ export class GameScene extends Phaser.Scene {
   // floor band is where it lands.
   private drawExits(floor: number): void {
     if (hasUpExit(floor)) {
-      this.drawStair(UP_EXIT_X, 'up');
+      this.drawStair(UP_EXIT_X, 'up', floor);
       const upLabel = this.add.text(UP_EXIT_X, FLOOR_HEIGHT - 104, '↑ 上楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
       this.floorObjects.push(upLabel);
     }
     if (hasDownExit(floor)) {
-      this.drawStair(DOWN_EXIT_X, 'down');
+      this.drawStair(DOWN_EXIT_X, 'down', floor);
       const downLabel = this.add.text(DOWN_EXIT_X, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
       this.floorObjects.push(downLabel);
     }
@@ -1505,38 +1579,57 @@ export class GameScene extends Phaser.Scene {
    * is the whole point of the cross-section: you can see where the stairs go
    * before you walk to them.
    */
-  private drawStair(x: number, dir: 'up' | 'down'): void {
-    // The flight itself is the stair tile, unrotated: it runs vertically between
-    // the two landings, which is exactly the tile's own orientation. It used to
-    // be a 32x64 decal sitting on the floor line, which said "there are stairs
-    // here" without saying where they went.
-    const y0 = FLOOR_HEIGHT - FLOOR_BAND;
-    const tile = dir === 'up' ? 'tile_stairs_up' : 'tile_stairs_down';
-    const flight = this.add
-      .tileSprite(x - 16, y0, 32, FLOOR_HEIGHT, tile)
-      .setOrigin(dir === 'up' ? 0 : 0, dir === 'up' ? 1 : 0);
-    const y1 = y0 + (dir === 'up' ? -FLOOR_HEIGHT : FLOOR_HEIGHT);
+  private drawStair(x: number, dir: 'up' | 'down', floor: number): void {
+    // Some connections are vertical shafts; the industrial middle connections
+    // use a steep switchback with a small landing. Both shapes share the same
+    // deterministic path as stairPosition(), so the character never leaves the
+    // drawn steps.
+    const y0 = STAIR_START_Y;
+    const y1 = y0 + (dir === 'up' ? -STAIR_RISE : STAIR_RISE);
+    const style = stairStyleFor(floor, dir === 'up' ? 1 : -1);
+    const bendX = stairBendFor(dir === 'up' ? 1 : -1, style);
 
     const g = this.add.graphics();
-    // The stringer: a slab under the treads so the flight has thickness.
-    g.fillStyle(PALETTE.shadow, 1);
-    g.fillRect(x - 19, Math.min(y0, y1), 38, FLOOR_HEIGHT);
-    // The landing at the far end, meeting the neighbour's floor band.
-    g.fillStyle(PALETTE.stone, 1);
-    g.fillRect(x - 24, y1 - 3, 48, 4);
-    g.fillStyle(PALETTE.ink, 0.6);
-    g.fillRect(x - 24, y1 - 1, 48, 1);
-    // A handrail along the near side, so the flight reads as something you
-    // hold onto on the way up rather than as a striped column.
-    g.lineStyle(1, PALETTE.dust, 0.55);
+    const steps = 18;
+    const xAt = (t: number): number => x + bendX * Math.sin(Math.PI * t);
+    const yAt = (t: number): number => y0 + (y1 - y0) * t;
+    // A dark stringer gives the shaft or switchback a readable silhouette.
+    g.lineStyle(9, PALETTE.shadow, 0.95);
     g.beginPath();
-    g.moveTo(x + 14, y0);
-    g.lineTo(x + 14, y1);
+    g.moveTo(x, y0);
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      g.lineTo(xAt(t), yAt(t));
+    }
     g.strokePath();
+    // Individual treads make the route legible at the zoomed-out tower view.
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const px = xAt(t);
+      const py = yAt(t);
+      g.fillStyle(i % 2 === 0 ? PALETTE.stone : PALETTE.dust, 0.95);
+      g.fillRect(Math.round(px - 15), Math.round(py - 2), 30, 4);
+    }
+    if (style === 'steep') {
+      const midX = xAt(0.5);
+      const midY = yAt(0.5);
+      g.fillStyle(PALETTE.stone, 1);
+      g.fillRect(Math.round(midX - 28), Math.round(midY - 3), 56, 6);
+    }
+    // A handrail follows the same path and ends at both landings.
+    g.lineStyle(2, PALETTE.dust, 0.7);
+    g.beginPath();
+    g.moveTo(x + (dir === 'up' ? 12 : -12), y0 - 8);
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      g.lineTo(xAt(t) + (dir === 'up' ? 12 : -12), yAt(t) - 8);
+    }
+    g.strokePath();
+    g.fillStyle(PALETTE.stone, 1);
+    g.fillRect(Math.round(x - 24), Math.round(y1 - 3), 48, 4);
 
-    flight.setDepth(ACTOR_DEPTH - 1);
     g.setDepth(ACTOR_DEPTH - 1);
-    this.floorObjects.push(flight, g);
+    this.floorObjects.push(g);
   }
 
   /**
@@ -1570,11 +1663,12 @@ export class GameScene extends Phaser.Scene {
     }
     // the stairwell opening in this floor's ceiling or floor, so the flight
     // arriving from the player's floor has somewhere to arrive
-    const stairX = isAbove ? DOWN_EXIT_X : UP_EXIT_X;
+    const stairX = isAbove ? UP_EXIT_X : DOWN_EXIT_X;
+    const stairOpeningY = yOffset + STAIR_START_Y - 10;
     g.fillStyle(PALETTE.ink, 0.85);
-    g.fillRect(stairX - 22, isAbove ? yOffset + wallH - 10 : yOffset, 44, 10);
+    g.fillRect(stairX - 22, stairOpeningY, 44, 10);
     g.fillStyle(PALETTE.stone, 1);
-    g.fillRect(stairX - 20, isAbove ? yOffset + wallH - 8 : yOffset + 2, 40, 6);
+    g.fillRect(stairX - 20, stairOpeningY + 2, 40, 6);
 
     // Aerial perspective, by distance and not by the floor's own ambience: the
     // first attempt tinted each neighbour with ambienceFor(floor), which made
@@ -1658,6 +1752,10 @@ export class GameScene extends Phaser.Scene {
     // setText/setColor (a stale Text's glTexture is null). Destroy and reset
     // everything this method owns before rebuilding.
     this.statLabels = [];
+    this.statValues = [];
+    this.lastGoalKey = '';
+    this.environmentText?.destroy();
+    this.environmentText = undefined;
     this.goalText?.destroy();
     this.goalText = undefined;
     this.scoreText?.destroy();
@@ -1669,75 +1767,56 @@ export class GameScene extends Phaser.Scene {
     this.goldText?.destroy();
     this.goldText = undefined;
 
-    // ── the top bar ─────────────────────────────────────────────────────────
-    // OVERHAUL UI: the HUD used to be five text chips with their own
-    // background colours scattered at the screen corners, which is what made the
-    // game read as a prototype. It is now one bar on the shared grid: floor
-    // badge, clock, four segmented stat bars, gold, score — each in its own
-    // column, all baseline-aligned.
-    this.add.rectangle(0, 0, DESIGN_WIDTH, HUD_BAR_H, UI.surface).setOrigin(0, 0).setAlpha(0.9).setScrollFactor(0).setDepth(100);
-    const topLine = this.add.graphics().setScrollFactor(0).setDepth(101);
-    topLine.fillStyle(UI.line, 0.9);
-    topLine.fillRect(0, HUD_BAR_H - 1, DESIGN_WIDTH, 1);
+    // A fixed screen-space instrument strip, then two independent context rows.
+    // The world's existing palette stays intact; generous gutters separate
+    // survival, location and money so none of them borrow another field's space.
+    const hud = HUD_LAYOUT;
+    this.add.rectangle(0, 0, DESIGN_WIDTH, hud.topHeight, UI.surface).setOrigin(0).setAlpha(0.98).setScrollFactor(0).setDepth(100);
+    this.add.rectangle(0, hud.topHeight, DESIGN_WIDTH, hud.contextBottom - hud.topHeight, UI.surface).setOrigin(0).setAlpha(0.94).setScrollFactor(0).setDepth(100);
+    const chrome = this.add.graphics().setScrollFactor(0).setDepth(101);
+    chrome.lineStyle(1, UI.line, 0.85);
+    for (const x of [196, 1000]) chrome.lineBetween(x, 14, x, hud.topHeight - 14);
+    chrome.lineBetween(16, hud.topHeight - 1, DESIGN_WIDTH - 16, hud.topHeight - 1);
+    chrome.lineBetween(16, hud.contextBottom - 1, DESIGN_WIDTH - 16, hud.contextBottom - 1);
+    chrome.fillStyle(UI.accent, 1);
+    chrome.fillRect(0, 0, 4, hud.topHeight);
 
-    // Floor badge: the one number that is always the answer to "where am I".
-    this.floorBadge = this.add
-      .text(8, HUD_BAR_H / 2, '1F', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(PALETTE.ink) })
-      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(103);
-    this.add
-      .rectangle(6, HUD_BAR_H / 2, 26, 15, UI.accent)
-      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(102);
-
-    this.clockText = this.add
-      .text(38, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
-      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(103);
+    this.floorBadge = this.add.text(20, 6, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
+      .setName('hud-floor').setScrollFactor(0).setDepth(103);
+    this.clockText = this.add.text(20, 38, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+      .setName('hud-clock').setScrollFactor(0).setDepth(103);
     this.refreshClock();
 
-    // The four survival bars, drawn by one Graphics.
-    this.barsGfx = this.add.graphics().setScrollFactor(0).setDepth(103);
-    STAT_BARS.forEach((s, i) => {
-      const col = 0 + i;
-      void col;
-      this.statLabels.push(
-        this.add
-          .text(HUD_STAT_X + i * HUD_STAT_PITCH, HUD_BAR_H / 2, s.label, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
-          .setOrigin(0, 0.5).setScrollFactor(0).setDepth(103),
-      );
+    this.barsGfx = this.add.graphics().setName('hud-stat-bars').setScrollFactor(0).setDepth(103);
+    STAT_BARS.forEach((stat, i) => {
+      const x = hud.statX + i * hud.statPitch;
+      this.statLabels.push(this.add.text(x, 10, stat.label, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+        .setName(`hud-stat-${stat.key}`).setScrollFactor(0).setDepth(103));
+      this.statValues.push(this.add.text(x + hud.statWidth, 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+        .setOrigin(1, 0).setName(`hud-value-${stat.key}`).setScrollFactor(0).setDepth(103));
     });
     this.refreshStats();
 
-    // Gold and score, right-aligned in their own columns.
-    this.goldText = this.add
-      .text(DESIGN_WIDTH - 8, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
-      .setOrigin(1, 0.5).setScrollFactor(0).setDepth(103);
-    this.scoreText = this.add
-      .text(DESIGN_WIDTH - 62, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
-      .setOrigin(1, 0.5).setScrollFactor(0).setDepth(103);
+    this.goldText = this.add.text(DESIGN_WIDTH - 20, 6, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
+      .setOrigin(1, 0).setName('hud-gold').setScrollFactor(0).setDepth(103);
+    this.scoreText = this.add.text(DESIGN_WIDTH - 20, 34, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
+      .setOrigin(1, 0).setName('hud-score').setScrollFactor(0).setDepth(103);
 
-    // The daily objective gets its own slim line under the bar: it is the
-    // answer to "what am I doing today", so it should not be a corner chip.
-    const goalY = HUD_BAR_H + 8;
-    this.goalText = this.add
-      .text(8, goalY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
-      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    this.goalText = this.add.text(20, hud.goalY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
+      .setName('hud-goal').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    this.environmentText = this.add.text(20, hud.environmentY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
+      .setName('hud-environment').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
-    // Centred on the CAMERA viewport, not the floor: FLOOR_WIDTH is the 1280px
-    // world, but a scrollFactor-0 object is positioned in screen space, so
-    // FLOOR_WIDTH/2 (=640) sat half outside the 640px canvas.
-    this.feedbackText = this.add
-      .text(DESIGN_WIDTH / 2, HUD_BAR_H + 26, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
-      .setOrigin(0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
-
-    // Red rather than amber: this is a standing blocker, not news. It sits below
-    // the flash so both can be on screen at once without overlapping.
-    this.bagFullText = this.add
-      .text(
-        DESIGN_WIDTH / 2,
-        HUD_BAR_H + 46,
-        `背包已满 · 使用、制作或交易腾出格子，否则搜刮会留在原处；能叠进已有堆的物品仍可拾取`,
-        { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } },
-      )
-      .setOrigin(0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
+    // Feedback has a dedicated lower lane. It remains above modal panels but
+    // can never collide with the daily objective or the permanent environment.
+    this.feedbackText = this.add.text(20, hud.feedbackY, '', {
+      fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh),
+      backgroundColor: '#0b0f12ee', padding: { x: 8, y: 5 }, wordWrap: { width: 1216 },
+    }).setName('hud-feedback').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    this.bagFullText = this.add.text(20, hud.bagY,
+      '背包已满 · 使用、制作或交易腾出格子，否则搜刮会留在原处；能叠进已有堆的物品仍可拾取',
+      { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12ee', padding: { x: 8, y: 3 }, wordWrap: { width: 1216 } },
+    ).setName('hud-bag-full').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
 
     // ── the foot bar ────────────────────────────────────────────────────────
     this.add.rectangle(0, DESIGN_HEIGHT - HUD_FOOT_H, DESIGN_WIDTH, HUD_FOOT_H, UI.surface).setOrigin(0, 0).setAlpha(0.88).setScrollFactor(0).setDepth(100);
@@ -1746,7 +1825,7 @@ export class GameScene extends Phaser.Scene {
     footLine.fillRect(0, DESIGN_HEIGHT - HUD_FOOT_H, DESIGN_WIDTH, 1);
     this.hintText = this.add
       .text(8, DESIGN_HEIGHT - HUD_FOOT_H / 2, 'A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
-      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+      .setOrigin(0, 0.5).setName('hud-hint').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // The low-HP vignette: pure red wash whose alpha is the pulse function's
     // output. Created invisible; update() drives it every frame.
@@ -1798,43 +1877,93 @@ export class GameScene extends Phaser.Scene {
     const goal = state.dailyGoal;
     const done = goal ? isDailyGoalDone(state) : false;
     const label = goal ? GOAL_LABELS[goal.kind](goal.target) : '';
-    const key = `${goal?.day ?? 0}|${goal?.kind ?? ''}|${goal?.target ?? 0}|${String(done)}`;
+    const stress = Math.round(state.player.stress ?? 20);
+    const key = `${goal?.day ?? 0}|${goal?.kind ?? ''}|${goal?.target ?? 0}|${String(done)}|${stress}`;
     if (key !== this.lastGoalKey) {
       this.lastGoalKey = key;
-      this.goalText.setText(`目标 ${label}${done ? ' ✓' : ''}`);
+      this.goalText.setText(`目标 ${label}${done ? ' ✓' : ''} · 压力 ${stress}`);
       this.goalText.setColor(done ? hex(TEXT.highlight) : hex(PALETTE.lightHigh));
     }
-    this.scoreText.setText(`${runScore(state)}分`);
-    this.goldText?.setText(`${state.player.gold}金`);
+    this.scoreText.setText(`分数 ${runScore(state)}`);
+    this.goldText?.setText(`金币 ${state.player.gold}`);
+    this.scoreText.setFontSize(TYPE.caption);
+    if (this.scoreText.width > 240) this.scoreText.setFontSize(18);
+    if (this.goldText) {
+      this.goldText.setFontSize(TYPE.caption);
+      if (this.goldText.width > 240) this.goldText.setFontSize(18);
+    }
+    this.fitHudLine(this.goalText, 1240);
+  }
+
+  /** Preserve legible type; shorten only exceptional overlong HUD strings. */
+  private fitHudLine(text: Phaser.GameObjects.Text, width: number): void {
+    if (text.width <= width) return;
+    const characters = Array.from(text.text);
+    while (characters.length > 1 && text.width > width) {
+      characters.pop();
+      text.setText(`${characters.join('')}…`);
+    }
   }
 
   private refreshClock(): void {
     const s = getGame();
-    const label = `D${s.day} ${formatClock(s.gameMinuteOfDay)}`;
+    const label = hudClockLabel(s.day, s.gameMinuteOfDay);
     if (label !== this.lastClock) {
       this.lastClock = label;
       this.clockText.setText(label);
     }
-    this.floorBadge?.setText(`${s.currentFloor}F`);
+    this.floorBadge?.setText(`第${s.currentFloor}层`);
+    this.fitHudLine(this.clockText, 164);
   }
 
   private refreshStats(): void {
+    // Transactions can change money while a modal freezes the ordinary tick.
+    this.refreshGoalHud();
     const p = getGame().player;
     const values = [p.hp, p.hunger, p.thirst, p.energy];
-    const key = values.map((v) => Math.round(v)).join(',');
+    const key = `${values.map((v) => Math.round(v)).join(',')}|${Math.round(p.stress ?? 20)}`;
     if (key === this.lastStats) return;
     this.lastStats = key;
     this.barsGfx.clear();
     values.forEach((v, i) => {
-      const x = HUD_STAT_X + i * HUD_STAT_PITCH + 24;
+      const x = HUD_LAYOUT.statX + i * HUD_LAYOUT.statPitch;
       const color = STAT_COLORS[STAT_BARS[i].key] ?? UI.good;
-      drawStatBar(this.barsGfx, x, HUD_BAR_H / 2 - 2, HUD_STAT_BAR_W, 4, v / 100, color);
+      drawStatBar(this.barsGfx, x, 40, HUD_LAYOUT.statWidth, 8, v / 100, color);
+      this.statValues[i]?.setText(String(Math.round(v)));
     });
     // The most urgent bar's label turns red, so the critical slot is findable
     // without reading four numbers.
     const urgent = mostUrgentStat(getGame().player);
     this.statLabels.forEach((t, i) => t.setColor(STAT_BARS[i].key === urgent ? hex(TEXT.warn) : hex(TEXT.secondary)));
-    this.refreshGoalHud();
+  }
+
+  /**
+   * The environment line refreshes on its own, not from refreshStats.
+   *
+   * refreshStats early-returns when the four bars have not moved, and the
+   * environment changes without any of them moving - walking from floor 4 onto
+   * floor 5's brazier changes the heat and nothing else. Calling it from the
+   * frame loop instead is what keeps the line honest.
+   */
+  private refreshEnvironmentHud(): void {
+    if (!this.environmentText) return;
+    const state = getGame();
+    const temp = bodyTempOf(state);
+    // The readout says what the heat is doing, not just the number: "回暖中" next
+    // to a brazier is the feedback that standing here was the right call.
+    const heat = warmthAt(state.currentFloor, state.player.x);
+    let mood: string;
+    if (heat > 0 && temp < BODY_TEMP_MAX) mood = '回暖中';
+    else if (temp <= COLD_THRESHOLD) mood = '寒冷';
+    else if (temp >= 85) mood = '暖和';
+    else mood = '微凉';
+    // An ailment outranks the weather on this line: being ill is more urgent than
+    // being chilly, and this line is the only place either is stated.
+    const ill = ailmentLabel(state);
+    const envPart = ill ? `${ill} · ${environmentLabel(state.currentFloor)}` : environmentLabel(state.currentFloor);
+    this.environmentText.setText(`${TEMP_LABEL} ${Math.round(temp)} ${mood} · ${envPart}`);
+    this.environmentText.setColor(temp <= COLD_THRESHOLD || ill !== '' ? hex(TEXT.warn) : hex(TEXT.secondary));
+    this.fitHudLine(this.environmentText, 1240);
   }
 
   private buildInventoryPanel(): void {
@@ -2229,7 +2358,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onToggleCrafting(): void {
-    if (this.inventoryOpen || this.dialogueOpen || this.pauseOpen) return;
+    if (this.inventoryOpen || this.dialogueOpen || this.pauseOpen || this.shelterOpen) return;
     if (!this.craftingOpen && getGame().currentFloor !== STARTING_FLOOR) {
       this.flash('只能在宿舍工作台制作');
       return;
@@ -2556,6 +2685,7 @@ export class GameScene extends Phaser.Scene {
       this.pauseObjects,
       this.dialogueObjects,
       this.encounterObjects,
+      this.shelterObjects,
     ];
     let found = false;
     for (const group of groups) {
@@ -2594,16 +2724,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onToggleMap(): void {
-    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen) return;
+    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
     this.openTowerOverview();
   }
 
   private onToggleInventory(): void {
-    if (this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen) return;
+    if (this.stairClimb || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
     this.toggleInventory();
   }
 
   private onEsc(): void {
+    if (this.stairClimb) return;
     // ESCAPE HATCH FIRST.
     //
     // Every branch below is gated on a state flag, so a panel that is DRAWN
@@ -2619,6 +2750,7 @@ export class GameScene extends Phaser.Scene {
       !this.craftingOpen &&
       !this.dialogueOpen &&
       !this.pauseOpen &&
+      !this.shelterOpen &&
       this.clearStrayPanels()
     ) {
       this.flash('面板已清理');
@@ -2642,6 +2774,10 @@ export class GameScene extends Phaser.Scene {
       this.closeEncounter();
       return;
     }
+    if (this.shelterOpen) {
+      this.closeShelter();
+      return;
+    }
     if (this.inventoryOpen) this.toggleInventory();
     else if (this.craftingOpen) this.toggleCrafting();
     else if (this.dialogueOpen) this.dialogueBack();
@@ -2649,6 +2785,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onNavUp(): void {
+    if (this.shelterOpen && !getGame().shelterPlan?.resolved) {
+      this.shelterSelected = Math.max(0, this.shelterSelected - 1);
+      this.buildShelterPanel();
+      return;
+    }
     // OVERHAUL Wave C1: the shop's cursor.
     if (this.encounterOpen && !getGame().combat && !this.encounter) {
       this.shopSelected = Math.max(0, this.shopSelected - 1);
@@ -2677,6 +2818,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onNavDown(): void {
+    if (this.shelterOpen && !getGame().shelterPlan?.resolved) {
+      this.shelterSelected = Math.min(SHELTER_ROWS.length - 1, this.shelterSelected + 1);
+      this.buildShelterPanel();
+      return;
+    }
     // OVERHAUL Wave C1: the shop's cursor.
     if (this.encounterOpen && !getGame().combat && !this.encounter) {
       this.shopSelected = Math.min(this.shopEntries.length - 1, this.shopSelected + 1);
@@ -2708,6 +2854,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onUse(): void {
+    if (this.stairClimb) return;
+    if (this.shelterOpen) {
+      this.activateShelterChoice();
+      return;
+    }
     // OVERHAUL Wave A: the fight's turn key. Once the outcome screen is up,
     // Enter closes it; until then it plays the selected action.
     if (this.encounterOpen && getGame().combat) {
@@ -2738,7 +2889,10 @@ export class GameScene extends Phaser.Scene {
         // on the survivor, at their chest, so the stat that moved is the one you
         // can see move.
         playFx(this, 'collect-burst', getGame().player.x, PLAYER_FEET_Y - 52, LIGHT_DEPTH + 1);
-        this.flash(`使用 ${getItem(stack.itemId).displayName} · ${STAT_LABEL[result.stat!]} +${Math.round(result.amount!)}`);
+        // The item's stat gain, and what it cleared: a medkit that closes a
+        // wound says so, because that is the reason it was reached for.
+        const cured = result.cured?.length ? ` · 治好${result.cured.map((c) => AILMENT_LABEL[c]).join('、')}` : '';
+        this.flash(`使用 ${getItem(stack.itemId).displayName} · ${STAT_LABEL[result.stat!]} +${Math.round(result.amount!)}${cured}`);
       } else {
         this.flash(result.reason ?? '无法使用');
       }
@@ -2756,6 +2910,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onInteract(): void {
+    if (this.stairClimb) return;
+    if (this.shelterOpen) {
+      this.onUse();
+      return;
+    }
     if (this.inventoryOpen || this.craftingOpen || this.pauseOpen) return;
     if (this.dialogueOpen) {
       this.closeDialogue();
@@ -2853,6 +3012,7 @@ export class GameScene extends Phaser.Scene {
     if (this.encounterOpen && combat) return '↑/↓ 选择 · Enter 出招 · ESC 撤退';
     if (this.encounterOpen && this.encounter) return '↑/↓ 选择 · Enter 确认 · ESC 离开';
     if (this.encounterOpen) return '↑/↓ 选择 · Enter 买入 · S 卖出 · ESC 离开';
+    if (this.shelterOpen) return getGame().shelterPlan?.resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回';
     if (this.inventoryOpen) return '↑/↓ 选择 · Enter 使用 · I 关闭';
     if (this.craftingOpen) return '↑/↓ 选择 · Enter 制作 · C 关闭';
     if (this.dialogueOpen) return '↑/↓ 选择 · Enter 确定 · ESC 返回';
@@ -2866,30 +3026,126 @@ export class GameScene extends Phaser.Scene {
 
   private attemptSleep(): void {
     const state = getGame();
-    const result = sleep(state);
+    if (!isNight(state.gameMinuteOfDay)) {
+      this.flash('还太早，20:00 后才能安排夜间行动');
+      return;
+    }
+    this.openShelter();
+  }
+
+  private openShelter(): void {
+    const state = getGame();
+    if (!state.shelterPlan?.resolved && availableShelterActions(state).length === 0) {
+      this.flash('今晚没有可安排的 shelter 行动');
+      return;
+    }
+    const existing = state.shelterPlan?.action;
+    this.shelterSelected = existing ? Math.max(0, SHELTER_ROWS.findIndex((row) => row.action === existing)) : 0;
+    this.shelterOpen = true;
+    this.buildShelterPanel();
+  }
+
+  private closeShelter(): void {
+    this.shelterOpen = false;
+    for (const object of this.shelterObjects) {
+      if (object !== this.shelterMarker) object.destroy();
+    }
+    this.shelterObjects = [];
+    this.shelterMarker.setVisible(false);
+  }
+
+  private buildShelterPanel(): void {
+    for (const object of this.shelterObjects) {
+      if (object !== this.shelterMarker) object.destroy();
+    }
+    this.shelterObjects = [];
+    const state = getGame();
+    const { width, height } = this.viewSize();
+    const panelW = 500;
+    const panelH = 300;
+    const cx = width / 2;
+    const cy = height / 2;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+    const depth = PANEL_DEPTH.game.dialogue;
+    const resolved = state.shelterPlan?.resolved === true;
+
+    this.shelterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
+    this.shelterObjects.push(...buildPanelHeader(this, left, top, panelW, '夜间安排 · 宿舍', UI.good, depth + 5));
+    this.shelterObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 44, depth + 5));
+    const stress = Math.round(state.player.stress ?? 20);
+    const latest = recentDiary(state, 1)[0];
+    this.shelterObjects.push(
+      this.add.text(left + 24, top + 40, `压力 ${stress}/100${latest ? ` · 上次：${latest.message}` : ' · 今天还没有记录'}`, {
+        fontFamily: 'monospace',
+        fontSize: `${TYPE.caption}px`,
+        color: hex(stress >= 70 ? TEXT.warn : TEXT.primary),
+        wordWrap: { width: panelW - 48 },
+      }).setOrigin(0, 0.5).setDepth(depth + 6),
+    );
+    const rowsTop = top + 80;
+    for (const [index, row] of SHELTER_ROWS.entries()) {
+      const objects = buildListRow(this, left + 16, rowsTop + index * 26, panelW - 32, depth + 6, {
+        label: row.label,
+        value: row.value,
+        selected: index === this.shelterSelected,
+        dim: resolved && state.shelterPlan?.action !== row.action,
+      });
+      this.shelterObjects.push(...objects);
+      const label = objects.find((object) => object instanceof Phaser.GameObjects.Text && object.text === row.label) as Phaser.GameObjects.Text | undefined;
+      if (index === this.shelterSelected && label) {
+        placeMarker(this.shelterMarker, label);
+        this.shelterMarker.setDepth(depth + 8).setVisible(true).setScrollFactor(0);
+      }
+    }
+    this.shelterObjects.push(
+      this.add.text(cx, top + panelH - 14, resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回', {
+        fontFamily: 'monospace',
+        fontSize: `${TYPE.caption}px`,
+        color: hex(PALETTE.clothHigh),
+      }).setOrigin(0.5).setDepth(depth + 6),
+    );
+    this.shelterObjects.push(this.shelterMarker);
+    this.assertPanelContent('shelter', this.shelterObjects);
+  }
+
+  private activateShelterChoice(): void {
+    const state = getGame();
+    if (state.shelterPlan?.resolved) {
+      const result = finishNight(state);
+      if (!result.ok) {
+        this.flash(result.reason ?? '今晚还不能睡');
+        return;
+      }
+      this.closeShelter();
+      saveToStorage(state);
+      playSfx('sleep');
+      const cam = this.cameras.main;
+      cam.fadeOut(520, 5, 8, 11);
+      this.time.delayedCall(560, () => {
+        if (!this.scene.isActive()) return;
+        cam.fadeIn(620, 5, 8, 11);
+        this.refreshClock();
+        this.refreshStats();
+        this.applyNightLighting();
+        const attackNote = result.attacked ? ` · 夜袭 -${result.attackDamage} HP` : '';
+        this.flash(`睡到第 ${result.nextDay} 天 06:00 · 压力 ${Math.round(state.player.stress ?? 20)}${attackNote}`);
+      });
+      if (state.status === 'lost') this.scene.start('End');
+      return;
+    }
+
+    const row = SHELTER_ROWS[this.shelterSelected];
+    if (!row) return;
+    const result = resolveShelterAction(state, row.action);
     if (!result.ok) {
-      this.flash(result.reason);
+      this.flash(result.reason ?? result.message);
       return;
     }
     saveToStorage(state);
-    playSfx('sleep');
-    // AND THE NIGHT PASSES. Sleeping was a sound effect and a line of text: the
-    // clock jumped eight hours and the frame did not move, so a new day looked
-    // identical to the last one. The screen now goes down and comes back with the
-    // day change behind the dark, which is the only cue that time actually went
-    // anywhere.
-    const cam = this.cameras.main;
-    cam.fadeOut(520, 5, 8, 11);
-    this.time.delayedCall(560, () => {
-      if (!this.scene.isActive()) return;
-      cam.fadeIn(620, 5, 8, 11);
-      this.refreshClock();
-      this.refreshStats();
-      this.applyNightLighting();
-      if (!result.won) this.flash(`睡到第 ${result.newDay} 天 06:00`);
-    });
-    if (result.won) this.scene.start('End');
-    else this.flash(`睡到第 ${result.newDay} 天 06:00`);
+    playSfx('click');
+    this.buildShelterPanel();
+    this.flash(`${result.message} 按 Enter 睡觉`);
   }
 
   private nearestContainer(): GeneratedContainer | null {
@@ -2968,49 +3224,59 @@ export class GameScene extends Phaser.Scene {
   }
 
   private changeFloor(direction: 1 | -1): void {
-    const result = tryChangeFloor(getGame(), direction);
-    if (result.ok) {
-      this.clearFloor();
-      this.drawFloor(); // records the visit for the floor just entered...
-      // OVERHAUL: a new deepest floor is the run's headline number, so the
-      // record is taken the moment the floor changes rather than at scoring.
-      recordDepth(getGame());
-      // OVERHAUL Wave B: depth is also the meta-progression currency — the
-      // moment a new survivor is earned, the run says so, because "who can I
-      // play next" is the reason to start another run.
-      const meta = loadMeta();
-      const gained = applyDepth(meta, getGame().currentFloor);
-      if (gained.length > 0) {
-        saveMeta(unlockFromDepth(meta, getGame().currentFloor));
-        playSfx('goal');
-        this.flash(`新幸存者解锁：${gained.map((c) => CHARACTER_NAMES[c] ?? c).join('、')}！回标题可更换`);
-      }
-      // B3-15: a dwell-rolled wanderer belongs to the floor it was rolled on.
-      // Leaving is the escape, so the event must not follow the player up the
-      // stairs and squat in the day's single event slot.
-      const we = getGame().worldEvents;
-      if (we.activeEvent?.source === 'dwell') we.activeEvent = null;
-      saveToStorage(getGame()); // ...so the save that follows includes it
-      // Climbing is the game's whole verb and it was a black flash: no direction,
-      // no distance. The pan now travels with the stairs - up a screen's worth
-      // when climbing, down when descending - so the tower feels like something
-      // you move through rather than a number that changes.
-      const cam = this.cameras.main;
-      cam.flash(260, 0, 0, 0);
-      this.time.delayedCall(120, () => {
-        if (!this.scene.isActive()) return;
-        // a tween on the scroll rather than camera.pan(): pan()'s fourth argument
-        // is not an ease string in Phaser 4 and threw "this.ease is not a function"
-        this.tweens.add({
-          targets: cam,
-          scrollY: cam.scrollY + (direction === 1 ? -DESIGN_HEIGHT : DESIGN_HEIGHT),
-          duration: 480,
-          ease: 'Sine.InOut',
-        });
-      });
-    } else {
-      this.flash(result.reason === 'top' ? '已到顶层' : '已到尽头');
+    if (this.stairClimb) return;
+    const traversal = stairTraversalFor(getGame(), direction);
+    if (!traversal) {
+      this.flash(direction === 1 ? '已到顶层' : '已到尽头');
+      return;
     }
+    this.speedX = 0;
+    this.stairClimb = { ...traversal, elapsedMs: 0 };
+    this.player.setFlipX(direction < 0);
+    this.player.play(walkAnimKey(this.metaSelectedCharacter()), true);
+    this.player.anims.timeScale = 1.25;
+    this.flash(direction === 1 ? '沿楼梯上行……' : '沿楼梯下行……');
+  }
+
+  /** Advance the visible stair traversal; floor state changes only at 100%. */
+  private updateStairClimb(delta: number): void {
+    const climb = this.stairClimb;
+    if (!climb) return;
+    climb.elapsedMs = Math.min(climb.durationMs, climb.elapsedMs + Math.max(0, delta));
+    const pose = stairPosition(climb, climb.elapsedMs);
+    this.player.setPosition(pose.x, pose.y);
+    this.player.setFlipX(climb.direction < 0);
+    this.player.anims.timeScale = 1.25;
+    for (const shadow of this.playerShadow) {
+      (shadow as Phaser.GameObjects.Rectangle).setPosition(pose.x, pose.y + 2);
+    }
+    if (this.playerLight) this.playerLight.setPosition(pose.x, pose.y - 40);
+    if (pose.progress < 1) return;
+
+    const state = getGame();
+    const result = completeStairTraversal(state, climb);
+    this.stairClimb = undefined;
+    if (!result.ok) {
+      this.player.setPosition(state.player.x, PLAYER_FEET_Y);
+      this.flash(result.reason === 'top' ? '已到顶层' : '已到尽头');
+      return;
+    }
+
+    this.clearFloor();
+    this.drawFloor(); // records the visit only after the player lands
+    recordDepth(state);
+    const meta = loadMeta();
+    const gained = applyDepth(meta, state.currentFloor);
+    if (gained.length > 0) {
+      saveMeta(unlockFromDepth(meta, state.currentFloor));
+      playSfx('goal');
+      this.flash(`新幸存者解锁：${gained.map((c) => CHARACTER_NAMES[c] ?? c).join('、')}！回标题可更换`);
+    }
+    // Leaving a dwell event's floor is still the escape; the event must not
+    // follow the player across the stairwell.
+    if (state.worldEvents.activeEvent?.source === 'dwell') state.worldEvents.activeEvent = null;
+    saveToStorage(state);
+    this.flash(`到达第 ${state.currentFloor} 层 · 已从楼梯落地`);
   }
 
   // B3-15: rolls dwell pressure and applies the outcome. Pure logic lives in
@@ -3059,7 +3325,11 @@ export class GameScene extends Phaser.Scene {
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
     this.refreshBagFullWarning();
-    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen) return;
+    if (this.stairClimb) {
+      this.updateStairClimb(delta);
+      return;
+    }
+    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
     const state = getGame();
 
     // B3-01 D9: a rejected write used to be silent, so a full disk or a private
@@ -3084,14 +3354,7 @@ export class GameScene extends Phaser.Scene {
     this.speedX = stepHorizontalSpeed(this.speedX, dir, delta) * moveSpeedFactor(state.player) * moveSpeedMult(state.relics ?? []);
     const dx = this.speedX * (delta / 1000);
     if (dx !== 0) movePlayerX(state, dx);
-    this.player.x = state.player.x;
-    // The shadow is its own objects (three stacked ellipses), so it has to be
-    // carried along instead of being a child of the sprite.
-    for (const o of this.playerShadow) (o as Phaser.GameObjects.Rectangle).x = state.player.x;
-    // The carry light rides with the player for the same reason the shadow does:
-    // it is not a child of the sprite, and it is what keeps the floor readable
-    // once night falls.
-    if (this.playerLight) this.playerLight.x = state.player.x;
+    this.syncPlayerWorldObjects(state.player.x, STAIR_START_Y);
 
     // The walk cycle carries all the vertical motion now — the poses' own hip
     // bob, not a sine wave bolted on top. What is left to do here is pick the
@@ -3124,8 +3387,11 @@ export class GameScene extends Phaser.Scene {
     // reward fires once, with the fanfare, so finishing it feels like an event
     // rather than a silent counter.
     ensureDailyGoal(state);
-    if (isDailyGoalDone(state) && !state.dailyGoal?.done) {
-      grantDailyGoalReward(state);
+    // The fanfare fires on the transition, not on the state: grantDailyGoalReward
+    // is itself idempotent (a flag guards it), so this only decides whether to
+    // make noise. Reading the return value rather than re-deriving the condition
+    // keeps the two from drifting apart.
+    if (isDailyGoalDone(state) && grantDailyGoalReward(state)) {
       playSfx('goal');
       this.flash('今日目标完成！分数 +' + GAME_CONFIG.overhaul.dailyGoalRewardScore + '，获得口粮×1');
     }
@@ -3155,6 +3421,28 @@ export class GameScene extends Phaser.Scene {
     const event = state.worldEvents.activeEvent;
     this.refreshClock();
     this.refreshStats();
+    this.refreshEnvironmentHud();
+    // Body heat crosses its thresholds slowly, so the message fires on the
+    // transition rather than every frame while cold. It is the floor telling you
+    // to move, which is the whole point of the stat.
+    if (tick.environment?.becameFreezing) {
+      this.flash('体温过低！靠近火源，否则会失温');
+      playSfx('danger');
+    } else if (tick.environment?.becameCold) {
+      this.flash('越来越冷了——这层没有热源');
+    } else if (tick.environment?.warmedUp) {
+      this.flash('缓过来了');
+    }
+    // An ailment announces itself on the crossing, not every frame it lasts: the
+    // message is news, and news that repeats is noise.
+    if (tick.sickness?.critical.length) {
+      this.flash(`${AILMENT_LABEL[tick.sickness.critical[0]]}恶化！需要治疗`);
+      playSfx('danger');
+    } else if (tick.sickness?.worsened.length) {
+      this.flash(`你${AILMENT_LABEL[tick.sickness.worsened[0]]}了——状态会掉得更快`);
+    } else if (tick.sickness?.recovered.length) {
+      this.flash(`${AILMENT_LABEL[tick.sickness.recovered[0]]}好了`);
+    }
     this.applyNightLighting();
 
     // GHI-03 M3: the clock and the survival decay only ever advance here, and
@@ -3225,7 +3513,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (this.nearBed(state)) {
-      this.hintText.setText('按 E 睡觉');
+      this.hintText.setText(isNight(state.gameMinuteOfDay) ? '按 E 安排夜间行动' : '床位 · 20:00 后可安排夜间行动');
       return;
     }
     if (this.nearCraftStation(state)) {
@@ -3253,7 +3541,7 @@ export class GameScene extends Phaser.Scene {
     }
     else if (zone === 'up') this.hintText.setText('按 E 上楼');
     else if (zone === 'down') this.hintText.setText('按 E 下楼');
-    else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互 · I 背包 · ESC 菜单');
+    else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单');
   }
 
   // The wanderer only haunts its own floor; it is slower than the player and
@@ -3316,6 +3604,11 @@ export class GameScene extends Phaser.Scene {
     if (Math.abs(this.wanderer.x - state.player.x) <= 12 && this.time.now - this.wandererHitAt >= WANDERER_HIT_COOLDOWN_MS) {
       this.wandererHitAt = this.time.now;
       state.player.hp = Math.max(0, state.player.hp - damage);
+      // AND IT LEAVES A WOUND. A hit used to be HP leaving and nothing else, so
+      // the only thing wrong with you afterwards was a smaller number. Now every
+      // hit opens a wound that outlasts it, and a lunge opens a deeper one — the
+      // ailment is what makes the night cost something the next day too.
+      inflict(state, 'wound', ai!.state === 'lunge' ? 55 : 30, absoluteMinute(state));
       this.refreshStats();
       this.playActionAnim(hurtAnimKey('player'), 400);
       playSfx('hurt');

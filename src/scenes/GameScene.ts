@@ -45,7 +45,7 @@ import {
 import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
 import { countItem, isBagFull, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
-import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, formatClock, isNight, spendTime } from '../systems/SurvivalSystem';
+import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, isNight, spendTime } from '../systems/SurvivalSystem';
 import { ensureNightEvent } from '../systems/EventSystem';
 import { armNextRoll, dwellRollDue, ensureDwell, isDwellExempt, rollDwellEvent, tickDwell } from '../systems/dwellPressure';
 import { freshWandererAI, stepWandererAI, type WandererAI } from '../systems/wandererAI';
@@ -88,7 +88,6 @@ import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSyste
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import {
-  HUD_BAR_H,
   HUD_FOOT_H,
   STAT_COLORS,
   TYPE,
@@ -136,6 +135,7 @@ import {
   buildWallDressing,
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
+import { HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
 import { trade } from '../systems/TradeSystem';
@@ -156,16 +156,16 @@ const TYPE_AUX = 22;
 // with breathing room; 13px was too cramped to read at a glance.
 
 const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: string; color: number }> = [
-  { key: 'hp', label: 'HP', color: 0xe56d63 },
-  { key: 'hunger', label: '饥', color: 0xf4b66a },
-  { key: 'thirst', label: '渴', color: 0x6aa8e5 },
-  { key: 'energy', label: '精', color: 0x77c6a4 },
+  { key: 'hp', label: '生命', color: 0xe56d63 },
+  { key: 'hunger', label: '饥饿', color: 0xf4b66a },
+  { key: 'thirst', label: '口渴', color: 0x6aa8e5 },
+  { key: 'energy', label: '精力', color: 0x77c6a4 },
 ];
 
 // Body heat gets its own readout rather than a fifth bar: it is the one stat a
 // floor owns, so it reads as "where you are" as much as "how you are". The bar
 // would have said the latter and hidden the former.
-const TEMP_LABEL = '温';
+const TEMP_LABEL = '体温值';
 
 // Ailment labels, so the HUD and the item flash name the same thing the same way.
 const AILMENT_LABEL: Record<string, string> = {
@@ -180,9 +180,6 @@ const AILMENT_LABEL: Record<string, string> = {
 // bar each), then the right-aligned score and gold. These are computed once
 // here rather than sprinkled through buildHud, so moving a column is one edit.
 // All doubled with the design canvas (640x360 -> 1280x720).
-const HUD_STAT_X = 200;
-const HUD_STAT_PITCH = 168;
-const HUD_STAT_BAR_W = 104;
 const PAUSE_OPTIONS = ['继续游戏', '塔楼地图', '重新开始', '返回标题'];
 
 // OVERHAUL: the daily objective's one-line label, per goal kind.
@@ -270,6 +267,7 @@ export class GameScene extends Phaser.Scene {
   private clockText!: Phaser.GameObjects.Text;
   private barsGfx!: Phaser.GameObjects.Graphics;
   private statLabels: Phaser.GameObjects.Text[] = [];
+  private statValues: Phaser.GameObjects.Text[] = [];
   private invCountText?: Phaser.GameObjects.Text;
   private invCells: Phaser.GameObjects.Rectangle[] = [];
   private invDetailName?: Phaser.GameObjects.Text;
@@ -1754,6 +1752,10 @@ export class GameScene extends Phaser.Scene {
     // setText/setColor (a stale Text's glTexture is null). Destroy and reset
     // everything this method owns before rebuilding.
     this.statLabels = [];
+    this.statValues = [];
+    this.lastGoalKey = '';
+    this.environmentText?.destroy();
+    this.environmentText = undefined;
     this.goalText?.destroy();
     this.goalText = undefined;
     this.scoreText?.destroy();
@@ -1765,82 +1767,56 @@ export class GameScene extends Phaser.Scene {
     this.goldText?.destroy();
     this.goldText = undefined;
 
-    // ── the top bar ─────────────────────────────────────────────────────────
-    // OVERHAUL UI: the HUD used to be five text chips with their own
-    // background colours scattered at the screen corners, which is what made the
-    // game read as a prototype. It is now one bar on the shared grid: floor
-    // badge, clock, four segmented stat bars, gold, score — each in its own
-    // column, all baseline-aligned.
-    this.add.rectangle(0, 0, DESIGN_WIDTH, HUD_BAR_H, UI.surface).setOrigin(0, 0).setAlpha(0.9).setScrollFactor(0).setDepth(100);
-    const topLine = this.add.graphics().setScrollFactor(0).setDepth(101);
-    topLine.fillStyle(UI.line, 0.9);
-    topLine.fillRect(0, HUD_BAR_H - 1, DESIGN_WIDTH, 1);
+    // A fixed screen-space instrument strip, then two independent context rows.
+    // The world's existing palette stays intact; generous gutters separate
+    // survival, location and money so none of them borrow another field's space.
+    const hud = HUD_LAYOUT;
+    this.add.rectangle(0, 0, DESIGN_WIDTH, hud.topHeight, UI.surface).setOrigin(0).setAlpha(0.98).setScrollFactor(0).setDepth(100);
+    this.add.rectangle(0, hud.topHeight, DESIGN_WIDTH, hud.contextBottom - hud.topHeight, UI.surface).setOrigin(0).setAlpha(0.94).setScrollFactor(0).setDepth(100);
+    const chrome = this.add.graphics().setScrollFactor(0).setDepth(101);
+    chrome.lineStyle(1, UI.line, 0.85);
+    for (const x of [196, 1000]) chrome.lineBetween(x, 14, x, hud.topHeight - 14);
+    chrome.lineBetween(16, hud.topHeight - 1, DESIGN_WIDTH - 16, hud.topHeight - 1);
+    chrome.lineBetween(16, hud.contextBottom - 1, DESIGN_WIDTH - 16, hud.contextBottom - 1);
+    chrome.fillStyle(UI.accent, 1);
+    chrome.fillRect(0, 0, 4, hud.topHeight);
 
-    // Floor badge: the one number that is always the answer to "where am I".
-    this.floorBadge = this.add
-      .text(8, HUD_BAR_H / 2, '1F', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(PALETTE.ink) })
-      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(103);
-    this.add
-      .rectangle(6, HUD_BAR_H / 2, 26, 15, UI.accent)
-      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(102);
-
-    this.clockText = this.add
-      .text(38, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
-      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(103);
+    this.floorBadge = this.add.text(20, 6, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
+      .setName('hud-floor').setScrollFactor(0).setDepth(103);
+    this.clockText = this.add.text(20, 38, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+      .setName('hud-clock').setScrollFactor(0).setDepth(103);
     this.refreshClock();
 
-    // The four survival bars, drawn by one Graphics.
-    this.barsGfx = this.add.graphics().setScrollFactor(0).setDepth(103);
-    STAT_BARS.forEach((s, i) => {
-      const col = 0 + i;
-      void col;
-      this.statLabels.push(
-        this.add
-          .text(HUD_STAT_X + i * HUD_STAT_PITCH, HUD_BAR_H / 2, s.label, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
-          .setOrigin(0, 0.5).setScrollFactor(0).setDepth(103),
-      );
+    this.barsGfx = this.add.graphics().setName('hud-stat-bars').setScrollFactor(0).setDepth(103);
+    STAT_BARS.forEach((stat, i) => {
+      const x = hud.statX + i * hud.statPitch;
+      this.statLabels.push(this.add.text(x, 10, stat.label, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+        .setName(`hud-stat-${stat.key}`).setScrollFactor(0).setDepth(103));
+      this.statValues.push(this.add.text(x + hud.statWidth, 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+        .setOrigin(1, 0).setName(`hud-value-${stat.key}`).setScrollFactor(0).setDepth(103));
     });
     this.refreshStats();
 
-    // Gold and score, right-aligned in their own columns.
-    this.goldText = this.add
-      .text(DESIGN_WIDTH - 8, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
-      .setOrigin(1, 0.5).setScrollFactor(0).setDepth(103);
-    this.scoreText = this.add
-      .text(DESIGN_WIDTH - 62, HUD_BAR_H / 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
-      .setOrigin(1, 0.5).setScrollFactor(0).setDepth(103);
+    this.goldText = this.add.text(DESIGN_WIDTH - 20, 6, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
+      .setOrigin(1, 0).setName('hud-gold').setScrollFactor(0).setDepth(103);
+    this.scoreText = this.add.text(DESIGN_WIDTH - 20, 34, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
+      .setOrigin(1, 0).setName('hud-score').setScrollFactor(0).setDepth(103);
 
-    // The daily objective gets its own slim line under the bar: it is the
-    // answer to "what am I doing today", so it should not be a corner chip.
-    // The floor's environment rides the same line — it is the other half of that
-    // answer, and putting it anywhere else made the five floors read as five
-    // colour schemes.
-    const goalY = HUD_BAR_H + 8;
-    this.goalText = this.add
-      .text(8, goalY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
-      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    this.goalText = this.add.text(20, hud.goalY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
+      .setName('hud-goal').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    this.environmentText = this.add.text(20, hud.environmentY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
+      .setName('hud-environment').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
-    this.environmentText = this.add
-      .text(DESIGN_WIDTH - 8, goalY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.dust) })
-      .setOrigin(1, 0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
-
-    // Centred on the CAMERA viewport, not the floor: FLOOR_WIDTH is the 1280px
-    // world, but a scrollFactor-0 object is positioned in screen space, so
-    // FLOOR_WIDTH/2 (=640) sat half outside the 640px canvas.
-    this.feedbackText = this.add
-      .text(DESIGN_WIDTH / 2, HUD_BAR_H + 26, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
-      .setOrigin(0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
-
-    // Red rather than amber: this is a standing blocker, not news. It sits below
-    // the flash so both can be on screen at once without overlapping.
-    this.bagFullText = this.add
-      .text(
-        DESIGN_WIDTH / 2,
-        HUD_BAR_H + 46,
-        `背包已满 · 使用、制作或交易腾出格子，否则搜刮会留在原处；能叠进已有堆的物品仍可拾取`,
-        { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } },
-      )
-      .setOrigin(0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
+    // Feedback has a dedicated lower lane. It remains above modal panels but
+    // can never collide with the daily objective or the permanent environment.
+    this.feedbackText = this.add.text(20, hud.feedbackY, '', {
+      fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh),
+      backgroundColor: '#0b0f12ee', padding: { x: 8, y: 5 }, wordWrap: { width: 1216 },
+    }).setName('hud-feedback').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    this.bagFullText = this.add.text(20, hud.bagY,
+      '背包已满 · 使用、制作或交易腾出格子，否则搜刮会留在原处；能叠进已有堆的物品仍可拾取',
+      { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12ee', padding: { x: 8, y: 3 }, wordWrap: { width: 1216 } },
+    ).setName('hud-bag-full').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
 
     // ── the foot bar ────────────────────────────────────────────────────────
     this.add.rectangle(0, DESIGN_HEIGHT - HUD_FOOT_H, DESIGN_WIDTH, HUD_FOOT_H, UI.surface).setOrigin(0, 0).setAlpha(0.88).setScrollFactor(0).setDepth(100);
@@ -1849,7 +1825,7 @@ export class GameScene extends Phaser.Scene {
     footLine.fillRect(0, DESIGN_HEIGHT - HUD_FOOT_H, DESIGN_WIDTH, 1);
     this.hintText = this.add
       .text(8, DESIGN_HEIGHT - HUD_FOOT_H / 2, 'A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
-      .setOrigin(0, 0.5).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+      .setOrigin(0, 0.5).setName('hud-hint').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // The low-HP vignette: pure red wash whose alpha is the pulse function's
     // output. Created invisible; update() drives it every frame.
@@ -1908,21 +1884,41 @@ export class GameScene extends Phaser.Scene {
       this.goalText.setText(`目标 ${label}${done ? ' ✓' : ''} · 压力 ${stress}`);
       this.goalText.setColor(done ? hex(TEXT.highlight) : hex(PALETTE.lightHigh));
     }
-    this.scoreText.setText(`${runScore(state)}分`);
-    this.goldText?.setText(`${state.player.gold}金`);
+    this.scoreText.setText(`分数 ${runScore(state)}`);
+    this.goldText?.setText(`金币 ${state.player.gold}`);
+    this.scoreText.setFontSize(TYPE.caption);
+    if (this.scoreText.width > 240) this.scoreText.setFontSize(18);
+    if (this.goldText) {
+      this.goldText.setFontSize(TYPE.caption);
+      if (this.goldText.width > 240) this.goldText.setFontSize(18);
+    }
+    this.fitHudLine(this.goalText, 1240);
+  }
+
+  /** Preserve legible type; shorten only exceptional overlong HUD strings. */
+  private fitHudLine(text: Phaser.GameObjects.Text, width: number): void {
+    if (text.width <= width) return;
+    const characters = Array.from(text.text);
+    while (characters.length > 1 && text.width > width) {
+      characters.pop();
+      text.setText(`${characters.join('')}…`);
+    }
   }
 
   private refreshClock(): void {
     const s = getGame();
-    const label = `D${s.day} ${formatClock(s.gameMinuteOfDay)}`;
+    const label = hudClockLabel(s.day, s.gameMinuteOfDay);
     if (label !== this.lastClock) {
       this.lastClock = label;
       this.clockText.setText(label);
     }
-    this.floorBadge?.setText(`${s.currentFloor}F`);
+    this.floorBadge?.setText(`第${s.currentFloor}层`);
+    this.fitHudLine(this.clockText, 164);
   }
 
   private refreshStats(): void {
+    // Transactions can change money while a modal freezes the ordinary tick.
+    this.refreshGoalHud();
     const p = getGame().player;
     const values = [p.hp, p.hunger, p.thirst, p.energy];
     const key = `${values.map((v) => Math.round(v)).join(',')}|${Math.round(p.stress ?? 20)}`;
@@ -1930,15 +1926,15 @@ export class GameScene extends Phaser.Scene {
     this.lastStats = key;
     this.barsGfx.clear();
     values.forEach((v, i) => {
-      const x = HUD_STAT_X + i * HUD_STAT_PITCH + 24;
+      const x = HUD_LAYOUT.statX + i * HUD_LAYOUT.statPitch;
       const color = STAT_COLORS[STAT_BARS[i].key] ?? UI.good;
-      drawStatBar(this.barsGfx, x, HUD_BAR_H / 2 - 2, HUD_STAT_BAR_W, 4, v / 100, color);
+      drawStatBar(this.barsGfx, x, 40, HUD_LAYOUT.statWidth, 8, v / 100, color);
+      this.statValues[i]?.setText(String(Math.round(v)));
     });
     // The most urgent bar's label turns red, so the critical slot is findable
     // without reading four numbers.
     const urgent = mostUrgentStat(getGame().player);
     this.statLabels.forEach((t, i) => t.setColor(STAT_BARS[i].key === urgent ? hex(TEXT.warn) : hex(TEXT.secondary)));
-    this.refreshGoalHud();
   }
 
   /**
@@ -1966,7 +1962,8 @@ export class GameScene extends Phaser.Scene {
     const ill = ailmentLabel(state);
     const envPart = ill ? `${ill} · ${environmentLabel(state.currentFloor)}` : environmentLabel(state.currentFloor);
     this.environmentText.setText(`${TEMP_LABEL} ${Math.round(temp)} ${mood} · ${envPart}`);
-    this.environmentText.setColor(temp <= COLD_THRESHOLD || ill !== '' ? hex(TEXT.warn) : hex(PALETTE.dust));
+    this.environmentText.setColor(temp <= COLD_THRESHOLD || ill !== '' ? hex(TEXT.warn) : hex(TEXT.secondary));
+    this.fitHudLine(this.environmentText, 1240);
   }
 
   private buildInventoryPanel(): void {
@@ -3544,7 +3541,7 @@ export class GameScene extends Phaser.Scene {
     }
     else if (zone === 'up') this.hintText.setText('按 E 上楼');
     else if (zone === 'down') this.hintText.setText('按 E 下楼');
-    else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互 · I 背包 · ESC 菜单');
+    else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单');
   }
 
   // The wanderer only haunts its own floor; it is slower than the player and

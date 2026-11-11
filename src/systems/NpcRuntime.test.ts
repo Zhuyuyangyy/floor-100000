@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { addItem } from '../systems/InventorySystem';
 import { createNpcState } from '../data/npcPersonalities';
-import { buildObservation, decideNpcAction } from './NpcRuntime';
+import { buildObservation, decideNpcAction, isDialogueFresh } from './NpcRuntime';
 import type { NpcFact } from '../ai/rulesExecutor';
 import type { NpcActionProposal, NpcBrain } from '../ai/types';
 
@@ -112,5 +112,65 @@ describe('decideNpcAction：降级链', () => {
     const d = await decideNpcAction(state(), alinFact, createNpcState('ally'), cfg);
     expect(d.source).toBe('rejected');
     expect(d.validated.ok).toBe(false);
+  });
+});
+
+describe('allowedActions：本阶段可用集（P1-1）', () => {
+  it('模型提议可用集之外的行动 → 拒绝并降级', async () => {
+    const s = state();
+    const brain = new FakeBrain('ollama', async () => ({
+      action: { type: 'gift' as const, itemId: 'wire' as const, quantity: 1 },
+      confidence: 0.9,
+    }));
+    const d = await decideNpcAction(s, alinFact, createNpcState('ally'), {
+      ...config(brain),
+      allowedActions: ['dialogue'], // 第一阶段场景只接通对话
+    });
+    expect(d.source).toBe('fallback');
+    expect(d.rejectionReason).toContain('不在本阶段可用集');
+  });
+
+  it('观察快照的 availableActions 反映传入的可用集', () => {
+    const s = state();
+    const obs = buildObservation(alinFact, createNpcState('ally'), s, 6, ['dialogue']);
+    expect(obs.availableActions).toEqual(['dialogue']);
+  });
+
+  it('缺省可用集 = 人格原型全集', () => {
+    const obs = buildObservation(alinFact, createNpcState('ally'), state());
+    expect(obs.availableActions).toContain('gift');
+    expect(obs.availableActions).not.toContain('attack');
+  });
+});
+
+describe('事件可见性进入观察（P1-3）', () => {
+  it('NPC 不在场的日记事件不进 recentEvents', () => {
+    const s = state();
+    s.diary = [
+      { id: 'a', day: 1, minute: 600, floor: 2, kind: 'combat_wounded', actorIds: ['player', 'wanderer'], itemChanges: [], stressDelta: 0, message: '夜袭受伤' },
+      { id: 'b', day: 2, minute: 600, floor: 2, kind: 'neighbor_cared', actorIds: ['player', 'alin'], itemChanges: [], stressDelta: 0, message: '和阿林交易' },
+      { id: 'c', day: 3, minute: 600, floor: 2, kind: 'shelter_attacked', actorIds: ['player'], itemChanges: [], stressDelta: 0, message: '宿舍被袭' },
+    ];
+    const obs = buildObservation(alinFact, createNpcState('ally'), s);
+    expect(obs.recentEvents).toEqual(["和阿林交易", "宿舍被袭"]); // 夜袭阿林不在场，不知道；其余按时间正序
+  });
+});
+
+describe('isDialogueFresh：过期结果丢弃（P1-2）', () => {
+  it('同一场对话且无操作 → 新鲜', () => {
+    expect(isDialogueFresh({ sessionId: 1, revision: 0 }, { sessionId: 1, revision: 0 })).toBe(true);
+  });
+
+  it('玩家翻过选项（revision 变化）→ 过期', () => {
+    expect(isDialogueFresh({ sessionId: 1, revision: 1 }, { sessionId: 1, revision: 0 })).toBe(false);
+  });
+
+  it('对话被关闭重开（sessionId 变化）→ 过期', () => {
+    expect(isDialogueFresh({ sessionId: 2, revision: 0 }, { sessionId: 1, revision: 0 })).toBe(false);
+  });
+
+  it('对话已关闭（null）→ 过期', () => {
+    expect(isDialogueFresh(null, { sessionId: 1, revision: 0 })).toBe(false);
+    expect(isDialogueFresh(undefined, { sessionId: 1, revision: 0 })).toBe(false);
   });
 });

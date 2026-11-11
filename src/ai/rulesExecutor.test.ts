@@ -47,7 +47,7 @@ describe('validateProposal：低置信度与畸形输入', () => {
   it('置信度低于阈值一律拒绝', () => {
     const result = validateProposal(game(), alin, proposal({ confidence: MIN_CONFIDENCE - 0.01 }));
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toContain('置信度不足');
+    if (!result.ok) expect(result.reason).toContain('置信度越界');
   });
 
   it('confidence 不是数字时拒绝而不是抛错', () => {
@@ -60,16 +60,20 @@ describe('validateProposal：低置信度与畸形输入', () => {
     const bad = { action: { type: 'mind_control' }, confidence: 1 } as unknown as NpcActionProposal;
     const result = validateProposal(game(), alin, bad);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toContain('未知行动类型');
+    // 白名单先于 switch 命中：未知类型同样不在任何原型的允许集里
+    if (!result.ok) expect(result.reason).toContain('不允许 mind_control');
   });
 });
 
 describe('validateProposal：无条件合法动作', () => {
-  it('dialogue / refuse / flee 永远放行，缺台词时给占位', () => {
-    for (const type of ['dialogue', 'refuse', 'flee'] as const) {
+  it('dialogue / refuse 对合作型放行，flee 只有敌对型有', () => {
+    for (const type of ['dialogue', 'refuse'] as const) {
       const result = validateProposal(game(), alin, proposal({ action: { type, ...(type === 'dialogue' ? { text: '' } : {}) } as NpcActionProposal['action'] }));
       expect(result.ok).toBe(true);
     }
+    // ally 的白名单里没有 flee——合作型不临阵脱逃
+    expect(validateProposal(game(), alin, proposal({ action: { type: 'flee' } })).ok).toBe(false);
+    expect(validateProposal(game(), wanderer, proposal({ action: { type: 'flee' } })).ok).toBe(true);
     const silent = validateProposal(game(), alin, proposal({ action: { type: 'dialogue', text: '你好' } }));
     expect(silent.ok).toBe(true);
     if (silent.ok && silent.action.type === 'dialogue') expect(silent.action.text).toBe('你好');
@@ -138,11 +142,11 @@ describe('validateProposal：交易必须过现有守恒规则', () => {
 });
 
 describe('validateProposal：攻击只在既有危险窗口内放行', () => {
-  it('非敌对原型永远不能提议攻击', () => {
+  it('非敌对原型永远不能提议攻击（原型白名单先于窗口判定）', () => {
     const night = game({ gameMinuteOfDay: 1320 }); // 22:00，夜间
     const result = validateProposal(night, alin, proposal({ action: { type: 'attack' } }));
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toContain('非敌对原型');
+    if (!result.ok) expect(result.reason).toContain('原型 ally 不允许 attack');
   });
 
   it('敌对原型在白天无停留压力时不能攻击', () => {

@@ -6,9 +6,18 @@
 // 塞进规则执行器。
 
 import type { ItemId } from '../core/gameTypes';
+import { ITEMS } from '../data/items';
 import type { NpcActionProposal, NpcObservation } from './types';
 
 const ACTION_KINDS = ['dialogue', 'trade', 'gift', 'refuse', 'attack', 'flee'] as const;
+
+/** 合法物品 ID 词表。没有它，模型会拿中文物品名当 itemId，交易全部被
+ *  规则执行器以「未知物品」拒绝——实测（阶段 B S2）确认过这个缺口。 */
+export function itemVocabulary(): string {
+  return Object.values(ITEMS)
+    .map((i) => `${i.id}(${i.displayName})`)
+    .join('、');
+}
 
 function fmtRelationship(obs: NpcObservation): string {
   const entries = Object.entries(obs.relationship);
@@ -45,6 +54,7 @@ export function buildUserPrompt(obs: NpcObservation): string {
     `情境：第${obs.world.day}天 ${fmtMinute(obs.world.gameMinute)}${obs.world.night ? '（夜间）' : ''}，第${obs.world.floor}层。`,
     `相关记忆：${fmtMemory(obs)}`,
     `可用行动：${obs.availableActions.join(', ')}`,
+    `合法物品ID（trade/gift 必须使用这些ID，禁止使用中文名）：${itemVocabulary()}`,
     '输出契约：{"utterance":"说的话，60字以内，符合人格","action":{"type":"dialogue|trade|gift|refuse|attack|flee","give":{"itemId":"","quantity":1},"get":{"itemId":"","quantity":1},"itemId":"","quantity":1,"text":""},"confidence":0到1的小数}',
     '只填当前 type 需要的字段。trade 表示「我给你 give，换你的 get」。',
   ].join('\n');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSystemPrompt, buildUserPrompt, extractJson, parseProposal } from './prompt';
+import { buildSystemPrompt, buildUserPrompt, extractJson, itemVocabulary, parseProposal } from './prompt';
 import type { NpcObservation } from '../ai/types';
 import { createNpcState } from '../data/npcPersonalities';
 import { recall } from '../systems/NpcMemory';
@@ -89,5 +89,19 @@ describe('prompt 构造', () => {
 
   it('无记忆时明说「尚无共同经历」而不是留空', () => {
     expect(buildUserPrompt(observation())).toContain('尚无共同经历');
+  });
+
+  it('用户提示带合法物品 ID 词表（实测 S2 交易被拒后的修复）', () => {
+    const user = buildUserPrompt(observation());
+    expect(user).toContain('合法物品ID');
+    expect(user).toContain('wire(电线)');
+    expect(user).toContain('battery(电池)');
+  });
+
+  it('itemVocabulary 覆盖全部 16 种物品且带中文名', () => {
+    const vocab = itemVocabulary();
+    expect(vocab).toContain('clean_water(净水)');
+    expect(vocab).toContain('ration_pack(压缩口粮)');
+    expect(vocab.split('、').length).toBe(15);
   });
 });

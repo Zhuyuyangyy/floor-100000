@@ -100,7 +100,16 @@ test('crafting deducts materials and the upgrade persists across reload', async 
   await page.keyboard.press('C');
   await page.waitForTimeout(200); // let the panel open
   await navTo(page, '加固门');
-  await page.screenshot({ path: 'e2e/screenshots/08-craft.png' });
+  const shownBeforeCraft = await page.evaluate(() => {
+    const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (key: string) => { children: { list: Array<{ visible: boolean; text?: string }> } } | null } } }).__PHASER_GAME__;
+    return (g?.scene.getScene('Game')?.children.list ?? []).filter((o) => o.visible && typeof o.text === 'string').map((o) => o.text ?? '');
+  });
+  expect(shownBeforeCraft.some((text) => text.includes('材料数量：当前持有 / 配方需求'))).toBe(true);
+  expect(shownBeforeCraft).toContain('木材 2/2');
+  expect(shownBeforeCraft).toContain('胶带 1/1');
+  expect(shownBeforeCraft).toContain('电池 0/1');
+  expect(shownBeforeCraft).toContain('净化操作 · 建成简易净水器后解锁');
+  await page.screenshot({ path: 'art-src/community-ui/previews/crafting-workbench-ready.png' });
   await page.keyboard.press('Enter');
 
   await page.waitForFunction(
@@ -113,6 +122,13 @@ test('crafting deducts materials and the upgrade persists across reload', async 
   );
   expect(await count(page, 'wood')).toBe(0);
   expect(await count(page, 'tape')).toBe(0);
+  const shownAfterCraft = await page.evaluate(() => {
+    const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (key: string) => { children: { list: Array<{ visible: boolean; text?: string }> } } | null } } }).__PHASER_GAME__;
+    return (g?.scene.getScene('Game')?.children.list ?? []).filter((o) => o.visible && typeof o.text === 'string').map((o) => o.text ?? '');
+  });
+  expect(shownAfterCraft).toContain('已建');
+  expect(shownAfterCraft).toContain('木材 0/2');
+  expect(shownAfterCraft).toContain('胶带 0/1');
 
   // Reload: the title menu appears; choose 继续游戏 to resume the saved run.
   await page.reload();
@@ -131,6 +147,8 @@ test('insufficient materials are refused with no deduction', async ({ page }) =>
   await startGame(page, 42);
   // No materials given: 照明灯 (index 0) is 材料不足.
   await page.keyboard.press('C');
+  await page.waitForTimeout(150);
+  await page.screenshot({ path: 'art-src/community-ui/previews/crafting-workbench-no-materials.png' });
   await page.keyboard.press('Enter'); // try to craft the lamp
   await page.waitForTimeout(250);
   const s = await readState(page);

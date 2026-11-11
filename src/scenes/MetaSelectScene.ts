@@ -1,6 +1,5 @@
 import Phaser from 'phaser';
 
-
 import { CHARACTER_NAMES, CHARACTER_UNLOCKS, canSelect, loadMeta, saveMeta } from '../systems/metaProgress';
 import { MODE_BLURBS, MODE_LABELS, MODES } from '../systems/modes';
 import { relicDisplay } from '../systems/relics';
@@ -39,9 +38,12 @@ const FLAVOUR: Record<string, string> = {
 export class MetaSelectScene extends Phaser.Scene {
   private optionTexts: Phaser.GameObjects.Text[] = [];
   private lockTexts: Phaser.GameObjects.Text[] = [];
+  private optionRows: Phaser.GameObjects.Rectangle[] = [];
+  private optionAccents: Phaser.GameObjects.Rectangle[] = [];
   private selected = 0;
   private marker!: Phaser.GameObjects.Image;
   private messageText!: Phaser.GameObjects.Text;
+  private messageTimer?: Phaser.Time.TimerEvent;
   private cursors!: { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key };
   private keyEnter!: Phaser.Input.Keyboard.Key;
   private keyEsc!: Phaser.Input.Keyboard.Key;
@@ -75,80 +77,103 @@ export class MetaSelectScene extends Phaser.Scene {
     this.add.rectangle(width / 2, height / 2, width, height, UI.surface).setAlpha(0.62).setDepth(-29);
 
     const cx = width / 2;
-    const panelW = 470;
-    const panelH = 300;
+    const panelW = Math.min(920, width - 64);
+    const panelH = Math.min(460, height - 232);
     const left = cx - panelW / 2;
     const top = height / 2 - panelH / 2;
     const depth = PANEL_DEPTH.menu.help;
+    const infoPanelH = 84;
+    const infoGap = 16;
+    const footerH = 28;
+    const footerGap = 14;
+    const infoY = Math.min(
+      top + panelH + infoGap + infoPanelH / 2,
+      height - footerH - footerGap - infoPanelH / 2,
+    );
 
-    this.add.text(cx, top - 18, '出发之前', { fontFamily: 'monospace', fontSize: '36pxpx', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 4 }).setOrigin(0.5).setDepth(depth + 1);
+    this.add.text(cx, top / 2, '出发之前', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 4 }).setOrigin(0.5).setDepth(depth + 1);
 
-    for (const o of buildPanel(this, cx, height / 2, panelW, panelH, 'green', depth)) o.setDepth(o.depth);
-    for (const o of buildPanelHeader(this, left, top, panelW, '幸存者', UI.good, depth + 5)) this.add.existing(o as Phaser.GameObjects.GameObject);
+    for (const o of buildPanel(this, cx, height / 2, panelW, panelH, 'yellow', depth)) o.setDepth(o.depth);
+    for (const o of buildPanelHeader(this, left, top, panelW, '幸存者', UI.accent, depth + 5)) this.add.existing(o as Phaser.GameObjects.GameObject);
+    buildPanel(this, cx, infoY, panelW, infoPanelH, 'yellow', depth + 5);
 
     // ── the portrait ────────────────────────────────────────────────────────
-    // Left third. The sprite is 88px of figure at native size, which is the
-    // whole reason to give it room instead of a 16px thumbnail.
-    const portraitX = left + 62;
-    const portraitFeet = top + panelH - 60;
-    this.portraitGlow = this.add.graphics().setDepth(depth + 5);
+    // The inset, warm edge and consistent foot line frame the real survivor art.
+    const portraitX = left + panelW * 0.12;
+    const portraitFeet = top + 284;
+    this.add.rectangle(portraitX, top + 210, 104, 148, PALETTE.ink).setAlpha(0.72).setDepth(depth + 5);
+    this.portraitGlow = this.add.graphics().setDepth(depth + 6);
+    const portraitFrame = this.add.graphics().setDepth(depth + 7);
+    portraitFrame.lineStyle(1, UI.line, 0.85);
+    portraitFrame.strokeRect(Math.round(portraitX - 52) + 0.5, Math.round(top + 136) + 0.5, 103, 147);
     this.portrait = this.add
       .sprite(portraitX, portraitFeet, walkSheetKey('player'))
       .setOrigin(0.5, 1)
-      .setDepth(depth + 7);
+      .setScale(0.9)
+      .setDepth(depth + 8);
     this.portrait.play(idleAnimKey('player'));
 
     this.flavourText = this.add
-      .text(portraitX, portraitFeet + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary), align: 'center', wordWrap: { width: 110 } })
-      .setOrigin(0.5, 0)
-      .setDepth(depth + 7);
+      .text(cx, infoY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary), align: 'center', wordWrap: { width: panelW - 40, useAdvancedWrap: true } })
+      .setOrigin(0.5)
+      .setDepth(depth + 8);
 
     // ── the roster ──────────────────────────────────────────────────────────
     const meta = loadMeta();
-    const listX = left + 128;
-    const listW = 200;
+    const listX = left + panelW * 0.27;
+    const listW = panelW * 0.29;
     this.optionTexts = [];
     this.lockTexts = [];
+    this.optionRows = [];
+    this.optionAccents = [];
     ROSTER.forEach((id, i) => {
       const unlocked = canSelect(meta, id);
       const need = CHARACTER_UNLOCKS[id];
-      const y = top + 34 + i * 40;
+      const rowTop = top + 42 + i * 56;
+      const rowY = rowTop + 26;
+      const rowX = listX + listW / 2 - 6;
+      this.optionRows.push(this.add.rectangle(rowX, rowY, listW - 8, 54, UI.accent).setAlpha(0.025).setDepth(depth + 6));
+      this.optionAccents.push(this.add.rectangle(listX - 1, rowY, 2, 54, UI.accent).setAlpha(0).setDepth(depth + 7));
       const name = this.add
-        .text(listX + 8, y + 6, CHARACTER_NAMES[id] ?? id, {
+        .text(listX + 8, rowTop, CHARACTER_NAMES[id] ?? id, {
           fontFamily: 'monospace',
           fontSize: `${TYPE.body}px`,
           color: unlocked ? hex(TEXT.primary) : hex(TEXT.disabled),
         })
-        .setDepth(depth + 7);
+        .setDepth(depth + 8);
       const lock = this.add
-        .text(listX + 8, y + 22, unlocked ? '可出战' : `最深第 ${need} 层解锁`, {
+        .text(listX + 8, rowTop + 26, unlocked ? '可出战' : `最深第 ${need} 层解锁`, {
           fontFamily: 'monospace',
           fontSize: `${TYPE.caption}px`,
           color: unlocked ? hex(PALETTE.clothHigh) : hex(TEXT.disabled),
         })
-        .setDepth(depth + 7);
+        .setDepth(depth + 8);
       this.optionTexts.push(name);
       this.lockTexts.push(lock);
     });
-    this.invWell(listX - 6, top + 28, listW, 168, depth + 5);
-    this.optionTexts.forEach((t) => t.setDepth(depth + 8));
-    this.lockTexts.forEach((t) => t.setDepth(depth + 8));
+    this.invWell(listX - 6, top + 28, listW, 252, depth + 5);
 
     this.marker = createMarker(this);
-    this.marker.setDepth(depth + 9);
+    this.marker.setDepth(depth + 10);
 
-    // ── the mode / relic column ─────────────────────────────────────────────
-    const colX = left + 338;
+    // ── the existing mode / relic column ────────────────────────────────────
+    // Keep a clear gutter beside the roster, but give the full-width mode copy
+    // enough room to avoid wrapping its final punctuation onto a line by itself.
+    const colX = left + panelW * 0.59;
+    const colW = panelW * 0.38;
     this.modeText = this.add
-      .text(colX, top + 34, `模式 ${MODE_LABELS[meta.mode]}`, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
+      .text(colX, top + 36, `模式 ${MODE_LABELS[meta.mode]}`, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
       .setDepth(depth + 7);
     this.modeBlurbText = this.add
-      .text(colX, top + 52, MODE_BLURBS[meta.mode], { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim), wordWrap: { width: 118 } })
+      .text(colX, top + 66, MODE_BLURBS[meta.mode], { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim), wordWrap: { width: colW, useAdvancedWrap: true } })
+      .setDepth(depth + 7);
+    this.add
+      .text(colX, top + 190, '遗物记录', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
       .setDepth(depth + 7);
     const relics = relicDisplay(meta);
     relics.forEach((r, i) => {
       this.add
-        .text(colX, top + 108 + i * 26, r.unlocked ? `◆ ${r.name}` : `◇ 第 ${r.need} 层`, {
+        .text(colX, top + 216 + i * 22, r.unlocked ? `◆ ${r.name}` : `◇ ${r.name} · 第 ${r.need} 层`, {
           fontFamily: 'monospace',
           fontSize: `${TYPE.caption}px`,
           color: r.unlocked ? hex(PALETTE.clothHigh) : hex(TEXT.disabledDeep),
@@ -157,20 +182,21 @@ export class MetaSelectScene extends Phaser.Scene {
     });
 
     this.messageText = this.add
-      .text(cx, top + panelH - 12, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn) })
+      .text(cx, infoY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn), stroke: hex(PALETTE.ink), strokeThickness: 2, align: 'center', wordWrap: { width: panelW - 40, useAdvancedWrap: true } })
       .setOrigin(0.5)
-      .setDepth(depth + 9)
+      .setDepth(depth + 12)
       .setVisible(false);
 
-    // The key legend sits on the foot bar, like the game's own.
+    // The footer names only controls that are already wired up.
     this.add
-      .rectangle(0, height - 18, width, 18, UI.surface)
+      .rectangle(0, height - 28, width, 28, UI.surface)
       .setOrigin(0, 0)
       .setAlpha(0.9)
       .setDepth(depth + 2);
+    this.add.rectangle(0, height - 28, width, 1, UI.accent).setOrigin(0, 0).setAlpha(0.7).setDepth(depth + 3);
     this.add
-      .text(8, height - 9, '↑/↓ 选择 · ←/→ 模式 · Enter 出发 · ESC 返回标题', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
-      .setOrigin(0, 0.5)
+      .text(cx, height - 14, '↑/↓ 角色 · ←/→ 模式 · Enter 出发 · ESC 返回标题', { fontFamily: 'monospace', fontSize: `${Math.min(TYPE.caption, Math.max(14, Math.floor((width - 48) / 37)))}px`, color: hex(PALETTE.clothHigh) })
+      .setOrigin(0.5)
       .setDepth(depth + 3);
 
     this.refreshOptions();
@@ -253,10 +279,8 @@ export class MetaSelectScene extends Phaser.Scene {
       const unlocked = canSelect(meta, ROSTER[i]);
       const isSelected = i === this.selected;
       t.setColor(unlocked ? (isSelected ? hex(PALETTE.lightHigh) : hex(TEXT.primary)) : hex(TEXT.disabled));
-      // The selected row gets a band, same language as every other list.
-      if (isSelected) {
-        t.setDepth(PANEL_DEPTH.menu.help + 8);
-      }
+      this.optionRows[i]?.setAlpha(isSelected ? 0.2 : 0.025);
+      this.optionAccents[i]?.setAlpha(isSelected ? 1 : 0);
     });
     const selected = this.optionTexts[this.selected];
     this.marker.setVisible(selected !== undefined);
@@ -271,14 +295,14 @@ export class MetaSelectScene extends Phaser.Scene {
       this.portrait.play(idleAnimKey(who), true);
       // A locked survivor is a silhouette: visible enough to be a promise,
       // dark enough to be out of reach.
-      this.portrait.setAlpha(unlocked ? 1 : 0.32);
-      this.portrait.setTint(unlocked ? 0xffffff : 0x3a4048);
+      this.portrait.setAlpha(unlocked ? 1 : 0.5);
+      this.portrait.setTint(unlocked ? 0xffffff : PALETTE.dust);
       this.portraitGlow?.clear();
       if (this.portraitGlow && unlocked) {
         // A warm pool behind the portrait, using the same warm ramp as the lamps.
         for (let s = 5; s >= 1; s--) {
           this.portraitGlow.fillStyle(UI.accent, 0.05 * s);
-          this.portraitGlow.fillEllipse(this.portrait.x, this.portrait.y - 34, 40 + s * 12, 66 + s * 16);
+          this.portraitGlow.fillEllipse(this.portrait.x, this.portrait.y - 34, 40 + s * 12, 58 + s * 14);
         }
       }
     }
@@ -286,7 +310,13 @@ export class MetaSelectScene extends Phaser.Scene {
   }
 
   private showMessage(text: string): void {
+    this.messageTimer?.remove();
+    this.flavourText.setVisible(false);
     this.messageText.setText(text).setVisible(true);
-    this.time.delayedCall(2600, () => this.messageText.setVisible(false));
+    this.messageTimer = this.time.delayedCall(2600, () => {
+      this.messageText.setVisible(false);
+      this.flavourText.setVisible(true);
+      this.messageTimer = undefined;
+    });
   }
 }

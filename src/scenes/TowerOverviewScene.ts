@@ -5,6 +5,7 @@ import { ENTRY_X } from '../core/constants';
 import {
   OVERVIEW_ROW_H,
   CONTENT_TOP,
+  HUD_BOTTOM,
   SECTOR_CELL,
   SECTOR_COLS,
   SECTOR_ROWS,
@@ -22,8 +23,6 @@ import {
   overviewHeight,
   sectorHeight,
   tryEnterSelected,
-  viewTop,
-  VIEW_H,
   zoomBy,
   type TowerNavState,
 } from '../systems/TowerNav';
@@ -47,14 +46,14 @@ import type { GameState } from '../core/gameTypes';
 // The camera carries the zoom and vertical scroll; content lives in world
 // coordinates so picking stays exact at every zoom level.
 
-const TYPE_TITLE = 32;
-const TYPE_BODY = 26;
-const TYPE_AUX = 22;
+const TYPE_TITLE = 28;
+const TYPE_BODY = 20;
+const TYPE_AUX = 18;
 
 type MapKey = 'up' | 'down' | 'left' | 'right' | 'enter' | 'esc';
 
 // Overview strip geometry (world units).
-const STRIP_X = 110;
+const STRIP_X = 180;
 const STRIP_W = DESIGN_WIDTH - STRIP_X * 2;
 // The sector grid is centred in the viewport so a whole 20x50 sector fits on
 // screen instead of hugging the left edge.
@@ -85,7 +84,7 @@ const COLOR_LOCKED = PALETTE.shadow;
 const COLOR_UNLOCKED = PALETTE.cloth;
 const COLOR_CURRENT = PALETTE.lightHigh;
 const COLOR_EXPLORED = PALETTE.clothHigh;
-const COLOR_CURSOR = 0xece8d8; // the text cream; the palette's ink-friendly neutral
+const COLOR_CURSOR = TEXT.primary;
 const COLOR_BG = PALETTE.ink;
 
 /** Blend two 24-bit colours; local so this module keeps no Phaser runtime use. */
@@ -138,6 +137,7 @@ export class TowerOverviewScene extends Phaser.Scene {
   private tierText!: Phaser.GameObjects.Text;
   private sectorLabels: Phaser.GameObjects.Text[] = [];
   private endpointLabels: Phaser.GameObjects.Text[] = [];
+  private floorScaleLabels: Phaser.GameObjects.Text[] = [];
   private messageText!: Phaser.GameObjects.Text;
 
   private detailObjects: PanelObject[] = [];
@@ -148,8 +148,8 @@ export class TowerOverviewScene extends Phaser.Scene {
   private dragging = false;
   private dragMoved = false;
   private dragStart = { x: 0, y: 0 };
-  // Sector under the pointer on the overview, or null. 3px rows are too small to
-  // aim at reliably, so the readout names the target before the click commits.
+  // Sector under the pointer on the overview, or null. Compact rows are still
+  // too small to aim at reliably, so the readout names the target before commit.
   private hoverSector: number | null = null;
 
   // Per-frame input guard (GHI-03 m9): Phaser can deliver one keydown several
@@ -186,12 +186,12 @@ export class TowerOverviewScene extends Phaser.Scene {
     const steps = 10;
     for (let i = 0; i < steps; i++) {
       const k = i / (steps - 1);
-      // Bottom (base of the tower) is warmer and darker; top is cold distance.
-      const color = mixColour(PALETTE.lightDeep, PALETTE.stone, k * 0.55);
+      // A cold steel gradient keeps the tower's warm light reserved for accents.
+      const color = mixColour(PALETTE.stone, PALETTE.ink, k * 0.72);
       sky.fillStyle(color, 1);
       sky.fillRect(0, (height / steps) * i, width, height / steps + 1);
     }
-    sky.setAlpha(0.5);
+    sky.setAlpha(0.82).setScrollFactor(0);
     this.cameras.main.setScroll(0, 0);
     this.cameras.main.setZoom(this.nav.zoom);
 
@@ -199,6 +199,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.currentGfx = this.add.graphics();
     this.cursorGfx = this.add.graphics();
 
+    this.buildHudChrome();
     this.buildHud();
     this.buildOverviewAnnotations();
     this.buildDetailPanel();
@@ -220,8 +221,10 @@ export class TowerOverviewScene extends Phaser.Scene {
         getNav: () => this.nav,
         getAccess: () => this.access,
         getView: () => ({
-          top: viewTop(this.nav.scroll, this.nav.zoom),
-          height: VIEW_H / this.nav.zoom,
+          left: this.cameras.main.worldView.x,
+          top: this.cameras.main.worldView.y,
+          width: this.cameras.main.worldView.width,
+          height: this.cameras.main.worldView.height,
           content: this.nav.level === 'overview' ? overviewHeight() : sectorHeight(),
         }),
         getCells: () => this.cellStates(),
@@ -234,34 +237,69 @@ export class TowerOverviewScene extends Phaser.Scene {
   // The HUD lives in two fixed bands: 0..CONTENT_TOP above the content and
   // DESIGN_HEIGHT-24..DESIGN_HEIGHT below it. Everything here is
   // scrollFactor(0), so the world zoom never scales or moves it.
+  private buildHudChrome(): void {
+    const { width, height } = this.cameras.main;
+    const g = this.add.graphics().setScrollFactor(0).setDepth(90);
+
+    g.fillStyle(PALETTE.ink, 0.98);
+    g.fillRect(0, 0, width, CONTENT_TOP);
+    g.fillStyle(PALETTE.shadow, 0.92);
+    g.fillRect(8, 4, width - 16, CONTENT_TOP - 8);
+    g.fillStyle(PALETTE.stone, 0.8);
+    g.fillRect(8, 4, width - 16, 1);
+    g.fillStyle(PALETTE.stoneLight, 0.48);
+    g.fillRect(8, CONTENT_TOP - 5, width - 16, 1);
+    g.fillStyle(PALETTE.lightDeep, 0.85);
+    g.fillRect(16, CONTENT_TOP - 3, width - 32, 2);
+
+    const footerY = height - HUD_BOTTOM;
+    g.fillStyle(PALETTE.ink, 0.98);
+    g.fillRect(0, footerY, width, HUD_BOTTOM);
+    g.fillStyle(PALETTE.stoneLight, 0.68);
+    g.fillRect(0, footerY, width, 1);
+    g.fillStyle(PALETTE.shadow, 0.95);
+    g.fillRect(8, footerY + 5, width - 16, HUD_BOTTOM - 10);
+    g.fillStyle(PALETTE.stone, 0.72);
+    g.fillRect(8, footerY + 5, width - 16, 1);
+
+    for (const x of [14, width - 18]) {
+      for (const y of [10, footerY + 9]) {
+        g.fillStyle(PALETTE.ink, 1);
+        g.fillRect(x, y, 5, 5);
+        g.fillStyle(PALETTE.dust, 0.8);
+        g.fillRect(x + 2, y + 2, 1, 1);
+      }
+    }
+  }
+
   private buildHud(): void {
     this.hudText = this.add
-      .text(12, 8, '', { fontFamily: 'monospace', fontSize: `${TYPE_TITLE}px`, color: hex(PALETTE.lightHigh), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
+      .text(24, 5, '', { fontFamily: 'monospace', fontSize: `${TYPE_TITLE}px`, color: hex(PALETTE.lightHigh) })
       .setScrollFactor(0)
-      .setDepth(100);
+      .setDepth(101);
     this.stateText = this.add
-      .text(12, 26, '', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 2 } })
+      .text(360, 9, '', { fontFamily: 'monospace', fontSize: '16px', color: hex(TEXT.highlight) })
       .setScrollFactor(0)
-      .setDepth(100);
+      .setDepth(101);
     this.infoText = this.add
-      .text(DESIGN_WIDTH - 12, 12, '', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 4 }, align: 'right' })
+      .text(DESIGN_WIDTH - 24, 9, '', { fontFamily: 'monospace', fontSize: '18px', color: hex(TEXT.highlight), align: 'right' })
       .setOrigin(1, 0)
       .setScrollFactor(0)
-      .setDepth(100);
+      .setDepth(101);
     this.hintText = this.add
-      .text(12, DESIGN_HEIGHT - 22, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
+      .text(24, DESIGN_HEIGHT - 21, '', { fontFamily: 'monospace', fontSize: '18px', color: hex(TEXT.highlight) })
       .setScrollFactor(0)
-      .setDepth(100);
+      .setDepth(101);
     // Colour legend for the sector grid. The map's whole language is colour, so
     // the four states have to be spelled out rather than guessed at.
     this.legendGfx = this.add.graphics().setScrollFactor(0).setDepth(102);
     this.legendText = this.add
-      .text(DESIGN_WIDTH - 12, DESIGN_HEIGHT - 22, '', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight) })
+      .text(DESIGN_WIDTH - 24, DESIGN_HEIGHT - 21, '', { fontFamily: 'monospace', fontSize: '16px', color: hex(TEXT.highlight) })
       .setOrigin(1, 0)
       .setScrollFactor(0)
       .setDepth(102);
     this.messageText = this.add
-      .text(DESIGN_WIDTH / 2, DESIGN_HEIGHT - 22, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } })
+      .text(DESIGN_WIDTH / 2, DESIGN_HEIGHT - 21, '', { fontFamily: 'monospace', fontSize: '18px', color: hex(TEXT.warn), backgroundColor: '#05080bcc', padding: { x: 8, y: 2 } })
       .setOrigin(0.5, 0)
       .setScrollFactor(0)
       .setDepth(101)
@@ -271,8 +309,8 @@ export class TowerOverviewScene extends Phaser.Scene {
     // this band is free at every level — unlike the bottom one, which the control
     // hint and the legend already share.
     this.tierText = this.add
-      .text(DESIGN_WIDTH / 2, 12, '', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
-      .setOrigin(0.5, 0)
+      .text(DESIGN_WIDTH - 160, 9, '', { fontFamily: 'monospace', fontSize: '16px', color: hex(TEXT.secondary), align: 'right' })
+      .setOrigin(1, 0)
       .setScrollFactor(0)
       .setDepth(100)
       .setVisible(false);
@@ -293,19 +331,26 @@ export class TowerOverviewScene extends Phaser.Scene {
     }
     this.endpointLabels = [
       this.add
-        .text(0, 0, '起点 第1层', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.clothHigh), backgroundColor: '#0b0f12cc', padding: { x: 2, y: 1 } })
+        .text(0, 0, '起点 第1层', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.clothHigh), backgroundColor: '#05080bcc', padding: { x: 2, y: 1 } })
         .setOrigin(0, 0)
         .setDepth(5),
       this.add
-        .text(0, 0, '终点 第100000层', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: '#d8a8e8', backgroundColor: '#0b0f12cc', padding: { x: 2, y: 1 } })
+        .text(0, 0, '终点 第100000层', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(COLOR_SUMMIT), backgroundColor: '#05080bcc', padding: { x: 2, y: 1 } })
         .setOrigin(0, 0)
         .setDepth(5),
     ];
+    this.floorScaleLabels = Array.from({ length: 10 }, () =>
+      this.add
+        .text(0, 0, '', { fontFamily: 'monospace', fontSize: '16px', color: hex(TEXT.secondary), backgroundColor: '#05080bcc', padding: { x: 3, y: 1 } })
+        .setOrigin(1, 0.5)
+        .setDepth(6)
+        .setVisible(false),
+    );
   }
 
   private buildDetailPanel(): void {
-    const w = 460;
-    const h = 178;
+    const w = 560;
+    const h = 246;
     const cx = DESIGN_WIDTH / 2;
     const cy = DESIGN_HEIGHT / 2;
     const left = cx - w / 2;
@@ -313,14 +358,14 @@ export class TowerOverviewScene extends Phaser.Scene {
 
     this.detailObjects.push(...buildPanel(this, cx, cy, w, h, 'yellow', PANEL_DEPTH.tower.detail));
     this.detailTitle = this.add
-      .text(cx, top + 22, '', { fontFamily: 'monospace', fontSize: `${TYPE_TITLE}px`, color: hex(PALETTE.lightHigh) })
+      .text(cx, top + 32, '', { fontFamily: 'monospace', fontSize: `${TYPE_TITLE}px`, color: hex(PALETTE.lightHigh) })
       .setOrigin(0.5);
     this.detailRows = [];
     for (let i = 0; i < 5; i++) {
-      this.detailRows.push(this.add.text(left + 26, top + 54 + i * 20, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: hex(TEXT.primary) }));
+      this.detailRows.push(this.add.text(left + 38, top + 68 + i * 30, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: hex(TEXT.primary) }));
     }
     this.detailAction = this.add
-      .text(cx, top + h - 20, '', { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: hex(PALETTE.clothHigh) })
+      .text(cx, top + h - 28, '', { fontFamily: 'monospace', fontSize: '18px', color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5);
     this.detailObjects.push(this.detailTitle, ...this.detailRows, this.detailAction);
     applyPanelDepth(this.detailObjects, PANEL_DEPTH.tower.detail);
@@ -347,6 +392,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     const onOverview = this.nav.level === 'overview';
     for (const label of this.sectorLabels) label.setVisible(onOverview);
     for (const label of this.endpointLabels) label.setVisible(onOverview);
+    for (const label of this.floorScaleLabels) label.setVisible(!onOverview);
 
     this.refreshHud();
     this.refreshDetail();
@@ -363,22 +409,36 @@ export class TowerOverviewScene extends Phaser.Scene {
   private drawOverview(): void {
     const g = this.gridGfx;
     const currentSector = sectorOf(this.state.currentFloor);
+    const towerTop = CONTENT_TOP;
+    const towerHeight = SECTOR_COUNT * OVERVIEW_ROW_H;
+    g.fillStyle(PALETTE.ink, 0.78);
+    g.fillRect(STRIP_X - 20, towerTop - 4, STRIP_W + 40, towerHeight + 8);
+    g.fillStyle(PALETTE.shadow, 0.94);
+    g.fillRect(STRIP_X - 12, towerTop - 2, 7, towerHeight + 4);
+    g.fillRect(STRIP_X + STRIP_W + 5, towerTop - 2, 7, towerHeight + 4);
+    g.fillStyle(PALETTE.stoneLight, 0.58);
+    g.fillRect(STRIP_X - 6, towerTop - 2, 1, towerHeight + 4);
+    g.fillRect(STRIP_X + STRIP_W + 5, towerTop - 2, 1, towerHeight + 4);
+    g.fillStyle(PALETTE.lightDeep, 0.9);
+    g.fillRect(STRIP_X - 12, towerTop - 2, 7, 2);
+    g.fillRect(STRIP_X + STRIP_W + 5, towerTop - 2, 7, 2);
+    g.fillRect(STRIP_X - 12, towerTop + towerHeight + 2, 7, 2);
+    g.fillRect(STRIP_X + STRIP_W + 5, towerTop + towerHeight + 2, 7, 2);
     for (let s = 0; s < SECTOR_COUNT; s++) {
       const y = this.rowY(s);
       const summary = describeSector(s);
       const visited = this.isSectorVisited(s);
       g.fillStyle(tierColor(summary.tiers[0].tier), 1);
-      // 2px of fill with a 1px gap keeps 100 rows countable as a striped tower
-      // instead of one solid block where adjacent sectors share a tier.
+      // A 3px fill with a 1px gap keeps the 100 rows distinct even when adjacent
+      // sectors share a tier, so the overview reads as stacked sections.
       g.fillRect(STRIP_X, y, STRIP_W, OVERVIEW_ROW_H - 1);
-      // A lit top edge on every row: at 3px a row there is no room for shading,
-      // but one lighter pixel on top turns a flat stripe into a ledge, and it is
-      // what stops the overview reading as a bar chart.
+      // A lit top edge on every row turns each compact stripe into a ledge and
+      // stops the overview reading as a flat bar chart.
       g.fillStyle(PALETTE.dust, 0.3);
       g.fillRect(STRIP_X, y, STRIP_W, 1);
       if (visited) {
-        // A full-height explored stripe along the left edge of the strip: at 3px
-        // per sector anything narrower is invisible.
+        // A full-height explored stripe along the left edge keeps visited
+        // sectors distinct without obscuring their tier colour.
         g.fillStyle(COLOR_EXPLORED, 1);
         g.fillRect(STRIP_X, y, 8, OVERVIEW_ROW_H - 1);
       }
@@ -397,8 +457,8 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.cursorGfx.strokeRect(STRIP_X - 3, ky - 1, STRIP_W + 6, OVERVIEW_ROW_H + 2);
 
     // The two ends of the climb. The summit in particular has to be marked: it
-    // is the goal the whole tower is arranged around, and at 3px a row the last
-    // sector is otherwise indistinguishable from the nine below it — it is not
+    // is the goal the whole tower is arranged around, and even at 4px a row the
+    // last sector is otherwise hard to distinguish from the nine below it — it is not
     // even in the every-tenth label set. Drawn after the current-sector marker so
     // they stay visible when the player is standing on one of them.
     const startY = this.rowY(0); // the slum, at the base
@@ -418,12 +478,13 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.drawEndpoints();
   }
 
-  // 起点 / 终点 tags in the right margin. At 3px a row neither end can carry its
+  // 起点 / 终点 tags in the right margin. At 4px a row still cannot carry its
   // own text, and the summit is the one thing a player must be able to find
   // without counting rows.
   private drawEndpoints(): void {
-    this.endpointLabels[0].setPosition(STRIP_X + STRIP_W + 10, this.rowY(0) - 1);
-    this.endpointLabels[1].setPosition(STRIP_X + STRIP_W + 10, this.rowY(SECTOR_COUNT - 1) - 5);
+    const labelX = STRIP_X + STRIP_W + 22;
+    this.endpointLabels[0].setPosition(labelX, this.rowY(0) - 1);
+    this.endpointLabels[1].setPosition(labelX, this.rowY(SECTOR_COUNT - 1) + 2);
   }
 
   private drawTierBands(): void {
@@ -437,7 +498,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     }
   }
 
-  // At 3px per row no row can carry its own label, so every tenth sector is
+  // Rows are too compact to carry their own labels, so every tenth sector is
   // numbered instead. Those anchors are what a player reads the tower by, and
   // they are what makes "all 100 sectors are on screen" verifiable by eye.
   // Positions only — redraw() owns the visibility, because this is not called at
@@ -458,6 +519,32 @@ export class TowerOverviewScene extends Phaser.Scene {
     // fixed HUD never sits on top of the cells.
     const originX = GRID_X;
     const originY = CONTENT_TOP;
+    const gridWidth = SECTOR_COLS * SECTOR_CELL;
+    const gridHeight = SECTOR_ROWS * SECTOR_CELL;
+    g.fillStyle(PALETTE.ink, 0.88);
+    g.fillRect(GRID_X - 96, originY - 16, gridWidth + 192, gridHeight + 32);
+    g.fillStyle(PALETTE.shadow, 0.96);
+    g.fillRect(GRID_X - 88, originY - 10, gridWidth + 176, gridHeight + 20);
+    g.lineStyle(2, PALETTE.stoneLight, 0.76);
+    g.strokeRect(GRID_X - 88, originY - 10, gridWidth + 176, gridHeight + 20);
+    g.lineStyle(1, PALETTE.lightDeep, 0.82);
+    g.strokeRect(GRID_X - 94, originY - 14, gridWidth + 188, gridHeight + 28);
+    g.fillStyle(PALETTE.stone, 0.9);
+    g.fillRect(GRID_X - 12, originY, 8, gridHeight);
+    g.fillRect(GRID_X + gridWidth + 4, originY, 8, gridHeight);
+    g.fillStyle(PALETTE.stoneLight, 0.72);
+    g.fillRect(GRID_X - 12, originY, 1, gridHeight);
+    g.fillRect(GRID_X + gridWidth + 11, originY, 1, gridHeight);
+    for (let i = 0; i < 10; i++) {
+      const tickY = originY + gridHeight - i * 5 * SECTOR_CELL - 30;
+      g.fillStyle(PALETTE.lightDeep, 0.9);
+      g.fillRect(GRID_X - 18, tickY, 14, 2);
+      g.fillRect(GRID_X + gridWidth + 4, tickY, 14, 2);
+      this.floorScaleLabels[i]
+        .setText(String(from + i * 100))
+        .setPosition(GRID_X - 22, tickY + 1)
+        .setVisible(true);
+    }
     // Rows stack from the bottom of the sector, and within a row floors read left
     // to right — the same way up the tower reads. `cellY` is the single place the
     // flip lives, matching pickFloorAt().
@@ -560,8 +647,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.infoText.setText(`缩放 ${zoomLabel}`);
 
     // Bottom-centre readout. In the sector view it is the sector's composition;
-    // on the overview it is whatever the pointer is over, which is what makes a
-    // 3px row pickable — you see the sector named before you commit to it.
+    // on the overview it names the sector under the pointer before you commit.
     if (level === 'sector' || level === 'floor') {
       this.tierText.setVisible(true);
       const summary = describeSector(this.nav.sector);
@@ -575,12 +661,15 @@ export class TowerOverviewScene extends Phaser.Scene {
       this.tierText.setVisible(false);
     }
 
+    const floorIsEnterable = level === 'floor' && tryEnterSelected(this.nav, this.access).ok;
     const hint =
       level === 'overview'
         ? '↑/↓ 选择 · Enter 进入 · 滚轮缩放 · 拖动平移 · ESC 返回游戏'
         : level === 'sector'
           ? '方向键选择 · Enter 查看 · 滚轮缩放 · 拖动 · ESC 返回'
-          : 'Enter 进入该楼层 · ESC 返回区段';
+          : floorIsEnterable
+            ? 'Enter 进入 · ESC 返回区段'
+            : 'Enter 尝试进入 · 未打通需先实际抵达 · ESC 返回区段';
     this.hintText.setText(hint);
     this.refreshLegend();
   }
@@ -754,20 +843,27 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.time.delayedCall(2200, () => this.messageText.setVisible(false));
   }
 
-  // World-space position of the pointer, mirroring Phaser's camera transform
-  // exactly (centre on scrollY + VIEW_H/2, VIEW_H/zoom visible).
-  private pointerWorld(): { x: number; y: number } {
+  // The map camera fills the canvas and has no rotation, follow, or shake. Invert
+  // its current transform directly so input never depends on a cached render matrix.
+  private pointerWorld(pointer: Phaser.Input.Pointer): Phaser.Math.Vector2 {
     const cam = this.cameras.main;
-    const z = cam.zoom;
-    const viewW = cam.width / z;
-    const viewH = cam.height / z;
-    const left = cam.scrollX + cam.width / 2 - viewW / 2;
-    const top = cam.scrollY + cam.height / 2 - viewH / 2;
-    return { x: this.input.activePointer.x / z + left, y: this.input.activePointer.y / z + top };
+    const originX = cam.width * cam.originX;
+    const originY = cam.height * cam.originY;
+    return new Phaser.Math.Vector2(
+      (pointer.x - cam.x - originX) / cam.zoomX + cam.scrollX + originX,
+      (pointer.y - cam.y - originY) / cam.zoomY + cam.scrollY + originY,
+    );
+  }
+
+  private isContentPointer(pointer: Phaser.Input.Pointer): boolean {
+    return pointer.x >= 0
+      && pointer.x < DESIGN_WIDTH
+      && pointer.y >= CONTENT_TOP
+      && pointer.y < DESIGN_HEIGHT - HUD_BOTTOM;
   }
 
   private onPointerDown(pointer: Phaser.Input.Pointer): void {
-    this.dragging = true;
+    this.dragging = this.isContentPointer(pointer);
     this.dragMoved = false;
     this.dragStart = { x: pointer.x, y: pointer.y };
   }
@@ -779,11 +875,19 @@ export class TowerOverviewScene extends Phaser.Scene {
       if (!this.dragMoved && Math.abs(dx) + Math.abs(dy) < 5) return;
       this.dragMoved = true;
       this.nav = { ...this.nav, scroll: clampScroll(this.nav, this.nav.scroll - dy / this.nav.zoom) };
+      this.dragStart = { x: pointer.x, y: pointer.y };
       this.redraw();
       return;
     }
     if (this.nav.level !== 'overview') return;
-    const world = this.pointerWorld();
+    if (!this.isContentPointer(pointer)) {
+      if (this.hoverSector !== null) {
+        this.hoverSector = null;
+        this.refreshHud();
+      }
+      return;
+    }
+    const world = this.pointerWorld(pointer);
     const sector = pickSectorAt(this.nav, world.y);
     if (sector === this.hoverSector) return;
     this.hoverSector = sector;
@@ -791,13 +895,13 @@ export class TowerOverviewScene extends Phaser.Scene {
   }
 
   private onPointerUp(pointer: Phaser.Input.Pointer): void {
+    const startedInContent = this.dragging;
     const wasDragging = this.dragMoved;
     this.dragging = false;
     this.dragMoved = false;
-    if (wasDragging) return;
-    if (pointer.x < 0 || pointer.y < 0 || pointer.x > DESIGN_WIDTH || pointer.y > DESIGN_HEIGHT) return;
+    if (!startedInContent || wasDragging || !this.isContentPointer(pointer)) return;
 
-    const world = this.pointerWorld();
+    const world = this.pointerWorld(pointer);
     if (this.nav.level === 'overview') {
       const sector = pickSectorAt(this.nav, world.y);
       if (sector === null) return;

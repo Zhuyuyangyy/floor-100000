@@ -43,6 +43,10 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 1280, height: 800
     await page.setViewportSize(viewport);
     await startGame(page);
     await expect.poll(async () => (await bounds(page)).find((o) => o.name === 'hud-goal')?.text).toContain('目标');
+    await expect.poll(async () => (await bounds(page)).find((o) => o.name === 'hud-stat-hp')?.text).toBe('生命值');
+    for (const [key, expected] of [['hp', '100/100'], ['hunger', '65/100'], ['thirst', '65/100'], ['energy', '80/100']] as const) {
+      await expect.poll(async () => (await bounds(page)).find((o) => o.name === `hud-value-${key}`)?.text).toBe(expected);
+    }
     const playerScreen = async (): Promise<{ top: number; bottom: number }> => page.evaluate(() => {
       const scene = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as {
         player: { getBounds(): { y: number; height: number } };
@@ -76,7 +80,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 1280, height: 800
       scene.flash('材料不足：废金属 0/2、电线 0/1、滤芯 0/1。请返回维修层收集材料，再回宿舍工作台制作净水器。');
     });
     await expect.poll(async () => (await bounds(page)).some((o) => o.name === 'hud-bag-full')).toBe(true);
-    await expect.poll(async () => (await bounds(page)).find((o) => o.name === 'hud-value-hp')?.text).toBe('17');
+    await expect.poll(async () => (await bounds(page)).find((o) => o.name === 'hud-value-hp')?.text).toBe('17/100');
     const actual = await bounds(page);
     for (const entry of actual) {
       expect(entry.x, `${entry.name} starts on canvas`).toBeGreaterThanOrEqual(0);
@@ -89,6 +93,11 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 1280, height: 800
       if (!object) throw new Error(`missing ${name}`);
       return object;
     };
+    for (const key of ['hp', 'hunger', 'thirst', 'energy'] as const) {
+      const label = named(`hud-stat-${key}`);
+      const value = named(`hud-value-${key}`);
+      expect(label.x + label.width, `${key} label must not collide with its current/max value`).toBeLessThanOrEqual(value.x);
+    }
     expect(named('hud-goal').y + named('hud-goal').height).toBeLessThanOrEqual(named('hud-environment').y);
     expect(named('hud-feedback').y + named('hud-feedback').height).toBeLessThanOrEqual(named('hud-bag-full').y);
     expect(named('hud-bag-full').y + named('hud-bag-full').height).toBeLessThanOrEqual(680);
@@ -126,7 +135,7 @@ test('HUD updates money without waiting for rounded stats and restores context a
     state.player.thirst = 80;
     state.player.energy = 80;
   });
-  await expect.poll(async () => (await bounds(page)).find((o) => o.name === 'hud-value-energy')?.text).toBe('80');
+  await expect.poll(async () => (await bounds(page)).find((o) => o.name === 'hud-value-energy')?.text).toBe('80/100');
   const before = await page.evaluate(() => {
     const state = window.__PHASER_SESSION__?.getState() as unknown as GameState | null;
     if (!state) throw new Error('missing state');

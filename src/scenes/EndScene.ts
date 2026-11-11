@@ -5,26 +5,21 @@ import { deathCause } from '../systems/SurvivalSystem';
 import { clearSave } from '../systems/SaveSystem';
 import { ART_BANNER_WIN_KEY, ART_BANNER_LOSE_KEY, TITLE_BG_KEY } from '../render/artpack';
 import { PALETTE, ROLE, TEXT, hex } from '../render/palette.ts';
-import { buildPanelHeader, buildPanelWell } from '../render/uiKit';
+import { TYPE, buildPanelHeader, buildPanelWell } from '../render/uiKit';
 import { buildPanel, PANEL_DEPTH } from '../render/panels';
 import { depthRecord, runScore } from '../systems/progress';
 
-// End screen (docs/01_GDD.md §5): loss on HP 0 with the cause and days survived,
-// and a keyboard restart into a fresh run.
+// End screen (docs/01_GDD.md §5): show the actual outcome, its cause/source,
+// existing run records, and the one operation this scene really supports.
 //
-// OVERHAUL UI: measured before this, 79% of the screen was ONE flat colour - the
-// worst of any screen in the game, and it is the moment that decides whether the
-// player starts another run. It is now built like the title: the painted
-// dormitory render sits behind it under an outcome-coloured wash, and the result
-// itself is a proper card - header strip, the cause in an inset well, and the
-// run's numbers in a row each. The banner art still carries the outcome icon.
-//
-// The win branch is NOT reachable in a normal run and says so. The frozen design
-// (GAME_DESIGN_LOCK.md) makes victory reaching floor 100000, which is B8; the only
-// thing that sets status='won' today is isLegacyVictory(), the retired day-8
-// threshold, and that is gated behind the ?devwin=1 fixture.
-const BANNER_W = 300;
-const BANNER_H = 88;
+// Production victory is still not reachable: status='won' is set only by the
+// retired day-8 threshold behind ?devwin=1. Keep that fixture unmistakable here;
+// do not present it as completion of the frozen floor-100000 victory condition.
+const BANNER_W = 260;
+const BANNER_H = 76;
+const CARD_W = 720;
+const CARD_H = 352;
+const OUTCOME_TITLE_SIZE = 48;
 
 export class EndScene extends Phaser.Scene {
   constructor() {
@@ -36,36 +31,36 @@ export class EndScene extends Phaser.Scene {
     const won = state.status === 'won';
     const { width, height } = this.cameras.main;
 
-    // ── the backdrop ────────────────────────────────────────────────────────
-    // The same painted render as the title and the character select, so the
-    // ending happens in the building the run happened in.
+    // ── backdrop ─────────────────────────────────────────────────────────────
     if (this.textures.exists(TITLE_BG_KEY)) {
       this.textures.get(TITLE_BG_KEY).setFilter(Phaser.Textures.FilterMode.LINEAR);
       this.add.image(width / 2, height / 2, TITLE_BG_KEY).setDisplaySize(width, height).setDepth(-30);
     } else {
       this.add.rectangle(width / 2, height / 2, width, height, PALETTE.ink).setDepth(-30);
     }
-    // The outcome wash: deep teal for a clear, deep red for a death. Both are the
-    // palette's ramps, so the end card belongs to the same world as the run.
     this.add
       .rectangle(width / 2, height / 2, width, height, won ? PALETTE.clothDeep : PALETTE.lightDeep)
       .setAlpha(0.26)
       .setDepth(-29);
     this.add.rectangle(width / 2, height / 2, width, height, PALETTE.ink).setAlpha(0.46).setDepth(-28);
 
-    // ── the card ────────────────────────────────────────────────────────────
+    // ── outcome mark and headline ────────────────────────────────────────────
     const cx = width / 2;
-    const panelW = 400;
-    const panelH = 250;
-    const left = cx - panelW / 2;
-    const top = height / 2 - panelH / 2 + 16;
+    const titleY = Math.round(height * 0.205);
     const depth = PANEL_DEPTH.menu.help;
+    const headline = won ? '胜利 · 开发夹具' : '你没能活下来';
 
-    const headline = won ? '你活了下来' : '你没能活下来';
+    if (this.textures.exists(won ? ART_BANNER_WIN_KEY : ART_BANNER_LOSE_KEY)) {
+      this.add
+        .image(cx, Math.round(height * 0.105), won ? ART_BANNER_WIN_KEY : ART_BANNER_LOSE_KEY)
+        .setDisplaySize(BANNER_W, BANNER_H)
+        .setDepth(depth + 2)
+        .setAlpha(0.95);
+    }
     this.add
-      .text(cx, top - 74, headline, {
+      .text(cx, titleY, headline, {
         fontFamily: 'monospace',
-        fontSize: '52pxpx',
+        fontSize: `${OUTCOME_TITLE_SIZE}px`,
         color: won ? hex(PALETTE.clothHigh) : hex(ROLE.danger),
         stroke: hex(PALETTE.ink),
         strokeThickness: 6,
@@ -73,79 +68,105 @@ export class EndScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(depth + 2);
 
-    // The outcome icon sits above the headline, small: it is a stamp, not the
-    // subject.
-    if (this.textures.exists(won ? ART_BANNER_WIN_KEY : ART_BANNER_LOSE_KEY)) {
-      this.add
-        .image(cx, top - 118, won ? ART_BANNER_WIN_KEY : ART_BANNER_LOSE_KEY)
-        .setDisplaySize(BANNER_W, BANNER_H)
-        .setDepth(depth + 2)
-        .setAlpha(0.95);
-    }
+    // ── metal result card ────────────────────────────────────────────────────
+    const panelW = Math.min(CARD_W, width - 64);
+    const panelH = CARD_H;
+    const left = cx - panelW / 2;
+    const top = Math.round(height / 2 - panelH / 2 + 18);
+    const accent = won ? PALETTE.clothHigh : PALETTE.lightHigh;
 
-    for (const o of buildPanel(this, cx, height / 2 + 16, panelW, panelH, won ? 'green' : 'yellow', depth)) {
+    for (const o of buildPanel(this, cx, top + panelH / 2, panelW, panelH, won ? 'green' : 'yellow', depth)) {
       this.add.existing(o as Phaser.GameObjects.GameObject);
     }
-    for (const o of buildPanelHeader(this, left, top, panelW, won ? '这一趟' : '死因', won ? PALETTE.clothHigh : PALETTE.lightHigh, depth + 5)) {
+    for (const o of buildPanelHeader(this, left, top, panelW, won ? '胜利来源' : '死因', accent, depth + 5, undefined, { height: 28, titleSize: TYPE.caption })) {
       this.add.existing(o as Phaser.GameObjects.GameObject);
     }
 
-    const reason = won ? '旧版第 8 天阈值 · ?devwin=1 夹具' : deathCause(state);
-    for (const o of buildPanelWell(this, left + 12, top + 26, panelW - 24, 26, depth + 5)) {
+    const reason = won ? '旧版第 8 天阈值 · 开发夹具（?devwin=1）' : deathCause(state);
+    const reasonTop = top + 34;
+    for (const o of buildPanelWell(this, left + 16, reasonTop, panelW - 32, 40, depth + 5)) {
       this.add.existing(o as Phaser.GameObjects.GameObject);
     }
     this.add
-      .text(cx, top + 39, reason, { fontFamily: 'monospace', fontSize: '24pxpx', color: hex(TEXT.primary) })
+      .text(cx, reasonTop + 20, reason, {
+        fontFamily: 'monospace',
+        fontSize: `${TYPE.body}px`,
+        color: hex(TEXT.primary),
+        align: 'center',
+        wordWrap: { width: panelW - 56 },
+      })
       .setOrigin(0.5)
       .setDepth(depth + 7);
 
-    // The run's numbers, one row each: label left, value right. The record is
-    // marked when this run beat it, because that is the line that makes a loss
-    // feel like progress.
-    const deepest = depthRecord(state);
-    const score = runScore(state);
-    const best = state.records?.bestScore ?? 0;
-    const rows: Array<[string, string, boolean]> = [
-      ['存活', `${state.day} 天`, false],
-      ['最深', `第 ${deepest} 层`, false],
-      ['得分', `${score}`, score >= best],
+    // These are the existing values, with labels that state their actual scope:
+    // deepestFloor is a cross-run record, while the score belongs to this run.
+    const stats: Array<[string, string]> = [
+      ['存活天数', `${state.day} 天`],
+      ['最深纪录', `第 ${depthRecord(state)} 层`],
+      ['本局得分', `${runScore(state)}`],
     ];
-    rows.forEach(([label, value, highlight], i) => {
-      const y = top + 70 + i * 26;
-      this.add
-        .text(left + 22, y, label, { fontFamily: 'monospace', fontSize: '24pxpx', color: hex(TEXT.dim) })
-        .setOrigin(0, 0.5)
-        .setDepth(depth + 7);
-      this.add
-        .text(left + panelW - 22, y, value, {
-          fontFamily: 'monospace',
-          fontSize: '26pxpx',
-          color: highlight ? hex(TEXT.highlight) : hex(TEXT.primary),
-        })
-        .setOrigin(1, 0.5)
-        .setDepth(depth + 7);
-      if (highlight) {
-        this.add
-          .text(left + panelW - 26, y + 1, '纪录', { fontFamily: 'monospace', fontSize: '20pxpx', color: hex(PALETTE.lightHigh) })
-          .setOrigin(1, 0.5)
-          .setDepth(depth + 8);
+    const tileGap = 12;
+    const innerMargin = 20;
+    const tileW = (panelW - innerMargin * 2 - tileGap * 2) / 3;
+    const tileTop = top + 90;
+    const tileH = 100;
+
+    stats.forEach(([label, value], index) => {
+      const tileX = left + innerMargin + index * (tileW + tileGap);
+      for (const o of buildPanelWell(this, tileX, tileTop, tileW, tileH, depth + 5)) {
+        this.add.existing(o as Phaser.GameObjects.GameObject);
       }
+      this.add
+        .text(tileX + tileW / 2, tileTop + 29, label, {
+          fontFamily: 'monospace',
+          fontSize: `${TYPE.caption}px`,
+          color: hex(TEXT.dim),
+        })
+        .setOrigin(0.5)
+        .setDepth(depth + 7);
+      this.add
+        .text(tileX + tileW / 2, tileTop + 68, value, {
+          fontFamily: 'monospace',
+          fontSize: `${TYPE.title}px`,
+          color: hex(TEXT.highlight),
+        })
+        .setOrigin(0.5)
+        .setDepth(depth + 7);
     });
 
     if (won) {
       this.add
-        .text(cx, top + panelH - 44, '正式胜利条件为抵达第 100000 层', { fontFamily: 'monospace', fontSize: '20pxpx', color: hex(TEXT.dim) })
+        .text(cx, top + 218, '正式胜利条件：抵达第 100000 层。', {
+          fontFamily: 'monospace',
+          fontSize: `${TYPE.caption}px`,
+          color: hex(TEXT.secondary),
+        })
+        .setOrigin(0.5)
+        .setDepth(depth + 7);
+      this.add
+        .text(cx, top + 244, '当前正常流程尚无可达胜利；此画面仅由开发夹具触发。', {
+          fontFamily: 'monospace',
+          fontSize: `${TYPE.caption}px`,
+          color: hex(TEXT.dim),
+          align: 'center',
+          wordWrap: { width: panelW - 48 },
+        })
         .setOrigin(0.5)
         .setDepth(depth + 7);
     }
 
-    // The restart prompt on a foot bar, the same shape as the game's own HUD.
-    const footY = top + panelH - 22;
-    for (const o of buildPanelWell(this, left + 12, footY - 9, panelW - 24, 20, depth + 5)) {
+    // The existing Enter handler starts a fresh run after clearing its save.
+    // State that consequence instead of implying this is a non-destructive retry.
+    const footY = top + panelH - 48;
+    for (const o of buildPanelWell(this, left + 16, footY - 18, panelW - 32, 36, depth + 5)) {
       this.add.existing(o as Phaser.GameObjects.GameObject);
     }
     this.add
-      .text(cx, footY, '按 回车 重新开始', { fontFamily: 'monospace', fontSize: '24pxpx', color: hex(PALETTE.clothHigh) })
+      .text(cx, footY, '按回车开始新一局 · 当前存档将被清除', {
+        fontFamily: 'monospace',
+        fontSize: `${TYPE.body}px`,
+        color: hex(PALETTE.lightHigh),
+      })
       .setOrigin(0.5)
       .setDepth(depth + 7);
 

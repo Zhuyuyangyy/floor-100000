@@ -6,6 +6,7 @@ import { devEntry } from '../core/devMode';
 import { clearSave, hasSave } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, createMarker, PANEL_DEPTH, placeMarker, type PanelObject } from '../render/panels';
+import { buildPanelHeader, TYPE, UI } from '../render/uiKit';
 import { buildPhotoTitleBackdrop, buildTitleBackdrop, type TitleBackdrop } from '../render/titleBackdrop';
 import { TITLE_BG_KEY } from '../render/artpack';
 
@@ -22,6 +23,8 @@ type InputSlot = 'up' | 'down' | 'enter' | 'esc';
 
 export class MenuScene extends Phaser.Scene {
   private optionTexts: Phaser.GameObjects.Text[] = [];
+  private optionRows: Phaser.GameObjects.Rectangle[] = [];
+  private optionAccents: Phaser.GameObjects.Rectangle[] = [];
   private entries: Array<{ label: string; run: () => void }> = [];
   private selected = 0;
   private cursors!: { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key };
@@ -36,6 +39,7 @@ export class MenuScene extends Phaser.Scene {
   private backdrop?: TitleBackdrop;
   private titleText?: Phaser.GameObjects.Text;
   private subtitleText?: Phaser.GameObjects.Text;
+  private menuHint?: Phaser.GameObjects.Text;
 
   constructor() {
     super('Menu');
@@ -74,13 +78,13 @@ export class MenuScene extends Phaser.Scene {
     });
 
     this.titleText = this.add
-      .text(width / 2, 92, '第100000层', { fontFamily: 'monospace', fontSize: '80pxpx', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 6 })
+      .text(width / 2, 88, '第100000层', { fontFamily: 'monospace', fontSize: '48px', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 6 })
       .setOrigin(0.5);
     // Every piece of title text carries its own dark stroke: the painted
     // backdrop behind it is bright in places, and a stroke keeps the text
     // legible without a scrim heavy enough to bury the painting.
     this.subtitleText = this.add
-      .text(width / 2, 138, '末 日 宿 舍', { fontFamily: 'monospace', fontSize: '44pxpx', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 4 })
+      .text(width / 2, 150, '末 日 宿 舍', { fontFamily: 'monospace', fontSize: '28px', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 4 })
       .setOrigin(0.5);
 
     this.entries = [{ label: '开始新游戏', run: () => this.startNew() }];
@@ -104,13 +108,33 @@ export class MenuScene extends Phaser.Scene {
     }
 
     this.optionTexts = [];
+    this.optionRows = [];
+    this.optionAccents = [];
     // buildHelp() only pushes, and field initialisers do not re-run on scene
     // restart — without this the help panel accumulates destroyed objects.
     this.helpObjects = [];
+    const menuW = 360;
+    const menuH = 154;
+    const menuX = width / 2;
+    const menuY = height / 2 + 66;
+    const menuTop = menuY - menuH / 2;
+    const menuDepth = PANEL_DEPTH.menu.help;
+    buildPanel(this, menuX, menuY, menuW, menuH, 'yellow', menuDepth);
+    buildPanelHeader(this, menuX - menuW / 2, menuTop, menuW, '主菜单', UI.accent, menuDepth + 1);
+    const rowPitch = 40;
+    const firstRowY = menuTop + 20 + (menuH - 20 - this.entries.length * rowPitch) / 2 + rowPitch / 2;
     this.entries.forEach((entry, i) => {
+      const rowY = firstRowY + i * rowPitch;
+      this.optionRows.push(
+        this.add.rectangle(menuX, rowY, menuW - 52, 36, PALETTE.stoneLight).setAlpha(0).setDepth(menuDepth + 3),
+      );
+      this.optionAccents.push(
+        this.add.rectangle(menuX - (menuW - 52) / 2, rowY, 3, 36, UI.accent).setAlpha(0).setDepth(menuDepth + 4),
+      );
       const t = this.add
-        .text(width / 2, 210 + i * 30, entry.label, { fontFamily: 'monospace', fontSize: '36pxpx', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
-        .setOrigin(0.5);
+        .text(menuX, rowY, entry.label, { fontFamily: 'monospace', fontSize: `${TYPE.body + 4}px`, color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
+        .setOrigin(0.5)
+        .setDepth(menuDepth + 5);
       this.optionTexts.push(t);
       // Entrance: a fade-in only. An earlier version also settled each entry
       // down 8px, which broke the e2e selection probe — it finds the
@@ -121,6 +145,7 @@ export class MenuScene extends Phaser.Scene {
       this.tweens.add({ targets: t, alpha: 1, duration: 300, delay: 350 + i * 140, ease: 'Cubic.out' });
     });
     this.marker = createMarker(this);
+    this.marker.setDepth(menuDepth + 6);
     // The marker breathes once visible so the selection reads as alive. Scale
     // only: refreshOptions() repositions this marker by x/y every time the
     // selection moves, so a positional tween would fight it (and the e2e probe
@@ -130,9 +155,15 @@ export class MenuScene extends Phaser.Scene {
     this.tweens.add({ targets: this.marker, scaleX: 1.15, scaleY: 1.15, duration: 900, delay: 900, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
     this.refreshOptions();
     this.messageText = this.add
-      .text(width / 2, height - 30, '', { fontFamily: 'monospace', fontSize: '26pxpx', color: hex(TEXT.warn), align: 'center' })
+      .text(width / 2, height - 50, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn), align: 'center', stroke: hex(PALETTE.ink), strokeThickness: 2 })
       .setOrigin(0.5)
+      .setDepth(menuDepth + 8)
       .setVisible(false);
+    this.add.rectangle(width / 2, height - 14, width, 28, UI.surface).setAlpha(0.9).setDepth(menuDepth + 1);
+    this.menuHint = this.add
+      .text(width / 2, height - 14, '↑/↓ 选择 · Enter 确认', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
+      .setOrigin(0.5)
+      .setDepth(menuDepth + 2);
     this.buildHelp(width, height);
   }
 
@@ -180,7 +211,12 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private refreshOptions(): void {
-    this.optionTexts.forEach((t, i) => t.setText(this.entries[i].label));
+    this.optionTexts.forEach((t, i) => {
+      const isSelected = i === this.selected;
+      t.setText(this.entries[i].label).setColor(isSelected ? hex(PALETTE.lightHot) : hex(TEXT.primary));
+      this.optionRows[i]?.setAlpha(isSelected ? 0.24 : 0.025);
+      this.optionAccents[i]?.setAlpha(isSelected ? 1 : 0);
+    });
     const selected = this.optionTexts[this.selected];
     this.marker.setVisible(selected !== undefined);
     if (selected) placeMarker(this.marker, selected);
@@ -243,25 +279,27 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private buildHelp(width: number, height: number): void {
-    const panelW = 460;
-    const panelH = 240;
+    const panelW = 500;
+    const panelH = 260;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
-    this.helpObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', PANEL_DEPTH.menu.help));
-    const title = this.add.text(cx, top + 20, '操作说明', { fontFamily: 'monospace', fontSize: '32pxpx', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
-    const lines = ['A/D 或 ←/→ 移动', 'E 交互（开箱 / 对话 / 上下楼 / 睡觉）', 'I 背包 · C 制作 · M 塔楼地图 · ESC 暂停', '目标：从第 1 层爬到第 100000 层的统治核心'];
-    const texts = lines.map((line, i) => this.add.text(left + 24, top + 58 + i * 26, line, { fontFamily: 'monospace', fontSize: '26pxpx', color: hex(TEXT.primary) }));
-    const footer = this.add.text(cx, top + panelH - 18, '按 Enter / ESC 关闭', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
-    this.helpObjects.push(title, ...texts, footer);
-    applyPanelDepth(this.helpObjects, PANEL_DEPTH.menu.help);
+    const helpDepth = PANEL_DEPTH.menu.help + 70;
+    this.helpObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', helpDepth));
+    this.helpObjects.push(...buildPanelHeader(this, left, top, panelW, '操作说明', UI.good, helpDepth + 1));
+    const lines = ['A/D 或 ←/→ 移动', 'E 交互（开箱 / 对话 / 上下楼 / 睡觉）', 'I 背包 · C 制作 · M 塔楼地图 · ESC 暂停', '生命值归零即失败；状态栏显示当前/上限', '目标：从第 1 层爬到第 100000 层的统治核心'];
+    const texts = lines.map((line, i) => this.add.text(left + 28, top + 50 + i * 30, line, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary), wordWrap: { width: panelW - 56, useAdvancedWrap: true } }));
+    const footer = this.add.text(cx, top + panelH - 48, '按 Enter / ESC 关闭', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    this.helpObjects.push(...texts, footer);
+    applyPanelDepth(this.helpObjects, helpDepth + 30);
     for (const o of this.helpObjects) o.setVisible(false);
   }
 
   private toggleHelp(): void {
     this.helpOpen = !this.helpOpen;
     for (const o of this.helpObjects) o.setVisible(this.helpOpen);
+    this.menuHint?.setVisible(!this.helpOpen);
   }
 }

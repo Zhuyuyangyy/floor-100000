@@ -1,5 +1,6 @@
 import { SECTOR_COUNT, SECTOR_SIZE, TOTAL_FLOORS, canEnter, sectorOf, sectorRange, type Access } from '../core/tower';
 import type { GameState } from '../core/gameTypes';
+import { DESIGN_HEIGHT } from '../core/design';
 
 // Three-level tower navigation (docs/B2_TOWER_ARCHITECTURE.md): the whole tower
 // (100 sectors) -> one sector (1000 floors) -> one floor. Pure so the rules can
@@ -11,22 +12,20 @@ import type { GameState } from '../core/gameTypes';
 
 export type NavLevel = 'overview' | 'sector' | 'floor';
 
-// Overview: one row per sector. The row pitch is 3px and the strip is inset
-// from the top of the viewport, so all 100 rows sit inside the 360px canvas at
-// the default 1x zoom with the fixed HUD bands clear of them — the tower is
-// meant to be taken in at a glance before zooming in, and 4px rows overflowed
-// by 40px, which cut the last ten sectors off behind a drag.
+// Overview: one 4px row per sector. The 400px strip uses about 61% of the usable
+// 660px band at 1x and still keeps all 100 sectors visible at the first 1.5x zoom.
+// The full tower stays visible before zooming in, with room for distinct stripes.
 //
 // Integer geometry matters: pixelArt rendering of fractional fillRects produces
 // uneven edges, so both the pitch and the inset stay whole numbers.
-export const OVERVIEW_ROW_H = 3;
+export const OVERVIEW_ROW_H = 4;
 export const CONTENT_TOP = 36;
 // Sector view: 1000 floors in a grid, 20 across x 50 down.
 export const SECTOR_COLS = 20;
 export const SECTOR_ROWS = SECTOR_SIZE / SECTOR_COLS;
 export const SECTOR_CELL = 12;
 
-export const VIEW_H = 360;
+export const VIEW_H = DESIGN_HEIGHT;
 // The fixed HUD occupies CONTENT_TOP at the top of the viewport and HUD_BOTTOM at
 // the bottom. Scroll bounds are computed against the usable band between them.
 // Without this the sector grid could be scrolled only to where its lowest rows sat
@@ -114,10 +113,12 @@ export function scrollForCentre(worldY: number): number {
 // with nothing to scroll.
 function scrollBounds(contentHeightValue: number, zoom: number): { min: number; max: number } {
   const half = VIEW_H / 2;
-  return {
-    min: CONTENT_TOP - half + (half - CONTENT_TOP) / zoom,
-    max: contentHeightValue - half - (half - HUD_BOTTOM) / zoom,
-  };
+  const topBound = CONTENT_TOP - half + (half - CONTENT_TOP) / zoom;
+  const bottomBound = contentHeightValue - half - (half - HUD_BOTTOM) / zoom;
+  // When the content fits inside the usable viewport, keep it top-aligned just
+  // below the fixed HUD instead of treating the reversed bounds as a range.
+  if (bottomBound < topBound) return { min: topBound, max: topBound };
+  return { min: topBound, max: bottomBound };
 }
 
 // Scroll is clamped to the content so a drag can never pull the tower off

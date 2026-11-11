@@ -112,7 +112,9 @@ async function selectInMenu(page: Page, options: string[], target: string): Prom
 
 // Press E and wait for the interaction to take effect, retrying — Phaser's
 // frame-based input occasionally drops a single synthetic keypress.
-async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 8): Promise<void> {
+// A stair transition itself takes 1s; allow extra time for a cold browser frame
+// or a keypress arriving while the Game scene is still binding its inputs.
+async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 20): Promise<void> {
   for (let i = 0; i < tries; i++) {
     if (await check()) return;
     await page.keyboard.press('E');

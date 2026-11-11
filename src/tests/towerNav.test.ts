@@ -29,6 +29,7 @@ import {
   zoomBy,
 } from '../systems/TowerNav';
 import { SECTOR_COUNT, TOTAL_FLOORS, sectorRange } from '../core/tower';
+import { DESIGN_HEIGHT } from '../core/design';
 import type { GameState } from '../core/gameTypes';
 
 function stateAt(floor: number, visited: number[] = []): GameState {
@@ -123,11 +124,18 @@ describe('level transitions', () => {
 // zoom, with room left for the fixed HUD bands top and bottom.
 describe('the overview fits the whole tower', () => {
   it('lays 100 sector rows out inside the viewport at 1x', () => {
+    expect(VIEW_H).toBe(DESIGN_HEIGHT);
     expect(overviewHeight()).toBeLessThanOrEqual(VIEW_H);
     // Every row is reachable: the strip starts below the top HUD band and ends
     // above the bottom one.
     expect(CONTENT_TOP).toBeGreaterThan(0);
     expect(overviewHeight()).toBeLessThan(VIEW_H);
+  });
+
+  it('fills more of the map band while keeping the whole tower visible at 1.5x', () => {
+    const usableHeight = VIEW_H - CONTENT_TOP - HUD_BOTTOM;
+    expect(OVERVIEW_ROW_H * SECTOR_COUNT).toBeGreaterThanOrEqual(usableHeight * 0.6);
+    expect(overviewHeight()).toBeLessThanOrEqual(CONTENT_TOP + usableHeight / 1.5);
   });
 
   it('shows the bottom of the tower from the top of the viewport at 1x', () => {
@@ -239,16 +247,20 @@ describe('zoom and scroll', () => {
     expect(scrollBy(nav, 99999)).toBe(0);
   });
 
-  it('opens scroll range once zoomed past the fit', () => {
-    const zoomed = zoomBy(openTower(accessOf(stateAt(1))), 1); // 1.5x
-    expect(scrollBy(zoomed, -9999)).toBeLessThan(0);
-    expect(scrollBy(zoomed, 99999)).toBeGreaterThan(0);
+  it('keeps a fitting overview fixed, then opens a pan range when zoomed beyond it', () => {
+    let zoomed = zoomBy(openTower(accessOf(stateAt(1))), 1); // 1.5x still fits
+    expect(scrollBy(zoomed, -9999)).toBe(zoomed.scroll);
+    expect(scrollBy(zoomed, 99999)).toBe(zoomed.scroll);
+    for (let i = 0; i < 3; i++) zoomed = zoomBy(zoomed, 1); // 3x no longer fits
+    const atTop = scrollBy(zoomed, -99999);
+    const atBottom = scrollBy(zoomed, 99999);
+    expect(atTop).toBeLessThan(atBottom);
+    expect(atTop).toBeLessThan(0);
   });
 
   it('never parks the tower under the fixed HUD, at any zoom', () => {
-    // The real invariant. The old bounds were computed against the whole 360px
-    // viewport, so at 1.5x the strip's top row landed at screen 0 — underneath the
-    // title — and its bottom row underneath the control hint.
+    // The real invariant. The bounds use the camera's 720px design viewport,
+    // while the two fixed HUD bands stay outside the usable content area.
     for (const steps of [1, 3, 6, 10]) {
       let nav = openTower(accessOf(stateAt(1)));
       for (let i = 0; i < steps; i++) nav = zoomBy(nav, 1);
@@ -267,8 +279,7 @@ describe('zoom and scroll', () => {
   });
 
   it('the sector grid keeps its lowest rows clear of the hint too', () => {
-    // The bug this bounds change fixes: floor 1's cell landed at screen 348, under
-    // the control hint at 336, because the clamp allowed a scroll that put it there.
+    // The lowest cell stays within the content viewport and above the fixed hint.
     const nav = enterSector(0); // floors 1..1000, cursor on floor 1
     const atMax = scrollBy(nav, 99999);
     const floorOneScreen = (floorCentreY(1) - viewTop(atMax, nav.zoom)) * nav.zoom;
@@ -305,10 +316,11 @@ describe('keyboard cursor', () => {
   });
 
   it('re-centres on the cursor once zoomed in', () => {
-    // 1.5x: the strip is taller than the viewport, so the cursor has to be
+    // At 3x the strip is taller than the viewport, so the cursor has to be
     // scrolled to or it would be off screen. Sector 50 is far enough from either
     // end that the clamp does not interfere.
-    let nav = zoomBy(openTower(accessOf(stateAt(1))), 1);
+    let nav = openTower(accessOf(stateAt(1)));
+    for (let i = 0; i < 4; i++) nav = zoomBy(nav, 1);
     for (let i = 0; i < 50; i++) nav = nudgeSector(nav, 1);
     expect(nav.cursor).toBe(50);
     // Mid-viewport, with context above and below.

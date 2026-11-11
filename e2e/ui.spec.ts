@@ -94,6 +94,7 @@ test('the title menu is keyboard-navigable and has a help panel', async ({ page 
   await page.keyboard.press('Enter');
   await page.waitForTimeout(150);
   expect(await hasVisibleText(page, 'A/D 或 ←/→ 移动')).toBe(true);
+  expect(await hasVisibleText(page, '生命值归零即失败；状态栏显示当前/上限')).toBe(true);
   await page.screenshot({ path: 'e2e/screenshots/13-help.png' });
 });
 
@@ -119,6 +120,99 @@ test('ESC opens the pause menu and 继续 resumes the game', async ({ page }) =>
   await page.keyboard.up('ArrowRight');
   const after = await page.evaluate(() => (window as unknown as { __PHASER_SESSION__?: { getState: () => { player: { x: number } } } }).__PHASER_SESSION__?.getState().player.x ?? -1);
   expect(after).not.toBe(before);
+  expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+});
+
+test('pause menu previews show keyboard focus and a safe restart confirmation', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  await startGame(page, 42);
+  await page.evaluate(() => localStorage.setItem('floor100000.save.v1', 'preserved-save-sentinel'));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(180);
+  expect(await hasVisibleText(page, '已暂停')).toBe(true);
+  expect(await selectedOption(page)).toBe('继续游戏');
+  await page.screenshot({ path: 'art-src/community-ui/previews/pause-menu-default.png' });
+
+  await page.keyboard.press('ArrowDown'); // -> 塔楼地图
+  await page.waitForTimeout(160);
+  expect(await selectedOption(page)).toBe('塔楼地图');
+  await page.screenshot({ path: 'art-src/community-ui/previews/pause-menu-selected-map.png' });
+
+  await page.keyboard.press('ArrowDown'); // -> 重新开始
+  await page.waitForTimeout(160);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(180);
+  expect(await hasVisibleText(page, '重新开始会清空现有存档')).toBe(true);
+  expect(await selectedOption(page)).toBe('取消，返回暂停菜单');
+  expect(await page.evaluate(() => localStorage.getItem('floor100000.save.v1'))).toBe('preserved-save-sentinel');
+  const headerGeometry = await page.evaluate(() => {
+    const scene = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as {
+      children: { list: Array<{ name: string; getBounds?: () => { y: number; height: number } }> };
+    } | null;
+    const list = scene?.children.list ?? [];
+    const band = list.find((object) => object.name === 'panel-header-band-确认重新开始')?.getBounds?.();
+    const title = list.find((object) => object.name === 'panel-header-title-确认重新开始')?.getBounds?.();
+    if (!band || !title) return null;
+    return { bandTop: band.y, bandBottom: band.y + band.height, titleTop: title.y, titleBottom: title.y + title.height };
+  });
+  expect(headerGeometry).not.toBeNull();
+  if (!headerGeometry) throw new Error('missing confirmation header bounds');
+  expect(headerGeometry.titleTop).toBeGreaterThanOrEqual(headerGeometry.bandTop);
+  expect(headerGeometry.titleBottom).toBeLessThanOrEqual(headerGeometry.bandBottom);
+  await page.screenshot({ path: 'art-src/community-ui/previews/pause-menu-confirmation.png' });
+
+  // Enter on the safe default must cancel, not clear the run.
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(160);
+  expect(await hasVisibleText(page, '已暂停')).toBe(true);
+  expect(await selectedOption(page)).toBe('重新开始');
+  expect(await page.evaluate(() => localStorage.getItem('floor100000.save.v1'))).toBe('preserved-save-sentinel');
+
+  // Esc is an independent cancellation path and must preserve the same save.
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(160);
+  expect(await selectedOption(page)).toBe('取消，返回暂停菜单');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(160);
+  expect(await selectedOption(page)).toBe('重新开始');
+  expect(await hasVisibleText(page, '已暂停')).toBe(true);
+  expect(await page.evaluate(() => localStorage.getItem('floor100000.save.v1'))).toBe('preserved-save-sentinel');
+  expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+});
+
+test('the pause menu opens the tower map and Esc returns to the same run', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  await startGame(page, 42);
+  const before = await page.evaluate(() => (window as unknown as {
+    __PHASER_SESSION__?: { getState: () => { currentFloor: number; day: number } };
+  }).__PHASER_SESSION__?.getState());
+  expect(before?.currentFloor).toBe(1);
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(160);
+  await page.keyboard.press('ArrowDown'); // -> 塔楼地图
+  await page.waitForTimeout(160);
+  expect(await selectedOption(page)).toBe('塔楼地图');
+  await page.keyboard.press('Enter');
+  await waitForScene(page, 'TowerOverview');
+
+  const onMap = await page.evaluate(() => (window as unknown as {
+    __PHASER_SESSION__?: { getState: () => { currentFloor: number; day: number } };
+  }).__PHASER_SESSION__?.getState());
+  expect(onMap?.currentFloor).toBe(before?.currentFloor);
+  expect(onMap?.day).toBe(before?.day);
+
+  await page.keyboard.press('Escape');
+  await waitForScene(page, 'Game');
+  const after = await page.evaluate(() => (window as unknown as {
+    __PHASER_SESSION__?: { getState: () => { currentFloor: number; day: number } };
+  }).__PHASER_SESSION__?.getState());
+  expect(after?.currentFloor).toBe(before?.currentFloor);
+  expect(after?.day).toBe(before?.day);
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
 
@@ -324,6 +418,7 @@ test('重新开始 leaves the panels working', async ({ page }) => {
   page.on('pageerror', (e) => errors.push(e.message));
 
   await startGame(page, 42);
+  await page.evaluate(() => localStorage.setItem('floor100000.save.v1', 'existing-save-sentinel'));
   await page.keyboard.press('I');
   await page.waitForTimeout(300);
   // OVERHAUL UI: the bag is an icon grid with a detail pane now, so the bag
@@ -342,8 +437,17 @@ test('重新开始 leaves the panels working', async ({ page }) => {
   await page.keyboard.press('ArrowDown'); // -> 重新开始
   await page.waitForTimeout(150);
   await page.keyboard.press('Enter');
+  await page.waitForTimeout(150);
+  expect(await hasVisibleText(page, '重新开始会清空现有存档')).toBe(true);
+  expect(await selectedOption(page)).toBe('取消，返回暂停菜单');
+  expect(await page.evaluate(() => localStorage.getItem('floor100000.save.v1'))).toBe('existing-save-sentinel');
+  await page.keyboard.press('ArrowUp'); // -> 确认并重新开始
+  await page.waitForTimeout(150);
+  expect(await selectedOption(page)).toBe('确认并重新开始');
+  await page.keyboard.press('Enter');
   // A new run lands on the character pick first.
   await waitForScene(page, 'MetaSelect');
+  expect(await page.evaluate(() => localStorage.getItem('floor100000.save.v1'))).toBeNull();
   // The pick screen reports active before create() binds its keys, so an
   // Enter can land in that window and be lost. Retry until the run starts.
   for (let i = 0; i < 5; i++) {

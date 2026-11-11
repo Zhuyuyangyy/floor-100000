@@ -1,0 +1,128 @@
+import { describe, expect, it, beforeEach } from 'vitest';
+import { createNewGame } from '../core/gameState';
+import { createNpcState } from '../data/npcPersonalities';
+import {
+  loadNpcState,
+  nextMemoryId,
+  recall,
+  recordMemory,
+  relationshipDelta,
+  resetMemorySeq,
+  saveNpcState,
+  trimMemory,
+} from './NpcMemory';
+import type { MemoryEntry, NpcPersistedState } from '../ai/types';
+
+function fresh(archetype: 'ally' | 'neutral' | 'hostile' = 'ally'): NpcPersistedState {
+  return createNpcState(archetype);
+}
+
+function mem(id: string, weight: number): MemoryEntry {
+  return { id, day: 1, minute: 600, kind: 'observed', actor: 'player', summary: id, weight };
+}
+
+describe('recordMemory：关系与情绪', () => {
+  beforeEach(() => resetMemorySeq());
+
+  it('恩惠记正关系，攻击记负关系', () => {
+    const s1 = recordMemory(fresh(), { day: 1, minute: 600, kind: 'gift', actor: 'player', summary: '送了电池' });
+    expect(s1.relationship.player).toBeGreaterThan(0);
+    const s2 = recordMemory(fresh(), { day: 1, minute: 600, kind: 'attack', actor: 'player', summary: '夜袭' });
+    expect(s2.relationship.player).toBeLessThan(0);
+  });
+
+  it('关系值被钳制在 -100..100，不会被刷爆', () => {
+    let s = fresh();
+    for (let i = 0; i < 50; i++) {
+      s = recordMemory(s, { day: 1, minute: 600, kind: 'gift', actor: 'player', summary: '送礼' });
+    }
+    expect(s.relationship.player).toBeLessThanOrEqual(100);
+  });
+
+  it('loyalty 越高关系变化越大', () => {
+    const loyal = recordMemory(fresh('ally'), { day: 1, minute: 600, kind: 'gift', actor: 'player', summary: 'x' });
+    const cold = recordMemory(fresh('neutral'), { day: 1, minute: 600, kind: 'gift', actor: 'player', summary: 'x' });
+    expect(loyal.relationship.player).toBeGreaterThan(cold.relationship.player);
+  });
+
+  it('敌对 archetype 记仇翻倍', () => {
+    const base = fresh('neutral');
+    const hostile = fresh('hostile');
+    const d1 = relationshipDelta(base, -0.5);
+    const d2 = relationshipDelta(hostile, -0.5);
+    expect(d2).toBeLessThan(d1); // 更负
+  });
+
+  it('情绪向最新记忆回归但保留残留', () => {
+    let s = recordMemory(fresh(), { day: 1, minute: 600, kind: 'gift', actor: 'player', summary: 'x' });
+    expect(s.mood).toBeGreaterThan(0);
+    s = recordMemory(s, { day: 2, minute: 600, kind: 'observed', actor: 'player', summary: 'y' });
+    expect(s.mood).toBeGreaterThan(0); // 没归零
+    expect(s.mood).toBeLessThan(1);
+  });
+});
+
+describe('trimMemory：有界淘汰', () => {
+  it('超出上限时淘汰权重最低、同权重淘汰最旧', () => {
+    const entries: MemoryEntry[] = [
+      mem('a', 0.9),
+      mem('b', 0.1),
+      mem('c', 0.1),
+      mem('d', -0.5),
+    ];
+    const kept = trimMemory(entries, 3);
+    expect(kept.map((e) => e.id)).toEqual(['a', 'c', 'd']); // b 与 c 同权重，b 更旧被淘汰
+  });
+
+  it('未超上限时原样返回', () => {
+    const entries = [mem('a', 0.5)];
+    expect(trimMemory(entries, 5)).toBe(entries);
+  });
+});
+
+describe('recall：检索预算', () => {
+  it('按重要度取 top-k，再按时间正序排', () => {
+    const memory: MemoryEntry[] = [
+      { id: '1', day: 3, minute: 600, kind: 'observed', actor: 'player', summary: '旧事', weight: 0.1 },
+      { id: '2', day: 1, minute: 600, kind: 'attack', actor: 'player', summary: '仇', weight: -0.9 },
+      { id: '3', day: 2, minute: 600, kind: 'gift', actor: 'player', summary: '恩', weight: 0.6 },
+    ];
+    const top = recall(memory, 2);
+    expect(top.map((e) => e.id)).toEqual(['2', '3']); // |0.9| > |0.6| > |0.1|
+  });
+
+  it('k=0 返回空，k 越界不抛错', () => {
+    expect(recall([mem('a', 0.5)], 0)).toEqual([]);
+    expect(recall([mem('a', 0.5)], 99)).toHaveLength(1);
+  });
+});
+
+describe('存档桥接：npcStates', () => {
+  beforeEach(() => resetMemorySeq());
+
+  it('存取往返一致', () => {
+    const state = createNewGame(7);
+    let npc = fresh();
+    npc = recordMemory(npc, { day: 1, minute: 600, kind: 'gift', actor: 'player', summary: '送了电池' });
+    saveNpcState(state, 'alin', npc);
+    const loaded = loadNpcState(state, 'alin');
+    expect(loaded).not.toBeNull();
+    expect(loaded?.memory).toHaveLength(1);
+    expect(loaded?.relationship.player).toBeGreaterThan(0);
+  });
+
+  it('坏 JSON 返回 null 而不是抛错（坏档不白屏）', () => {
+    const state = createNewGame(7);
+    state.npcStates['alin'] = '{oops';
+    expect(loadNpcState(state, 'alin')).toBeNull();
+  });
+
+  it('缺条目按首次遇到处理', () => {
+    const state = createNewGame(7);
+    expect(loadNpcState(state, 'wanderer')).toBeNull();
+  });
+
+  it('id 单调递增，不依赖随机数', () => {
+    expect(nextMemoryId()).not.toBe(nextMemoryId());
+  });
+});

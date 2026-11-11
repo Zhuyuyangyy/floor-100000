@@ -29,12 +29,12 @@ describe('aiNpcConfig：默认关闭', () => {
     expect(cfg.baseUrl).toBe('http://127.0.0.1:11434'); // 默认本机，不入库
   });
 
-  it('超时可配且非法值回落默认', () => {
+  it('超时可配且非法值回落默认（45s，实测校准值）', () => {
     vi.stubEnv('VITE_NPC_MODEL', 'm');
     vi.stubEnv('VITE_NPC_TIMEOUT_MS', '5000');
     expect(aiNpcConfig().timeoutMs).toBe(5000);
     vi.stubEnv('VITE_NPC_TIMEOUT_MS', 'abc');
-    expect(aiNpcConfig().timeoutMs).toBe(3000);
+    expect(aiNpcConfig().timeoutMs).toBe(45_000);
   });
 });
 

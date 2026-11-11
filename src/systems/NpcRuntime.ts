@@ -30,7 +30,7 @@ export interface NpcDecision {
   rejectionReason?: string;
 }
 
-const DEFAULT_TIMEOUT_MS = 3000;
+const DEFAULT_TIMEOUT_MS = 45_000; // Spark 实测 npc-qwen 21-32s（见 config.ts 注释）
 const DEFAULT_RECALL_K = 6;
 
 /** 组装出站观察快照。纯函数，可在测试里直接断言内容。 */

@@ -47,7 +47,10 @@ export function aiNpcConfig(): AiNpcConfig {
     enabled: model.length > 0 && (forced || envValue('VITE_NPC_MODEL') !== undefined),
     baseUrl,
     model,
-    timeoutMs: Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 3000,
+    // 45s：Spark 实测 npc-qwen(17G) 冷启 ~33s、热推理 21-32s（RFC §8）。
+    // 异步设计下超时不阻塞交互——降级句先显示，模型到了再替换；
+    // 对话已关则丢弃结果。3s 只适用于 8B 以下小模型。
+    timeoutMs: Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 45_000,
     recallK: 6,
   };
 }

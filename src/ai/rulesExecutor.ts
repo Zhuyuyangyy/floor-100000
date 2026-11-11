@@ -9,6 +9,7 @@ import { countItem } from '../systems/InventorySystem';
 import { canFit } from '../systems/TradeSystem';
 import { isItemId, getItem } from '../data/items';
 import { isNight } from '../systems/SurvivalSystem';
+import { ARCHETYPE_ACTIONS } from '../data/npcPersonalities';
 import type { NpcAction, NpcActionProposal, NpcArchetype } from './types';
 
 export type ValidatedAction =
@@ -28,6 +29,8 @@ export interface NpcFact {
 
 /** 低于该置信度的建议一律不信，降级选项树。 */
 export const MIN_CONFIDENCE = 0.5;
+/** 置信度是概率：大于 1 同样是模型没守契约。 */
+export const MAX_CONFIDENCE = 1;
 /** AI 台词长度上限，超出截断而非拒绝（台词短了不致命）。 */
 export const MAX_UTTERANCE = 60;
 
@@ -92,12 +95,18 @@ export function validateProposal(
 ): ValidatedAction {
   const utterance = sanitizeUtterance(proposal.utterance);
   // NaN 也是 number，只比大小会漏过去；先挡非有限值。
-  if (!Number.isFinite(proposal.confidence) || proposal.confidence < MIN_CONFIDENCE) {
-    return { ok: false, reason: `置信度不足（${String(proposal.confidence)} < ${MIN_CONFIDENCE}）` };
+  // 上界同样重要：confidence 是概率，>1 说明模型没守契约。
+  if (!Number.isFinite(proposal.confidence) || proposal.confidence < MIN_CONFIDENCE || proposal.confidence > MAX_CONFIDENCE) {
+    return { ok: false, reason: `置信度越界（${String(proposal.confidence)}，应在 ${MIN_CONFIDENCE}–${MAX_CONFIDENCE}）` };
   }
   const action = proposal.action;
   if (!action || typeof action !== 'object' || typeof (action as { type?: unknown }).type !== 'string') {
     return { ok: false, reason: '建议缺少合法 action.type' };
+  }
+  // 人格白名单：模型不能提出该原型根本没有的行动（如合作型提议攻击）。
+  // 与运行时的 availableActions 检查构成双重防线。
+  if (!ARCHETYPE_ACTIONS[npc.archetype].includes(action.type as NpcAction['type'])) {
+    return { ok: false, reason: `原型 ${npc.archetype} 不允许 ${String((action as { type: unknown }).type)}` };
   }
   switch (action.type) {
     case 'dialogue': {

@@ -1,15 +1,17 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { createNpcState } from '../data/npcPersonalities';
 import {
+  eventVisibility,
+  isValidNpcState,
   loadNpcState,
   nextMemoryId,
   recall,
   recordMemory,
   relationshipDelta,
-  resetMemorySeq,
   saveNpcState,
   trimMemory,
+  visibleEvents,
 } from './NpcMemory';
 import type { MemoryEntry, NpcPersistedState } from '../ai/types';
 
@@ -22,7 +24,6 @@ function mem(id: string, weight: number): MemoryEntry {
 }
 
 describe('recordMemory：关系与情绪', () => {
-  beforeEach(() => resetMemorySeq());
 
   it('恩惠记正关系，攻击记负关系', () => {
     const s1 = recordMemory(fresh(), { day: 1, minute: 600, kind: 'gift', actor: 'player', summary: '送了电池' });
@@ -98,7 +99,6 @@ describe('recall：检索预算', () => {
 });
 
 describe('存档桥接：npcStates', () => {
-  beforeEach(() => resetMemorySeq());
 
   it('存取往返一致', () => {
     const state = createNewGame(7);
@@ -122,7 +122,76 @@ describe('存档桥接：npcStates', () => {
     expect(loadNpcState(state, 'wanderer')).toBeNull();
   });
 
-  it('id 单调递增，不依赖随机数', () => {
+  it('id 全局唯一（UUID，刷新页面不重号）', () => {
     expect(nextMemoryId()).not.toBe(nextMemoryId());
+  });
+
+  it('id 跨「重启」不碰撞：重置模块后仍不与旧 id 重复', async () => {
+    const before = nextMemoryId();
+    vi.resetModules();
+    const fresh = await import('./NpcMemory');
+    expect(fresh.nextMemoryId()).not.toBe(before);
+  });
+});
+
+describe('事件可见性：NPC 独立知识体系（P1-3）', () => {
+  const ev = (kind: string, actorIds: string[]) => ({ id: 'e', day: 1, minute: 600, floor: 2, kind: kind as 'returned_from_scavenge', actorIds, itemChanges: [], stressDelta: 0, message: 'x' });
+
+  it('NPC 在场 = 亲历', () => {
+    expect(eventVisibility('alin', ev('trade', ['player', 'alin']))).toBe('witnessed');
+  });
+
+  it('公共事件（宿舍被袭）不到场也知道', () => {
+    expect(eventVisibility('xiaozhou', ev('shelter_attacked', ['player']))).toBe('public');
+  });
+
+  it('不在场的普通事件 = 未知（不能进 prompt）', () => {
+    expect(eventVisibility('xiaozhou', ev('combat_wounded', ['player', 'wanderer']))).toBe('unknown');
+  });
+
+  it('visibleEvents 只放行亲历与公共，保持时间顺序', () => {
+    const events = [
+      { id: 'a', day: 1, minute: 600, floor: 2, kind: 'combat_wounded' as const, actorIds: ['player', 'wanderer'], itemChanges: [], stressDelta: 0, message: '夜袭' },
+      { id: 'b', day: 2, minute: 600, floor: 2, kind: 'shelter_attacked' as const, actorIds: ['player'], itemChanges: [], stressDelta: 0, message: '宿舍被袭' },
+      { id: 'c', day: 3, minute: 600, floor: 2, kind: 'neighbor_cared' as const, actorIds: ['player', 'alin'], itemChanges: [], stressDelta: 0, message: '交易' },
+    ];
+    const seen = visibleEvents('alin', events);
+    expect(seen.map((e) => e.id)).toEqual(['b', 'c']); // a 阿林不在场，不知道
+  });
+});
+
+describe('isValidNpcState：坏状态判坏而不是喂给推理层（P2）', () => {
+  const good = createNpcState('ally');
+
+  it('合法状态通过', () => {
+    expect(isValidNpcState(good)).toBe(true);
+  });
+
+  it('未知 archetype 拒绝', () => {
+    expect(isValidNpcState({ ...good, archetype: 'chaotic' })).toBe(false);
+  });
+
+  it('人格分量越界拒绝', () => {
+    expect(isValidNpcState({ ...good, traits: { ...good.traits, altruism: 1.5 } })).toBe(false);
+    expect(isValidNpcState({ ...good, traits: { ...good.traits, caution: Number.NaN } })).toBe(false);
+  });
+
+  it('关系值越界拒绝', () => {
+    expect(isValidNpcState({ ...good, relationship: { player: 101 } })).toBe(false);
+  });
+
+  it('情绪越界拒绝', () => {
+    expect(isValidNpcState({ ...good, mood: -1.2 })).toBe(false);
+  });
+
+  it('畸形记忆条目拒绝', () => {
+    expect(isValidNpcState({ ...good, memory: [{ id: '', day: 1, minute: 0, kind: 'gift', actor: 'player', summary: 'x', weight: 0.5 }] })).toBe(false);
+    expect(isValidNpcState({ ...good, memory: [{ id: 'm', day: 1, minute: 99999, kind: 'gift', actor: 'player', summary: 'x', weight: 0.5 }] })).toBe(false);
+  });
+
+  it('loadNpcState 对 Schema 坏的状态返回 null（按首次遇到重建）', () => {
+    const state = createNewGame(7);
+    state.npcStates['alin'] = JSON.stringify({ ...good, traits: { ...good.traits, altruism: 9 } });
+    expect(loadNpcState(state, 'alin')).toBeNull();
   });
 });

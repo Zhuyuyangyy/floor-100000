@@ -30,7 +30,9 @@ export class OllamaBrain implements NpcBrain {
   constructor(options: OllamaBrainOptions) {
     this.baseUrl = (options.baseUrl ?? 'http://127.0.0.1:11434').replace(/\/+$/, '');
     this.model = options.model;
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    // 浏览器里裸 fetch 引用脱离 window 调用会抛 Illegal invocation；
+    // 包一层箭头函数保证 this 正确。测试注入的 mock 不受影响。
+    this.fetchImpl = options.fetchImpl ?? ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => fetch(input, init));
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 

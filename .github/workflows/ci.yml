@@ -8,11 +8,16 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # Pin the browser and OS dependencies to @playwright/test in the lockfile;
+    # avoid runtime apt installs from external Ubuntu package mirrors.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --ipc=host
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - name: Typecheck
@@ -21,7 +26,13 @@ jobs:
         run: npm run test
       - name: Build
         run: npm run build
-      - name: Install Chromium for Playwright
-        run: npx playwright install --with-deps chromium
-      - name: E2E smoke
-        run: npm run test:e2e
+      - name: E2E regression suite
+        run: npm run test:e2e -- --config=playwright.candidate.config.ts --workers=1
+      - name: Upload Playwright failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-artifacts-${{ github.run_id }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7

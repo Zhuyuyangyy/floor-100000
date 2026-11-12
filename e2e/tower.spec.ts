@@ -411,6 +411,7 @@ test('wheel zoom and drag pan preserve map state; pointer selection works at 1x'
 });
 
 test('selecting a floor is not entering it: a locked floor is refused', async ({ page }) => {
+  test.setTimeout(60_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
 

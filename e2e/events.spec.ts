@@ -54,6 +54,35 @@ async function readState(page: Page): Promise<State> {
   return page.evaluate(`(() => { const s = ${GET_STATE}; if (!s) throw new Error('no session'); return s; })()`) as Promise<State>;
 }
 
+// Wait for a settled state after the 1s stair animation. A 2s bound was too
+// short in a reproduced cold-frame run; keep the existing 5s E2E wait envelope.
+async function waitForSettledFloor(page: Page, from: number, target: number): Promise<number> {
+  await page.waitForFunction(
+    ({ expectedFrom, expectedTarget }) => {
+      const state = (window as unknown as { __PHASER_SESSION__?: { getState: () => { currentFloor: number } | null } }).__PHASER_SESSION__?.getState();
+      const game = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (key: string) => { stairClimb?: unknown } | null } } }).__PHASER_GAME__;
+      const scene = game?.scene.getScene('Game');
+      return !!state && !!scene && !scene.stairClimb && (state.currentFloor === expectedFrom || state.currentFloor === expectedTarget);
+    },
+    { expectedFrom: from, expectedTarget: target },
+    { timeout: 5000 },
+  );
+  return (await readState(page)).currentFloor;
+}
+
+// Stair traversal lasts about 1s. Send one E, then wait for a settled floor;
+// do not retry at the timeout boundary while stairClimb may still be active.
+async function pressEForFloorChange(page: Page, from: number, target: number): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const current = await waitForSettledFloor(page, from, target);
+    if (current === target) return;
+    if (current !== from) throw new Error(`unexpected floor while moving ${from} -> ${target}: ${current}`);
+    await page.keyboard.press('E');
+  }
+  if (await waitForSettledFloor(page, from, target) === target) return;
+  throw new Error(`could not move from floor ${from} to ${target}`);
+}
+
 async function nightAlpha(page: Page): Promise<number> {
   return page.evaluate(NIGHT_ALPHA) as Promise<number>;
 }
@@ -73,22 +102,11 @@ async function setX(page: Page, x: number): Promise<void> {
   }, x);
 }
 
-// Press E and wait for the interaction to take effect, retrying against a
-// dropped synthetic keypress (Phaser's input is frame-based).
-async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 8): Promise<void> {
-  for (let i = 0; i < tries; i++) {
-    if (await check()) return;
-    await page.keyboard.press('E');
-    await page.waitForTimeout(250);
-  }
-  if (!(await check())) throw new Error('interact (E) did not take effect');
-}
-
 // Floors run upward: 1 -> 2 -> 3. The up-exit is the left end of the floor.
 async function goUp(page: Page): Promise<void> {
   await setX(page, 40); // UP_EXIT_X
   const before = (await readState(page)).currentFloor;
-  await pressEUntil(page, async () => (await readState(page)).currentFloor > before);
+  await pressEForFloorChange(page, before, before + 1);
 }
 
 test('the night event is reproducible for a given seed', async ({ page }) => {
@@ -174,7 +192,7 @@ test('the wanderer is avoidable — leaving the floor escapes it undamaged', asy
   // which is correct game behaviour and a broken test. Going down walks away from it.
   await setX(page, 1240); // DOWN_EXIT_X
   const floorBefore = (await readState(page)).currentFloor;
-  await pressEUntil(page, async () => (await readState(page)).currentFloor < floorBefore);
+  await pressEForFloorChange(page, floorBefore, floorBefore - 1);
   expect(await hasWanderer(page)).toBe(false); // gone with the floor
   const after = await readState(page);
   expect(after.player.hp).toBe(hpBefore); // never hit while escaping

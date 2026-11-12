@@ -159,6 +159,46 @@ test('a fight ends when the monster dies, and the player HP never goes negative'
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
 
+test('boss outcome keeps the loot line and shows only the working continue key', async ({ page }) => {
+  await startAndClimb(page);
+  expect(await openAmbush(page), 'no ambush spot on floor 2 for seed 42').toBe(true);
+
+  // Turn the live combat into a visual boss-outcome fixture; the result builder
+  // still receives the real log and changes no combat or reward rules itself.
+  await page.evaluate(() => {
+    const state = window.__PHASER_SESSION__?.getState() as unknown as { combat?: { kind: string } } | null;
+    const scene = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as { finishCombat?: (outcome: 'win') => void } | null;
+    if (!state?.combat || !scene?.finishCombat) throw new Error('missing live combat fixture');
+    state.combat.kind = 'boss';
+    scene.finishCombat('win');
+  });
+
+  const layout = await page.evaluate(() => {
+    const scene = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as {
+      children: { list: Array<{ type: string; text?: string; visible: boolean; getBounds?: () => { x: number; y: number; width: number; height: number } }> };
+    } | null;
+    const readText = (match: (text: string) => boolean) => {
+      const object = scene?.children.list.find((child) => child.type === 'Text' && child.visible && match(child.text ?? ''));
+      if (!object?.getBounds) return null;
+      return { text: object.text ?? '', ...object.getBounds() };
+    };
+    return {
+      loot: readText((text) => text.includes('守门人倒下了。你搜出：')),
+      route: readText((text) => text.includes('上楼的路通了。分数 +200')),
+      continue: readText((text) => text === 'Enter 继续'),
+    };
+  });
+  expect(layout.loot?.text).toContain('守门人倒下了。你搜出：');
+  expect(layout.route?.text).toBe('上楼的路通了。分数 +200');
+  expect(layout.continue?.text).toBe('Enter 继续');
+  expect(layout.loot?.width, 'the CJK loot line must wrap inside the 400px log inset').toBeLessThanOrEqual(400);
+  expect(layout.loot?.height, 'the long loot line must visibly occupy multiple lines').toBeGreaterThan(23);
+  expect(layout.loot!.y + layout.loot!.height, 'the route line must start after the wrapped loot line').toBeLessThanOrEqual(layout.route!.y);
+  expect(layout.route!.y + layout.route!.height, 'the route line must remain inside the log well').toBeLessThanOrEqual(400);
+  expect(layout.route!.y + layout.route!.height, 'the route line must not overlap the continue prompt').toBeLessThanOrEqual(layout.continue!.y);
+  expect(layout.continue?.text).not.toContain('ESC 继续');
+});
+
 test('fleeing costs a turn and leaves the spot unspent', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));

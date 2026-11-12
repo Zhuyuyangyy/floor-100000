@@ -86,7 +86,7 @@ import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
-import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
+import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import {
   HUD_FOOT_H,
   STAT_COLORS,
@@ -97,6 +97,11 @@ import {
   buildPanelWell,
   drawStatBar,
 } from '../render/uiKit';
+import { tradeRowPresentation } from '../render/tradePresentation';
+import { buildCombatActionButtons } from '../render/combatActionButtons';
+import { buildCombatLog } from '../render/combatLog';
+import { buildCombatOutcome } from '../render/combatOutcome';
+import { buildCombatTargetCard } from '../render/combatTarget';
 import { ENV_FLOOR_KEY, ENV_WALL_KEY } from '../render/artpack';
 import {
   WALK_CHARACTERS,
@@ -144,8 +149,11 @@ import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId
 const INVENTORY_SLOTS = 12;
 // Row pitch for the inventory list: 20px fits a full-size 16x16 icon with a 2px
 // gap either side, and keeps every offset an integer (no scaling, no blur).
-// Crafting rows: same 16px icon, 24px pitch keeps the cost text readable.
-const CRAFT_ROW_PITCH = 24;
+// Crafting cards keep title, description, and live material counts on separate
+// lines. 16px ingredient icons remain at native pixel size.
+const CRAFT_ROW_HEIGHT = 58;
+const CRAFT_ROW_PITCH = 62;
+const CRAFT_MATERIAL_SLOT_PITCH = 260;
 // HUD type scale (docs/05_ART_GUIDE.md §2: no size too small to read). Title 16 /
 // body 13 / auxiliary 11 — all integer pixels, since any fractional size would be
 // resampled and blur the pixel look.
@@ -155,11 +163,11 @@ const TYPE_AUX = 22;
 // Row pitch for the four HUD stat bars. 15px gives an 11px label plus a 7px bar
 // with breathing room; 13px was too cramped to read at a glance.
 
-const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: string; color: number }> = [
-  { key: 'hp', label: '生命', color: 0xe56d63 },
-  { key: 'hunger', label: '饥饿', color: 0xf4b66a },
-  { key: 'thirst', label: '口渴', color: 0x6aa8e5 },
-  { key: 'energy', label: '精力', color: 0x77c6a4 },
+const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: string; color: number; max: number }> = [
+  { key: 'hp', label: '生命值', color: 0xe56d63, max: GAME_CONFIG.player.hpMax },
+  { key: 'hunger', label: '饥饿', color: 0xf4b66a, max: GAME_CONFIG.player.hungerMax },
+  { key: 'thirst', label: '口渴', color: 0x6aa8e5, max: GAME_CONFIG.player.thirstMax },
+  { key: 'energy', label: '精力', color: 0x77c6a4, max: GAME_CONFIG.player.energyMax },
 ];
 
 // Body heat gets its own readout rather than a fifth bar: it is the one stat a
@@ -326,7 +334,16 @@ export class GameScene extends Phaser.Scene {
 
   private craftingOpen = false;
   private craftObjects: PanelObject[] = [];
-  private craftRows: Array<{ band: Phaser.GameObjects.Rectangle; name: Phaser.GameObjects.Text; status: Phaser.GameObjects.Text }> = [];
+  private craftRows: Array<{
+    band: Phaser.GameObjects.Rectangle;
+    title: Phaser.GameObjects.Text;
+    description: Phaser.GameObjects.Text;
+    statusBand: Phaser.GameObjects.Rectangle;
+    status: Phaser.GameObjects.Text;
+    materialSlots: Array<{ icon: Phaser.GameObjects.Image; label: Phaser.GameObjects.Text }>;
+  }> = [];
+  private craftSummary!: Phaser.GameObjects.Text;
+  private craftUnlockHint!: Phaser.GameObjects.Text;
   private craftMarker!: Phaser.GameObjects.Image;
   private craftSelected = 0;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
@@ -361,8 +378,16 @@ export class GameScene extends Phaser.Scene {
   private pauseOpen = false;
   private pauseObjects: PanelObject[] = [];
   private pauseOptionTexts: Phaser.GameObjects.Text[] = [];
+  private pauseOptionPlates: Phaser.GameObjects.Rectangle[] = [];
+  private pauseOptionRules: Phaser.GameObjects.Rectangle[] = [];
   private pauseMarker!: Phaser.GameObjects.Image;
   private pauseSelected = 0;
+  private pauseConfirmOpen = false;
+  private pauseConfirmObjects: PanelObject[] = [];
+  private pauseConfirmOptionTexts: Phaser.GameObjects.Text[] = [];
+  private pauseConfirmBands: Array<{ band: Phaser.GameObjects.Rectangle; rule: Phaser.GameObjects.Rectangle }> = [];
+  private pauseConfirmMarker!: Phaser.GameObjects.Image;
+  private pauseConfirmSelected = 1;
   private lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
   // B3-01 D9: last save-failure count we already warned about. Survives a scene
   // restart on purpose — the page's storage is still broken after 重新开始, so
@@ -408,7 +433,13 @@ export class GameScene extends Phaser.Scene {
     this.craftMarker = createMarker(this);
     this.pauseObjects = [];
     this.pauseOptionTexts = [];
+    this.pauseOptionPlates = [];
+    this.pauseOptionRules = [];
     this.pauseMarker = createMarker(this);
+    this.pauseConfirmObjects = [];
+    this.pauseConfirmOptionTexts = [];
+    this.pauseConfirmBands = [];
+    this.pauseConfirmMarker = createMarker(this);
     this.dialogueObjects = [];
     this.dialogueOptions = [];
     this.dialogueOptionIcons = [];
@@ -428,6 +459,8 @@ export class GameScene extends Phaser.Scene {
     this.shelterSelected = 0;
     this.pauseOpen = false;
     this.pauseSelected = 0;
+    this.pauseConfirmOpen = false;
+    this.pauseConfirmSelected = 1;
     this.wanderer = undefined;
     this.wandererHitAt = Number.NEGATIVE_INFINITY;
     this.stairClimb = undefined;
@@ -694,7 +727,7 @@ export class GameScene extends Phaser.Scene {
       const plate = this.add.circle(x, y, 11, PALETTE.ink, 0.85).setDepth(6);
       const dot = this.add.circle(x, y, 9, color, 1).setDepth(7);
       const label = this.add
-        .text(x, y, '?', { fontFamily: 'monospace', fontSize: '26pxpx', color: hex(PALETTE.ink) })
+        .text(x, y, '?', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.ink) })
         .setOrigin(0.5)
         .setDepth(8);
       // A 1.9s breath on the plate only, so the disc reads as a beacon without
@@ -709,7 +742,7 @@ export class GameScene extends Phaser.Scene {
       const trader = this.add.sprite(shopX, PLAYER_FEET_Y, walkSheetKey('npc_alin')).setOrigin(0.5, 1).setDepth(5);
       trader.play(idleAnimKey('npc_alin'));
       const tag = this.add
-        .text(shopX, PLAYER_FEET_Y - 108, '行商', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 4, y: 2 } })
+        .text(shopX, PLAYER_FEET_Y - 108, '行商', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 4, y: 2 } })
         .setOrigin(0.5)
         .setDepth(6);
       this.spotMarkers.set('shop', { x: shopX, isBoss: false, dot: trader as unknown as Phaser.GameObjects.Arc, label: tag });
@@ -775,62 +808,62 @@ export class GameScene extends Phaser.Scene {
     const { width, height } = this.viewSize();
     const cx = width / 2;
     const cy = height / 2;
-    const panelW = 440;
-    const panelH = 248;
+    const panelW = 460;
+    const panelH = 68 + this.shopEntries.length * 56;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
     const depth = PANEL_DEPTH.game.dialogue;
 
-    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
-    this.encounterObjects.push(...buildPanelHeader(this, left, top, panelW, '行商', UI.good, depth + 5));
+    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
+    this.encounterObjects.push(...buildPanelHeader(this, left, top, panelW, '行商', PALETTE.light, depth + 5));
 
-    // The purse, right-aligned on the header row: the one number that decides
-    // what the rest of this panel means.
+    // A recessed purse plate sits in the dark metal header.
+    this.encounterObjects.push(...buildPanelWell(this, left + panelW - 144, top + 2, 132, 16, depth + 5));
     this.encounterObjects.push(
       this.add
-        .text(left + panelW - 10, top + 10, `${state.player.gold} 金`, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
+        .text(left + panelW - 18, top + 10, `${state.player.gold} 金`, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
         .setOrigin(1, 0.5)
-        .setDepth(depth + 6),
+        .setDepth(depth + 7),
     );
 
-    // Stock as rows: icon, name, price, how many the player already carries.
-    // The icon is the item's own 16x16 art, so the shop speaks the same visual
-    // language as the bag.
+    const rowTop = top + 28;
+    // Reserve a clean band below each selected quote for its action/status label.
+    const rowPitch = 56;
+    this.encounterObjects.push(
+      ...buildPanelWell(this, left + 8, rowTop - 2, panelW - 16, this.shopEntries.length * rowPitch + 2, depth + 4),
+    );
+    // Each row pairs its live quote with the amount carried; the item's own
+    // icon keeps the shop visually consistent with the bag.
     this.shopEntries.forEach((e, i) => {
-      const y = top + 30 + i * 30;
+      const y = rowTop + i * rowPitch;
       const selected = i === this.shopSelected;
+      const row = tradeRowPresentation(state.player.gold, e.price, countItem(state.player.inventory, e.itemId));
       this.encounterObjects.push(
         ...buildListRow(this, left + 8, y, panelW - 16, depth + 5, {
           iconKey: itemIconKey(e.itemId),
           label: getItem(e.itemId).displayName,
-          value: `${e.price} 金 · 持 ${countItem(state.player.inventory, e.itemId)}`,
+          value: `${row.priceLabel} · ${row.carriedLabel}`,
           selected,
         }),
       );
       if (!selected) return;
-      // The selected row also shows what the trade would do, since the only
-      // feedback otherwise arrives after the gold is already spent.
-      const canBuy = state.player.gold >= e.price;
       this.encounterObjects.push(
         this.add
-          .text(left + panelW - 20, y + 20, canBuy ? 'Enter 买入' : '金币不足', {
+          .text(left + panelW - 20, y + 42, row.actionLabel, {
             fontFamily: 'monospace',
             fontSize: `${TYPE.caption}px`,
-            color: canBuy ? hex(PALETTE.clothHigh) : hex(TEXT.warn),
+            color: row.canBuy ? hex(PALETTE.clothHigh) : hex(TEXT.warn),
           })
           .setOrigin(1, 0.5)
           .setDepth(depth + 7),
       );
     });
 
-    // The sell hint lives in its own strip at the bottom: the stock list is
-    // what the player is browsing, and the sell mechanics apply to the whole bag
-    // rather than to the highlighted row.
-    const footY = top + panelH - 34;
-    this.encounterObjects.push(...buildPanelWell(this, left + 8, footY, panelW - 16, 22, depth + 5));
+    const footY = top + panelH - 32;
+    this.encounterObjects.push(...buildPanelWell(this, left + 8, footY, panelW - 16, 24, depth + 5));
     this.encounterObjects.push(
       this.add
-        .text(left + 16, footY + 11, 'S 卖出背包里的一件  ·  ESC 离开', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
+        .text(left + 16, footY + 12, '↑/↓选择 · Enter买入 · S卖出 · Esc离开', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
         .setOrigin(0, 0.5)
         .setDepth(depth + 7),
     );
@@ -845,7 +878,7 @@ export class GameScene extends Phaser.Scene {
     if (!entry) return;
     const r = buy(state, entry.itemId, state.currentFloor);
     playSfx(r.ok ? 'chest' : 'pickup');
-    this.flash(r.ok ? r.message : r.reason);
+    this.flash(r.ok ? `买入成功：${getItem(entry.itemId).displayName}×1 · ${r.message}` : `买入失败：${r.reason}`);
     // The trade, seen. Gold changing hands was a number in the HUD and a line of
     // text; the coin spins over the counter while the deal is open.
     if (r.ok) {
@@ -863,7 +896,7 @@ export class GameScene extends Phaser.Scene {
     if (!entry) return;
     const r = sell(state, entry.itemId, state.currentFloor);
     playSfx(r.ok ? 'chest' : 'pickup');
-    this.flash(r.ok ? r.message : r.reason);
+    this.flash(r.ok ? `卖出成功：${getItem(entry.itemId).displayName}×1 · ${r.message}` : `卖出失败：${r.reason}`);
     if (r.ok) {
       const coin = startFxLoop(this, 'coin-spin', state.player.x + 26, PLAYER_FEET_Y - 62, LIGHT_DEPTH);
       if (coin) this.encounterObjects.push(coin);
@@ -983,80 +1016,64 @@ export class GameScene extends Phaser.Scene {
     const { width, height } = this.viewSize();
     const cx = width / 2;
     const cy = height / 2;
-    const panelW = 440;
-    const panelH = 232;
+    const panelW = 480;
+    const panelH = 328;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
     const depth = PANEL_DEPTH.game.dialogue;
     const isBoss = combat.kind === 'boss';
 
     this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
-    // OVERHAUL UI: the fight uses the same header strip, segmented bar and row
-    // bands as every other panel, instead of its own centred title and a flat
-    // two-rectangle HP bar. A boss gets the danger accent on the header rule.
     this.encounterObjects.push(
-      ...buildPanelHeader(this, left, top, panelW, `${combat.monster.name}${isBoss ? '（守门人）' : ''}`, isBoss ? UI.danger : UI.accent, depth + 5),
+      ...buildPanelHeader(
+        this,
+        left,
+        top,
+        panelW,
+        `战斗 · 第 ${combat.turn} 回合`,
+        isBoss ? UI.danger : UI.accent,
+        depth + 5,
+        undefined,
+        { height: 28, titleSize: TYPE.caption },
+      ),
     );
-
-    // The monster's HP as the same segmented bar the HUD uses, so "how much is
-    // left" reads at a glance instead of as a proportion of a strip.
-    const g = this.add.graphics().setDepth(depth + 7);
-    drawStatBar(g, left + 12, top + 30, panelW - 24, 7, combat.monster.hp / combat.monster.maxHp, isBoss ? UI.danger : UI.accent, 24);
-    this.encounterObjects.push(g);
     this.encounterObjects.push(
-      this.add
-        .text(left + panelW - 12, top + 44, `${combat.monster.hp}/${combat.monster.maxHp} · 第 ${combat.turn} 回合`, {
-          fontFamily: 'monospace',
-          fontSize: `${TYPE.caption}px`,
-          color: hex(TEXT.dim),
-        })
-        .setOrigin(1, 0)
-        .setDepth(depth + 7),
+      ...buildCombatTargetCard({
+        scene: this,
+        monster: combat.monster,
+        selected: true,
+        isBoss,
+        x: left + 12,
+        y: top + 28,
+        width: panelW - 24,
+        height: 68,
+        depth: depth + 5,
+      }),
     );
-
-    // The log's tail: the last three lines, on a dark well so they read as a
-    // record of what happened rather than as more body text.
-    const logTop = top + 56;
-    const logH = 62;
-    this.encounterObjects.push(...buildPanelWell(this, left + 12, logTop, panelW - 24, logH, depth + 5));
-    const tail = combat.log.slice(-3);
-    tail.forEach((line, i) => {
-      this.encounterObjects.push(
-        this.add
-          .text(left + 20, logTop + 8 + i * 17, line, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim), wordWrap: { width: panelW - 40 } })
-          .setDepth(depth + 7),
-      );
-    });
-
-    // The three actions, as rows with a status column - the key, what it does,
-    // and what it costs. A list of three verbs in a row was the old shape.
-    const choices: ReadonlyArray<readonly [string, string, string]> = [
-      ['攻击', '按 Enter', '造成武器伤害'],
-      ['格挡', '受伤减半', '回 3 精力'],
-      ['撤退', '按 ESC', '逃跑可能失败'],
-    ];
-    choices.forEach(([label, key, note], i) => {
-      const y = top + 126 + i * 26;
-      const selected = i === this.combatSelected;
-      if (selected) {
-        this.encounterObjects.push(this.add.rectangle(left + 12, y, panelW - 24, 24, UI.accent).setOrigin(0, 0).setAlpha(0.14).setDepth(depth + 5));
-        this.encounterObjects.push(this.add.rectangle(left + 12, y, 2, 24, UI.accent).setOrigin(0, 0).setDepth(depth + 6));
-      }
-      this.encounterObjects.push(
-        this.add
-          .text(left + 22, y + 12, label, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary) })
-          .setOrigin(0, 0.5)
-          .setDepth(depth + 7),
-        this.add
-          .text(left + panelW - 22, y + 12, `${key} · ${note}`, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
-          .setOrigin(1, 0.5)
-          .setDepth(depth + 7),
-      );
-    });
+    this.encounterObjects.push(
+      ...buildCombatLog(this, combat.log, {
+        left: left + 12,
+        top: top + 104,
+        width: panelW - 24,
+        height: 88,
+        depth: depth + 5,
+        maxEntries: 2,
+      }),
+    );
+    this.encounterObjects.push(
+      ...buildCombatActionButtons(this, {
+        x: left + 12,
+        y: top + 200,
+        width: panelW - 24,
+        height: 60,
+        selectedIndex: this.combatSelected,
+        depth: depth + 5,
+      }),
+    );
 
     this.encounterObjects.push(
       this.add
-        .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 出招 · ESC 撤退', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+        .text(cx, top + panelH - 48, '↑/↓ 选择 · Enter 出招 · ESC 撤退', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
         .setOrigin(0.5)
         .setDepth(depth + 7),
     );
@@ -1200,37 +1217,20 @@ export class GameScene extends Phaser.Scene {
     const { width, height } = this.viewSize();
     const cx = width / 2;
     const cy = height / 2;
-    // OVERHAUL UI: the outcome uses the same header strip and log well as the
-    // fight itself, so the panel does not change shape when the fight ends.
     const outDepth = PANEL_DEPTH.game.dialogue;
-    const outW = 440;
-    const outH = 170;
-    const outLeft = cx - outW / 2;
-    const outTop = cy - outH / 2;
-    const headline = outcome === 'win' ? (isBoss ? '守门人倒下了' : '战斗胜利') : '敌人逃走了';
-    this.encounterObjects.push(...buildPanel(this, cx, cy, outW, outH, 'yellow', outDepth));
-    this.encounterObjects.push(...buildPanelHeader(this, outLeft, outTop, outW, headline, UI.good, outDepth + 5));
-    this.encounterObjects.push(...buildPanelWell(this, outLeft + 12, outTop + 26, outW - 24, 62, outDepth + 5));
-    const tail = combat.log.slice(-3);
-    tail.forEach((line, i) => {
-      this.encounterObjects.push(
-        this.add
-          .text(outLeft + 20, outTop + 38 + i * 17, line, {
-            fontFamily: 'monospace',
-            fontSize: `${TYPE.caption}px`,
-            color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim),
-            wordWrap: { width: outW - 40 },
-          })
-          .setDepth(outDepth + 7),
-      );
-    });
     this.encounterObjects.push(
-      this.add
-        .text(cx, outTop + outH - 12, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
-        .setOrigin(0.5)
-        .setDepth(outDepth + 7),
+      ...buildCombatOutcome(this, {
+        outcome,
+        isBoss,
+        monsterName: combat.monster.name,
+        floor: combat.floor,
+        turn: combat.turn,
+        log: combat.log,
+        centerX: cx,
+        centerY: cy,
+        depth: outDepth,
+      }),
     );
-    lockToScreen(this.encounterObjects);
     // The fight is over: the outcome screen waits for one Enter, then
     // closeCombat clears state.combat and the floor's spots.
     this.combatDone = true;
@@ -1345,19 +1345,19 @@ export class GameScene extends Phaser.Scene {
     const isBoss = enc.encounter.kind === 'boss';
     this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.dialogue));
     this.encounterObjects.push(
-      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: 'monospace', fontSize: '32pxpx', color: isBoss ? hex(TEXT.warn) : hex(PALETTE.lightHigh) }).setOrigin(0.5),
+      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: isBoss ? hex(TEXT.warn) : hex(PALETTE.lightHigh) }).setOrigin(0.5),
     );
     this.encounterObjects.push(
-      this.add.text(left + 20, top + 44, result.message, { fontFamily: 'monospace', fontSize: '26pxpx', color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+      this.add.text(left + 20, top + 44, result.message, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
     );
     const loot = result.items.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、');
     if (loot) {
       this.encounterObjects.push(
-        this.add.text(left + 20, top + 96, `获得：${loot}`, { fontFamily: 'monospace', fontSize: '26pxpx', color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+        this.add.text(left + 20, top + 96, `获得：${loot}`, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
       );
     }
     this.encounterObjects.push(
-      this.add.text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.dim) }).setOrigin(0.5),
+      this.add.text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) }).setOrigin(0.5),
     );
     if (state.status === 'lost') {
       this.scene.start('End');
@@ -1702,7 +1702,7 @@ export class GameScene extends Phaser.Scene {
       // above the prop instead of at a fixed offset from the floor line — at the
       // old spot it would be printed straight across the middle of the crate.
       const label = this.add
-        .text(c.x, y - 4 - box.displayHeight - 8, c.label, { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.primary) })
+        .text(c.x, y - 4 - box.displayHeight - 8, c.label, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
         .setOrigin(0.5);
       this.containerObjs.set(c.id, { box, label });
       this.floorObjects.push(box, label);
@@ -1740,7 +1740,7 @@ export class GameScene extends Phaser.Scene {
   private drawBed(): void {
     const y = FLOOR_HEIGHT - 64;
     const bed = this.add.image(BED_X, y + 4, 'furn_bed').setOrigin(0.5, 1);
-    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.primary) }).setOrigin(0.5);
+    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) }).setOrigin(0.5);
     this.floorObjects.push(bed, bedLabel);
   }
 
@@ -1928,8 +1928,8 @@ export class GameScene extends Phaser.Scene {
     values.forEach((v, i) => {
       const x = HUD_LAYOUT.statX + i * HUD_LAYOUT.statPitch;
       const color = STAT_COLORS[STAT_BARS[i].key] ?? UI.good;
-      drawStatBar(this.barsGfx, x, 40, HUD_LAYOUT.statWidth, 8, v / 100, color);
-      this.statValues[i]?.setText(String(Math.round(v)));
+      drawStatBar(this.barsGfx, x, 40, HUD_LAYOUT.statWidth, 8, v / STAT_BARS[i].max, color);
+      this.statValues[i]?.setText(`${Math.round(v)}/${Math.round(STAT_BARS[i].max)}`);
     });
     // The most urgent bar's label turns red, so the critical slot is findable
     // without reading four numbers.
@@ -1973,8 +1973,8 @@ export class GameScene extends Phaser.Scene {
     // on the right: the icons carry the identity, the pane carries the words,
     // and neither one is a wall of text.
     const { width, height } = this.viewSize();
-    const panelW = 440;
-    const panelH = 236;
+    const panelW = 600;
+    const panelH = 320;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -1992,13 +1992,13 @@ export class GameScene extends Phaser.Scene {
     this.invCountText = this.invObjects[this.invObjects.length - 1] as Phaser.GameObjects.Text;
 
     // ── the grid ────────────────────────────────────────────────────────────
-    // 4 columns x 3 rows of 40px cells: twelve slots, no scrolling, and each
-    // cell is big enough for a 2x icon (pixel art upscales cleanly at integer
-    // factors, unlike the old 16px icons in a 20px row).
-    const GRID_X = left + 12;
-    const GRID_Y = top + 30;
-    const CELL = 40;
-    const GAP = 5;
+    // 4 columns x 3 rows, kept fixed at twelve slots. The larger cells leave a
+    // separate lower strip for stack counts, so they never sit on the 2x icon.
+    const GRID_X = left + 24;
+    const GRID_Y = top + 32;
+    const CELL = 56;
+    const GAP = 8;
+    const GRID_H = 3 * CELL + 2 * GAP;
     this.invCells = [];
     this.invSlotIcons = [];
     this.invSlotTexts = [];
@@ -2007,18 +2007,24 @@ export class GameScene extends Phaser.Scene {
       const row = Math.floor(i / 4);
       const x = GRID_X + col * (CELL + GAP);
       const y = GRID_Y + row * (CELL + GAP);
-      const cell = this.add.rectangle(x, y, CELL, CELL, 0x080c0f).setOrigin(0, 0).setAlpha(0.6).setDepth(depth + 5);
+      const cell = this.add.rectangle(x, y, CELL, CELL, PALETTE.ink).setOrigin(0, 0).setAlpha(0.72).setDepth(depth + 5);
       const border = this.add.graphics().setDepth(depth + 6);
-      border.lineStyle(1, UI.line, 0.85);
+      border.lineStyle(1, UI.line, 0.72);
       border.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
+      // A restrained inner bevel gives each slot the same cold, machined-metal
+      // read as the panel frame without changing the established palette.
+      border.fillStyle(PALETTE.stoneLight, 0.28);
+      border.fillRect(x + 3, y + 2, CELL - 6, 1);
+      border.fillStyle(PALETTE.shadow, 0.9);
+      border.fillRect(x + 3, y + CELL - 3, CELL - 6, 1);
       const icon = this.add
-        .image(x + CELL / 2, y + CELL / 2, 'blank')
+        .image(x + CELL / 2, y + 18, 'blank')
         .setOrigin(0.5)
         .setScale(2)
         .setDepth(depth + 6);
       const badge = this.add
-        .text(x + CELL - 3, y + CELL - 3, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
-        .setOrigin(1, 1)
+        .text(x + CELL / 2, y + CELL - 2, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
+        .setOrigin(0.5, 1)
         .setDepth(depth + 7);
       this.invCells.push(cell);
       this.invSlotIcons.push(icon);
@@ -2027,22 +2033,28 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ── the detail pane ─────────────────────────────────────────────────────
-    const DETAIL_X = GRID_X + 4 * (CELL + GAP) + 8;
-    const DETAIL_W = left + panelW - 12 - DETAIL_X;
-    this.invObjects.push(...buildPanelWell(this, DETAIL_X, GRID_Y, DETAIL_W, 3 * (CELL + GAP) - GAP, depth + 5));
+    const DETAIL_X = GRID_X + 4 * CELL + 3 * GAP + 16;
+    const DETAIL_W = left + panelW - 16 - DETAIL_X;
+    this.invObjects.push(...buildPanelWell(this, DETAIL_X, GRID_Y, DETAIL_W, GRID_H, depth + 5));
+    const detailTrim = this.add.graphics().setDepth(depth + 6);
+    detailTrim.fillStyle(UI.good, 0.78);
+    detailTrim.fillRect(DETAIL_X + 8, GRID_Y + 8, 2, 64);
+    detailTrim.fillStyle(PALETTE.stoneLight, 0.55);
+    detailTrim.fillRect(DETAIL_X + 8, GRID_Y + 78, DETAIL_W - 16, 1);
+    this.invObjects.push(detailTrim);
     this.invDetailName = this.add
-      .text(DETAIL_X + 8, GRID_Y + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(PALETTE.lightHigh) })
+      .text(DETAIL_X + 18, GRID_Y + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(TEXT.highlight), wordWrap: { width: DETAIL_W - 28 } })
       .setDepth(depth + 7);
     this.invDetailMeta = this.add
-      .text(DETAIL_X + 8, GRID_Y + 28, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+      .text(DETAIL_X + 18, GRID_Y + 50, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary), wordWrap: { width: DETAIL_W - 28 } })
       .setDepth(depth + 7);
     this.invDetailBody = this.add
-      .text(DETAIL_X + 8, GRID_Y + 46, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: DETAIL_W - 16 } })
+      .text(DETAIL_X + 12, GRID_Y + 90, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary), wordWrap: { width: DETAIL_W - 24 } })
       .setDepth(depth + 7);
     this.invObjects.push(this.invDetailName, this.invDetailMeta, this.invDetailBody);
 
     const footer = this.add
-      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+      .text(cx, top + panelH - 16, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5, 0.5)
       .setDepth(depth + 6);
     this.invObjects.push(footer, this.invMarker);
@@ -2070,7 +2082,7 @@ export class GameScene extends Phaser.Scene {
     }
     // Highlight the selected cell.
     this.invCells.forEach((c, i) => {
-      c.setFillStyle(i === this.invSelected ? UI.accent : 0x080c0f, i === this.invSelected ? 0.2 : 0.6);
+      c.setFillStyle(i === this.invSelected ? UI.accent : PALETTE.ink, i === this.invSelected ? 0.2 : 0.72);
     });
     if (this.invCountText) this.invCountText.setText(`${slots.length}/${INVENTORY_SLOTS}`);
 
@@ -2083,13 +2095,18 @@ export class GameScene extends Phaser.Scene {
       const item = getItem(selected.itemId);
       const category = item.category === 'consumable' ? '消耗品' : item.category === 'material' ? '材料' : '工具';
       this.invDetailName?.setText(item.displayName);
+      this.invDetailName?.setColor(hex(TEXT.highlight));
       this.invDetailMeta?.setText(`${category} · 持有 ${selected.quantity}`);
+      this.invDetailMeta?.setColor(hex(TEXT.secondary));
       const effect = item.effect ? `${STAT_LABEL[item.effect.stat]} +${item.effect.amount}` : '';
       this.invDetailBody?.setText(effect || `${category}，暂时没有直接效果。`);
     } else {
       this.invDetailName?.setText('');
+      this.invDetailName?.setColor(hex(TEXT.dim));
       this.invDetailMeta?.setText('');
+      this.invDetailMeta?.setColor(hex(TEXT.dim));
       this.invDetailBody?.setText('空格子。搜刮、制作或交易都往这里放东西。');
+      this.invDetailBody?.setColor(hex(TEXT.secondary));
     }
   }
 
@@ -2185,8 +2202,8 @@ export class GameScene extends Phaser.Scene {
   private drawWorkbench(): void {
     const y = FLOOR_HEIGHT - 64;
     const bench = this.add.image(CRAFT_X, y + 4, 'furn_workbench').setOrigin(0.5, 1);
-    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.primary) }).setOrigin(0.5);
-    this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) }).setOrigin(0.5);
+    this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
     this.floorObjects.push(bench, benchLabel, this.upgradeBoard);
     this.refreshUpgradeBoard();
   }
@@ -2199,36 +2216,65 @@ export class GameScene extends Phaser.Scene {
 
   private buildCraftPanel(): void {
     const { width, height } = this.viewSize();
-    const panelW = 460;
-    const panelH = 300;
+    const panelW = 948;
+    const panelH = 416;
     const cx = width / 2;
-    const cy = height / 2;
+    // The modal fits between the permanent top context and y=556 feedback lane,
+    // leaving both of those HUD channels unobscured while it is open.
+    const cy = height / 2 - 28;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
     this.craftObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.craft));
-    // OVERHAUL UI: header strip instead of a centred title floating on a slab.
-    this.craftObjects.push(...buildPanelHeader(this, left, top, panelW, '工作台 · 制作', UI.accent, PANEL_DEPTH.game.craft + 5));
-    const title = this.add.text(cx, top + 18, '', { fontFamily: 'monospace', fontSize: '32pxpx', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
-    this.craftObjects.push(title);
+    const header = this.add.rectangle(left + 28, top + 10, panelW - 56, 40, 0x202b32).setOrigin(0, 0).setAlpha(0.98);
+    const headerAccent = this.add.rectangle(left + 28, top + 10, 3, 40, UI.accent).setOrigin(0, 0);
+    const headerRule = this.add.rectangle(left + 31, top + 49, panelW - 62, 1, UI.accent).setOrigin(0, 0).setAlpha(0.78);
+    const title = this.add
+      .text(left + 50, top + 30, '工作台 · 制作与升级', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(PALETTE.lightHigh) })
+      .setOrigin(0, 0.5);
+    this.craftSummary = this.add
+      .text(left + 30, top + 64, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+      .setOrigin(0, 0.5);
+    this.craftObjects.push(header, headerAccent, headerRule, title, this.craftSummary);
+    this.craftObjects.push(...buildPanelWell(this, left + 18, top + 82, panelW - 36, 270, PANEL_DEPTH.game.craft + 5));
 
-    // OVERHAUL UI: row bands + a status column.
-    //
-    // The old list was four lines of text inside an opaque slab — no banding, no
-    // columns, nothing to anchor the eye. Each row now has its own band (alternate
-    // rows tinted), a fixed-cost column and a right-aligned status, so a row reads
-    // like a row instead of a sentence.
+    // Each upgrade gets a dedicated dark-metal card: name and real effect above,
+    // then one native-size icon and live owned/required count per ingredient.
     this.craftRows = [];
     for (let i = 0; i < 4; i++) {
-      const rowY = top + 30 + i * CRAFT_ROW_PITCH;
-      const band = this.add.rectangle(left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.34).setDepth(PANEL_DEPTH.game.craft + 5);
-      const name = this.add.text(left + 18, rowY + 9, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-      const status = this.add.text(left + panelW - 16, rowY + 9, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-      this.craftRows.push({ band, name, status });
-      this.craftObjects.push(band, name, status);
+      const rowY = top + 90 + i * CRAFT_ROW_PITCH;
+      const band = this.add.rectangle(left + 28, rowY, panelW - 56, CRAFT_ROW_HEIGHT, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.2);
+      const rowTitle = this.add
+        .text(left + 44, rowY + 15, '', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
+        .setOrigin(0, 0.5);
+      const description = this.add
+        .text(left + 250, rowY + 15, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+        .setOrigin(0, 0.5);
+      const statusBand = this.add.rectangle(left + panelW - 174, rowY + 2, 142, 26, UI.accent).setOrigin(0, 0).setAlpha(0.16);
+      const status = this.add
+        .text(left + panelW - 103, rowY + 15, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(UI.accent) })
+        .setOrigin(0.5);
+      const materialSlots = Array.from({ length: 3 }, (_, slot) => {
+        const x = left + 44 + slot * CRAFT_MATERIAL_SLOT_PITCH;
+        const icon = this.add.image(x, rowY + 45, 'blank').setOrigin(0, 0.5).setVisible(false);
+        const label = this.add
+          .text(x + 22, rowY + 45, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+          .setOrigin(0, 0.5)
+          .setVisible(false);
+        return { icon, label };
+      });
+      this.craftRows.push({ band, title: rowTitle, description, statusBand, status, materialSlots });
+      this.craftObjects.push(band, rowTitle, description, statusBand, status, ...materialSlots.flatMap((slot) => [slot.icon, slot.label]));
     }
-    const footer = this.add.text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-    this.craftObjects.push(footer, this.craftMarker);
+    this.craftUnlockHint = this.add
+      .text(left + 44, top + 90 + 3 * CRAFT_ROW_PITCH + 29, '净化操作 · 建成简易净水器后解锁', {
+        fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim),
+      })
+      .setOrigin(0, 0.5);
+    const footer = this.add
+      .text(cx, top + panelH - 19, '↑/↓ 选择 · Enter 制作/净化 · C 或 Esc 关闭', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+      .setOrigin(0.5);
+    this.craftObjects.push(this.craftUnlockHint, footer, this.craftMarker);
 
     applyPanelDepth(this.craftObjects, PANEL_DEPTH.game.craft);
     this.assertPanelContent('craft', this.craftObjects);
@@ -2244,42 +2290,82 @@ export class GameScene extends Phaser.Scene {
   private refreshCraft(): void {
     const state = getGame();
     const entries = this.craftEntries();
+    const builtCount = RECIPES.filter((recipe) => hasUpgrade(state, recipe.id)).length;
+    this.craftSummary.setText(`已建成 ${builtCount}/${RECIPES.length} 项  ·  材料数量：当前持有 / 配方需求`);
+    this.craftUnlockHint.setVisible(!hasUpgrade(state, 'purifier'));
     if (this.craftSelected >= entries.length) this.craftSelected = Math.max(0, entries.length - 1);
     for (let i = 0; i < 4; i++) {
       const row = this.craftRows[i];
       if (!row) continue;
       const entry = entries[i];
       if (!entry) {
-        row.name.setText('');
+        row.title.setText('');
+        row.description.setText('');
         row.status.setText('');
         row.band.setAlpha(0);
+        row.statusBand.setAlpha(0);
+        for (const slot of row.materialSlots) {
+          slot.icon.setVisible(false);
+          slot.label.setText('').setVisible(false);
+        }
         continue;
       }
       const selected = i === this.craftSelected;
-      row.band.setAlpha(selected ? 0.72 : 0.3);
+      row.band.setAlpha(selected ? 0.32 : 0.18);
       row.band.setFillStyle(selected ? UI.accent : UI.surfaceRaised, 1);
       if (entry.kind === 'recipe') {
         const recipe = getRecipe(entry.id!);
-        const cost = Object.entries(recipe.cost)
-          .map(([id, n]) => `${getItem(id as ItemId).displayName}×${n}`)
-          .join(' ');
-        row.name.setText(`${recipe.displayName}  ${cost}`);
-        row.name.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
+        row.title.setText(recipe.displayName);
+        row.title.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
+        row.description.setText(recipe.description);
         const built = hasUpgrade(state, entry.id!);
         const ok = canCraft(state, entry.id!).ok;
+        const stateColor = built || ok ? UI.good : UI.danger;
         row.status.setText(built ? '已建' : ok ? '可制作' : '材料不足');
-        row.status.setColor(built ? hex(PALETTE.clothHigh) : ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
+        row.status.setColor(hex(stateColor));
+        row.statusBand.setFillStyle(stateColor, 1).setAlpha(0.18);
+        const materials = Object.entries(recipe.cost) as Array<[ItemId, number]>;
+        row.materialSlots.forEach((slot, index) => {
+          const material = materials[index];
+          if (!material) {
+            slot.icon.setVisible(false);
+            slot.label.setText('').setVisible(false);
+            return;
+          }
+          const [itemId, need] = material;
+          const have = countItem(state.player.inventory, itemId);
+          slot.icon.setTexture(itemIconKey(itemId)).setVisible(true);
+          slot.label.setText(`${getItem(itemId).displayName} ${have}/${need}`).setColor(have >= need ? hex(UI.good) : hex(UI.danger)).setVisible(true);
+        });
       } else {
-        const can = countItem(state.player.inventory, 'dirty_water') >= 1;
-        row.name.setText('净化  脏水→净水');
-        row.name.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
+        const dirty = countItem(state.player.inventory, 'dirty_water');
+        const can = dirty >= 1;
+        row.title.setText('净化随身脏水');
+        row.title.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
+        row.description.setText('将背包内全部脏水一次转为净水');
         row.status.setText(can ? '可净化' : '缺脏水');
-        row.status.setColor(can ? hex(PALETTE.clothHigh) : hex(TEXT.dim));
+        const stateColor = can ? UI.good : UI.danger;
+        row.status.setColor(hex(stateColor));
+        row.statusBand.setFillStyle(stateColor, 1).setAlpha(0.18);
+        row.materialSlots.forEach((slot, index) => {
+          if (index > 1) {
+            slot.icon.setVisible(false);
+            slot.label.setText('').setVisible(false);
+            return;
+          }
+          const itemId: ItemId = index === 0 ? 'dirty_water' : 'clean_water';
+          slot.icon.setTexture(itemIconKey(itemId)).setVisible(true);
+          slot.label
+            .setText(index === 0 ? `脏水 ×${dirty}` : `净水 ×${dirty}（产出）`)
+            .setColor(index === 0 && dirty < 1 ? hex(UI.danger) : hex(UI.good))
+            .setVisible(true);
+        });
       }
+      row.statusBand.setVisible(true);
     }
     const selectedRow = this.craftRows[this.craftSelected];
     this.craftMarker.setVisible(entries[this.craftSelected] !== undefined && selectedRow !== undefined);
-    if (entries[this.craftSelected] && selectedRow) placeMarkerLeftOf(this.craftMarker, selectedRow.name);
+    if (entries[this.craftSelected] && selectedRow) placeMarkerLeftOf(this.craftMarker, selectedRow.title);
   }
 
 
@@ -2294,8 +2380,8 @@ export class GameScene extends Phaser.Scene {
 
   private buildPausePanel(): void {
     const { width, height } = this.viewSize();
-    const panelW = 380;
-    const panelH = 220;
+    const panelW = 640;
+    const panelH = 448;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -2303,30 +2389,148 @@ export class GameScene extends Phaser.Scene {
 
     this.pauseObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.pause));
     this.pauseObjects.push(...buildPanelHeader(this, left, top, panelW, '已暂停', UI.accent, PANEL_DEPTH.game.pause + 5));
-    const title = this.add.text(cx, top + 20, '', { fontFamily: 'monospace', fontSize: '32pxpx', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
-    const controls = this.add.text(cx, top + 50, 'A/D 移动 · E 交互 · I 背包 · C 制作', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
-    this.pauseObjects.push(title, controls, this.pauseMarker);
+    const controls = this.add
+      .text(cx, top + 58, '↑/↓ 选择 · Enter 确认 · ESC 继续', {
+        fontFamily: 'monospace',
+        fontSize: `${TYPE.caption}px`,
+        color: hex(TEXT.secondary),
+      })
+      .setOrigin(0.5);
+    this.pauseObjects.push(controls);
+
+    const rowX = cx - 260;
+    const rowTop = top + 106;
+    const rowW = 520;
+    const rowH = 48;
+    const rowPitch = 60;
+    this.pauseObjects.push(...buildPanelWell(this, rowX - 12, rowTop - 8, rowW + 24, rowPitch * PAUSE_OPTIONS.length + 4, PANEL_DEPTH.game.pause + 4));
 
     PAUSE_OPTIONS.forEach((label, i) => {
-      const t = this.add.text(cx, top + 92 + i * 28, label, { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: hex(TEXT.primary) }).setOrigin(0.5);
+      const y = rowTop + i * rowPitch;
+      const plate = this.add
+        .rectangle(rowX, y, rowW, rowH, PALETTE.shadow, 0.92)
+        .setOrigin(0, 0)
+        .setStrokeStyle(1, PALETTE.stoneLight, 0.55);
+      const rule = this.add.rectangle(rowX + 12, y + 8, 3, rowH - 16, PALETTE.stoneLight, 0.9).setOrigin(0, 0);
+      const t = this.add
+        .text(rowX + 40, y + rowH / 2, label, {
+          fontFamily: 'monospace',
+          fontSize: `${TYPE.body}px`,
+          color: hex(TEXT.primary),
+        })
+        .setOrigin(0, 0.5);
+      this.pauseOptionPlates.push(plate);
+      this.pauseOptionRules.push(rule);
       this.pauseOptionTexts.push(t);
-      this.pauseObjects.push(t);
+      this.pauseObjects.push(plate, rule, t);
     });
+
+    this.pauseObjects.push(this.pauseMarker);
 
     applyPanelDepth(this.pauseObjects, PANEL_DEPTH.game.pause);
     this.assertPanelContent('pause', this.pauseObjects);
     for (const o of this.pauseObjects) o.setVisible(false);
+
+    this.buildPauseConfirmPanel(width, height);
   }
 
   private refreshPause(): void {
-    this.pauseOptionTexts.forEach((t, i) => t.setText(PAUSE_OPTIONS[i]));
+    this.pauseOptionTexts.forEach((t, i) => {
+      t.setText(PAUSE_OPTIONS[i]);
+      const selected = i === this.pauseSelected;
+      t.setColor(hex(selected ? PALETTE.lightHigh : TEXT.primary));
+      this.pauseOptionPlates[i]?.setFillStyle(selected ? PALETTE.stone : PALETTE.shadow, selected ? 1 : 0.92);
+      this.pauseOptionPlates[i]?.setStrokeStyle(1, selected ? PALETTE.lightHigh : PALETTE.stoneLight, selected ? 0.95 : 0.55);
+      this.pauseOptionRules[i]?.setFillStyle(selected ? PALETTE.lightHigh : PALETTE.stoneLight, selected ? 1 : 0.9);
+    });
     const selectedText = this.pauseOptionTexts[this.pauseSelected];
-    if (selectedText) placeMarker(this.pauseMarker, selectedText);
+    if (selectedText) placeMarkerLeftOf(this.pauseMarker, selectedText);
+  }
+
+  private buildPauseConfirmPanel(width: number, height: number): void {
+    const panelW = 520;
+    const panelH = 264;
+    const cx = width / 2;
+    const cy = height / 2;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+    const depth = PANEL_DEPTH.game.pause + 20;
+
+    this.pauseConfirmObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
+    this.pauseConfirmObjects.push(...buildPanelHeader(this, left, top, panelW, '确认重新开始', UI.danger, depth + 5));
+    const warning = this.add.text(cx, top + 55, '重新开始会清空现有存档。', {
+      fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.warn),
+    }).setOrigin(0.5);
+    const detail = this.add.text(cx, top + 82, '确认后将直接开启一局全新的游戏。', {
+      fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary),
+    }).setOrigin(0.5);
+    this.pauseConfirmObjects.push(warning, detail, ...buildPanelWell(this, left + 20, top + 106, panelW - 40, 92, depth + 5), this.pauseConfirmMarker);
+
+    const labels = ['确认并重新开始', '取消，返回暂停菜单'];
+    labels.forEach((label, i) => {
+      const rowY = top + 116 + i * 40;
+      const band = this.add.rectangle(left + 30, rowY, panelW - 60, 32, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 5);
+      const rule = this.add.rectangle(left + 30, rowY, 3, 32, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 6);
+      const text = this.add.text(left + 60, rowY + 16, label, {
+        fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: hex(TEXT.primary),
+      }).setOrigin(0, 0.5);
+      this.pauseConfirmBands.push({ band, rule });
+      this.pauseConfirmOptionTexts.push(text);
+      this.pauseConfirmObjects.push(band, rule, text);
+    });
+
+    const footer = this.add.text(cx, top + 236, '↑/↓ 选择  ·  Enter 确认  ·  Esc 取消', {
+      fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary),
+    }).setOrigin(0.5);
+    this.pauseConfirmObjects.push(footer);
+    applyPanelDepth(this.pauseConfirmObjects, depth);
+    for (const o of this.pauseConfirmObjects) o.setVisible(false);
+  }
+
+  private refreshPauseConfirm(): void {
+    this.pauseConfirmOptionTexts.forEach((text, i) => {
+      text.setColor(i === this.pauseConfirmSelected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
+      const band = this.pauseConfirmBands[i];
+      if (band) {
+        band.band.setAlpha(i === this.pauseConfirmSelected ? 0.16 : 0);
+        band.rule.setAlpha(i === this.pauseConfirmSelected ? 1 : 0);
+      }
+    });
+    const selectedText = this.pauseConfirmOptionTexts[this.pauseConfirmSelected];
+    if (selectedText) placeMarkerLeftOf(this.pauseConfirmMarker, selectedText);
+  }
+
+  private openPauseConfirm(): void {
+    this.pauseConfirmOpen = true;
+    this.pauseConfirmSelected = 1; // Cancel is the safe default.
+    for (const o of this.pauseObjects) o.setVisible(false);
+    for (const o of this.pauseConfirmObjects) o.setVisible(true);
+    this.refreshPauseConfirm();
+  }
+
+  private closePauseConfirm(): void {
+    this.pauseConfirmOpen = false;
+    for (const o of this.pauseConfirmObjects) o.setVisible(false);
+    for (const o of this.pauseObjects) o.setVisible(this.pauseOpen);
+    this.pauseSelected = 2;
+    this.refreshPause();
+  }
+
+  private restartFromPause(): void {
+    this.pauseConfirmOpen = false;
+    clearSave();
+    startNewGame(Date.now() >>> 0);
+    // A restart is a new run, so it goes through the character pick like any
+    // other new run — otherwise the pick screen would be skippable and the
+    // survivor choice would silently stop mattering.
+    this.scene.start('MetaSelect');
   }
 
   private togglePause(): void {
     this.pauseOpen = !this.pauseOpen;
+    this.pauseConfirmOpen = false;
     for (const o of this.pauseObjects) o.setVisible(this.pauseOpen);
+    for (const o of this.pauseConfirmObjects) o.setVisible(false);
     if (this.pauseOpen) {
       this.pauseSelected = 0;
       this.refreshPause();
@@ -2334,17 +2538,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   private activatePause(): void {
+    if (this.pauseConfirmOpen) {
+      if (this.pauseConfirmSelected === 0) this.restartFromPause();
+      else this.closePauseConfirm();
+      return;
+    }
     if (this.pauseSelected === 0) {
       this.togglePause(); // 继续游戏
     } else if (this.pauseSelected === 1) {
       this.openTowerOverview(); // 塔楼地图
     } else if (this.pauseSelected === 2) {
-      clearSave();
-      startNewGame(Date.now() >>> 0); // 重新开始
-      // A restart is a new run, so it goes through the character pick like any
-      // other new run — otherwise the pick screen would be skippable and the
-      // survivor choice would silently stop mattering.
-      this.scene.start('MetaSelect');
+      this.openPauseConfirm();
     } else {
       this.scene.start('Menu'); // 返回标题
     }
@@ -2441,7 +2645,7 @@ export class GameScene extends Phaser.Scene {
       // Same contact shadow as the player, so an NPC stands on the floor rather
       // than hovering a few pixels above it.
       const shadow = addContactShadow(this, npc.x, PLAYER_FEET_Y + 2, 26, 2, 0.5);
-      const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.primary) }).setOrigin(0.5);
+      const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) }).setOrigin(0.5);
       this.floorObjects.push(...shadow, sprite, nameLabel);
     }
   }
@@ -2456,8 +2660,8 @@ export class GameScene extends Phaser.Scene {
 
   private buildDialoguePanel(): void {
     const { width, height } = this.viewSize();
-    const panelW = 460;
-    const panelH = 260;
+    const panelW = 560;
+    const panelH = 320;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -2465,51 +2669,70 @@ export class GameScene extends Phaser.Scene {
 
     const depth = PANEL_DEPTH.game.dialogue;
     this.dialogueObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
-    // OVERHAUL UI: the same header strip every other panel uses, with the NPC's
-    // name on it, and the message in an inset well so speech reads as speech
-    // rather than as more body text.
+    // Keep the project's square riveted frame and raised title strip; the wider
+    // face gives the dialogue and barter rows the same measured breathing room
+    // as the other dark-metal panels.
     // Empty header title on purpose: the NPC's name is the header, and drawing a
     // static '对话' underneath it printed the two on top of each other.
     this.dialogueObjects.push(...buildPanelHeader(this, left, top, panelW, '', UI.good, depth + 5));
     // Create with placeholder content so each text's canvas/frame exists up front
     // (setText on a never-rendered empty text throws in Phaser 4).
     this.dialogueTitle = this.add
-      .text(left + 10, top + 10, '对话', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
+      .text(left + 12, top + 12, '对话', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
       .setOrigin(0, 0.5)
       .setDepth(depth + 6);
-    this.dialogueObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 34, depth + 5));
+    const messageX = left + 20;
+    const messageY = top + 32;
+    const messageW = panelW - 40;
+    const messageH = 52;
+    this.dialogueObjects.push(...buildPanelWell(this, messageX, messageY, messageW, messageH, depth + 5));
+    // A restrained teal edge makes the speech well read as a separate metal
+    // inset without introducing a new colour or rounded treatment.
+    const messageAccent = this.add.rectangle(messageX, messageY, 4, messageH, UI.good).setOrigin(0, 0).setDepth(depth + 6);
+    this.dialogueObjects.push(messageAccent);
     // dialogueTitle MUST be in the list: closeDialogue() hides everything in it,
     // and a name left out of the list stays on screen after the panel closes.
     this.dialogueObjects.push(this.dialogueTitle);
     this.dialogueMessage = this.add
-      .text(cx, top + 45, '……', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: panelW - 44 } })
+      .text(cx, messageY + messageH / 2, '……', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: panelW - 72 } })
       .setOrigin(0.5)
       .setDepth(depth + 7);
     this.dialogueObjects.push(this.dialogueMessage);
 
+    const optionX = left + 24;
+    const optionY = top + 100;
+    const optionW = panelW - 48;
+    const optionH = 30;
+    const optionPitch = 34;
+    this.dialogueObjects.push(...buildPanelWell(this, left + 20, top + 94, panelW - 40, 148, depth + 5));
     this.dialogueBands = [];
     for (let i = 0; i < 4; i++) {
-      const rowY = top + 74 + i * 30;
-      // A selection band per row, the same language as every other list: a wash
-      // plus a 2px accent rule. Toggled in refreshDialogue.
-      const band = this.add.rectangle(left + 12, rowY, panelW - 24, 26, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 5);
-      const rule = this.add.rectangle(left + 12, rowY, 2, 26, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 6);
+      const rowY = optionY + i * optionPitch;
+      // Each choice gets a crisp, square selection wash inside the recessed
+      // list well; hairline dividers keep the inactive rows legible at a glance.
+      const band = this.add.rectangle(optionX, rowY, optionW, optionH, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 5);
+      const rule = this.add.rectangle(optionX, rowY, 3, optionH, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 6);
       this.dialogueBands.push({ band, rule });
       this.dialogueObjects.push(band, rule);
-      const icon = this.add.image(left + 30, rowY + 12, 'blank').setOrigin(0.5).setDepth(depth + 7);
+      if (i < 3) {
+        const separator = this.add.rectangle(optionX + 12, rowY + optionH + 1, optionW - 24, 1, PALETTE.stoneLight).setOrigin(0, 0).setAlpha(0.24).setDepth(depth + 6);
+        this.dialogueObjects.push(separator);
+      }
+      const icon = this.add.image(left + 44, rowY + optionH / 2, 'blank').setOrigin(0.5).setDepth(depth + 7);
       const t = this.add
-        .text(left + 46, rowY + 12, '……', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
+        .text(left + 60, rowY + optionH / 2, '……', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
         .setOrigin(0, 0.5)
         .setDepth(depth + 7);
       this.dialogueOptionIcons.push(icon);
       this.dialogueOptions.push(t);
       this.dialogueObjects.push(icon, t);
     }
+    const footerRule = this.add.rectangle(left + 20, top + panelH - 40, panelW - 40, 1, PALETTE.stoneLight).setOrigin(0, 0).setAlpha(0.42).setDepth(depth + 6);
     const footer = this.add
-      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+      .text(cx, top + panelH - 20, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5)
       .setDepth(depth + 7);
-    this.dialogueObjects.push(footer, this.dialogueMarker);
+    this.dialogueObjects.push(footerRule, footer, this.dialogueMarker);
 
     applyPanelDepth(this.dialogueObjects, PANEL_DEPTH.game.dialogue);
     this.assertPanelContent('dialogue', this.dialogueObjects);
@@ -2580,10 +2803,10 @@ export class GameScene extends Phaser.Scene {
       if (option.icon) icon.setTexture(itemIconKey(option.icon)).setVisible(true);
       else icon.setVisible(false);
       const selected = i === d.selected;
-      this.dialogueOptions[i].setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
+      this.dialogueOptions[i].setColor(selected ? hex(TEXT.highlight) : hex(TEXT.primary));
       const b = this.dialogueBands[i];
       if (b) {
-        b.band.setAlpha(selected ? 0.14 : 0);
+        b.band.setAlpha(selected ? 0.16 : 0);
         b.rule.setAlpha(selected ? 1 : 0);
       }
     }
@@ -2683,6 +2906,7 @@ export class GameScene extends Phaser.Scene {
       this.invObjects,
       this.craftObjects,
       this.pauseObjects,
+      this.pauseConfirmObjects,
       this.dialogueObjects,
       this.encounterObjects,
       this.shelterObjects,
@@ -2735,6 +2959,10 @@ export class GameScene extends Phaser.Scene {
 
   private onEsc(): void {
     if (this.stairClimb) return;
+    if (this.pauseConfirmOpen) {
+      this.closePauseConfirm();
+      return;
+    }
     // ESCAPE HATCH FIRST.
     //
     // Every branch below is gated on a state flag, so a panel that is DRAWN
@@ -2812,8 +3040,13 @@ export class GameScene extends Phaser.Scene {
       this.dialogue.selected = Math.max(0, this.dialogue.selected - 1);
       this.refreshDialogue();
     } else if (this.pauseOpen) {
-      this.pauseSelected = Math.max(0, this.pauseSelected - 1);
-      this.refreshPause();
+      if (this.pauseConfirmOpen) {
+        this.pauseConfirmSelected = Math.max(0, this.pauseConfirmSelected - 1);
+        this.refreshPauseConfirm();
+      } else {
+        this.pauseSelected = Math.max(0, this.pauseSelected - 1);
+        this.refreshPause();
+      }
     }
   }
 
@@ -2848,8 +3081,13 @@ export class GameScene extends Phaser.Scene {
       this.dialogue.selected = Math.min(Math.max(0, count - 1), this.dialogue.selected + 1);
       this.refreshDialogue();
     } else if (this.pauseOpen) {
-      this.pauseSelected = Math.min(PAUSE_OPTIONS.length - 1, this.pauseSelected + 1);
-      this.refreshPause();
+      if (this.pauseConfirmOpen) {
+        this.pauseConfirmSelected = Math.min(1, this.pauseConfirmSelected + 1);
+        this.refreshPauseConfirm();
+      } else {
+        this.pauseSelected = Math.min(PAUSE_OPTIONS.length - 1, this.pauseSelected + 1);
+        this.refreshPause();
+      }
     }
   }
 
@@ -3061,8 +3299,8 @@ export class GameScene extends Phaser.Scene {
     this.shelterObjects = [];
     const state = getGame();
     const { width, height } = this.viewSize();
-    const panelW = 500;
-    const panelH = 300;
+    const panelW = 880;
+    const panelH = 440;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -3071,39 +3309,118 @@ export class GameScene extends Phaser.Scene {
     const resolved = state.shelterPlan?.resolved === true;
 
     this.shelterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
-    this.shelterObjects.push(...buildPanelHeader(this, left, top, panelW, '夜间安排 · 宿舍', UI.good, depth + 5));
-    this.shelterObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 44, depth + 5));
+    const header = this.add.rectangle(left + 24, top + 12, panelW - 48, 42, 0x202b32).setOrigin(0, 0).setAlpha(0.98).setScrollFactor(0).setDepth(depth + 5);
+    const headerAccent = this.add.rectangle(left + 24, top + 12, 4, 42, UI.accent).setOrigin(0, 0).setScrollFactor(0).setDepth(depth + 6);
+    const headerRule = this.add.rectangle(left + 28, top + 53, panelW - 56, 1, UI.accent).setOrigin(0, 0).setAlpha(0.72).setScrollFactor(0).setDepth(depth + 6);
+    const title = this.add
+      .text(left + 48, top + 33, '夜间安排 · 宿舍', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
+      .setOrigin(0, 0.5)
+      .setScrollFactor(0)
+      .setDepth(depth + 6);
+    this.shelterObjects.push(header, headerAccent, headerRule, title);
+    this.shelterObjects.push(...buildPanelWell(this, left + 24, top + 64, panelW - 48, 50, depth + 5));
     const stress = Math.round(state.player.stress ?? 20);
     const latest = recentDiary(state, 1)[0];
+    const latestMessage = latest?.message ?? '';
+    const latestCharacters = Array.from(latestMessage);
+    const latestPreview = latestCharacters.length > 28 ? `${latestCharacters.slice(0, 28).join('')}…` : latestMessage;
     this.shelterObjects.push(
-      this.add.text(left + 24, top + 40, `压力 ${stress}/100${latest ? ` · 上次：${latest.message}` : ' · 今天还没有记录'}`, {
+      this.add.text(left + 40, top + 89, `压力 ${stress}/100${latest ? ` · 上次：${latestPreview}` : ' · 今天还没有记录'}`, {
         fontFamily: 'monospace',
         fontSize: `${TYPE.caption}px`,
         color: hex(stress >= 70 ? TEXT.warn : TEXT.primary),
-        wordWrap: { width: panelW - 48 },
-      }).setOrigin(0, 0.5).setDepth(depth + 6),
+        wordWrap: { width: panelW - 96, useAdvancedWrap: true },
+      }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(depth + 7),
     );
-    const rowsTop = top + 80;
+    const rowsTop = top + 122;
+    const rowHeight = 64;
+    const rowPitch = 68;
     for (const [index, row] of SHELTER_ROWS.entries()) {
-      const objects = buildListRow(this, left + 16, rowsTop + index * 26, panelW - 32, depth + 6, {
-        label: row.label,
-        value: row.value,
-        selected: index === this.shelterSelected,
-        dim: resolved && state.shelterPlan?.action !== row.action,
+      const x = left + 24;
+      const y = rowsTop + index * rowPitch;
+      const selected = index === this.shelterSelected;
+      const dim = resolved && state.shelterPlan?.action !== row.action;
+      const requirements: Array<{ itemId: ItemId; need: number }> = row.action === 'treat'
+        ? [{ itemId: 'medkit', need: 1 }]
+        : row.action === 'repair'
+          ? [{ itemId: 'wood', need: 2 }, { itemId: 'tape', need: 1 }]
+          : row.action === 'care'
+            ? [{ itemId: 'ration_pack', need: 1 }]
+            : [];
+      const band = this.add
+        .rectangle(x, y, panelW - 48, rowHeight, selected ? UI.surfaceRaised : 0x101920)
+        .setOrigin(0, 0)
+        .setAlpha(selected ? 0.56 : 0.36)
+        .setScrollFactor(0)
+        .setDepth(depth + 6);
+      const outline = this.add.graphics().setDepth(depth + 7).setScrollFactor(0);
+      const right = x + panelW - 48;
+      outline.lineStyle(1, selected ? UI.accent : UI.line, dim ? 0.26 : selected ? 0.9 : 0.44);
+      outline.beginPath();
+      outline.moveTo(x + 8, y + 1);
+      outline.lineTo(right - 1, y + 1);
+      outline.lineTo(right - 1, y + rowHeight - 8);
+      outline.lineTo(right - 8, y + rowHeight - 1);
+      outline.lineTo(x + 1, y + rowHeight - 1);
+      outline.lineTo(x + 1, y + 8);
+      outline.closePath();
+      outline.strokePath();
+      const accent = this.add
+        .rectangle(x + 1, y + 8, 3, rowHeight - 16, selected ? UI.accent : UI.good)
+        .setOrigin(0, 0)
+        .setAlpha(dim ? 0.24 : selected ? 0.95 : 0.56)
+        .setScrollFactor(0)
+        .setDepth(depth + 7);
+      const label = this.add
+        .text(x + 24, y + 20, row.label, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(selected ? PALETTE.lightHigh : TEXT.primary) })
+        .setOrigin(0, 0.5)
+        .setAlpha(dim ? 0.42 : 1)
+        .setScrollFactor(0)
+        .setDepth(depth + 8);
+      const value = this.add
+        .text(x + 24, y + 47, row.value, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
+        .setOrigin(0, 0.5)
+        .setAlpha(dim ? 0.42 : 1)
+        .setScrollFactor(0)
+        .setDepth(depth + 8);
+      this.shelterObjects.push(band, outline, accent, label, value);
+
+      const materialX = right - 316;
+      requirements.forEach(({ itemId, need }, materialIndex) => {
+        const have = countItem(state.player.inventory, itemId);
+        const slotX = materialX + materialIndex * 154;
+        const icon = this.add
+          .image(slotX, y + rowHeight / 2, itemIconKey(itemId))
+          .setDisplaySize(24, 24)
+          .setOrigin(0, 0.5)
+          .setAlpha(dim ? 0.42 : 1)
+          .setScrollFactor(0)
+          .setDepth(depth + 8);
+        const count = this.add
+          .text(slotX + 32, y + rowHeight / 2, `${getItem(itemId).displayName} ${have}/${need}`, {
+            fontFamily: 'monospace',
+            fontSize: `${TYPE.caption}px`,
+            color: hex(have >= need ? UI.good : UI.danger),
+          })
+          .setOrigin(0, 0.5)
+          .setAlpha(dim ? 0.42 : 1)
+          .setScrollFactor(0)
+          .setDepth(depth + 8);
+        this.shelterObjects.push(icon, count);
       });
-      this.shelterObjects.push(...objects);
-      const label = objects.find((object) => object instanceof Phaser.GameObjects.Text && object.text === row.label) as Phaser.GameObjects.Text | undefined;
-      if (index === this.shelterSelected && label) {
-        placeMarker(this.shelterMarker, label);
-        this.shelterMarker.setDepth(depth + 8).setVisible(true).setScrollFactor(0);
+
+      if (selected) {
+        placeMarkerLeftOf(this.shelterMarker, label);
+        this.shelterMarker.setDepth(depth + 9).setVisible(true).setScrollFactor(0);
       }
     }
     this.shelterObjects.push(
-      this.add.text(cx, top + panelH - 14, resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回', {
+      // Keep the footer clear of the last card while staying inside the frame.
+      this.add.text(cx, top + panelH - 30, resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回', {
         fontFamily: 'monospace',
         fontSize: `${TYPE.caption}px`,
         color: hex(PALETTE.clothHigh),
-      }).setOrigin(0.5).setDepth(depth + 6),
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(depth + 6),
     );
     this.shelterObjects.push(this.shelterMarker);
     this.assertPanelContent('shelter', this.shelterObjects);

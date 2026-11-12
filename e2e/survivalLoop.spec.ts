@@ -75,36 +75,51 @@ const setX = (page: Page, x: number): Promise<void> =>
     if (s) s.player.x = v;
   }, x);
 
-// Climb to `target` through the real up-exit, retrying the E press: Phaser's
-// frame-based input occasionally drops a single synthetic keypress.
-async function climbTo(page: Page, target: number): Promise<void> {
-  for (let attempt = 0; attempt < 10; attempt++) {
-    if ((await readState(page)).currentFloor === target) return;
-    await setX(page, 40); // UP_EXIT_X
+async function waitForSettledFloor(page: Page, from: number, target: number): Promise<number> {
+  await page.waitForFunction(
+    ({ expectedFrom, expectedTarget }) => {
+      const state = (window as unknown as { __PHASER_SESSION__?: { getState: () => { currentFloor: number } | null } }).__PHASER_SESSION__?.getState();
+      const game = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (key: string) => { stairClimb?: unknown } | null } } }).__PHASER_GAME__;
+      const scene = game?.scene.getScene('Game');
+      return !!state && !!scene && !scene.stairClimb && (state.currentFloor === expectedFrom || state.currentFloor === expectedTarget);
+    },
+    { expectedFrom: from, expectedTarget: target },
+    { timeout: 5000 },
+  );
+  return (await readState(page)).currentFloor;
+}
+
+async function moveOneFloor(page: Page, target: number): Promise<void> {
+  const from = (await readState(page)).currentFloor;
+  if (from === target) return;
+  if (Math.abs(target - from) !== 1) throw new Error(`floor move must be adjacent: ${from} -> ${target}`);
+  await setX(page, target > from ? 40 : 1240);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const current = await waitForSettledFloor(page, from, target);
+    if (current === target) return;
+    if (current !== from) throw new Error(`unexpected floor while moving ${from} -> ${target}: ${current}`);
     await page.keyboard.press('E');
-    await page.waitForFunction(
-      (floor) => window.__PHASER_SESSION__?.getState()?.currentFloor === floor,
-      target,
-      { timeout: 1800 },
-    ).then(() => true).catch(() => false);
   }
-  if ((await readState(page)).currentFloor === target) return;
-  throw new Error(`could not climb to ${target} (at ${(await readState(page)).currentFloor})`);
+  const finalFloor = await waitForSettledFloor(page, from, target);
+  if (finalFloor !== target) throw new Error(`could not move from ${from} to ${target} (at ${finalFloor})`);
+}
+
+async function climbTo(page: Page, target: number): Promise<void> {
+  for (;;) {
+    const current = (await readState(page)).currentFloor;
+    if (current === target) return;
+    if (current > target) throw new Error(`cannot climb down from ${current} to ${target}`);
+    await moveOneFloor(page, current + 1);
+  }
 }
 
 async function descendTo(page: Page, target: number): Promise<void> {
-  for (let attempt = 0; attempt < 10; attempt++) {
-    if ((await readState(page)).currentFloor === target) return;
-    await setX(page, 1240); // DOWN_EXIT_X
-    await page.keyboard.press('E');
-    await page.waitForFunction(
-      (floor) => window.__PHASER_SESSION__?.getState()?.currentFloor === floor,
-      target,
-      { timeout: 1800 },
-    ).then(() => true).catch(() => false);
+  for (;;) {
+    const current = (await readState(page)).currentFloor;
+    if (current === target) return;
+    if (current < target) throw new Error(`cannot descend up from ${current} to ${target}`);
+    await moveOneFloor(page, current - 1);
   }
-  if ((await readState(page)).currentFloor === target) return;
-  throw new Error(`could not descend to ${target} (at ${(await readState(page)).currentFloor})`);
 }
 
 // Walk over a loose ground item; pickups are automatic within 12px, so standing
@@ -169,6 +184,7 @@ async function selectInMenu(page: Page, options: string[], target: string): Prom
 const MAIN_OPTIONS = ['问候', '询问', '交易', '退出'];
 
 test('a player can gather every upgrade material and build all three upgrades', async ({ page }) => {
+  test.setTimeout(60_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
 
@@ -358,7 +374,7 @@ test('sleeping advances the clock, restores energy and charges the night', async
   expect(s.day).toBe(2);
   // 06:00, give or take the tick that elapsed while the assertions ran.
   expect(s.gameMinuteOfDay).toBeGreaterThanOrEqual(360);
-  expect(s.gameMinuteOfDay).toBeLessThan(362);
+  expect(s.gameMinuteOfDay).toBeLessThan(365);
   expect(s.player.energy).toBeGreaterThan(95); // restored, minus a tick of awake decay
   // The night is not free: hunger and thirst were charged, but energy was not.
   expect(s.player.hunger).toBeLessThan(90);

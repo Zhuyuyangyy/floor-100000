@@ -161,19 +161,22 @@ export function buildPanelHeader(
   accent: number,
   depth: number,
   titleX?: number,
+  layout?: { height?: number; titleSize?: number },
 ): UiObject[] {
   const out: UiObject[] = [];
-  const h = 20;
+  const h = layout?.height ?? 24;
+  const titleSize = layout?.titleSize ?? TYPE.caption;
   // The strip itself.
-  out.push(scene.add.rectangle(left, top, w, h, UI.surfaceRaised).setOrigin(0, 0).setScrollFactor(0).setAlpha(0.96).setDepth(depth));
+  out.push(scene.add.rectangle(left, top, w, h, UI.surfaceRaised).setName(title ? `panel-header-band-${title}` : 'panel-header-band').setOrigin(0, 0).setScrollFactor(0).setAlpha(0.96).setDepth(depth));
   // A 2px accent edge on the left, so the header has a leading mark.
   out.push(scene.add.rectangle(left, top, 2, h, accent).setOrigin(0, 0).setScrollFactor(0).setDepth(depth + 1));
   // The title.
   out.push(
     scene.add
-      .text(titleX ?? left + 10, top + h / 2, title, { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
+      .text(titleX ?? left + 10, top + h / 2, title, { fontFamily: 'monospace', fontSize: `${titleSize}px`, color: hex(TEXT.primary) })
       .setOrigin(0, 0.5)
       .setScrollFactor(0)
+      .setName(title ? `panel-header-title-${title}` : 'panel-header-title')
       .setDepth(depth + 1),
   );
   // The hairline that separates the header from the body.

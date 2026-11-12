@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// Use Playwright's bundled Chromium, matching the default config and CI image.
 const port = Number(process.env.CANDIDATE_E2E_PORT ?? 5199);
 const baseURL = `http://127.0.0.1:${port}`;
 
@@ -24,7 +25,6 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        channel: 'chrome',
         viewport: { width: 1280, height: 800 },
       },
     },

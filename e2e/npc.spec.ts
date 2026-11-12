@@ -110,10 +110,9 @@ async function selectInMenu(page: Page, options: string[], target: string): Prom
   throw new Error(`could not reach "${target}" (cursor at "${await cursorLabel(page)}")`);
 }
 
-// Press E and wait for the interaction to take effect, retrying — Phaser's
-// frame-based input occasionally drops a single synthetic keypress.
-// A stair transition itself takes 1s; allow extra time for a cold browser frame
-// or a keypress arriving while the Game scene is still binding its inputs.
+// Retry short interactions when Phaser drops a frame-based synthetic keypress.
+// Do not use this polling loop for stairs: repeated E can start another climb
+// as soon as the previous traversal lands.
 async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 20): Promise<void> {
   for (let i = 0; i < tries; i++) {
     if (await check()) return;
@@ -123,9 +122,34 @@ async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 20
   if (!(await check())) throw new Error('interact (E) did not take effect');
 }
 
+async function waitForSettledFloor(page: Page, from: number, target: number): Promise<number> {
+  await page.waitForFunction(
+    ({ expectedFrom, expectedTarget }) => {
+      const state = (window as unknown as { __PHASER_SESSION__?: { getState: () => { currentFloor: number } | null } }).__PHASER_SESSION__?.getState();
+      const game = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (key: string) => { stairClimb?: unknown } | null } } }).__PHASER_GAME__;
+      const scene = game?.scene.getScene('Game');
+      return !!state && !!scene && !scene.stairClimb && (state.currentFloor === expectedFrom || state.currentFloor === expectedTarget);
+    },
+    { expectedFrom: from, expectedTarget: target },
+    { timeout: 5000 },
+  );
+  return (await readState(page)).currentFloor;
+}
+
+async function pressEForFloorChange(page: Page, from: number, target: number): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const current = await waitForSettledFloor(page, from, target);
+    if (current === target) return;
+    if (current !== from) throw new Error(`unexpected floor while moving ${from} -> ${target}: ${current}`);
+    await page.keyboard.press('E');
+  }
+  if (await waitForSettledFloor(page, from, target) === target) return;
+  throw new Error(`could not move from floor ${from} to ${target}`);
+}
+
 async function goToNeighborFloor(page: Page): Promise<void> {
   await setX(page, 40); // UP_EXIT_X: floor 1 -> 2
-  await pressEUntil(page, async () => (await readState(page)).currentFloor === 2);
+  await pressEForFloorChange(page, 1, 2);
 }
 
 test('trade with 阿林 changes the bag (电线 for 废金属)', async ({ page }) => {

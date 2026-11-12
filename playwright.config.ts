@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// Uses the locally installed Chrome (channel: 'chrome') so no separate
-// Playwright browser download is required in this environment.
+// Use Playwright's bundled Chromium so the selected browser matches the
+// Playwright version installed by npm and the pinned CI container image.
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -23,7 +23,6 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        channel: 'chrome',
         viewport: { width: 1280, height: 800 },
       },
     },

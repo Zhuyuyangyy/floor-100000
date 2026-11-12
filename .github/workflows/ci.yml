@@ -28,3 +28,11 @@ jobs:
         run: npm run build
       - name: E2E regression suite
         run: npm run test:e2e -- --config=playwright.candidate.config.ts --workers=1
+      - name: Upload Playwright failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-artifacts-${{ github.run_id }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -10,9 +10,9 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL,
-    trace: 'off',
-    screenshot: 'off',
-    video: 'off',
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
   },
   webServer: {
     command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`,

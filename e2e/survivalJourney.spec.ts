@@ -101,12 +101,16 @@ test.describe('B3-02 full survival journey', () => {
     const opened = async (): Promise<boolean> =>
       ((await readState(page)).visitedFloors[floor]?.openedContainers ?? []).includes(id);
     await walkTo(page, x);
+    const actualFloor = (await readState(page)).currentFloor;
+    if (actualFloor !== floor) {
+      throw new Error(`cannot open ${floor}/${id}: player is on floor ${actualFloor}`);
+    }
     for (let i = 0; i < 8; i++) {
       if (await opened()) return;
       await page.keyboard.press('E');
       await page.waitForTimeout(220);
     }
-    throw new Error(`could not open ${floor}/${id}`);
+    throw new Error(`could not open ${floor}/${id} on floor ${actualFloor}`);
   }
 
   // Drink one bottle through the real inventory panel.
@@ -131,16 +135,36 @@ test.describe('B3-02 full survival journey', () => {
     await page.waitForTimeout(200);
   }
 
-  // Walk to a stairwell and take it. The floor change is the game's own logic.
+  async function waitForSettledFloor(page: Page, from: number, target: number): Promise<number> {
+    await page.waitForFunction(
+      ({ expectedFrom, expectedTarget }) => {
+        const state = (window as unknown as { __PHASER_SESSION__?: { getState: () => { currentFloor: number } | null } }).__PHASER_SESSION__?.getState();
+        const game = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (key: string) => { stairClimb?: unknown } | null } } }).__PHASER_GAME__;
+        const scene = game?.scene.getScene('Game');
+        return !!state && !!scene && !scene.stairClimb && (state.currentFloor === expectedFrom || state.currentFloor === expectedTarget);
+      },
+      { expectedFrom: from, expectedTarget: target },
+      { timeout: 5000 },
+    );
+    return (await readState(page)).currentFloor;
+  }
+
+  // Wait for a completed stair traversal before trying another E. Repeated E
+  // presses during the animation can be ignored or start a second traversal.
   async function takeStairs(page: Page, dir: 'up' | 'down', expectedFloor: number): Promise<void> {
     await walkTo(page, dir === 'up' ? UP_EXIT_X : DOWN_EXIT_X);
-    for (let i = 0; i < 10; i++) {
-      if ((await readState(page)).currentFloor === expectedFloor) return;
+    const from = (await readState(page)).currentFloor;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const current = await waitForSettledFloor(page, from, expectedFloor);
+      if (current === expectedFloor) return;
+      if (current !== from) {
+        throw new Error(`unexpected floor while moving ${from} -> ${expectedFloor}: ${current}`);
+      }
       await page.keyboard.press('E');
-      await page.waitForTimeout(220);
     }
-    if ((await readState(page)).currentFloor === expectedFloor) return;
-    throw new Error(`could not go ${dir} to floor ${expectedFloor} (at ${(await readState(page)).currentFloor})`);
+    const finalFloor = await waitForSettledFloor(page, from, expectedFloor);
+    if (finalFloor === expectedFloor) return;
+    throw new Error(`could not go ${dir} to floor ${expectedFloor} (at ${finalFloor})`);
   }
 
   test('wakes on floor 1, explores 2-5, returns home and sleeps', async ({ page }) => {

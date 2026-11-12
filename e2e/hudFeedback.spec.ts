@@ -122,7 +122,17 @@ test('the flash renders on top of an open panel', async ({ page }) => {
   expect(shown, 'the flash must be readable').toContain('水分');
   expect(shown, `the amount is not a whole number: ${shown}`).not.toContain('.');
 
-  await page.waitForTimeout(1900); // past the 1.6s flash
+  await page.waitForFunction(
+    () => {
+      const game = window.__PHASER_GAME__ as unknown as {
+        scene: { getScene: (key: string) => { children: { list: Array<{ name?: string; text?: string; visible: boolean }> } } | null };
+      };
+      const flash = game?.scene.getScene('Game')?.children.list.find((object) => object.name === 'hud-feedback');
+      return !flash || !flash.visible || !(flash.text ?? '').includes('水分');
+    },
+    undefined,
+    { timeout: 5000 },
+  );
   const withoutFlash = await page.screenshot({ clip });
 
   expect(

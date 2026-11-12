@@ -83,3 +83,14 @@ CI=1 CANDIDATE_E2E_PORT=5305 ./node_modules/.bin/playwright test \
 ```
 
 CI workflow 在一次性 runner/container 中执行候选配置与单 worker：`npm run test:e2e -- --config=playwright.candidate.config.ts --workers=1`。截至本地验证结果收集截止时，远端 post-fix Actions 尚未运行；该句只描述测试记录的截止状态，不代表之后的授权提交、推送与 Draft PR 状态。
+
+
+## 2026-11-12 follow-up：补齐远端暴露的两个竞态
+
+远端 CI 首轮在 `hudFeedback.spec.ts` 和 `survivalJourney.spec.ts` 各失败一次。后续修复保持业务逻辑和像素断言不变：
+
+- `survivalJourney.spec.ts` 的楼梯准备改为等待 `currentFloor` 与 `stairClimb` 同时稳定后再发送下一次 E；打开容器前增加实际楼层检查和诊断信息。
+- `hudFeedback.spec.ts` 在第二张截图前等待 `hud-feedback` 文本实际清空，避免用固定 1900ms 猜测动画状态。
+- 两套 Playwright 配置改为失败时保留 trace/video、截图；CI 上传 `test-results/`，保留 7 天。
+
+本地验证：`npm run typecheck`、`npm test`（51 个文件、661/661）、`npm run build` 通过；HUD 两项和完整 `survivalJourney` 目标用例通过；完整生存旅程重复 2 次，2/2 通过。远端 Actions 结果以本次提交后的 workflow run 为准。

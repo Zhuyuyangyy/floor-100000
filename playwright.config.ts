@@ -8,9 +8,9 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL: 'http://localhost:5173',
-    trace: 'off',
-    screenshot: 'off',
-    video: 'off',
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
   },
   webServer: {
     command: 'npm run dev',

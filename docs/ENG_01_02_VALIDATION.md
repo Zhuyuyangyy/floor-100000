@@ -94,3 +94,6 @@ CI workflow 在一次性 runner/container 中执行候选配置与单 worker：`
 - 两套 Playwright 配置改为失败时保留 trace/video、截图；CI 上传 `test-results/`，保留 7 天。
 
 本地验证：`npm run typecheck`、`npm test`（51 个文件、661/661）、`npm run build` 通过；HUD 两项和完整 `survivalJourney` 目标用例通过；完整生存旅程重复 2 次，2/2 通过。远端 Actions 结果以本次提交后的 workflow run 为准。
+
+
+第二轮完整回归还暴露了三个环境敏感点：`survivalJourney` 次日清晨断言窗口过窄、`survivalLoop` 仍使用固定楼梯等待且接近 30 秒默认超时、`tower` 的 120 次地图导航在慢 runner 上超过 30 秒。已分别改为清晨范围断言、settled-floor 等待，以及 60 秒的专项测试预算；单独验证均通过。远端完整回归仍需以新提交的 Actions 结果为准。

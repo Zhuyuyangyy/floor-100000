@@ -367,7 +367,7 @@ test.describe('B3-02 full survival journey', () => {
     const slept = await readState(page);
     expect(slept.day).toBe(2);
     expect(slept.gameMinuteOfDay).toBeGreaterThanOrEqual(360); // next 06:00
-    expect(slept.gameMinuteOfDay).toBeLessThan(362);
+    expect(slept.gameMinuteOfDay).toBeLessThan(365);
     expect(slept.player.energy).toBeGreaterThan(95); // restored
     // The night was charged, not free.
     expect(slept.player.hunger).toBeLessThan(beforeSleep.player.hunger);

@@ -62,13 +62,23 @@ async function startAndClimb(page: Page): Promise<void> {
     { timeout: 20_000 },
   );
   await page.waitForTimeout(800);
-  // Climb to floor 2, where the encounter spots live.
-  await page.evaluate(() => {
-    const st = window.__PHASER_SESSION__?.getState();
-    if (st) st.player.x = 40;
-  });
-  await page.keyboard.press('E');
-  await page.waitForFunction(() => window.__PHASER_SESSION__?.getState()?.currentFloor === 2, undefined, { timeout: 3000 });
+  // Climb to floor 2, where the encounter spots live. The climb is a visible
+  // 1000 ms traversal; wait for the landing instead of a fixed 3 s budget.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const floor = await page.evaluate(() => window.__PHASER_SESSION__?.getState()?.currentFloor);
+    if (floor === 2) return;
+    await page.evaluate(() => {
+      const st = window.__PHASER_SESSION__?.getState();
+      if (st) st.player.x = 40;
+    });
+    await page.keyboard.press('E');
+    const landed = await page
+      .waitForFunction(() => window.__PHASER_SESSION__?.getState()?.currentFloor === 2, undefined, { timeout: 10_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (landed) return;
+  }
+  throw new Error('could not climb to floor 2 for the combat specs');
 }
 
 /** Open the ambush at whichever spot on this floor rolls one. */

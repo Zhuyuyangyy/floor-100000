@@ -63,13 +63,19 @@ const setScalar = (page: Page, patch: { day?: number; gameMinuteOfDay?: number }
     if (s) Object.assign(s, p);
   }, patch);
 
-async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 8): Promise<void> {
+// Press E once, then poll before pressing again. A blind fixed retry can fire
+// on the frame a stair climb commits and start a second one.
+async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 4, settleMs = 2500): Promise<void> {
   for (let i = 0; i < tries; i++) {
     if (await check()) return;
     await page.keyboard.press('E');
-    await page.waitForTimeout(250);
+    const deadline = Date.now() + settleMs;
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(80);
+      if (await check()) return;
+    }
   }
-  if (!(await check())) throw new Error('interact (E) did not take effect');
+  throw new Error('interact (E) did not take effect');
 }
 
 test('plays a real first-day loop: loot, decay, then sleep to day 2', async ({ page }) => {

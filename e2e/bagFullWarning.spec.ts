@@ -140,7 +140,7 @@ test.describe('B3-02.1 bag-full feedback', () => {
     for (let i = 0; i < 10; i++) {
       if (await onFloor()) return;
       await page.keyboard.press('E');
-      if (await pollUntil(page, onFloor, 1500)) return;
+      if (await pollUntil(page, onFloor, 3000)) return;
       await walkTo(page, exitX);
     }
     throw new Error(`could not go ${dir} to floor ${expectedFloor}`);

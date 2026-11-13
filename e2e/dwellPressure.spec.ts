@@ -50,9 +50,10 @@ test('lingering on a floor rolls dwell pressure', async ({ page }) => {
   }
   await waitForScene(page, 'Game');
 
-  // Climb to floor 2 through the real exit (retrying the E press, same as
-  // art.spec: a single synthetic keypress is occasionally dropped).
-  for (let attempt = 0; attempt < 8; attempt++) {
+  // Climb to floor 2 through the real exit. Wait for the landing: the stair
+  // traversal takes 1000 ms, and a blind 220 ms retry can start a second climb
+  // on the exact commit frame (measured: the run ended on floor 5 at x=40).
+  for (let attempt = 0; attempt < 6; attempt++) {
     const floor = await page.evaluate(() => window.__PHASER_SESSION__?.getState()?.currentFloor);
     if (floor === 2) break;
     await page.evaluate(() => {
@@ -60,7 +61,9 @@ test('lingering on a floor rolls dwell pressure', async ({ page }) => {
       if (s) s.player.x = 40; // UP_EXIT_X
     });
     await page.keyboard.press('E');
-    await page.waitForTimeout(220);
+    await page
+      .waitForFunction(() => window.__PHASER_SESSION__?.getState()?.currentFloor === 2, undefined, { timeout: 3000 })
+      .catch(() => undefined);
   }
   expect(await page.evaluate(() => window.__PHASER_SESSION__?.getState()?.currentFloor)).toBe(2);
 

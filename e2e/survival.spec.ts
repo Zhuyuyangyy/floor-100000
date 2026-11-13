@@ -153,18 +153,24 @@ test('a leak spoils the floor\'s ground supplies and they recover when it clears
   // Ascend to 3, the only floor with loose ground supplies (battery at
   // x=160). Teleporting to the stairs is enough — the zone check reads
   // state.player.x directly.
-  // The E press is retried: Phaser's frame-based input occasionally drops a
-  // single synthetic keypress, which would otherwise time this test out at
-  // random (the same reason npc.spec.ts and events.spec.ts use pressEUntil).
+  //
+  // Press once, then wait for the landing: the climb is a 1000 ms traversal, and
+  // a blind 250 ms retry can start a second climb on the commit frame.
   for (const target of [2, 3]) {
-    for (let attempt = 0; attempt < 5; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       if ((await readState(page)).currentFloor === target) break;
       await page.evaluate(() => {
         const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { player: { x: number } } | null } }).__PHASER_SESSION__?.getState();
         if (s) s.player.x = 40; // UP_EXIT_X
       });
       await page.keyboard.press('E');
-      await page.waitForTimeout(250);
+      await page
+        .waitForFunction(
+          (floor) => (window as unknown as { __PHASER_SESSION__?: { getState: () => { currentFloor: number } | null } }).__PHASER_SESSION__?.getState()?.currentFloor === floor,
+          target,
+          { timeout: 3000 },
+        )
+        .catch(() => undefined);
     }
     expect((await readState(page)).currentFloor).toBe(target);
   }
@@ -184,10 +190,23 @@ test('a leak spoils the floor\'s ground supplies and they recover when it clears
   await page.waitForTimeout(400);
   expect(await countItem(page, 'battery'), 'spoiled supply must not be pickable').toBe(0);
 
-  // Recovered: the supplies come back without leaving the floor.
+  // Recovered: the supplies come back without leaving the floor. Poll for the
+  // pickup instead of trusting a fixed 400 ms window — the ground is rebuilt on
+  // the frame the event clears and autoPickup runs with the walking path, so on
+  // a slow first-render frame 400 ms is not always enough.
   await setEvent(null);
-  await page.waitForTimeout(400);
-  expect(await countItem(page, 'battery'), 'supply must return once the leak clears').toBe(1);
+  const recovered = await page
+    .waitForFunction(
+      () => {
+        const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { player: { inventory: { slots: Array<{ itemId: string }> } } } | null } }).__PHASER_SESSION__?.getState();
+        return !!s && s.player.inventory.slots.some((x) => x.itemId === 'battery');
+      },
+      undefined,
+      { timeout: 5000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  expect(recovered, 'supply must return once the leak clears').toBe(true);
 
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });

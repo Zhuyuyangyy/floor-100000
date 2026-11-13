@@ -110,20 +110,40 @@ async function selectInMenu(page: Page, options: string[], target: string): Prom
   throw new Error(`could not reach "${target}" (cursor at "${await cursorLabel(page)}")`);
 }
 
-// Press E and wait for the interaction to take effect, retrying — Phaser's
-// frame-based input occasionally drops a single synthetic keypress.
-async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 8): Promise<void> {
+// Press E once, then poll for the action to take effect before pressing again.
+//
+// Blind 250 ms retries were the bug. A stair climb runs for STAIR_TRAVEL_MS
+// (1000 ms), so a retry could land on the exact frame the climb committed: E
+// then starts a SECOND climb, `currentFloor === 2` is already true, and the
+// helper returns mid-flight. Everything after it then writes to a player who is
+// still on the stairs — setX(480) is overwritten by the landing (endX = 40) —
+// and the next presses keep climbing. Measured: the trade specs ended on floor
+// 5 at x=40 with no dialogue open.
+async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 4, settleMs = 2500): Promise<void> {
   for (let i = 0; i < tries; i++) {
     if (await check()) return;
     await page.keyboard.press('E');
-    await page.waitForTimeout(250);
+    const deadline = Date.now() + settleMs;
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(80);
+      if (await check()) return;
+    }
   }
-  if (!(await check())) throw new Error('interact (E) did not take effect');
+  throw new Error('interact (E) did not take effect');
+}
+
+/** True while the visible stair traversal is still running. */
+async function isClimbing(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const sc = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { stairClimb?: unknown } | null } } }).__PHASER_GAME__?.scene.getScene('Game');
+    return !!sc?.stairClimb;
+  });
 }
 
 async function goToNeighborFloor(page: Page): Promise<void> {
   await setX(page, 40); // UP_EXIT_X: floor 1 -> 2
-  await pressEUntil(page, async () => (await readState(page)).currentFloor === 2);
+  // Landed, not merely "floor is 2": a second climb in flight also reports 2.
+  await pressEUntil(page, async () => (await readState(page)).currentFloor === 2 && !(await isClimbing(page)));
 }
 
 test('trade with 阿林 changes the bag (电线 for 废金属)', async ({ page }) => {

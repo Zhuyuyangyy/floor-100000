@@ -139,6 +139,13 @@ import { HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
 import { trade } from '../systems/TradeSystem';
+import { aiNpcConfig, archetypeForNpcId, npcFactFromDef } from '../ai/config';
+import { OllamaBrain } from '../ai/brains/ollamaBrain';
+import { OptionTreeBrain } from '../ai/brains/optionTreeBrain';
+import { createNpcState } from '../data/npcPersonalities';
+import { loadNpcState, recordMemory, saveNpcState } from '../systems/NpcMemory';
+import { decideNpcAction, isDialogueFresh, type DialogueSession, type NpcRuntimeConfig } from '../systems/NpcRuntime';
+import type { NpcPersistedState } from '../ai/types';
 import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId, ShelterAction } from '../core/gameTypes';
 
 const INVENTORY_SLOTS = 12;
@@ -348,7 +355,13 @@ export class GameScene extends Phaser.Scene {
   private keyF!: Phaser.Input.Keyboard.Key;
 
   private dialogueOpen = false;
-  private dialogue: { npc: NpcId; level: 'main' | 'trade'; selected: number; message: string; lineToggle: number } | null = null;
+  // sessionId/revision：AI 异步返回的保鲜键。玩家每次开对话 sessionId+1，
+  // 每次操作 revision+1；过期 AI 结果不得覆盖新对话（P1-2）。
+  private dialogueSessionSeq = 0;
+  private dialogue: { npc: NpcId; level: 'main' | 'trade'; selected: number; message: string; lineToggle: number; sessionId: number; revision: number } | null = null;
+  // feat/ai-npc-spark-integration：每个 NPC 一个运行时（降级脑的台词是该
+  // NPC 自己的问候语）。未配置模型时整个 Map 为空，行为与改造前一致。
+  private aiRuntimes = new Map<string, NpcRuntimeConfig>();
   private dialogueObjects: PanelObject[] = [];
   /** one selection band per dialogue row, toggled in refreshDialogue */
   private dialogueBands: Array<{ band: Phaser.GameObjects.Rectangle; rule: Phaser.GameObjects.Rectangle }> = [];
@@ -2535,11 +2548,98 @@ export class GameScene extends Phaser.Scene {
     ];
   }
 
+  // ── AI NPC（feat/ai-npc-spark-integration，默认关闭）─────────────────────
+  // 接线原则：AI 只影响「开场白」这一句话与事后的记忆积累；菜单结构、
+  // 交易执行、数值规则全部走原有路径。未配置模型时以下方法全部空转。
+
+  private getAiRuntime(npc: NpcDef): NpcRuntimeConfig | null {
+    const cfg = aiNpcConfig();
+    if (!cfg.enabled) return null;
+    let runtime = this.aiRuntimes.get(npc.id);
+    if (!runtime) {
+      runtime = {
+        brain: new OllamaBrain({ baseUrl: cfg.baseUrl, model: cfg.model, timeoutMs: cfg.timeoutMs }),
+        // 降级脑给该 NPC 自己的第一句问候——Spark 不可达时玩家看到的就是
+        // 改造前那一句，这是护栏 2 的场景侧落地。
+        fallback: new OptionTreeBrain(npc.greetings[0]),
+        timeoutMs: cfg.timeoutMs,
+        memoryRecallK: cfg.recallK,
+        // 第一阶段只接通 dialogue 的执行路径：模型提议交易/赠送等其他行动
+        // 一律被运行时拒绝并降级，不会出现「说了但没做」或「没说要了」的错位。
+        allowedActions: ['dialogue'],
+      };
+      this.aiRuntimes.set(npc.id, runtime);
+    }
+    return runtime;
+  }
+
+  private npcStateFor(npc: NpcDef): NpcPersistedState {
+    return loadNpcState(getGame(), npc.id) ?? createNpcState(archetypeForNpcId(npc.id));
+  }
+
+  /** 当前对话的保鲜键；没有打开的对话时为 null。 */
+  private currentDialogueSession(): DialogueSession | null {
+    if (!this.dialogueOpen || !this.dialogue) return null;
+    return { sessionId: this.dialogue.sessionId, revision: this.dialogue.revision };
+  }
+
+  /** 异步取一句人格化开场白。取到前画面显示原句，与改造前无差异。 */
+  private async enhanceOpeningLine(npc: NpcDef): Promise<void> {
+    const runtime = this.getAiRuntime(npc);
+    if (!runtime) return;
+    // 请求发出前记住这场对话的保鲜键；45s 后返回时用它判断结果是否过期
+    const captured = this.currentDialogueSession();
+    if (!captured) return;
+    try {
+      const decision = await decideNpcAction(getGame(), npcFactFromDef(npc), this.npcStateFor(npc), runtime);
+      if (!decision.validated.ok) return;
+      const { action, utterance } = decision.validated;
+      // 第一阶段只落地对话文本；其他行动类型在第一阶段就被 availableActions 挡掉
+      const line = utterance ?? (action.type === 'dialogue' ? action.text : '');
+      // 保鲜检查：玩家可能已关闭对话、重开、或翻过选项——过期结果一律丢弃，
+      // 不能覆盖玩家眼前的这场新对话（P1-2）。
+      if (line && isDialogueFresh(this.currentDialogueSession(), captured)) {
+        this.dialogue!.message = line;
+        this.dialogue!.revision += 1; // AI 换行本身也是一次修订，防止两次返回互相覆盖
+        this.refreshDialogue();
+      }
+    } catch {
+      // AI 层任何意外都不能把对话搞坏：保持原句即为正确行为
+    }
+  }
+
+  /** 交易成功后记一条记忆，积累关系历史。AI 关闭时整个方法不执行。 */
+  private recordNpcTrade(npc: NpcDef, summary: string): void {
+    if (!aiNpcConfig().enabled) return;
+    const game = getGame();
+    const next = recordMemory(this.npcStateFor(npc), {
+      day: game.day,
+      minute: game.gameMinuteOfDay,
+      kind: 'trade',
+      actor: 'player',
+      summary,
+    });
+    saveNpcState(game, npc.id, next);
+    // 记忆写进 npcStates 之后必须再存一次盘：chargeTime 的保存发生在这之前，
+    // 否则交易成功即刻刷新页面会丢掉这条记忆（P1-4）。
+    saveToStorage(game);
+  }
+
   private openDialogue(npc: NpcDef): void {
-    this.dialogue = { npc: npc.id, level: 'main', selected: 0, message: npc.greetings[0], lineToggle: 0 };
+    this.dialogueSessionSeq += 1;
+    this.dialogue = {
+      npc: npc.id,
+      level: 'main',
+      selected: 0,
+      message: npc.greetings[0],
+      lineToggle: 0,
+      sessionId: this.dialogueSessionSeq,
+      revision: 0,
+    };
     this.dialogueOpen = true;
     for (const o of this.dialogueObjects) o.setVisible(true);
     this.refreshDialogue();
+    void this.enhanceOpeningLine(npc);
   }
 
   private closeDialogue(): void {
@@ -2550,6 +2650,7 @@ export class GameScene extends Phaser.Scene {
 
   private dialogueBack(): void {
     if (!this.dialogue) return;
+    this.dialogue.revision += 1; // 玩家操作使在途 AI 结果过期
     if (this.dialogue.level === 'trade') {
       this.dialogue.level = 'main';
       this.dialogue.selected = 0;
@@ -2595,6 +2696,7 @@ export class GameScene extends Phaser.Scene {
   private activateDialogueOption(): void {
     const d = this.dialogue;
     if (!d) return;
+    d.revision += 1; // 玩家操作使在途 AI 结果过期
     const npc = getNpc(d.npc);
     if (d.level === 'main') {
       switch (d.selected) {
@@ -2627,6 +2729,7 @@ export class GameScene extends Phaser.Scene {
         playSfx('trade');
         d.message = `换到了 ${getItem(offer.give.itemId).displayName}×${offer.give.quantity}（-${ACTION_COSTS.trade} 分钟）`;
         this.chargeTime(ACTION_COSTS.trade);
+        this.recordNpcTrade(npc, `换到${getItem(offer.give.itemId).displayName}×${offer.give.quantity}`);
       }
     } else {
       d.level = 'main';

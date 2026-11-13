@@ -73,15 +73,20 @@ async function setX(page: Page, x: number): Promise<void> {
   }, x);
 }
 
-// Press E and wait for the interaction to take effect, retrying against a
-// dropped synthetic keypress (Phaser's input is frame-based).
-async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 8): Promise<void> {
+// Press E once, then poll before pressing again. A blind fixed retry can fire
+// on the frame a stair climb commits, start a second climb, and move the run an
+// extra floor (the climb itself takes STAIR_TRAVEL_MS = 1000 ms).
+async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 4, settleMs = 2500): Promise<void> {
   for (let i = 0; i < tries; i++) {
     if (await check()) return;
     await page.keyboard.press('E');
-    await page.waitForTimeout(250);
+    const deadline = Date.now() + settleMs;
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(80);
+      if (await check()) return;
+    }
   }
-  if (!(await check())) throw new Error('interact (E) did not take effect');
+  throw new Error('interact (E) did not take effect');
 }
 
 // Floors run upward: 1 -> 2 -> 3. The up-exit is the left end of the floor.

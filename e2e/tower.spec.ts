@@ -280,6 +280,10 @@ test('the keyboard cursor moves across the sector grid', async ({ page }) => {
 });
 
 test('selecting a floor is not entering it: a locked floor is refused', async ({ page }) => {
+  // Boots a run, parks it, opens the overview and drills two levels deep; on a
+  // single-worker CI container that is 34 s of real time, past Playwright's
+  // 30 s default.
+  test.setTimeout(90_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
 

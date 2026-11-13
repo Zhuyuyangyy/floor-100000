@@ -33,17 +33,29 @@ async function readState(page: Page): Promise<State> {
   }) as Promise<State>;
 }
 
-// Climb to `target` through the real up-exit, retrying the E press: Phaser's
-// frame-based input occasionally drops a single synthetic keypress.
+// Climb to `target` through the real up-exit.
+//
+// Press E once, then wait for the landing: the stair traversal is a visible
+// 1000 ms animation (STAIR_TRAVEL_MS), so pressing again every 220 ms could
+// land on the commit frame, start a second climb, and leave the run one floor
+// further than the test asked for.
 async function climbTo(page: Page, target: number): Promise<void> {
-  for (let attempt = 0; attempt < 8; attempt++) {
+  for (let attempt = 0; attempt < 6; attempt++) {
     if ((await readState(page)).currentFloor === target) return;
     await page.evaluate(() => {
       const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
       if (s) s.player.x = 40; // UP_EXIT_X
     });
     await page.keyboard.press('E');
-    await page.waitForTimeout(220);
+    const landed = await page
+      .waitForFunction(
+        (floor) => window.__PHASER_SESSION__?.getState()?.currentFloor === floor,
+        target,
+        { timeout: 3000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    if (landed) return;
   }
   throw new Error(`could not climb to floor ${target} (at ${(await readState(page)).currentFloor})`);
 }

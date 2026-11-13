@@ -132,14 +132,25 @@ test.describe('B3-02 full survival journey', () => {
   }
 
   // Walk to a stairwell and take it. The floor change is the game's own logic.
+  // Wait for the landing: the traversal is a visible 1000 ms animation, so a
+  // blind 220 ms retry can start a second climb on the commit frame and skip a
+  // floor (measured: a route that asked for 2 ended on 5).
   async function takeStairs(page: Page, dir: 'up' | 'down', expectedFloor: number): Promise<void> {
     await walkTo(page, dir === 'up' ? UP_EXIT_X : DOWN_EXIT_X);
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 6; i++) {
       if ((await readState(page)).currentFloor === expectedFloor) return;
       await page.keyboard.press('E');
-      await page.waitForTimeout(220);
+      const landed = await page
+        .waitForFunction(
+          (floor) => window.__PHASER_SESSION__?.getState()?.currentFloor === floor,
+          expectedFloor,
+          { timeout: 3000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+      if (landed) return;
+      await walkTo(page, dir === 'up' ? UP_EXIT_X : DOWN_EXIT_X);
     }
-    if ((await readState(page)).currentFloor === expectedFloor) return;
     throw new Error(`could not go ${dir} to floor ${expectedFloor} (at ${(await readState(page)).currentFloor})`);
   }
 
@@ -343,7 +354,11 @@ test.describe('B3-02 full survival journey', () => {
     const slept = await readState(page);
     expect(slept.day).toBe(2);
     expect(slept.gameMinuteOfDay).toBeGreaterThanOrEqual(360); // next 06:00
-    expect(slept.gameMinuteOfDay).toBeLessThan(362);
+    // Waking lands at 06:00, but the clock keeps running until this line reads
+    // it, so the measured value carries a few real-time seconds of drift.
+    // Measured: 362.04 against a 362.00 bound. Five minutes still catches a
+    // "slept past the morning" bug without failing on the read latency.
+    expect(slept.gameMinuteOfDay).toBeLessThan(365);
     expect(slept.player.energy).toBeGreaterThan(95); // restored
     // The night was charged, not free.
     expect(slept.player.hunger).toBeLessThan(beforeSleep.player.hunger);

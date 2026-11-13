@@ -9,6 +9,8 @@
 - 存档：LocalStorage（首版数据很小）；未来数据增长后评估 IndexedDB。
 - 不使用服务器、实时后端、数据库、外部 AI/模型 API。
 
+  > 边界（2026-11-11 ADR-001）：唯一例外是**本项目自有的 DGX Spark 局域网推理**（Ollama HTTP，无云服务、无账号、无付费、无联机依赖），且仅在 `feat/ai-npc-spark-integration` 分支内生效。推理不可达时游戏必须完全可玩。云 API 依旧禁止。
+
 依赖版本以项目建立时兼容、稳定、可安装的版本为准，生成并提交 lockfile。禁止随意使用尚未稳定的主版本。Phaser 官方模板参考：`npm create @phaserjs/game@latest`（交互选择 Web Bundler + Vite + TypeScript）。
 
 ## 2. 建议文件结构（可微调，不改职责）

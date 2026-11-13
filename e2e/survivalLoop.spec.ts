@@ -78,15 +78,20 @@ const setX = (page: Page, x: number): Promise<void> =>
 // Climb to `target` through the real up-exit, retrying the E press: Phaser's
 // frame-based input occasionally drops a single synthetic keypress.
 async function climbTo(page: Page, target: number): Promise<void> {
-  for (let attempt = 0; attempt < 10; attempt++) {
+  for (let attempt = 0; attempt < 6; attempt++) {
     if ((await readState(page)).currentFloor === target) return;
     await setX(page, 40); // UP_EXIT_X
     await page.keyboard.press('E');
-    await page.waitForFunction(
-      (floor) => window.__PHASER_SESSION__?.getState()?.currentFloor === floor,
-      target,
-      { timeout: 1800 },
-    ).then(() => true).catch(() => false);
+    // Wait for the visible climb to land (1000 ms) before considering another press.
+    const landed = await page
+      .waitForFunction(
+        (floor) => window.__PHASER_SESSION__?.getState()?.currentFloor === floor,
+        target,
+        { timeout: 3000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    if (landed) return;
   }
   if ((await readState(page)).currentFloor === target) return;
   throw new Error(`could not climb to ${target} (at ${(await readState(page)).currentFloor})`);

@@ -64,6 +64,20 @@ export interface NpcObservation {
   /** NPC 当前可执行的合法动作菜单（选项树降级路径的并集） */
   availableActions: NpcActionKind[];
   recentEvents: string[];
+  /** Optional high-signal context for autonomous hostile NPC decisions. */
+  situation?: {
+    eventType: 'wanderer';
+    eventSource: 'night' | 'dwell';
+    eventStatus: 'active' | 'attack' | 'flee' | 'resolved';
+    playerHp: number;
+    playerX: number;
+    npcX: number;
+    distance: number;
+    motionState: 'stalking' | 'lunge' | 'cooldown' | 'fleeing';
+    lungeMsLeft: number;
+    cooldownMsLeft: number;
+    recentEncounter?: string;
+  };
 }
 
 export type NpcActionKind =

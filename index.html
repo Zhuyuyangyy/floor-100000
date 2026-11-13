@@ -4,7 +4,50 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>第100000层：末日宿舍</title>
+    <!--
+      Phaser measures Text once, at creation, against whatever font is available
+      at that moment. Loading the game before the webfont is ready bakes the
+      fallback's metrics into every label and the font swap never reflows them.
+      Preloading here (and the document.fonts gate in main.ts) is what keeps the
+      glyphs and their measurements in sync.
+    -->
+    <link
+      rel="preload"
+      href="/assets/fonts/ark-pixel-latin.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/assets/fonts/ark-pixel-zh_hans.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
     <style>
+      /*
+       * Ark Pixel 10px monospaced, split by language by the upstream release.
+       * Two families in a stack rather than one @font-face with unicode-range:
+       * a canvas ctx.font string resolves missing glyphs through the fallback
+       * chain exactly like CSS does, so Latin digits/letters come from the
+       * latin face and CJK from the zh_hans face without either file having
+       * to carry the other's glyphs. 136 KB total.
+       */
+      @font-face {
+        font-family: 'ArkPixel Latin';
+        src: url('/assets/fonts/ark-pixel-latin.woff2') format('woff2');
+        font-display: block;
+      }
+      @font-face {
+        font-family: 'ArkPixel ZH';
+        src: url('/assets/fonts/ark-pixel-zh_hans.woff2') format('woff2');
+        font-display: block;
+      }
+      :root {
+        --game-font: 'ArkPixel Latin', 'ArkPixel ZH', 'Microsoft YaHei', 'PingFang SC',
+          'Noto Sans CJK SC', sans-serif;
+      }
       html,
       body {
         margin: 0;

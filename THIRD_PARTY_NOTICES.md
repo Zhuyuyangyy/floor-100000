@@ -62,8 +62,30 @@ Third-party assets bundled with this project, with their licence and provenance.
 
 ---
 
+## UI typeface — Ark Pixel Font, SIL OFL 1.1
+
+- **Files:** `public/assets/fonts/ark-pixel-latin.woff2`,
+  `public/assets/fonts/ark-pixel-zh_hans.woff2`, `public/assets/fonts/OFL.txt`
+- **Used for:** every in-game text (HUD, panels, menus, labels) via
+  `FONT_FAMILY` in `src/render/uiKit.ts`, loaded by two `@font-face` rules in
+  `index.html`.
+- **Original source:** TakWolf, Ark Pixel Font — https://github.com/TakWolf/ark-pixel-font,
+  release `2026.11.10`, 10px monospaced, `otf.woff2` package.
+- **Author / copyright:** TakWolf (https://takwolf.com), Copyright (c) 2021.
+- **Licence:** SIL Open Font License 1.1 for the font (full text bundled as
+  `OFL.txt`, taken verbatim from the release archive). The upstream repository
+  additionally licenses its build tooling under MIT; no tooling is vendored here.
+- **Modification:** none to the outlines. Only the `latin` and `zh_hans` language
+  subsets were extracted from the release zip and renamed; the other five
+  language subsets were dropped to keep the bundle at 136 KB.
+- **Why not Zpix:** considered first, but its README restricts commercial use to
+  paid licences and explicitly forbids format conversion and redistribution of
+  subsets, which a bundled `.woff2` would require.
+
+---
+
 ## Everything else
 
 All other art and audio in this repository is original and generated at runtime by
 `src/render/pixelArt.ts` and `src/render/audio.ts`, except for the Kenney marker,
-owner-supplied art pack, and the pixelfx atlases listed above.
+owner-supplied art pack, the pixelfx atlases and the Ark Pixel typeface listed above.

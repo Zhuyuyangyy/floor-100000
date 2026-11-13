@@ -5,7 +5,7 @@ import { deathCause } from '../systems/SurvivalSystem';
 import { clearSave } from '../systems/SaveSystem';
 import { ART_BANNER_WIN_KEY, ART_BANNER_LOSE_KEY, TITLE_BG_KEY } from '../render/artpack';
 import { PALETTE, ROLE, TEXT, hex } from '../render/palette.ts';
-import { buildPanelHeader, buildPanelWell } from '../render/uiKit';
+import { buildPanelHeader, buildPanelWell, FONT_FAMILY } from '../render/uiKit';
 import { buildPanel, PANEL_DEPTH } from '../render/panels';
 import { depthRecord, runScore } from '../systems/progress';
 
@@ -64,8 +64,8 @@ export class EndScene extends Phaser.Scene {
     const headline = won ? '你活了下来' : '你没能活下来';
     this.add
       .text(cx, top - 74, headline, {
-        fontFamily: 'monospace',
-        fontSize: '52pxpx',
+        fontFamily: FONT_FAMILY,
+        fontSize: '52px',
         color: won ? hex(PALETTE.clothHigh) : hex(ROLE.danger),
         stroke: hex(PALETTE.ink),
         strokeThickness: 6,
@@ -95,7 +95,7 @@ export class EndScene extends Phaser.Scene {
       this.add.existing(o as Phaser.GameObjects.GameObject);
     }
     this.add
-      .text(cx, top + 39, reason, { fontFamily: 'monospace', fontSize: '24pxpx', color: hex(TEXT.primary) })
+      .text(cx, top + 39, reason, { fontFamily: FONT_FAMILY, fontSize: '24px', color: hex(TEXT.primary) })
       .setOrigin(0.5)
       .setDepth(depth + 7);
 
@@ -111,41 +111,46 @@ export class EndScene extends Phaser.Scene {
       ['得分', `${score}`, score >= best],
     ];
     rows.forEach(([label, value, highlight], i) => {
-      const y = top + 70 + i * 26;
+      // 40px pitch for a 24px pixel face. The old 26px pitch was measured
+      // against SimSun, whose ink box is much shorter than its em; a pixel
+      // glyph fills the em, so three rows at 26px read as one smudge.
+      const y = top + 76 + i * 40;
       this.add
-        .text(left + 22, y, label, { fontFamily: 'monospace', fontSize: '24pxpx', color: hex(TEXT.dim) })
+        .text(left + 22, y, label, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.dim) })
         .setOrigin(0, 0.5)
         .setDepth(depth + 7);
       this.add
         .text(left + panelW - 22, y, value, {
-          fontFamily: 'monospace',
-          fontSize: '26pxpx',
+          fontFamily: FONT_FAMILY,
+          fontSize: '24px',
           color: highlight ? hex(TEXT.highlight) : hex(TEXT.primary),
         })
         .setOrigin(1, 0.5)
         .setDepth(depth + 7);
       if (highlight) {
+        // Was anchored to the same x/y as the value, so '纪录' was painted
+        // straight over the score. It belongs to the label column instead.
         this.add
-          .text(left + panelW - 26, y + 1, '纪录', { fontFamily: 'monospace', fontSize: '20pxpx', color: hex(PALETTE.lightHigh) })
-          .setOrigin(1, 0.5)
+          .text(left + 100, y, '新纪录', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.lightHigh) })
+          .setOrigin(0, 0.5)
           .setDepth(depth + 8);
       }
     });
 
     if (won) {
       this.add
-        .text(cx, top + panelH - 44, '正式胜利条件为抵达第 100000 层', { fontFamily: 'monospace', fontSize: '20pxpx', color: hex(TEXT.dim) })
+        .text(cx, top + panelH - 60, '正式胜利条件为抵达第 100000 层', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(TEXT.dim) })
         .setOrigin(0.5)
         .setDepth(depth + 7);
     }
 
     // The restart prompt on a foot bar, the same shape as the game's own HUD.
-    const footY = top + panelH - 22;
-    for (const o of buildPanelWell(this, left + 12, footY - 9, panelW - 24, 20, depth + 5)) {
+    const footY = top + panelH - 24;
+    for (const o of buildPanelWell(this, left + 12, footY - 14, panelW - 24, 28, depth + 5)) {
       this.add.existing(o as Phaser.GameObjects.GameObject);
     }
     this.add
-      .text(cx, footY, '按 回车 重新开始', { fontFamily: 'monospace', fontSize: '24pxpx', color: hex(PALETTE.clothHigh) })
+      .text(cx, footY, '按 回车 重新开始', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5)
       .setDepth(depth + 7);
 

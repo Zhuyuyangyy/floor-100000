@@ -145,3 +145,63 @@
 | B6-AI-06 | 三个原型的行为差异人工试玩记录 | ✅ 已完成：控制变量实验报告见 docs/plans/2026-11-11-b6-ai-personality-playtest.md，行为分叉在行动类型层面可观察 |
 | B6-AI-07 | 存量 E2E 红灯定性（`a266d04922` 上 Playwright smoke 失败） | ✅ 已定性：并行负载下 flaky（基线/分支各挂不同测试、单独跑均过），存量问题与本分支无关；修复待排期 |
 | B6-AI-08 | 流浪者（HOSTILE）与夜间事件系统对接；NPC 自主行动循环 | ⬜ 后续阶段 |
+
+## P8-NEIGHBOUR-DRESSING 相邻楼层陈设（2026-11-12）
+
+**问题**：相机在纵向上覆盖 3.6 层楼，但 `drawNeighbourFloor` 只画墙、地板、色偏、门和雾。玩家下方两层「看得见、但空着」，剖面承诺了一栋楼，美术只交付了一条走廊。
+
+**改动**（`src/scenes/GameScene.ts`，单文件）：
+- 邻层改用与玩家层相同的渲染器：`buildRoomDepth` / `buildWallDressing` / `drawCorridorRoom` / `buildCeilingLights` / `buildAerialHaze`，整层装入一个 floor-local container，单一 depth 压在玩家层之后（container 内按插入顺序绘制，模拟玩家层的 depth 语义）。
+- 起点层没有走廊主题（`THEMES[1]` 不存在），补窗户、床、工作台，使玩家从第 2 层往上看能认出自己的房间。
+- 景深：双层 ambience 洗色（比玩家层强 1.45×）、道具按距离 tint、火把/蜡烛隐藏、整层 alpha 与冷雾随距离递增。邻层的火盆由 `startFxLoop` 直接建在场景上而不回传，用「绘制前后 children 差分」兜住。
+- 远景省去 `buildSurfaceDetail` / `buildFloorClutter`：两层之外不可见，却占邻层约 250 个对象里的 120 个。
+
+**验证**：`npx tsc --noEmit` 通过；`npx vitest run` 735/735 通过；第 1、2、4 层实机截图确认三层内容与主次（验证截图为临时文件，未归档）；无头 Chromium 实测 47–51 fps，关闭邻层的基线为 60（纯软件渲染）。
+
+**已知**：帧率比基线低约 10，成本在 draw call；烘焙成 RenderTexture 可降到每层 1 call，但当前 Phaser 版本的 `RenderTexture.draw` 会丢掉 Graphics 之后的批次，未采用。
+
+## P8-CROWBAR-VISIBLE 武器实体与斩击反馈（2026-11-12）
+
+**问题**：`f08815e` 加了 `sword-slash` / `parry` 图集，但游戏里「看不到剑」。三条独立原因叠在一起：
+
+1. **没有武器**。角色是空手出拳，剑光凭空出现，读作着色器故障而不是一次挥砍。
+2. **只在命中时播放**。`playCombatFeedback` 把剑光写在 `round.playerDamage > 0` 里，而战斗命中率本就不高，未命中回合屏幕上一个像素都不动。
+3. **落进了 HUD 遮罩带**。屏幕顶部三条 `depth 100` 的矩形（alpha 0.88–0.98）是状态栏的渐隐带，覆盖世界 y≈94 以上；剑光锚点在胸口，弧线整段被压暗 94%（实测像素 `(31,43,55)`，而纹理画的是 `0xc6d2da`）。
+
+**改动**：
+- 新增 `src/render/weapon.ts`：程序化烘焙一把撬棍（46×18，4 档钢色 + 深色缠带握把 + 弯钩 + 一圈 ink 描边）。用 `Graphics.generateTexture` 而非 `CanvasTexture` —— 后者在本项目 Phaser 版本下读回有 420 个不透明像素、对象在显示列表、alpha 1、深度最高，渲染出 0 像素。
+- `GameScene`：`weapon` 独立 sprite，`syncWeapon()` 每帧定位。待机时握在右手（世界 y≈104，避开遮罩带）；出手时按 `attackPose()` 的同一套 IK 反推拳头位置，绕握把旋转。朝左用 `π − 角度` 而非取负角度（`setFlipX` 只镜像帧内像素，不改变 46px 的 +x 占位，取负会让武器反向压在身前）。
+- `syncWeapon()` 放在 `update()` 的面板早退**之前**，并补进 `updateStairClimb()`：战斗与爬楼都不走常规行走路径，否则武器全程留在原地。
+- 挥砍改为**动作驱动**而非伤害驱动：`if (action === 'attack')` 播攻击帧，剑光无条件播放；命中才追加 `crit-hit`。遭遇面板的「动手」同样调用。
+- 剑光 scale 1.35、`timeScale 0.7`（800ms → 1.14s），锚点下移到脚上方 18px —— 图集弧线在 pivot 上方约 57px，原来锚在胸口等于把整道弧线甩到头顶以上。
+- 死亡帧淡出武器，避免尸体腰间悬着一根棍子。
+
+**验证**：`npx tsc --noEmit` 通过；`npx vitest run` 735/735 通过（`textureKeys.test.ts` 的 `DYNAMIC_KEYS` 补 `WEAPON_KEY`，该键由常量而非字面量创建、静态扫描看不到）；实机逐帧确认 6 个攻击回合**全部**出现 `sword-slash` 且武器深度切到 6（身前），未命中亦然；朝左/朝右待机与挥砍截图核对；无头 Chromium 59 fps（邻层开启状态），控制台 0 报错。
+
+**已知**：朝左时弯钩的卷曲方向是反的（水平镜像的副作用，1px 卷曲在 1:1 下不可辨）；待机姿势是「手持前伸」，不是「扛肩」或「背挎」，因为角色 64px 宽、武器 42px 长，背挎时露出的那一截必然落在 HUD 遮罩带里。
+
+## P8-TYPEFACE 字体与排版收口（2026-11-13）
+
+**问题**：反馈「字体太丑」。三个独立缺陷叠加：
+
+1. **95 处 `fontFamily: 'monospace'`**。`monospace` 是通用族名，对中文而言等于没有指定：拉丁字取 Consolas，汉字跌到浏览器默认（Windows 上是宋体），同一行里宽度、基线、字重都不统一，且与 2D 像素美术没有任何共同网格。
+2. **30 处 `'80pxpx'` 这类非法字号**。不是合法 CSS，Phaser 静默回退到默认字号 —— 主菜单 80px 的标题实际渲染成 16px 的一小条，副标题、菜单项、操作说明、结局页数值全部错位。
+3. **字号恢复后旧间距不够**。既有坐标是按「字号失效后的小字」量的，24px 字放进 26px 行距、30px 名字压 20px 说明，全部叠在一起。
+
+**改动**：
+- 引入 **Ark Pixel Font 10px monospaced**（TakWolf，SIL OFL 1.1，`2026.11.10` 版），只取 `latin` + `zh_hans` 两个语言分包，共 **136 KB**；`OFL.txt` 一并入库，授权记录写进 `THIRD_PARTY_NOTICES.md`。先试过 Zpix，但其 README 限定商用付费且禁止转换/拆分传播，不适合打包，已放弃。
+- `index.html`：两条 `@font-face`（按语言分面，靠 CSS 回退链解析缺字）+ 两个 `preload`。
+- `src/render/uiKit.ts`：新增 `FONT_FAMILY` / `FONT_FACES`，与 `TYPE` 同层，改一处即换全游戏字体。
+- `src/main.ts`：`document.fonts.load()` 两个面就绪后再 `new Phaser.Game()`，3 秒超时兜底。Phaser 的 Text 只在创建时测量一次，字体后到会永久缓存 fallback 的度量。
+- 批量替换 95 处字体族、30 处非法字号。
+- 布局重排（按像素字的实际 em 高度重新排间距）：
+  - `MenuScene`：标题 116 / 副标题 190 / 菜单 286 起步、56 行距；帮助面板 460×240 → 580×260，正文 26 → 22、行距 26 → 38，并精简两条超宽文案。
+  - `GameScene`：背包详情三行 10/28/46 → 10/48/76；暂停面板 380×220 → 460×264，选项行距 28 → 40，操作提示 22 → 20；遭遇结果面板正文/战利品下移并降字号。
+  - `EndScene`：数值行 26 → 40 行距、字号 26/24 → 24/22；底部按钮 well 20 → 28 高；「纪录」原本与得分值同坐标重叠，移到标签列。
+  - `MetaSelectScene`：名单行距 40 → 52、说明行 +22 → +28；模式说明下移并把遗物列从 +108 推到 +140；底栏 18 → 22 高。
+
+**验证**：`npx tsc --noEmit` 通过；`VITE_NPC_MODEL= npx vitest run` **735/735**；`npx playwright test e2e/smoke.spec.ts e2e/ui.spec.ts` **14/14**；`npm run build` 通过，`dist/assets/fonts/` 含 2 个 woff2 + OFL；六个界面实机截图核对（`output/font-*.png`）；页面内 `document.fonts.check()` 两个面均为 true，控制台 0 报错。
+
+**已知**：
+- 字号并非全部是 10 的整数倍（22/24/30/36/44/80），靠 OTF 矢量轮廓缩放，实测无可见模糊；仍以 20/30/40 这类整十值最锐。
+- `.env.local` 里的 `VITE_NPC_MODEL=npc-qwen:latest` 会让 `src/ai/config.test.ts` 的「生产默认关闭」断言变红。这是该测试对本地环境文件的脆弱性（`config.ts` 优先读 `process.env`），与本轮无关；跑测试时用 `VITE_NPC_MODEL= npx vitest run` 可隔离。

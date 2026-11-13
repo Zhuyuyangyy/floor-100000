@@ -50,8 +50,12 @@ export function buildSystemPrompt(obs: NpcObservation): string {
 
 /** 用户提示：情境 + 输出契约。 */
 export function buildUserPrompt(obs: NpcObservation): string {
+  const situation = obs.situation
+    ? `巡游体现场：事件${obs.situation.eventStatus}（${obs.situation.eventSource}），玩家HP ${obs.situation.playerHp}、玩家位置 ${Math.round(obs.situation.playerX)}，自身位置 ${Math.round(obs.situation.npcX)}，距离 ${Math.round(obs.situation.distance)}，当前状态 ${obs.situation.motionState}，扑击剩余 ${Math.max(0, Math.round(obs.situation.lungeMsLeft))}ms，冷却剩余 ${Math.max(0, Math.round(obs.situation.cooldownMsLeft))}ms。`
+    : '';
   return [
     `情境：第${obs.world.day}天 ${fmtMinute(obs.world.gameMinute)}${obs.world.night ? '（夜间）' : ''}，第${obs.world.floor}层。`,
+    situation,
     `相关记忆：${fmtMemory(obs)}`,
     `可用行动：${obs.availableActions.join(', ')}`,
     `合法物品ID（trade/gift 必须使用这些ID，禁止使用中文名）：${itemVocabulary()}`,

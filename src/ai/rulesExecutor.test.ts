@@ -73,7 +73,16 @@ describe('validateProposal：无条件合法动作', () => {
     }
     // ally 的白名单里没有 flee——合作型不临阵脱逃
     expect(validateProposal(game(), alin, proposal({ action: { type: 'flee' } })).ok).toBe(false);
-    expect(validateProposal(game(), wanderer, proposal({ action: { type: 'flee' } })).ok).toBe(true);
+    const hostileGame = game({
+      currentFloor: 2,
+      worldEvents: {
+        history: [],
+        activeEvent: { type: 'wanderer', floor: 2, source: 'night', status: 'active', message: 'test' },
+      },
+    });
+    expect(validateProposal(hostileGame, { ...wanderer, event: {
+      type: 'wanderer', floor: 2, source: 'night', status: 'active', distance: 120, playerX: 600, npcX: 480,
+    } }, proposal({ action: { type: 'flee' } })).ok).toBe(true);
     const silent = validateProposal(game(), alin, proposal({ action: { type: 'dialogue', text: '你好' } }));
     expect(silent.ok).toBe(true);
     if (silent.ok && silent.action.type === 'dialogue') expect(silent.action.text).toBe('你好');

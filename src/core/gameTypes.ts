@@ -135,6 +135,8 @@ export interface ActiveEvent {
   // ones (the player lingered too long on one floor) act whenever the player is
   // on that floor, day or night.
   source?: 'night' | 'dwell';
+  /** Lifecycle for autonomous events. Missing means active for legacy saves. */
+  status?: 'active' | 'attack' | 'flee' | 'resolved';
 }
 
 // B3-15: how long the player has been lingering on one floor, and how many

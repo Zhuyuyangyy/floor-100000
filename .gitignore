@@ -13,6 +13,9 @@ blob-report/
 .playwright/
 e2e/screenshots/
 
+# local verification screenshots and one-off probe scripts
+output/
+
 # local env / os
 *.local
 .DS_Store

@@ -46,7 +46,7 @@ import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../sy
 import { countItem, isBagFull, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
 import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, isNight, spendTime } from '../systems/SurvivalSystem';
-import { ensureNightEvent } from '../systems/EventSystem';
+import { ensureNightEvent, eventStatus, setEventStatus } from '../systems/EventSystem';
 import { armNextRoll, dwellRollDue, ensureDwell, isDwellExempt, rollDwellEvent, tickDwell } from '../systems/dwellPressure';
 import { freshWandererAI, stepWandererAI, type WandererAI } from '../systems/wandererAI';
 import { ensureDailyGoal, grantDailyGoalReward, isDailyGoalDone } from '../systems/dailyGoals';
@@ -88,6 +88,7 @@ import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSyste
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import {
+  FONT_FAMILY,
   HUD_FOOT_H,
   STAT_COLORS,
   TYPE,
@@ -99,16 +100,23 @@ import {
 } from '../render/uiKit';
 import { ENV_FLOOR_KEY, ENV_WALL_KEY } from '../render/artpack';
 import {
+  ATTACK_FRAME_START,
+  ATTACK_FRAMES,
+  FRAME_H,
+  FRAME_W,
   WALK_CHARACTERS,
   attackAnimKey,
+  attackPose,
   dieAnimKey,
   hurtAnimKey,
   idleAnimKey,
+  joint,
   pickupAnimKey,
   searchAnimKey,
   walkAnimKey,
   walkSheetKey,
 } from '../render/walkcycle';
+import { WEAPON_GRIP_X, WEAPON_GRIP_Y, WEAPON_H, WEAPON_KEY, WEAPON_W } from '../render/weapon.ts';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
@@ -145,6 +153,13 @@ import { OptionTreeBrain } from '../ai/brains/optionTreeBrain';
 import { createNpcState } from '../data/npcPersonalities';
 import { loadNpcState, recordMemory, saveNpcState } from '../systems/NpcMemory';
 import { decideNpcAction, isDialogueFresh, type DialogueSession, type NpcRuntimeConfig } from '../systems/NpcRuntime';
+import {
+  decideWandererIntent,
+  WandererAutonomyController,
+  WandererFallbackBrain,
+  type WandererIntent,
+  type WandererSituation,
+} from '../systems/NpcAutonomy';
 import type { NpcPersistedState } from '../ai/types';
 import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId, ShelterAction } from '../core/gameTypes';
 
@@ -158,6 +173,9 @@ const CRAFT_ROW_PITCH = 24;
 // resampled and blur the pixel look.
 const TYPE_BODY = 26;
 const TYPE_AUX = 22;
+
+const WANDERER_FLEE_SAFE_DISTANCE = 280;
+const WANDERER_FLEE_EXIT_MARGIN = 24;
 
 // Row pitch for the four HUD stat bars. 15px gives an 11px label plus a 7px bar
 // with breathing room; 13px was too cramped to read at a glance.
@@ -235,6 +253,8 @@ type DirKeys = {
 // renders and feeds input back through pure logic functions.
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
+  /** The crowbar in the survivor's hand. Follows the attack pose's fist. */
+  private weapon?: Phaser.GameObjects.Image;
   private cursors!: DirKeys;
   private wasd!: { left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key };
   private keyE!: Phaser.Input.Keyboard.Key;
@@ -259,6 +279,10 @@ export class GameScene extends Phaser.Scene {
   // OVERHAUL: the wanderer's stalk/lunge state machine. Lives beside the sprite
   // because the scene owns the movement it drives.
   private wandererAI?: WandererAI;
+  private wandererIntent: WandererIntent = 'attack';
+  private wandererAutonomy = new WandererAutonomyController();
+  private wandererEventKey = '';
+  private wandererLastEncounter = '';
   // Not field-initialised-only: a scene restart re-runs create() but not the
   // class fields, so clearFloor() zeroes this too. Left over, a restarted floor
   // would resume the run already at top speed.
@@ -443,6 +467,10 @@ export class GameScene extends Phaser.Scene {
     this.pauseSelected = 0;
     this.wanderer = undefined;
     this.wandererHitAt = Number.NEGATIVE_INFINITY;
+    this.wandererAutonomy.cancel();
+    this.wandererIntent = 'attack';
+    this.wandererEventKey = '';
+    this.wandererLastEncounter = '';
     this.stairClimb = undefined;
     this.lastClock = '';
     this.lastStats = '';
@@ -584,6 +612,15 @@ export class GameScene extends Phaser.Scene {
       // painted over by all of them - the player was invisible in the middle of
       // an empty floor with nothing wrong in the console.
       .setDepth(ACTOR_DEPTH);
+    // The crowbar goes in before the first sync so the survivor is armed from
+    // the frame the floor appears, not from the first step. Its depth is set by
+    // syncWeapon (behind the figure when slung, in front when swung).
+    this.weapon?.destroy();
+    this.weapon = this.add
+      .image(state.player.x, PLAYER_FEET_Y - 54, WEAPON_KEY)
+      .setOrigin(WEAPON_GRIP_X / WEAPON_W, WEAPON_GRIP_Y / WEAPON_H)
+      .setDepth(ACTOR_DEPTH - 1);
+    this.floorObjects.push(this.weapon);
     this.playerLight?.setName('player-light');
     this.syncPlayerWorldObjects(state.player.x, STAIR_START_Y);
     this.player.play(idleAnimKey(who));
@@ -627,6 +664,9 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.stopFollow();
     for (const o of this.floorObjects) o.destroy();
     this.floorObjects = [];
+    // The crowbar went with the floor; drop the reference so drawFloor builds a
+    // new one instead of trying to reuse a destroyed image.
+    this.weapon = undefined;
     for (const shadow of this.playerShadow) shadow.destroy();
     this.playerShadow = [];
     this.speedX = 0;
@@ -635,6 +675,9 @@ export class GameScene extends Phaser.Scene {
     this.wanderer?.destroy();
     this.wanderer = undefined;
     this.wandererAI = undefined;
+    this.wandererAutonomy.cancel();
+    this.wandererIntent = 'attack';
+    this.wandererEventKey = '';
     this.clearEncounterSpots();
   }
 
@@ -645,6 +688,85 @@ export class GameScene extends Phaser.Scene {
       (shadow as Phaser.GameObjects.Rectangle).setPosition(x, y + 2);
     }
     if (this.playerLight) this.playerLight.setPosition(x, y - 40);
+    this.syncWeapon();
+  }
+
+  /**
+   * Puts the crowbar where the survivor's hand is.
+   *
+   * Slung, it sits across the back and behind the figure: the silhouette then
+   * says "armed" while walking, which is the half of the weapon that was missing
+   * entirely - the game drew a bare-handed survivor and then played a slash out
+   * of nothing.
+   *
+   * Swung, it is anchored to the fist of the attack frame that is on screen.
+   * Reading the frame back off the texture rather than off a timer keeps the grip
+   * on the hand even if the clip is retimed, and it means the crowbar and the arm
+   * cannot drift apart.
+   */
+  private syncWeapon(): void {
+    const w = this.weapon;
+    if (!w || !w.active) return;
+    const flip = this.player.flipX;
+    // A dying survivor lets go of it. The fall clip drops the body through the
+    // height the grip is anchored at, so a held crowbar would hover over the
+    // corpse at waist height. Fading it out and back in on the next non-death
+    // frame is cheaper than a drop animation nobody will be watching the end
+    // card over.
+    if (this.time.now < this.actionAnimUntil && this.actionAnimKey === dieAnimKey('player')) {
+      w.setAlpha(0);
+      return;
+    }
+    const swinging =
+      this.time.now < this.actionAnimUntil && this.actionAnimKey === attackAnimKey('player');
+
+    if (swinging) {
+      const frameNo = Number(this.player.frame?.name ?? ATTACK_FRAME_START);
+      const f = Math.max(0, Math.min(ATTACK_FRAMES - 1, frameNo - ATTACK_FRAME_START));
+      const pose = attackPose(f);
+      const swing = pose.armSwing;
+      // Same construction drawArm() uses for the near arm, so the grip lands on
+      // the pixels that draw the fist rather than near them.
+      const shoulder = { x: pose.shoulder.x + 2, y: pose.shoulder.y + 4 };
+      const elbow = joint(shoulder, 12, swing);
+      const hand = joint(elbow, 11, swing * 0.6);
+      // Frame-local to world: the sheet's anchor is its centre line, and the
+      // whole sprite is mirrored when the survivor faces left.
+      const dx = (hand.x - FRAME_W / 2) * (flip ? -1 : 1);
+      const dy = FRAME_H - hand.y;
+      w.setPosition(this.player.x + dx, this.player.y - dy);
+      // 0 rad points right and grows clockwise; the pose's angle is measured from
+      // straight down, so facing right is a quarter turn. Facing left the bar has
+      // to point the other way, which is a half turn more - NOT a negated angle.
+      // setFlipX does not help here: it mirrors the texture inside a frame that
+      // still occupies the same 46 pixels to the right of the origin, so a
+      // mirrored weapon on a left-facing survivor stayed across the body.
+      const rot = Math.PI / 2 - (swing * Math.PI) / 180;
+      w.setRotation(flip ? Math.PI - rot : rot);
+      w.setDepth(ACTOR_DEPTH + 1);
+      w.setAlpha(1);
+      return;
+    }
+
+    // Carried at the hip, angled down and forward.
+    //
+    // Everything above world y≈94 is under the HUD's fade band - three
+    // depth-100 rectangles at alpha 0.88-0.98 that darken the top of the screen
+    // so the status bar reads. A slung crowbar put its visible end exactly in
+    // that band, which is why it measured (31,43,55) on screen while its texture
+    // was drawn in 0xc6d2da: ninety-four percent of it was the mask, not the
+    // weapon. Below the band, at hip height, the grip is inside the silhouette
+    // and 34 of the 42 shaft pixels are clear of it.
+    w.setPosition(this.player.x + (flip ? -20 : 20), this.player.y - 56);
+    // Facing right the bar leans 17° down and forward. Facing left it has to be
+    // a half turn plus that lean, not the negative angle: the texture occupies
+    // its 46 pixels on the +x side of the grip no matter how it is flipped, so a
+    // negated angle points the weapon up and back over the shoulder instead of
+    // down and ahead. The claw's own curl ends up inverted on that side, which
+    // at one pixel of curl is not a thing anyone can see.
+    w.setRotation(flip ? Math.PI - 0.3 : 0.3);
+    w.setDepth(ACTOR_DEPTH - 1);
+    w.setAlpha(1);
   }
 
   // The survivor picked on the meta-select screen, as a walk-sheet key. Falls
@@ -707,7 +829,7 @@ export class GameScene extends Phaser.Scene {
       const plate = this.add.circle(x, y, 11, PALETTE.ink, 0.85).setDepth(6);
       const dot = this.add.circle(x, y, 9, color, 1).setDepth(7);
       const label = this.add
-        .text(x, y, '?', { fontFamily: 'monospace', fontSize: '26pxpx', color: hex(PALETTE.ink) })
+        .text(x, y, '?', { fontFamily: FONT_FAMILY, fontSize: '26px', color: hex(PALETTE.ink) })
         .setOrigin(0.5)
         .setDepth(8);
       // A 1.9s breath on the plate only, so the disc reads as a beacon without
@@ -722,7 +844,7 @@ export class GameScene extends Phaser.Scene {
       const trader = this.add.sprite(shopX, PLAYER_FEET_Y, walkSheetKey('npc_alin')).setOrigin(0.5, 1).setDepth(5);
       trader.play(idleAnimKey('npc_alin'));
       const tag = this.add
-        .text(shopX, PLAYER_FEET_Y - 108, '行商', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 4, y: 2 } })
+        .text(shopX, PLAYER_FEET_Y - 108, '行商', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 4, y: 2 } })
         .setOrigin(0.5)
         .setDepth(6);
       this.spotMarkers.set('shop', { x: shopX, isBoss: false, dot: trader as unknown as Phaser.GameObjects.Arc, label: tag });
@@ -801,7 +923,7 @@ export class GameScene extends Phaser.Scene {
     // what the rest of this panel means.
     this.encounterObjects.push(
       this.add
-        .text(left + panelW - 10, top + 10, `${state.player.gold} 金`, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
+        .text(left + panelW - 10, top + 10, `${state.player.gold} 金`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
         .setOrigin(1, 0.5)
         .setDepth(depth + 6),
     );
@@ -827,7 +949,7 @@ export class GameScene extends Phaser.Scene {
       this.encounterObjects.push(
         this.add
           .text(left + panelW - 20, y + 20, canBuy ? 'Enter 买入' : '金币不足', {
-            fontFamily: 'monospace',
+            fontFamily: FONT_FAMILY,
             fontSize: `${TYPE.caption}px`,
             color: canBuy ? hex(PALETTE.clothHigh) : hex(TEXT.warn),
           })
@@ -843,7 +965,7 @@ export class GameScene extends Phaser.Scene {
     this.encounterObjects.push(...buildPanelWell(this, left + 8, footY, panelW - 16, 22, depth + 5));
     this.encounterObjects.push(
       this.add
-        .text(left + 16, footY + 11, 'S 卖出背包里的一件  ·  ESC 离开', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
+        .text(left + 16, footY + 11, 'S 卖出背包里的一件  ·  ESC 离开', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
         .setOrigin(0, 0.5)
         .setDepth(depth + 7),
     );
@@ -1019,7 +1141,7 @@ export class GameScene extends Phaser.Scene {
     this.encounterObjects.push(
       this.add
         .text(left + panelW - 12, top + 44, `${combat.monster.hp}/${combat.monster.maxHp} · 第 ${combat.turn} 回合`, {
-          fontFamily: 'monospace',
+          fontFamily: FONT_FAMILY,
           fontSize: `${TYPE.caption}px`,
           color: hex(TEXT.dim),
         })
@@ -1036,7 +1158,7 @@ export class GameScene extends Phaser.Scene {
     tail.forEach((line, i) => {
       this.encounterObjects.push(
         this.add
-          .text(left + 20, logTop + 8 + i * 17, line, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim), wordWrap: { width: panelW - 40 } })
+          .text(left + 20, logTop + 8 + i * 17, line, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim), wordWrap: { width: panelW - 40 } })
           .setDepth(depth + 7),
       );
     });
@@ -1057,11 +1179,11 @@ export class GameScene extends Phaser.Scene {
       }
       this.encounterObjects.push(
         this.add
-          .text(left + 22, y + 12, label, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary) })
+          .text(left + 22, y + 12, label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary) })
           .setOrigin(0, 0.5)
           .setDepth(depth + 7),
         this.add
-          .text(left + panelW - 22, y + 12, `${key} · ${note}`, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+          .text(left + panelW - 22, y + 12, `${key} · ${note}`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
           .setOrigin(1, 0.5)
           .setDepth(depth + 7),
       );
@@ -1069,11 +1191,40 @@ export class GameScene extends Phaser.Scene {
 
     this.encounterObjects.push(
       this.add
-        .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 出招 · ESC 撤退', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+        .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 出招 · ESC 撤退', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
         .setOrigin(0.5)
         .setDepth(depth + 7),
     );
     lockToScreen(this.encounterObjects);
+  }
+
+  /**
+   * The visible swing: the arc, its mirroring, and the crit flash on a kill.
+   *
+   * Shared by the turn-based fight and the single-roll encounter, because they
+   * are the same gesture - the survivor swings the crowbar - and two copies of
+   * the scale and the facing rule would drift apart.
+   */
+  private playSwingFx(killed = false): void {
+    const state = getGame();
+    const facing = this.player?.flipX ? -1 : 1;
+    const slash = playFx(this, 'sword-slash', state.player.x + 30 * facing, PLAYER_FEET_Y - 18, LIGHT_DEPTH, {
+      // The atlas's usable arc is about 90x60 inside a 136x104 frame, and its
+      // pivot sits near the bottom of that frame - so the arc rises about 57px
+      // above whatever point it is anchored to. Anchoring at chest height put
+      // the whole arc above the survivor's head; anchoring near the feet puts it
+      // across the body, which is where a swing happens. 1.35 is roughly the
+      // crowbar's reach; 0.7 stretches the 800ms cut to 1.14s, long enough to
+      // survive a glance away at the log.
+      scale: 1.35,
+      timeScale: 0.7,
+    });
+    // The arc is drawn facing right; a survivor facing left needs it mirrored or
+    // the slash trails behind them.
+    if (slash) slash.setFlipX(facing < 0);
+    if (killed) {
+      playFx(this, 'crit-hit', state.player.x + 30 * facing, PLAYER_FEET_Y - 30, LIGHT_DEPTH + 1, { scale: 1.4 });
+    }
   }
 
   // Feedback is deliberately downstream of the pure combat result. It can add
@@ -1081,12 +1232,16 @@ export class GameScene extends Phaser.Scene {
   // or decides whether the turn continues.
   private playCombatFeedback(round: CombatRound, action: CombatAction): void {
     const state = getGame();
-    if (round.playerDamage > 0) {
-      playFx(this, 'sword-slash', state.player.x + 28, PLAYER_FEET_Y - 52, LIGHT_DEPTH);
-      if (round.monsterDead) playFx(this, 'crit-hit', state.player.x + 28, PLAYER_FEET_Y - 52, LIGHT_DEPTH + 1);
-    }
+    // The swing happens whether or not it lands.
+    //
+    // It used to be gated on playerDamage > 0, which meant a miss produced
+    // nothing on screen at all - and with the fight's accuracy the miss was the
+    // common case. The one visual sign that the survivor carries a weapon was an
+    // effect that appeared in roughly half the rounds, for two thirds of a
+    // second, above a figure holding nothing. A swing that whiffs still swings.
+    if (action === 'attack') this.playSwingFx(round.monsterDead);
     if (action === 'guard' && round.monsterDamage > 0 && !round.fled) {
-      playFx(this, 'parry', state.player.x + 10, PLAYER_FEET_Y - 50, LIGHT_DEPTH + 1);
+      playFx(this, 'parry', state.player.x + 10, PLAYER_FEET_Y - 50, LIGHT_DEPTH + 1, { scale: 1.3 });
     }
     if (round.monsterDamage > 0 && !round.fled) {
       playFx(this, 'hit-flash', state.player.x, PLAYER_FEET_Y - 48, LIGHT_DEPTH + 2);
@@ -1116,9 +1271,13 @@ export class GameScene extends Phaser.Scene {
     combat.guarding = action === 'guard';
     this.playCombatFeedback(round, action);
 
+    // The swing is the action's, not the damage's. Gating the clip on
+    // playerDamage > 0 meant a miss had no swing either, so the crowbar stayed
+    // slung across the survivor's back while the arc played out of thin air. The
+    // arm and the weapon have to agree, and the arc is the arm's.
+    if (action === 'attack') this.playActionAnim(attackAnimKey('player'), 320);
     if (round.playerDamage > 0) {
       combat.monster.hp = Math.max(0, combat.monster.hp - round.playerDamage);
-      this.playActionAnim(attackAnimKey('player'), 300);
     }
     if (action === 'guard') {
       state.player.energy = Math.min(GAME_CONFIG.player.energyMax, state.player.energy + GUARD_ENERGY_RESTORE);
@@ -1229,7 +1388,7 @@ export class GameScene extends Phaser.Scene {
       this.encounterObjects.push(
         this.add
           .text(outLeft + 20, outTop + 38 + i * 17, line, {
-            fontFamily: 'monospace',
+            fontFamily: FONT_FAMILY,
             fontSize: `${TYPE.caption}px`,
             color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim),
             wordWrap: { width: outW - 40 },
@@ -1239,7 +1398,7 @@ export class GameScene extends Phaser.Scene {
     });
     this.encounterObjects.push(
       this.add
-        .text(cx, outTop + outH - 12, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+        .text(cx, outTop + outH - 12, 'Enter / ESC 继续', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
         .setOrigin(0.5)
         .setDepth(outDepth + 7),
     );
@@ -1283,7 +1442,7 @@ export class GameScene extends Phaser.Scene {
     this.encounterObjects.push(
       this.add
         .text(left + 20, top + 50, enc.encounter.message, {
-          fontFamily: 'monospace',
+          fontFamily: FONT_FAMILY,
           fontSize: `${TYPE.body}px`,
           color: hex(TEXT.primary),
           wordWrap: { width: panelW - 40 },
@@ -1304,7 +1463,7 @@ export class GameScene extends Phaser.Scene {
         this.encounterObjects.push(
           this.add
             .text(left + 24, y + 13, CHOICE_LABELS[choice], {
-              fontFamily: 'monospace',
+              fontFamily: FONT_FAMILY,
               fontSize: `${TYPE.body}px`,
               color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.secondary),
             })
@@ -1314,7 +1473,7 @@ export class GameScene extends Phaser.Scene {
       });
       this.encounterObjects.push(
         this.add
-          .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确认 · ESC 离开', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+          .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确认 · ESC 离开', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
           .setOrigin(0.5)
           .setDepth(depth + 7),
       );
@@ -1339,8 +1498,11 @@ export class GameScene extends Phaser.Scene {
     enc.resolved = true;
     if (result.items.length > 0) playSfx('chest');
     // A swing reads as a swing: the attack clip plays whenever the player chose
-    // to fight, win or lose.
-    if (choice === 'fight') this.playActionAnim(attackAnimKey('player'), 300);
+    // to fight, win or lose - and so does the arc, for the same reason.
+    if (choice === 'fight') {
+      this.playActionAnim(attackAnimKey('player'), 300);
+      this.playSwingFx();
+    }
     if (result.hpChange < 0) {
       this.cameras.main.shake(160, 0.008);
       this.refreshStats();
@@ -1358,19 +1520,19 @@ export class GameScene extends Phaser.Scene {
     const isBoss = enc.encounter.kind === 'boss';
     this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.dialogue));
     this.encounterObjects.push(
-      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: 'monospace', fontSize: '32pxpx', color: isBoss ? hex(TEXT.warn) : hex(PALETTE.lightHigh) }).setOrigin(0.5),
+      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: FONT_FAMILY, fontSize: '32px', color: isBoss ? hex(TEXT.warn) : hex(PALETTE.lightHigh) }).setOrigin(0.5),
     );
     this.encounterObjects.push(
-      this.add.text(left + 20, top + 44, result.message, { fontFamily: 'monospace', fontSize: '26pxpx', color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+      this.add.text(left + 20, top + 44, result.message, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
     );
     const loot = result.items.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、');
     if (loot) {
       this.encounterObjects.push(
-        this.add.text(left + 20, top + 96, `获得：${loot}`, { fontFamily: 'monospace', fontSize: '26pxpx', color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+        this.add.text(left + 20, top + 104, `获得：${loot}`, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
       );
     }
     this.encounterObjects.push(
-      this.add.text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.dim) }).setOrigin(0.5),
+      this.add.text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.dim) }).setOrigin(0.5),
     );
     if (state.status === 'lost') {
       this.scene.start('End');
@@ -1572,12 +1734,12 @@ export class GameScene extends Phaser.Scene {
   private drawExits(floor: number): void {
     if (hasUpExit(floor)) {
       this.drawStair(UP_EXIT_X, 'up', floor);
-      const upLabel = this.add.text(UP_EXIT_X, FLOOR_HEIGHT - 104, '↑ 上楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+      const upLabel = this.add.text(UP_EXIT_X, FLOOR_HEIGHT - 104, '↑ 上楼', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
       this.floorObjects.push(upLabel);
     }
     if (hasDownExit(floor)) {
       this.drawStair(DOWN_EXIT_X, 'down', floor);
-      const downLabel = this.add.text(DOWN_EXIT_X, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: 'monospace', fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
+      const downLabel = this.add.text(DOWN_EXIT_X, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
       this.floorObjects.push(downLabel);
     }
   }
@@ -1648,57 +1810,180 @@ export class GameScene extends Phaser.Scene {
   /**
    * A neighbouring floor, drawn as context rather than as a playable room.
    *
-   * The full renderer is deliberately not reused: it builds the light layer, the
-   * containers, the NPCs and the encounter spots, all of which belong to the
-   * floor the player is standing on and would clobber each other if a neighbour
-   * ran them too. A neighbour needs the wall, the floor band, the tint, a door
-   * or two, and the stair opening — enough to read as another floor of the same
-   * building, and no more. It is also drawn further back in depth and under more
-   * haze, so the cross-section has distance rather than reading as three
-   * screenshots stacked.
+   * It is the same building, so it is dressed like one: the room props, the wall
+   * dressing and the ceiling lights come from the same renderers the player's
+   * floor uses. A neighbour used to be a bare wall with three doors on it, which
+   * read as an empty shaft — the two floors under the player were visibly there
+   * and visibly vacant, and the cross-section promised a tower that the art did
+   * not deliver.
+   *
+   * What a neighbour still does NOT get is everything bound to the floor being
+   * played: the interactive light layer, the containers, the NPCs and the
+   * encounter spots. Those are floor state, and a neighbour running them would
+   * clobber the live floor's.
+   *
+   * The floor is built inside one container in floor-local 0..FLOOR_HEIGHT
+   * coordinates, so the shared renderers work on it unchanged and a single
+   * depth keeps the whole thing behind the playable floor. Container children
+   * paint in insertion order, so this method's push order stands in for the
+   * depth values the live floor uses: base art, then the depth cues, then the
+   * props and their light fixtures.
    */
   private drawNeighbourFloor(floor: number, yOffset: number, isAbove: boolean, distance: number): void {
     const wallH = FLOOR_HEIGHT - FLOOR_BAND;
     const tint = corridorTint(floor);
-    const objs: Phaser.GameObjects.GameObject[] = [];
+    // A container in floor-local coordinates: the shared renderers build the
+    // floor unchanged and one depth keeps all of it behind the playable floor.
+    const preexisting = new Set<Phaser.GameObjects.GameObject>(this.children.list);
+    const layer = this.add.container(0, yOffset).setDepth(STACK_DEPTH);
+    const add = (...objs: Phaser.GameObjects.GameObject[]): void => {
+      for (const o of objs) layer.add(o);
+    };
 
-    objs.push(this.add.image(0, yOffset + 8, ENV_WALL_KEY).setOrigin(0, 0));
-    objs.push(this.add.image(0, yOffset + wallH, ENV_FLOOR_KEY).setOrigin(0, 0));
-    if (tint) {
-      objs.push(this.add.rectangle(FLOOR_WIDTH / 2, yOffset + 8 + (wallH - 8) / 2, FLOOR_WIDTH, wallH - 8, tint.color, tint.alpha));
-    }
-    const g = this.add.graphics();
-    g.fillStyle(0x0b0f12, 1);
-    g.fillRect(0, yOffset, FLOOR_WIDTH, 8);
-    // doors on the room boundaries, so the floor reads as divided into rooms
-    for (let i = 1; i < ROOM_COUNT; i++) {
-      objs.push(this.add.image(i * ROOM_WIDTH, yOffset + wallH, 'tile_door').setOrigin(0.5, 1));
-    }
-    // the stairwell opening in this floor's ceiling or floor, so the flight
-    // arriving from the player's floor has somewhere to arrive
-    const stairX = isAbove ? UP_EXIT_X : DOWN_EXIT_X;
-    const stairOpeningY = yOffset + STAIR_START_Y - 10;
-    g.fillStyle(PALETTE.ink, 0.85);
-    g.fillRect(stairX - 22, stairOpeningY, 44, 10);
-    g.fillStyle(PALETTE.stone, 1);
-    g.fillRect(stairX - 20, stairOpeningY + 2, 40, 6);
+    // Base art. Same wall and floor band as every other floor of the tower.
+    add(this.add.image(0, 8, ENV_WALL_KEY).setOrigin(0, 0));
+    add(this.add.image(0, wallH, ENV_FLOOR_KEY).setOrigin(0, 0));
+    if (tint) add(this.add.rectangle(FLOOR_WIDTH / 2, 8 + (wallH - 8) / 2, FLOOR_WIDTH, wallH - 8, tint.color, tint.alpha));
+    const ceilingSeam = this.add.graphics();
+    ceilingSeam.fillStyle(0x0b0f12, 1);
+    ceilingSeam.fillRect(0, 0, FLOOR_WIDTH, 8);
+    add(ceilingSeam);
 
-    // Aerial perspective, by distance and not by the floor's own ambience: the
-    // first attempt tinted each neighbour with ambienceFor(floor), which made
-    // the floor below lighter and the floor above darker and read as two
-    // different weather rather than as depth. One cool haze that strengthens
-    // with distance is what actually recedes.
-    const haze = this.add.rectangle(
-      FLOOR_WIDTH / 2,
-      yOffset + FLOOR_HEIGHT / 2,
-      FLOOR_WIDTH,
-      FLOOR_HEIGHT,
-      0x1b2836,
-      0.09 * distance,
+    // The same two-band ambient wash the live floor's light layer lays down,
+    // slightly stronger: the wall keeps its own light at the very top, the wall
+    // band takes the floor's hue, the floor band takes more of it. Without this
+    // a neighbour rendered its props at full colour under nothing but a light
+    // haze, so the floors below read BRIGHTER than the one being played and the
+    // cross-section inverted — the distant floors became the foreground.
+    const amb = ambienceFor(floor);
+    const clearY = FLOOR_HEIGHT * 0.16;
+    const floorTop = FLOOR_HEIGHT * 0.62;
+    add(
+      this.add
+        .rectangle(FLOOR_WIDTH / 2, (clearY + floorTop) / 2, FLOOR_WIDTH, floorTop - clearY, amb.color)
+        .setAlpha(Math.min(0.55, amb.wallAlpha * 1.45)),
     );
-    objs.push(g, haze);
-    for (const o of objs) (o as Phaser.GameObjects.GameObject & { setDepth(n: number): void }).setDepth(STACK_DEPTH);
-    this.floorObjects.push(...objs);
+    add(
+      this.add
+        .rectangle(FLOOR_WIDTH / 2, (floorTop + FLOOR_HEIGHT) / 2, FLOOR_WIDTH, FLOOR_HEIGHT - floorTop, amb.color)
+        .setAlpha(Math.min(0.62, amb.floorAlpha * 1.45)),
+    );
+
+    // Depth cues, identical to the playable floor's so a neighbour reads as a
+    // room seen from further away rather than as a flat backdrop. The seeds are
+    // the floor number: the two neighbours are different floors, not the same
+    // wall printed twice.
+    //
+    // The wall streaks and the floor litter the live floor gets are left out on
+    // purpose: two floors down they are two pixels of noise, and they were 120 of
+    // the neighbour's ~250 objects. What survives is what carries meaning at this
+    // distance — the room's furniture, its doors, its lights.
+    add(...buildRoomDepth(this, { width: FLOOR_WIDTH, wallBottom: wallH, height: FLOOR_HEIGHT, lightXs: [40, 1240] }));
+    add(...buildWallDressing(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }));
+
+    // Haze sits behind the props, as it does on the live floor (depth 2), and is
+    // the thing that still separates "next floor down" from "the floor after".
+    add(...buildAerialHaze(this, { width: FLOOR_WIDTH, wallBottom: wallH, hazeColor: ambienceFor(floor).color, strength: 0.2 }));
+
+    // Room props, by the same theme renderer. Floor 2 is worker housing and floor
+    // 3 a store room whether the player is standing on them or looking at them.
+    const detail = this.add.graphics();
+    const props: Phaser.GameObjects.GameObject[] = [];
+    for (let r = 0; r < ROOM_COUNT; r++) {
+      drawCorridorRoom({ scene: this, g: detail, floor, roomX: r * ROOM_WIDTH, floorY: wallH, room: r, objects: props });
+    }
+    // The starting floor is the dorm and has no corridor theme, so as a
+    // neighbour it would draw nothing at all. Give it the two pieces of
+    // furniture that make it recognisable from the floor above, plus its lit
+    // windows — the player should be able to look back down at their own room.
+    if (floor === STARTING_FLOOR) {
+      for (let r = 0; r < ROOM_COUNT; r++) {
+        props.push(this.add.image(r * ROOM_WIDTH + ROOM_WIDTH / 2 - 8, 116, 'tile_window').setOrigin(0.5));
+      }
+      props.push(this.add.image(BED_X, wallH + 4, 'furn_bed').setOrigin(0.5, 1));
+      props.push(this.add.image(CRAFT_X, wallH + 4, 'furn_workbench').setOrigin(0.5, 1));
+    }
+    detail.setAlpha(0.68);
+    // Props are tinted rather than alpha-faded. A prop drawn at full colour is
+    // the brightest thing in the frame — a store-room crate in the floor two
+    // down was out-shouting the player's own dorm — and neither a haze nor an
+    // ambient wash touches an image that is painted in wood and brass. A
+    // per-distance tint multiplies those colours down without making the floor
+    // see-through, which is what alpha would do.
+    const dim = distance === 1 ? 0x9dabbd : 0x76828f;
+    const dimObject = (o: Phaser.GameObjects.GameObject): void => {
+      const tintable = o as Phaser.GameObjects.GameObject & { setTint?: (c: number) => void };
+      if (typeof tintable.setTint === 'function') tintable.setTint(dim);
+      // The light-tube rectangles are bright by design and cannot be tinted, so
+      // their fill is swapped for a dimmer warm grey: a neighbour's strip light
+      // should be a hint of a fixture, not the brightest pixel on screen.
+      if (o instanceof Phaser.GameObjects.Rectangle && o.fillColor === PALETTE.lightHot) {
+        o.setFillStyle(0x8a8468, o.fillAlpha);
+      }
+      // A neighbour's flames are hidden outright. Paused on their first frame
+      // they read as a small figure standing in the corridor; left looping they
+      // are ten 30fps animations burning behind the floor the player is on. The
+      // lamp glow underneath survives, so the floor still reads as lit.
+      // Matched on the texture, not on the class: these are created by the fx
+      // helper and are not reliably Sprite instances, so an instanceof test let
+      // every torch through and the neighbour floors kept their full-brightness
+      // flames.
+      const texKey = (o as Phaser.GameObjects.GameObject & { texture?: { key?: string } }).texture?.key;
+      if (texKey === 'torch' || texKey === 'candle' || texKey === 'brazier') {
+        (o as Phaser.GameObjects.GameObject & { setVisible(v: boolean): void }).setVisible(false);
+      }
+    };
+    for (const o of props) dimObject(o);
+    add(...props);
+
+    // The ceiling strip lights belong on top of the props: they are the room's
+    // light source, and they are what tells the eye these floors are habitable
+    // at all rather than sealed. Tinted for the same reason as the props.
+    const strips = buildCeilingLights(this, { width: FLOOR_WIDTH, seed: floor * 13, top: 16 });
+    for (const o of strips) dimObject(o);
+    add(...strips);
+
+    // The room linework goes on last, over the props: the door plates, the mats
+    // and the lamp spill all belong on top of what they belong to, and the
+    // Graphics cannot be tinted, so it is faded instead — its halos were the one
+    // element the ambient wash never touched, and they sat on the floor below as
+    // pale blobs brighter than the rooms they lit.
+    add(detail);
+
+    // The stairwell opening, so the flight arriving from the player's floor has
+    // somewhere to land. Drawn after the props because it is a hole in the
+    // floor, not something standing on it.
+    const stairX = isAbove ? UP_EXIT_X : DOWN_EXIT_X;
+    const g = this.add.graphics();
+    g.fillStyle(PALETTE.ink, 0.85);
+    g.fillRect(stairX - 22, STAIR_START_Y - 10, 44, 10);
+    g.fillStyle(PALETTE.stone, 1);
+    g.fillRect(stairX - 20, STAIR_START_Y - 8, 40, 6);
+    add(g);
+
+    // Anything a room renderer created without handing it back in its object
+    // list is swept up here — the canteen's brazier is started with startFxLoop
+    // and never returned, so it stayed on the scene at full brightness with its
+    // 30fps loop running two floors below the player. Everything new since this
+    // method began, that is not already in the layer, belongs to this floor.
+    for (const o of [...this.children.list]) {
+      if (o === layer || preexisting.has(o)) continue;
+      dimObject(o);
+      layer.add(o);
+    }
+
+    // Aerial perspective by distance, not by the floor's own ambience: a cool
+    // haze that strengthens with distance is what recedes. It goes on top of the
+    // whole floor, props included, so the second neighbour reads as further
+    // away even though it is now fully detailed.
+    add(this.add.rectangle(FLOOR_WIDTH / 2, FLOOR_HEIGHT / 2, FLOOR_WIDTH, FLOOR_HEIGHT, 0x1b2836, 0.2 * distance));
+
+    // And the whole floor is set back a step. Detail alone was not enough: once
+    // the neighbours were properly furnished, a warm canteen one floor down was
+    // rendering more brightly than the cold maintenance floor the player was
+    // standing on, and the eye went to the background.
+    layer.setAlpha(1 - 0.09 * distance);
+    this.floorObjects.push(layer);
   }
 
   private buildContainers(): void {
@@ -1715,7 +2000,7 @@ export class GameScene extends Phaser.Scene {
       // above the prop instead of at a fixed offset from the floor line — at the
       // old spot it would be printed straight across the middle of the crate.
       const label = this.add
-        .text(c.x, y - 4 - box.displayHeight - 8, c.label, { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.primary) })
+        .text(c.x, y - 4 - box.displayHeight - 8, c.label, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) })
         .setOrigin(0.5);
       this.containerObjs.set(c.id, { box, label });
       this.floorObjects.push(box, label);
@@ -1753,7 +2038,7 @@ export class GameScene extends Phaser.Scene {
   private drawBed(): void {
     const y = FLOOR_HEIGHT - 64;
     const bed = this.add.image(BED_X, y + 4, 'furn_bed').setOrigin(0.5, 1);
-    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.primary) }).setOrigin(0.5);
+    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5);
     this.floorObjects.push(bed, bedLabel);
   }
 
@@ -1794,41 +2079,41 @@ export class GameScene extends Phaser.Scene {
     chrome.fillStyle(UI.accent, 1);
     chrome.fillRect(0, 0, 4, hud.topHeight);
 
-    this.floorBadge = this.add.text(20, 6, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
+    this.floorBadge = this.add.text(20, 6, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
       .setName('hud-floor').setScrollFactor(0).setDepth(103);
-    this.clockText = this.add.text(20, 38, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+    this.clockText = this.add.text(20, 38, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
       .setName('hud-clock').setScrollFactor(0).setDepth(103);
     this.refreshClock();
 
     this.barsGfx = this.add.graphics().setName('hud-stat-bars').setScrollFactor(0).setDepth(103);
     STAT_BARS.forEach((stat, i) => {
       const x = hud.statX + i * hud.statPitch;
-      this.statLabels.push(this.add.text(x, 10, stat.label, { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+      this.statLabels.push(this.add.text(x, 10, stat.label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
         .setName(`hud-stat-${stat.key}`).setScrollFactor(0).setDepth(103));
-      this.statValues.push(this.add.text(x + hud.statWidth, 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+      this.statValues.push(this.add.text(x + hud.statWidth, 10, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
         .setOrigin(1, 0).setName(`hud-value-${stat.key}`).setScrollFactor(0).setDepth(103));
     });
     this.refreshStats();
 
-    this.goldText = this.add.text(DESIGN_WIDTH - 20, 6, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
+    this.goldText = this.add.text(DESIGN_WIDTH - 20, 6, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
       .setOrigin(1, 0).setName('hud-gold').setScrollFactor(0).setDepth(103);
-    this.scoreText = this.add.text(DESIGN_WIDTH - 20, 34, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
+    this.scoreText = this.add.text(DESIGN_WIDTH - 20, 34, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
       .setOrigin(1, 0).setName('hud-score').setScrollFactor(0).setDepth(103);
 
-    this.goalText = this.add.text(20, hud.goalY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
+    this.goalText = this.add.text(20, hud.goalY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
       .setName('hud-goal').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
-    this.environmentText = this.add.text(20, hud.environmentY, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
+    this.environmentText = this.add.text(20, hud.environmentY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
       .setName('hud-environment').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // Feedback has a dedicated lower lane. It remains above modal panels but
     // can never collide with the daily objective or the permanent environment.
     this.feedbackText = this.add.text(20, hud.feedbackY, '', {
-      fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh),
+      fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh),
       backgroundColor: '#0b0f12ee', padding: { x: 8, y: 5 }, wordWrap: { width: 1216 },
     }).setName('hud-feedback').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
     this.bagFullText = this.add.text(20, hud.bagY,
       '背包已满 · 使用、制作或交易腾出格子，否则搜刮会留在原处；能叠进已有堆的物品仍可拾取',
-      { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12ee', padding: { x: 8, y: 3 }, wordWrap: { width: 1216 } },
+      { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12ee', padding: { x: 8, y: 3 }, wordWrap: { width: 1216 } },
     ).setName('hud-bag-full').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
 
     // ── the foot bar ────────────────────────────────────────────────────────
@@ -1837,7 +2122,7 @@ export class GameScene extends Phaser.Scene {
     footLine.fillStyle(UI.line, 0.9);
     footLine.fillRect(0, DESIGN_HEIGHT - HUD_FOOT_H, DESIGN_WIDTH, 1);
     this.hintText = this.add
-      .text(8, DESIGN_HEIGHT - HUD_FOOT_H / 2, 'A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
+      .text(8, DESIGN_HEIGHT - HUD_FOOT_H / 2, 'A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
       .setOrigin(0, 0.5).setName('hud-hint').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // The low-HP vignette: pure red wash whose alpha is the pulse function's
@@ -1998,7 +2283,7 @@ export class GameScene extends Phaser.Scene {
     this.invObjects.push(...buildPanelHeader(this, left, top, panelW, '背包', UI.good, depth + 5));
     this.invObjects.push(
       this.add
-        .text(left + panelW - 10, top + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
+        .text(left + panelW - 10, top + 10, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
         .setOrigin(1, 0.5)
         .setDepth(depth + 6),
     );
@@ -2030,7 +2315,7 @@ export class GameScene extends Phaser.Scene {
         .setScale(2)
         .setDepth(depth + 6);
       const badge = this.add
-        .text(x + CELL - 3, y + CELL - 3, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
+        .text(x + CELL - 3, y + CELL - 3, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
         .setOrigin(1, 1)
         .setDepth(depth + 7);
       this.invCells.push(cell);
@@ -2043,19 +2328,23 @@ export class GameScene extends Phaser.Scene {
     const DETAIL_X = GRID_X + 4 * (CELL + GAP) + 8;
     const DETAIL_W = left + panelW - 12 - DETAIL_X;
     this.invObjects.push(...buildPanelWell(this, DETAIL_X, GRID_Y, DETAIL_W, 3 * (CELL + GAP) - GAP, depth + 5));
+    // Three rows at 10 / 48 / 76. They used to be at 10 / 28 / 46, which only
+    // worked because SimSun's glyphs sit inside a much smaller ink box than the
+    // em size; a pixel face fills the whole em, so the 30px name ran straight
+    // through the 20px meta line and the body through both.
     this.invDetailName = this.add
-      .text(DETAIL_X + 8, GRID_Y + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(PALETTE.lightHigh) })
+      .text(DETAIL_X + 8, GRID_Y + 10, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(PALETTE.lightHigh) })
       .setDepth(depth + 7);
     this.invDetailMeta = this.add
-      .text(DETAIL_X + 8, GRID_Y + 28, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+      .text(DETAIL_X + 8, GRID_Y + 48, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
       .setDepth(depth + 7);
     this.invDetailBody = this.add
-      .text(DETAIL_X + 8, GRID_Y + 46, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: DETAIL_W - 16 } })
+      .text(DETAIL_X + 8, GRID_Y + 76, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: DETAIL_W - 16 } })
       .setDepth(depth + 7);
     this.invObjects.push(this.invDetailName, this.invDetailMeta, this.invDetailBody);
 
     const footer = this.add
-      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5, 0.5)
       .setDepth(depth + 6);
     this.invObjects.push(footer, this.invMarker);
@@ -2198,8 +2487,8 @@ export class GameScene extends Phaser.Scene {
   private drawWorkbench(): void {
     const y = FLOOR_HEIGHT - 64;
     const bench = this.add.image(CRAFT_X, y + 4, 'furn_workbench').setOrigin(0.5, 1);
-    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.primary) }).setOrigin(0.5);
-    this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5);
+    this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
     this.floorObjects.push(bench, benchLabel, this.upgradeBoard);
     this.refreshUpgradeBoard();
   }
@@ -2222,7 +2511,7 @@ export class GameScene extends Phaser.Scene {
     this.craftObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.craft));
     // OVERHAUL UI: header strip instead of a centred title floating on a slab.
     this.craftObjects.push(...buildPanelHeader(this, left, top, panelW, '工作台 · 制作', UI.accent, PANEL_DEPTH.game.craft + 5));
-    const title = this.add.text(cx, top + 18, '', { fontFamily: 'monospace', fontSize: '32pxpx', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
+    const title = this.add.text(cx, top + 18, '', { fontFamily: FONT_FAMILY, fontSize: '32px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
     this.craftObjects.push(title);
 
     // OVERHAUL UI: row bands + a status column.
@@ -2235,12 +2524,12 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < 4; i++) {
       const rowY = top + 30 + i * CRAFT_ROW_PITCH;
       const band = this.add.rectangle(left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.34).setDepth(PANEL_DEPTH.game.craft + 5);
-      const name = this.add.text(left + 18, rowY + 9, '', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-      const status = this.add.text(left + panelW - 16, rowY + 9, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      const name = this.add.text(left + 18, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      const status = this.add.text(left + panelW - 16, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
       this.craftRows.push({ band, name, status });
       this.craftObjects.push(band, name, status);
     }
-    const footer = this.add.text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+    const footer = this.add.text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
     this.craftObjects.push(footer, this.craftMarker);
 
     applyPanelDepth(this.craftObjects, PANEL_DEPTH.game.craft);
@@ -2307,8 +2596,8 @@ export class GameScene extends Phaser.Scene {
 
   private buildPausePanel(): void {
     const { width, height } = this.viewSize();
-    const panelW = 380;
-    const panelH = 220;
+    const panelW = 460;
+    const panelH = 264;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -2316,12 +2605,16 @@ export class GameScene extends Phaser.Scene {
 
     this.pauseObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.pause));
     this.pauseObjects.push(...buildPanelHeader(this, left, top, panelW, '已暂停', UI.accent, PANEL_DEPTH.game.pause + 5));
-    const title = this.add.text(cx, top + 20, '', { fontFamily: 'monospace', fontSize: '32pxpx', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
-    const controls = this.add.text(cx, top + 50, 'A/D 移动 · E 交互 · I 背包 · C 制作', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    const title = this.add.text(cx, top + 20, '', { fontFamily: FONT_FAMILY, fontSize: '32px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
+    // 20px and a 460px panel: the old 22px line in a 380px panel ran out past
+    // the frame, because a full-width Han glyph in a monospaced pixel face is
+    // the whole em wide and the line has twelve of them.
+    const controls = this.add.text(cx, top + 50, 'A/D 移动 · E 交互 · I 背包 · C 制作', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
     this.pauseObjects.push(title, controls, this.pauseMarker);
 
     PAUSE_OPTIONS.forEach((label, i) => {
-      const t = this.add.text(cx, top + 92 + i * 28, label, { fontFamily: 'monospace', fontSize: `${TYPE_BODY}px`, color: hex(TEXT.primary) }).setOrigin(0.5);
+      // 40px pitch, up from 28: four 24px rows at 28px touched.
+      const t = this.add.text(cx, top + 96 + i * 40, label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE_BODY}px`, color: hex(TEXT.primary) }).setOrigin(0.5);
       this.pauseOptionTexts.push(t);
       this.pauseObjects.push(t);
     });
@@ -2454,7 +2747,7 @@ export class GameScene extends Phaser.Scene {
       // Same contact shadow as the player, so an NPC stands on the floor rather
       // than hovering a few pixels above it.
       const shadow = addContactShadow(this, npc.x, PLAYER_FEET_Y + 2, 26, 2, 0.5);
-      const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(TEXT.primary) }).setOrigin(0.5);
+      const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5);
       this.floorObjects.push(...shadow, sprite, nameLabel);
     }
   }
@@ -2487,7 +2780,7 @@ export class GameScene extends Phaser.Scene {
     // Create with placeholder content so each text's canvas/frame exists up front
     // (setText on a never-rendered empty text throws in Phaser 4).
     this.dialogueTitle = this.add
-      .text(left + 10, top + 10, '对话', { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
+      .text(left + 10, top + 10, '对话', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
       .setOrigin(0, 0.5)
       .setDepth(depth + 6);
     this.dialogueObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 34, depth + 5));
@@ -2495,7 +2788,7 @@ export class GameScene extends Phaser.Scene {
     // and a name left out of the list stays on screen after the panel closes.
     this.dialogueObjects.push(this.dialogueTitle);
     this.dialogueMessage = this.add
-      .text(cx, top + 45, '……', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: panelW - 44 } })
+      .text(cx, top + 45, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: panelW - 44 } })
       .setOrigin(0.5)
       .setDepth(depth + 7);
     this.dialogueObjects.push(this.dialogueMessage);
@@ -2511,7 +2804,7 @@ export class GameScene extends Phaser.Scene {
       this.dialogueObjects.push(band, rule);
       const icon = this.add.image(left + 30, rowY + 12, 'blank').setOrigin(0.5).setDepth(depth + 7);
       const t = this.add
-        .text(left + 46, rowY + 12, '……', { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
+        .text(left + 46, rowY + 12, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
         .setOrigin(0, 0.5)
         .setDepth(depth + 7);
       this.dialogueOptionIcons.push(icon);
@@ -2519,7 +2812,7 @@ export class GameScene extends Phaser.Scene {
       this.dialogueObjects.push(icon, t);
     }
     const footer = this.add
-      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5)
       .setDepth(depth + 7);
     this.dialogueObjects.push(footer, this.dialogueMarker);
@@ -3180,7 +3473,7 @@ export class GameScene extends Phaser.Scene {
     const latest = recentDiary(state, 1)[0];
     this.shelterObjects.push(
       this.add.text(left + 24, top + 40, `压力 ${stress}/100${latest ? ` · 上次：${latest.message}` : ' · 今天还没有记录'}`, {
-        fontFamily: 'monospace',
+        fontFamily: FONT_FAMILY,
         fontSize: `${TYPE.caption}px`,
         color: hex(stress >= 70 ? TEXT.warn : TEXT.primary),
         wordWrap: { width: panelW - 48 },
@@ -3203,7 +3496,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.shelterObjects.push(
       this.add.text(cx, top + panelH - 14, resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回', {
-        fontFamily: 'monospace',
+        fontFamily: FONT_FAMILY,
         fontSize: `${TYPE.caption}px`,
         color: hex(PALETTE.clothHigh),
       }).setOrigin(0.5).setDepth(depth + 6),
@@ -3354,6 +3647,10 @@ export class GameScene extends Phaser.Scene {
       (shadow as Phaser.GameObjects.Rectangle).setPosition(pose.x, pose.y + 2);
     }
     if (this.playerLight) this.playerLight.setPosition(pose.x, pose.y - 40);
+    // The climb moves the sprite directly, outside the walking path, so the
+    // crowbar has to be told again or it hangs in the air at the stair mouth
+    // while the survivor slides up it.
+    this.syncWeapon();
     if (pose.progress < 1) return;
 
     const state = getGame();
@@ -3400,6 +3697,7 @@ export class GameScene extends Phaser.Scene {
         type: 'wanderer',
         floor: state.currentFloor,
         source: 'dwell',
+        status: 'active',
         message: outcome.message,
       };
       state.worldEvents.history.push(`day${state.day}:dwell`);
@@ -3428,6 +3726,13 @@ export class GameScene extends Phaser.Scene {
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
     this.refreshBagFullWarning();
+    // The crowbar is stepped here, above the panel early-return.
+    //
+    // A fight holds encounterOpen for its whole duration and this method bails
+    // out on that flag, so the weapon was only ever synced while walking - which
+    // is precisely when it is slung and static. The swing happens in a panel, so
+    // it stayed slung across the back through the entire attack.
+    this.syncWeapon();
     if (this.stairClimb) {
       this.updateStairClimb(delta);
       return;
@@ -3652,74 +3957,148 @@ export class GameScene extends Phaser.Scene {
   // B3-15: a dwell-rolled wanderer acts day or night — the pressure comes from
   // lingering, not from the clock, so gating it on night would let a player
   // idle safely until dark.
+  private wandererEventKeyFor(state: GameState, event: ActiveEvent): string {
+    return `${state.day}:${event.source ?? 'night'}:${event.floor ?? -1}:${state.worldEvents.dwell?.rolls ?? 0}`;
+  }
+
+  private wandererSituation(state: GameState, event: ActiveEvent): WandererSituation {
+    const x = this.wanderer?.x ?? (state.player.x < FLOOR_WIDTH / 2 ? FLOOR_WIDTH - 48 : 48);
+    const ai = this.wandererAI;
+    return {
+      eventType: 'wanderer',
+      eventSource: event.source ?? 'night',
+      eventStatus: eventStatus(event) ?? 'active',
+      playerHp: state.player.hp,
+      playerX: state.player.x,
+      npcX: x,
+      distance: Math.abs(x - state.player.x),
+      motionState: this.wandererIntent === 'flee' ? 'fleeing' : ai?.state ?? 'stalking',
+      lungeMsLeft: ai?.lungeMsLeft ?? 0,
+      cooldownMsLeft: ai?.cooldownMsLeft ?? 0,
+      recentEncounter: this.wandererLastEncounter || undefined,
+    };
+  }
+
+  private recordWandererMemory(kind: 'attack' | 'flee' | 'observed' | 'player_attack', summary: string): void {
+    if (!aiNpcConfig().enabled) return;
+    const state = getGame();
+    const next = recordMemory(this.npcStateForWanderer(), {
+      day: state.day,
+      minute: state.gameMinuteOfDay,
+      kind,
+      actor: 'player',
+      summary,
+    });
+    saveNpcState(state, 'wanderer', next);
+  }
+
+  private npcStateForWanderer(): NpcPersistedState {
+    return loadNpcState(getGame(), 'wanderer') ?? createNpcState('hostile');
+  }
+
+  private requestWandererIntent(state: GameState, event: ActiveEvent): void {
+    if (!aiNpcConfig().enabled || eventStatus(event) === 'resolved' || !this.wanderer) return;
+    const token = this.wandererAutonomy.begin();
+    if (token === null) return;
+    const cfg = aiNpcConfig();
+    const key = this.wandererEventKey;
+    const situation = this.wandererSituation(state, event);
+    void decideWandererIntent(state, this.npcStateForWanderer(), situation, {
+      brain: new OllamaBrain({ baseUrl: cfg.baseUrl, model: cfg.model, timeoutMs: cfg.timeoutMs }),
+      fallback: new WandererFallbackBrain(),
+      timeoutMs: cfg.timeoutMs,
+      memoryRecallK: cfg.recallK,
+    }).then((decision) => {
+      const current = getGame().worldEvents.activeEvent;
+      if (!this.wandererAutonomy.isCurrent(token) || !this.wanderer || !current || current.type !== 'wanderer') return;
+      if (this.wandererEventKey !== key || getGame().currentFloor !== current.floor || eventStatus(current) === 'resolved') return;
+      if (decision.intent === 'flee' || decision.intent === 'attack') {
+        this.wandererIntent = decision.intent;
+        setEventStatus(current, decision.intent);
+        this.wandererLastEncounter = decision.intent === 'flee' ? '它判断继续接近不划算，转身撤退。' : '它判断这里仍然是可攻击窗口。';
+      }
+    }).finally(() => this.wandererAutonomy.finish(token));
+  }
+
+  private resolveWandererFlee(state: GameState, event: ActiveEvent): void {
+    setEventStatus(event, 'resolved');
+    this.wandererLastEncounter = '巡游体主动撤退，威胁暂时解除。';
+    this.recordWandererMemory('flee', this.wandererLastEncounter);
+    this.wandererAutonomy.cancel();
+    saveToStorage(state);
+    this.flash(this.wandererLastEncounter);
+  }
+
   private updateWanderer(delta: number): void {
     const state = getGame();
     const event = state.worldEvents.activeEvent;
     const active =
       event?.type === 'wanderer' &&
+      eventStatus(event) !== 'resolved' &&
       state.currentFloor === event.floor &&
       (isNight(state.gameMinuteOfDay) || event.source === 'dwell');
     if (!active) {
+      if (this.wanderer || this.wandererEventKey) this.wandererAutonomy.cancel();
       if (this.wanderer) {
-        this.wanderer.destroy();
         this.wanderer.destroy();
         this.wandererGlow?.destroy();
         this.wandererGlow = undefined;
         this.wanderer = undefined;
         this.wandererAI = undefined;
       }
+      this.wandererEventKey = '';
+      this.wandererIntent = 'attack';
       return;
     }
+    const key = this.wandererEventKeyFor(state, event);
     if (!this.wanderer) {
       const spawnX = state.player.x < FLOOR_WIDTH / 2 ? FLOOR_WIDTH - 48 : 48;
-      this.wanderer = this.add
-        .sprite(spawnX, PLAYER_FEET_Y, walkSheetKey('wanderer'))
-        .setOrigin(0.5, 1)
-        .setDepth(ACTOR_DEPTH);
+      this.wanderer = this.add.sprite(spawnX, PLAYER_FEET_Y, walkSheetKey('wanderer')).setOrigin(0.5, 1).setDepth(ACTOR_DEPTH);
       this.wanderer.play(walkAnimKey('wanderer'));
       this.wandererAI = freshWandererAI(spawnX);
-      // A THREAT YOU CANNOT SEE IS NOT A THREAT, IT IS A PUNISHMENT.
-      //
-      // The wanderer is deliberately thin (bulk 0.6, a 16px torso) and it only
-      // comes out at night, which is the darkest the game gets. A dim red pool
-      // under it is enough to make it findable across the corridor without
-      // lighting it up: it reads as something wrong in the room rather than as a
-      // character, which is what it should be.
+      this.wandererEventKey = key;
+      this.wandererIntent = eventStatus(event) === 'flee' ? 'flee' : 'attack';
+      this.wandererLastEncounter = '';
       this.wandererGlow = addGlow(this, spawnX, PLAYER_FEET_Y - 8, 34, 0.42, LIGHT_DEPTH);
+      if (eventStatus(event) === 'active') this.requestWandererIntent(state, event);
     }
-    const ai = this.wandererAI;
-    // OVERHAUL: the state machine drives the speed. Standing within its range
-    // for a second and a half earns a 2.2x lunge — the walk-away escape still
-    // works, but standing still is now genuinely fatal, which is the whole
-    // point of the rework (B3-06 measured the old "only kills the stationary"
-    // as a design bug, not a feature).
-    ai!.selfX = this.wanderer.x;
-    if (this.wandererGlow) this.wandererGlow.x = this.wanderer.x;
-    const step = stepWandererAI(ai!, state.player.x, delta);
-    const dir = Math.sign(state.player.x - this.wanderer.x);
-    if (dir !== 0) this.wanderer.x += dir * WANDERER_SPEED * step.speedMultiplier * (delta / 1000);
-    // The sheet is drawn facing right, so a thing that walks left must be
-    // flipped or it moonwalks at the player. The player sprite has done this
-    // since the beginning; the wanderer never did.
-    if (dir !== 0) this.wanderer.setFlipX(dir < 0);
-    // A lunge hit lands double: the wind-up is the tell, the lunge is the bill.
-    const damage = ai!.state === 'lunge' ? WANDERER_DAMAGE * 2 : WANDERER_DAMAGE;
-    if (Math.abs(this.wanderer.x - state.player.x) <= 12 && this.time.now - this.wandererHitAt >= WANDERER_HIT_COOLDOWN_MS) {
+    const ai = this.wandererAI!;
+    const previousState = ai.state;
+    ai.selfX = this.wanderer!.x;
+    if (this.wandererGlow) this.wandererGlow.x = this.wanderer!.x;
+    const step = stepWandererAI(ai, state.player.x, delta, this.wandererIntent);
+    const toward = Math.sign(state.player.x - this.wanderer!.x);
+    const dir = step.direction === 'away-from-player' ? -toward : toward;
+    if (dir !== 0) this.wanderer!.x = Math.max(0, Math.min(FLOOR_WIDTH, this.wanderer!.x + dir * WANDERER_SPEED * step.speedMultiplier * (delta / 1000)));
+    if (dir !== 0) this.wanderer!.setFlipX(dir < 0);
+
+    if (this.wandererIntent === 'flee') {
+      const safe = Math.abs(this.wanderer!.x - state.player.x) >= WANDERER_FLEE_SAFE_DISTANCE;
+      const atExit = this.wanderer!.x <= WANDERER_FLEE_EXIT_MARGIN || this.wanderer!.x >= FLOOR_WIDTH - WANDERER_FLEE_EXIT_MARGIN;
+      if (safe || atExit) {
+        this.resolveWandererFlee(state, event);
+        return;
+      }
+    }
+
+    // Re-open a decision only after an attack cycle reaches cooldown; never
+    // issue parallel requests for one event.
+    if (this.wandererIntent === 'attack' && previousState !== ai.state && ai.state === 'cooldown') {
+      setEventStatus(event, 'active');
+      this.requestWandererIntent(state, event);
+    }
+
+    const damage = ai.state === 'lunge' ? WANDERER_DAMAGE * 2 : WANDERER_DAMAGE;
+    if (this.wandererIntent === 'attack' && ai.state !== 'fleeing' && Math.abs(this.wanderer!.x - state.player.x) <= 12 && this.time.now - this.wandererHitAt >= WANDERER_HIT_COOLDOWN_MS) {
       this.wandererHitAt = this.time.now;
       state.player.hp = Math.max(0, state.player.hp - damage);
-      // AND IT LEAVES A WOUND. A hit used to be HP leaving and nothing else, so
-      // the only thing wrong with you afterwards was a smaller number. Now every
-      // hit opens a wound that outlasts it, and a lunge opens a deeper one — the
-      // ailment is what makes the night cost something the next day too.
-      inflict(state, 'wound', ai!.state === 'lunge' ? 55 : 30, absoluteMinute(state));
+      this.recordWandererMemory('attack', `巡游体在第${state.currentFloor}层攻击了玩家，造成${damage}点伤害。`);
+      inflict(state, 'wound', ai.state === 'lunge' ? 55 : 30, absoluteMinute(state));
       this.refreshStats();
       this.playActionAnim(hurtAnimKey('player'), 400);
       playSfx('hurt');
       this.cameras.main.shake(160, 0.008);
-      this.cameras.main.flash(140, 230, 109, 99); // red damage flash
-      // AND THE FLOOR TAKES IT. The lunge was a number changing and a red screen
-      // wash; the slam puts the impact on the ground where the two of them are
-      // standing, and a lunge lands harder than a walk-by.
+      this.cameras.main.flash(140, 230, 109, 99);
       playFx(this, 'ground-slam', state.player.x, PLAYER_FEET_Y - 6, LIGHT_DEPTH);
       this.flash(`被巡游体击中！HP -${damage}，快回宿舍或换层！`);
       if (state.player.hp <= 0) state.status = 'lost';

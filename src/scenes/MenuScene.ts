@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { FONT_FAMILY } from '../render/uiKit';
 
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { startNewGame, tryContinue } from '../core/session';
@@ -73,14 +74,25 @@ export class MenuScene extends Phaser.Scene {
       this.backdrop = undefined;
     });
 
+    // The type scale was authored at 80/44/36, but the fontSize strings used to
+    // read `'80pxpx'` — invalid CSS, so Phaser silently rendered everything at
+    // its default 16px and the original 30px row pitch looked generous. With the
+    // sizes restored, the old coordinates stack the subtitle on top of the
+    // headline and the two menu entries on each other. These four numbers are
+    // the layout: each block clears the previous block's half-height plus air.
+    const TITLE_Y = 116;
+    const SUBTITLE_Y = 190;
+    const MENU_TOP = 286;
+    const MENU_STEP = 56;
+
     this.titleText = this.add
-      .text(width / 2, 92, '第100000层', { fontFamily: 'monospace', fontSize: '80pxpx', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 6 })
+      .text(width / 2, TITLE_Y, '第100000层', { fontFamily: FONT_FAMILY, fontSize: '80px', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 6 })
       .setOrigin(0.5);
     // Every piece of title text carries its own dark stroke: the painted
     // backdrop behind it is bright in places, and a stroke keeps the text
     // legible without a scrim heavy enough to bury the painting.
     this.subtitleText = this.add
-      .text(width / 2, 138, '末 日 宿 舍', { fontFamily: 'monospace', fontSize: '44pxpx', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 4 })
+      .text(width / 2, SUBTITLE_Y, '末 日 宿 舍', { fontFamily: FONT_FAMILY, fontSize: '44px', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 4 })
       .setOrigin(0.5);
 
     this.entries = [{ label: '开始新游戏', run: () => this.startNew() }];
@@ -109,7 +121,7 @@ export class MenuScene extends Phaser.Scene {
     this.helpObjects = [];
     this.entries.forEach((entry, i) => {
       const t = this.add
-        .text(width / 2, 210 + i * 30, entry.label, { fontFamily: 'monospace', fontSize: '36pxpx', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
+        .text(width / 2, MENU_TOP + i * MENU_STEP, entry.label, { fontFamily: FONT_FAMILY, fontSize: '36px', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
         .setOrigin(0.5);
       this.optionTexts.push(t);
       // Entrance: a fade-in only. An earlier version also settled each entry
@@ -130,7 +142,7 @@ export class MenuScene extends Phaser.Scene {
     this.tweens.add({ targets: this.marker, scaleX: 1.15, scaleY: 1.15, duration: 900, delay: 900, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
     this.refreshOptions();
     this.messageText = this.add
-      .text(width / 2, height - 30, '', { fontFamily: 'monospace', fontSize: '26pxpx', color: hex(TEXT.warn), align: 'center' })
+      .text(width / 2, height - 30, '', { fontFamily: FONT_FAMILY, fontSize: '26px', color: hex(TEXT.warn), align: 'center' })
       .setOrigin(0.5)
       .setVisible(false);
     this.buildHelp(width, height);
@@ -243,18 +255,27 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private buildHelp(width: number, height: number): void {
-    const panelW = 460;
-    const panelH = 240;
+    // A 10px pixel face at 22px is a full-width Han glyph, so the old 460px
+    // panel with 26px text and a 26px row pitch had long lines running straight
+    // through the frame and the rows touching. Wider panel, one size down, and a
+    // row pitch that leaves air under the descenders.
+    const panelW = 580;
+    const panelH = 260;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
     this.helpObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', PANEL_DEPTH.menu.help));
-    const title = this.add.text(cx, top + 20, '操作说明', { fontFamily: 'monospace', fontSize: '32pxpx', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
-    const lines = ['A/D 或 ←/→ 移动', 'E 交互（开箱 / 对话 / 上下楼 / 睡觉）', 'I 背包 · C 制作 · M 塔楼地图 · ESC 暂停', '目标：从第 1 层爬到第 100000 层的统治核心'];
-    const texts = lines.map((line, i) => this.add.text(left + 24, top + 58 + i * 26, line, { fontFamily: 'monospace', fontSize: '26pxpx', color: hex(TEXT.primary) }));
-    const footer = this.add.text(cx, top + panelH - 18, '按 Enter / ESC 关闭', { fontFamily: 'monospace', fontSize: '22pxpx', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    const title = this.add.text(cx, top + 26, '操作说明', { fontFamily: FONT_FAMILY, fontSize: '30px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
+    const lines = [
+      'A/D 或 ←/→ 移动 · E 交互',
+      'E 交互：开箱 / 对话 / 楼梯 / 睡觉',
+      'I 背包 · C 制作 · M 地图 · ESC 暂停',
+      '目标：爬到第 100000 层',
+    ];
+    const texts = lines.map((line, i) => this.add.text(left + 24, top + 72 + i * 38, line, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }));
+    const footer = this.add.text(cx, top + panelH - 30, '按 Enter / ESC 关闭', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
     this.helpObjects.push(title, ...texts, footer);
     applyPanelDepth(this.helpObjects, PANEL_DEPTH.menu.help);
     for (const o of this.helpObjects) o.setVisible(false);

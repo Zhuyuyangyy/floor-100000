@@ -8,7 +8,7 @@ import { getGame } from '../core/session';
 import { playSfx } from '../render/audio';
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { buildPanel, createMarker, PANEL_DEPTH, placeMarker } from '../render/panels';
-import { buildPanelHeader, TYPE, UI } from '../render/uiKit';
+import { buildPanelHeader, FONT_FAMILY, TYPE, UI } from '../render/uiKit';
 import { idleAnimKey, walkSheetKey } from '../render/walkcycle';
 import { TITLE_BG_KEY } from '../render/artpack';
 
@@ -81,7 +81,7 @@ export class MetaSelectScene extends Phaser.Scene {
     const top = height / 2 - panelH / 2;
     const depth = PANEL_DEPTH.menu.help;
 
-    this.add.text(cx, top - 18, '出发之前', { fontFamily: 'monospace', fontSize: '36pxpx', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 4 }).setOrigin(0.5).setDepth(depth + 1);
+    this.add.text(cx, top - 18, '出发之前', { fontFamily: FONT_FAMILY, fontSize: '36px', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 4 }).setOrigin(0.5).setDepth(depth + 1);
 
     for (const o of buildPanel(this, cx, height / 2, panelW, panelH, 'green', depth)) o.setDepth(o.depth);
     for (const o of buildPanelHeader(this, left, top, panelW, '幸存者', UI.good, depth + 5)) this.add.existing(o as Phaser.GameObjects.GameObject);
@@ -90,7 +90,7 @@ export class MetaSelectScene extends Phaser.Scene {
     // Left third. The sprite is 88px of figure at native size, which is the
     // whole reason to give it room instead of a 16px thumbnail.
     const portraitX = left + 62;
-    const portraitFeet = top + panelH - 60;
+    const portraitFeet = top + panelH - 70;
     this.portraitGlow = this.add.graphics().setDepth(depth + 5);
     this.portrait = this.add
       .sprite(portraitX, portraitFeet, walkSheetKey('player'))
@@ -99,7 +99,7 @@ export class MetaSelectScene extends Phaser.Scene {
     this.portrait.play(idleAnimKey('player'));
 
     this.flavourText = this.add
-      .text(portraitX, portraitFeet + 10, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary), align: 'center', wordWrap: { width: 110 } })
+      .text(portraitX, portraitFeet + 10, '', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(TEXT.secondary), align: 'center', wordWrap: { width: 132 } })
       .setOrigin(0.5, 0)
       .setDepth(depth + 7);
 
@@ -112,17 +112,21 @@ export class MetaSelectScene extends Phaser.Scene {
     ROSTER.forEach((id, i) => {
       const unlocked = canSelect(meta, id);
       const need = CHARACTER_UNLOCKS[id];
-      const y = top + 34 + i * 40;
+      // 52px pitch, name on the first 24px and its unlock note on the next
+      // 20px. At the old 40px pitch with the note at +22, a pixel face (which
+      // fills its whole em, unlike SimSun) put the note straight through the
+      // name and the whole roster read as one smudge.
+      const y = top + 34 + i * 52;
       const name = this.add
-        .text(listX + 8, y + 6, CHARACTER_NAMES[id] ?? id, {
-          fontFamily: 'monospace',
+        .text(listX + 8, y, CHARACTER_NAMES[id] ?? id, {
+          fontFamily: FONT_FAMILY,
           fontSize: `${TYPE.body}px`,
           color: unlocked ? hex(TEXT.primary) : hex(TEXT.disabled),
         })
         .setDepth(depth + 7);
       const lock = this.add
-        .text(listX + 8, y + 22, unlocked ? '可出战' : `最深第 ${need} 层解锁`, {
-          fontFamily: 'monospace',
+        .text(listX + 8, y + 28, unlocked ? '可出战' : `最深第 ${need} 层解锁`, {
+          fontFamily: FONT_FAMILY,
           fontSize: `${TYPE.caption}px`,
           color: unlocked ? hex(PALETTE.clothHigh) : hex(TEXT.disabled),
         })
@@ -130,7 +134,7 @@ export class MetaSelectScene extends Phaser.Scene {
       this.optionTexts.push(name);
       this.lockTexts.push(lock);
     });
-    this.invWell(listX - 6, top + 28, listW, 168, depth + 5);
+    this.invWell(listX - 6, top + 28, listW, 220, depth + 5);
     this.optionTexts.forEach((t) => t.setDepth(depth + 8));
     this.lockTexts.forEach((t) => t.setDepth(depth + 8));
 
@@ -140,36 +144,39 @@ export class MetaSelectScene extends Phaser.Scene {
     // ── the mode / relic column ─────────────────────────────────────────────
     const colX = left + 338;
     this.modeText = this.add
-      .text(colX, top + 34, `模式 ${MODE_LABELS[meta.mode]}`, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
+      .text(colX, top + 34, `模式 ${MODE_LABELS[meta.mode]}`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
       .setDepth(depth + 7);
     this.modeBlurbText = this.add
-      .text(colX, top + 52, MODE_BLURBS[meta.mode], { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim), wordWrap: { width: 118 } })
+      .text(colX, top + 66, MODE_BLURBS[meta.mode], { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(TEXT.dim), wordWrap: { width: 150 } })
       .setDepth(depth + 7);
     const relics = relicDisplay(meta);
     relics.forEach((r, i) => {
+      // Down to +140 and onto a 28px pitch: the blurb above it wraps to two or
+      // three lines at this width, and the relic column started at +108 where
+      // the third line now lands.
       this.add
-        .text(colX, top + 108 + i * 26, r.unlocked ? `◆ ${r.name}` : `◇ 第 ${r.need} 层`, {
-          fontFamily: 'monospace',
-          fontSize: `${TYPE.caption}px`,
+        .text(colX, top + 140 + i * 28, r.unlocked ? `◆ ${r.name}` : `◇ 第 ${r.need} 层`, {
+          fontFamily: FONT_FAMILY,
+          fontSize: '18px',
           color: r.unlocked ? hex(PALETTE.clothHigh) : hex(TEXT.disabledDeep),
         })
         .setDepth(depth + 7);
     });
 
     this.messageText = this.add
-      .text(cx, top + panelH - 12, '', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn) })
+      .text(cx, top + panelH - 12, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn) })
       .setOrigin(0.5)
       .setDepth(depth + 9)
       .setVisible(false);
 
     // The key legend sits on the foot bar, like the game's own.
     this.add
-      .rectangle(0, height - 18, width, 18, UI.surface)
+      .rectangle(0, height - 22, width, 22, UI.surface)
       .setOrigin(0, 0)
       .setAlpha(0.9)
       .setDepth(depth + 2);
     this.add
-      .text(8, height - 9, '↑/↓ 选择 · ←/→ 模式 · Enter 出发 · ESC 返回标题', { fontFamily: 'monospace', fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+      .text(8, height - 11, '↑/↓ 选择 · ←/→ 模式 · Enter 出发 · ESC 返回标题', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(PALETTE.clothHigh) })
       .setOrigin(0, 0.5)
       .setDepth(depth + 3);
 

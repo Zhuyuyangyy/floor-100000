@@ -5,6 +5,7 @@ import { bakedTextures } from './bakeProbe';
 import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHARACTER_KEYS, ENV_FILES, ITEM_ICON_FILES } from '../render/artpack';
 import { FURNITURE_KEYS } from '../render/furniture';
 import { WALK_CHARACTERS, walkSheetKey } from '../render/walkcycle';
+import { WEAPON_KEY } from '../render/weapon';
 
 // Phaser answers a texture key it does not have with __MISSING — a green
 // placeholder box — and says nothing. That is how a renamed furniture key turned
@@ -64,6 +65,9 @@ const DYNAMIC_KEYS = [
   'npc_xiaozhou',
   'tile_stairs_up',
   'tile_stairs_down',
+  // The crowbar is created with WEAPON_KEY, so its name is not a literal inside
+  // an add.image call and the scan below cannot see it.
+  WEAPON_KEY,
   ...Object.keys(ITEM_ICON_FILES),
   ...FURNITURE_KEYS,
   ...WALK_CHARACTERS.map(walkSheetKey),

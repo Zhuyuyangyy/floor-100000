@@ -32,6 +32,7 @@ function validateStack(raw: unknown): string | null {
 
 const VISIT_KEYS: Array<keyof FloorVisit> = ['openedContainers', 'lootedItems', 'unlockedDoors', 'localEvents'];
 const EVENT_TYPES: Array<ActiveEvent['type']> = ['blackout', 'wanderer', 'leak'];
+const EVENT_STATUSES: Array<NonNullable<ActiveEvent['status']>> = ['active', 'attack', 'flee', 'resolved'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -59,6 +60,9 @@ function validateActiveEvent(value: unknown): string | null {
   }
   if (value.source !== undefined && value.source !== 'night' && value.source !== 'dwell') {
     return 'worldEvents.activeEvent.source 无效';
+  }
+  if (value.status !== undefined && !EVENT_STATUSES.includes(value.status as NonNullable<ActiveEvent['status']>)) {
+    return 'worldEvents.activeEvent.status 无效';
   }
   return null;
 }

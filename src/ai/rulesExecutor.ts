@@ -4,6 +4,7 @@
 // 调用方降级到选项树。执行器不 import 任何推理/网络代码，只依赖现有
 // 纯逻辑系统（背包、交易、时钟），保证可在 Node 下单测。
 
+import { FLOOR_WIDTH } from '../core/constants';
 import type { GameState, ItemId, InventoryStack } from '../core/gameTypes';
 import { countItem } from '../systems/InventorySystem';
 import { canFit } from '../systems/TradeSystem';
@@ -16,6 +17,16 @@ export type ValidatedAction =
   | { ok: true; action: NpcAction; utterance?: string }
   | { ok: false; reason: string };
 
+export interface NpcEventFact {
+  type: 'wanderer';
+  floor: number;
+  source: 'night' | 'dwell';
+  status: 'active' | 'attack' | 'flee' | 'resolved';
+  distance: number;
+  playerX: number;
+  npcX: number;
+}
+
 /** NPC 在执行器眼中的最小事实集，由调用方从 data/npcs.ts 等处填充。 */
 export interface NpcFact {
   id: string;
@@ -25,6 +36,8 @@ export interface NpcFact {
   hp: number;
   /** NPC 当前持有物。第一阶段由静态报价表推导（见 npcInventory.ts）。 */
   inventory: InventoryStack[];
+  /** Optional event context used to gate autonomous hostile actions. */
+  event?: NpcEventFact;
 }
 
 /** 低于该置信度的建议一律不信，降级选项树。 */
@@ -59,6 +72,24 @@ function attackWindowOpen(state: GameState, npc: NpcFact): { open: boolean; reas
   const dwell = state.worldEvents.dwell;
   const dwellPressure = dwell !== undefined && dwell.floor === npc.floor && dwell.rolls > 0;
   if (!night && !dwellPressure) return { open: false, reason: '当前不在敌对行为窗口（夜间或停留压力）' };
+  return { open: true, reason: '' };
+}
+
+function fleeWindowOpen(state: GameState, npc: NpcFact): { open: boolean; reason: string } {
+  if (npc.archetype !== 'hostile') return { open: false, reason: '非敌对原型不得提议撤退' };
+  const event = npc.event;
+  if (!event || event.type !== 'wanderer') return { open: false, reason: '缺少有效巡游事件' };
+  if (event.status === 'resolved') return { open: false, reason: '事件已经解决' };
+  if (event.status === 'flee') return { open: false, reason: '撤退意图已经执行' };
+  if (npc.floor !== state.currentFloor || event.floor !== state.currentFloor || event.floor !== npc.floor) {
+    return { open: false, reason: '巡游体不在当前楼层' };
+  }
+  if (!Number.isFinite(event.distance) || event.distance < 0 || event.distance > FLOOR_WIDTH) {
+    return { open: false, reason: '玩家与巡游体不在有效事件范围' };
+  }
+  if (!Number.isFinite(event.playerX) || !Number.isFinite(event.npcX)) {
+    return { open: false, reason: '事件位置无效' };
+  }
   return { open: true, reason: '' };
 }
 
@@ -117,8 +148,10 @@ export function validateProposal(
     }
     case 'refuse':
       return { ok: true, action: { type: 'refuse' }, utterance };
-    case 'flee':
-      return { ok: true, action: { type: 'flee' }, utterance };
+    case 'flee': {
+      const window = fleeWindowOpen(state, npc);
+      return window.open ? { ok: true, action: { type: 'flee' }, utterance } : { ok: false, reason: window.reason };
+    }
     case 'trade': {
       const reason = validateTrade(state, npc, action);
       return reason ? { ok: false, reason } : { ok: true, action, utterance };

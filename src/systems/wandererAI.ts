@@ -15,7 +15,7 @@
 import { GAME_CONFIG } from '../core/config';
 
 export interface WandererAI {
-  state: 'stalking' | 'lunge' | 'cooldown';
+  state: 'stalking' | 'lunge' | 'cooldown' | 'fleeing';
   /** 玩家上一帧的 x：每帧用 |playerX - lastX| 算玩家这一帧的位移 */
   lastX: number;
   /**
@@ -75,8 +75,24 @@ export function stepWandererAI(
   ai: WandererAI,
   playerX: number,
   dtMs: number,
-): { speedMultiplier: number; state: WandererAI['state'] } {
+  intent: 'attack' | 'flee' = 'attack',
+): { speedMultiplier: number; state: WandererAI['state']; direction: 'toward-player' | 'away-from-player' } {
   const dt = Math.max(0, dtMs);
+  if (intent === 'flee') {
+    // Fleeing is an explicit high-level intent. It never enters lunge and does
+    // not deal damage; the scene owns the actual sprite movement.
+    ai.state = 'fleeing';
+    ai.stillMs = 0;
+    ai.lungeMsLeft = 0;
+    ai.cooldownMsLeft = 0;
+    ai.lastX = playerX;
+    return { speedMultiplier: STALKING_SPEED_MULTIPLIER, state: ai.state, direction: 'away-from-player' };
+  }
+  if (ai.state === 'fleeing') {
+    ai.state = 'stalking';
+    ai.stillMs = 0;
+    ai.lastX = playerX;
+  }
   switch (ai.state) {
     case 'stalking': {
       // 每帧位移 vs 按帧长折算的静止限额：超了就是「在走」，静止计时清零。
@@ -93,9 +109,9 @@ export function stepWandererAI(
         ai.state = 'lunge';
         ai.lungeMsLeft = LUNGE_MS;
         ai.stillMs = 0;
-        return { speedMultiplier: GAME_CONFIG.overhaul.lungeSpeedMultiplier, state: ai.state };
+        return { speedMultiplier: GAME_CONFIG.overhaul.lungeSpeedMultiplier, state: ai.state, direction: 'toward-player' };
       }
-      return { speedMultiplier: STALKING_SPEED_MULTIPLIER, state: ai.state };
+      return { speedMultiplier: STALKING_SPEED_MULTIPLIER, state: ai.state, direction: 'toward-player' };
     }
     case 'lunge': {
       const moved = Math.abs(playerX - ai.lastX);
@@ -106,7 +122,7 @@ export function stepWandererAI(
         ai.lungeMsLeft = 0;
         ai.cooldownMsLeft = COOLDOWN_MS;
         ai.stillMs = 0;
-        return { speedMultiplier: COOLDOWN_SPEED_MULTIPLIER, state: ai.state };
+        return { speedMultiplier: COOLDOWN_SPEED_MULTIPLIER, state: ai.state, direction: 'toward-player' };
       }
       ai.lungeMsLeft = Math.max(0, ai.lungeMsLeft - dt);
       if (ai.lungeMsLeft <= 0) {
@@ -116,9 +132,9 @@ export function stepWandererAI(
         ai.state = 'cooldown';
         ai.cooldownMsLeft = COOLDOWN_MS;
         ai.stillMs = 0;
-        return { speedMultiplier: COOLDOWN_SPEED_MULTIPLIER, state: ai.state };
+        return { speedMultiplier: COOLDOWN_SPEED_MULTIPLIER, state: ai.state, direction: 'toward-player' };
       }
-      return { speedMultiplier: GAME_CONFIG.overhaul.lungeSpeedMultiplier, state: ai.state };
+      return { speedMultiplier: GAME_CONFIG.overhaul.lungeSpeedMultiplier, state: ai.state, direction: 'toward-player' };
     }
     case 'cooldown': {
       ai.lastX = playerX; // 持续同步锚点，冷却结束切回 stalking 首帧不会误判位移
@@ -126,9 +142,9 @@ export function stepWandererAI(
       if (ai.cooldownMsLeft <= 0) {
         ai.state = 'stalking';
         ai.stillMs = 0; // 重新站够 1.5s 才能触发下一次扑击
-        return { speedMultiplier: STALKING_SPEED_MULTIPLIER, state: ai.state };
+        return { speedMultiplier: STALKING_SPEED_MULTIPLIER, state: ai.state, direction: 'toward-player' };
       }
-      return { speedMultiplier: COOLDOWN_SPEED_MULTIPLIER, state: ai.state };
+      return { speedMultiplier: COOLDOWN_SPEED_MULTIPLIER, state: ai.state, direction: 'toward-player' };
     }
   }
 }

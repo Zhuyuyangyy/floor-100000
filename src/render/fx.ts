@@ -129,6 +129,11 @@ export function playFx(
   x: number,
   y: number,
   depth = 24,
+  /** Playback overrides. Scale is for effects that have to carry a moment on
+   *  their own rather than decorate one; timeScale stretches the same frames
+   *  over more time without touching the atlas metadata, which stays a truthful
+   *  description of what pixelfx exported. */
+  opts?: { scale?: number; timeScale?: number },
 ): Phaser.GameObjects.Sprite | null {
   const meta = FX_META[id];
   if (!meta || !scene.textures.exists(id)) return null;
@@ -136,6 +141,7 @@ export function playFx(
   if (frameCount <= 0) return null;
 
   const sprite = scene.add.sprite(x, y, id).setDepth(depth);
+  if (opts?.scale) sprite.setScale(opts.scale);
   // the pivot is the effect's own origin (a hit spark's is the point of impact, a
   // brazier's is its base), so it is applied rather than assumed to be centre
   sprite.setOrigin(meta.pivot.x / meta.frameSize[0], meta.pivot.y / meta.frameSize[1]);
@@ -147,9 +153,12 @@ export function playFx(
     return null;
   }
   sprite.play(id);
+  if (opts?.timeScale && opts.timeScale !== 1) sprite.anims.timeScale = opts.timeScale;
 
   if (!meta.loop) {
-    const duration = (frameCount / meta.fps) * 1000;
+    // the timeout is derived from the stretched rate, or a slowed effect is
+    // destroyed mid-swing by a timer that still thinks it runs at 30fps
+    const duration = ((frameCount / meta.fps) * 1000) / (opts?.timeScale ?? 1);
     sprite.once('animationcomplete', () => sprite.destroy());
     // a belt-and-braces timer: if the complete event is missed the sprite still
     // goes away instead of lingering as a frozen frame

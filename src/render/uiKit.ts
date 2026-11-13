@@ -55,6 +55,30 @@ export const TYPE = {
   caption: 20,
 } as const;
 
+// ── the typeface ────────────────────────────────────────────────────────────
+// Every Text in the game used to request `monospace`. For a Chinese game that
+// is not a typeface: the Latin glyphs came from Consolas while every Han glyph
+// fell through to the browser's default CJK face (SimSun on Windows), so a
+// single label mixed two widths, two baselines and two weights. It also had no
+// pixel grid in common with the 2D art.
+//
+// Ark Pixel 10px monospaced is loaded by two language-split @font-face rules in
+// index.html; the two families form a stack so the browser resolves missing
+// glyphs through the chain. Keeping the stack here means one edit re-types the
+// whole game.
+export const FONT_FAMILY =
+  "'ArkPixel Latin', 'ArkPixel ZH', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif";
+
+/** Both faces must be ready before Phaser creates its first Text. */
+export const FONT_FACES = ['ArkPixel Latin', 'ArkPixel ZH'] as const;
+
+// Sizes stay as plain literals at the call site (`'24px'`, not a helper).
+//
+// They were written as `'24pxpx'` in 30 places — not valid CSS, so Phaser
+// silently fell back to its default and the title screen's 80px headline
+// rendered as a 16px squib. That typo is invisible in review because the string
+// still looks like a size. When adding one, copy an existing literal.
+
 // ── the colour roles ────────────────────────────────────────────────────────
 // Roles, not raw hex at the call site: a stat bar, a warning and a value all
 // need to be changed together, and they were not.
@@ -171,7 +195,7 @@ export function buildPanelHeader(
   // The title.
   out.push(
     scene.add
-      .text(titleX ?? left + 10, top + h / 2, title, { fontFamily: 'monospace', fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
+      .text(titleX ?? left + 10, top + h / 2, title, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
       .setOrigin(0, 0.5)
       .setScrollFactor(0)
       .setDepth(depth + 1),
@@ -243,7 +267,7 @@ export function buildListRow(
   const labelColor = opts.dim ? '#6b6862' : opts.selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary);
   out.push(
     scene.add
-      .text(textX, cy, opts.label, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: labelColor })
+      .text(textX, cy, opts.label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: labelColor })
       .setOrigin(0, 0.5)
       .setScrollFactor(0)
       .setDepth(depth + 1),
@@ -251,7 +275,7 @@ export function buildListRow(
   if (opts.value !== undefined) {
     out.push(
       scene.add
-        .text(x + w - 8, cy, opts.value, { fontFamily: 'monospace', fontSize: `${TYPE.body}px`, color: opts.dim ? '#6b6862' : hex(TEXT.highlight) })
+        .text(x + w - 8, cy, opts.value, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: opts.dim ? '#6b6862' : hex(TEXT.highlight) })
         .setOrigin(1, 0.5)
         .setScrollFactor(0)
         .setDepth(depth + 1),

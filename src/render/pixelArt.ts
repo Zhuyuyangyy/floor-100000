@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 
 import { bakeWalkSheets } from './walkcycle';
+import { bakeWeapon } from './weapon.ts';
 import { PALETTE } from './palette.ts';
 
 // Procedural pixel-art factory for 《第100000层：末日宿舍》.
@@ -126,4 +127,7 @@ export function generateAllPixelArt(scene: Phaser.Scene): void {
   // The side-view walk cycles. These are pixel data rather than Graphics calls,
   // so they are baked by walkcycle.ts through a CanvasTexture.
   bakeWalkSheets(scene);
+  // The crowbar the survivor carries. Separate from the sheets because it has to
+  // rotate around a grip point, which a baked character frame cannot do.
+  bakeWeapon(scene);
 }

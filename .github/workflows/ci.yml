@@ -6,6 +6,9 @@ on:
   pull_request:
 
 jobs:
+  # The merge gate. Typecheck, unit tests and the production build are
+  # deterministic: if this job is green, the code compiles, the rules hold and
+  # the bundle builds. It does not need a browser, so it stays fast.
   verify:
     runs-on: ubuntu-latest
     steps:
@@ -21,7 +24,35 @@ jobs:
         run: npm run test
       - name: Build
         run: npm run build
-      - name: Install Chromium for Playwright
-        run: npx playwright install --with-deps chromium
-      - name: E2E smoke
-        run: npm run test:e2e
+
+  # Browser regression suite, kept as its own job so a browser-only failure
+  # never hides whether the code itself is sound.
+  #
+  # Two things used to make this job lie: the browser came from whatever
+  # Google Chrome the runner image happened to ship, and the suite ran with
+  # 2 parallel workers against one Vite dev server. The same commit passed or
+  # failed depending on the day. The pinned Playwright image fixes the browser
+  # and the OS libraries; one worker and one retry absorb the remaining frame
+  # timing noise in a suite that drives a real Phaser loop.
+  e2e:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: E2E suite
+        run: npm run test:e2e -- --workers=1 --retries=1
+      - name: Upload Playwright failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-artifacts-${{ github.run_id }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7

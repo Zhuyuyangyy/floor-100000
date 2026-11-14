@@ -29,12 +29,16 @@ import {
   type TowerNavState,
 } from '../systems/TowerNav';
 import { SECTOR_COUNT, SECTOR_SIZE, TIERS, describeFloor, describeSector, sectorOf, sectorRange, type TierId } from '../core/tower';
+import { PLAYABLE_FLOORS_V01 } from '../core/constants';
 import { getFloorTemplate } from '../data/floorTemplates';
 import { describeFloorContents } from '../systems/LootSystem';
+import { encounterSpots } from '../systems/encounterSpots';
 import { saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
-import { applyPanelDepth, buildPanel, PANEL_DEPTH, type PanelObject } from '../render/panels';
-import { PALETTE, TEXT, hex } from '../render/palette.ts';
+import { applyPanelDepth, buildPanel, PANEL_DEPTH, PANEL_FILL_BANDS, PANEL_FRAME_PIECES, PANEL_SLICE, type PanelObject } from '../render/panels';
+import { PALETTE, ROLE, TEXT, hex } from '../render/palette.ts';
+import { TOWER_FOOT_TOP, TOWER_STRIP_W, TOWER_STRIP_X, TOWER_TAG_X, DETAIL_CONTENT_ACTION_GAP, DETAIL_CONTENT_W, DETAIL_FOOT_PAD, DETAIL_PANEL_H, DETAIL_PANEL_W, DETAIL_ROWS_TOP, DETAIL_ROW_COUNT, DETAIL_ROW_PITCH, DETAIL_ROW_X } from '../render/hudLayout';
+import { estimateLineHeight, estimateTextWidth, wrapText } from '../render/dialogueLayout';
 import type { GameState } from '../core/gameTypes';
 
 // TowerOverviewScene — the three-level map (docs/B2_TOWER_ARCHITECTURE.md):
@@ -52,11 +56,23 @@ const TYPE_TITLE = 32;
 const TYPE_BODY = 26;
 const TYPE_AUX = 22;
 
+// The bottom band's objects sit at TOWER_FOOT_TOP (render/hudLayout), 36px above
+// the canvas bottom. That used to be DESIGN_HEIGHT - 22, which put the control
+// hint's measured bounds at y 698..731 — the 26px type plus 6px of padding is
+// 33px tall, so the last 11 pixels of every level's hint line fell off the
+// 720px canvas (Playwright getBounds(), all three levels). The legend and the
+// transient message share the band, so they move together.
+
 type MapKey = 'up' | 'down' | 'left' | 'right' | 'enter' | 'esc';
 
-// Overview strip geometry (world units).
-const STRIP_X = 110;
-const STRIP_W = DESIGN_WIDTH - STRIP_X * 2;
+// Overview strip geometry (world units): TOWER_STRIP_X / TOWER_STRIP_W from
+// render/hudLayout, where uiLayout.test.ts can assert the fit arithmetically.
+// NOT the full DESIGN_WIDTH - TOWER_STRIP_X*2 (1060) any more. The 起点/终点 tags sit
+// in the right margin at TOWER_TAG_X, and the widest of them ("终点 第100000层",
+// 169px at TYPE_AUX — measured, not estimated) used to end at 1349: 69px past
+// the 1280 canvas, so the summit tag was clipped by the viewport on the one
+// screen whose whole job is showing the summit. TOWER_ENDPOINT_MARGIN (200)
+// leaves the tag's offset, its width and a right inset inside the canvas.
 // The sector grid is centred in the viewport so a whole 20x50 sector fits on
 // screen instead of hugging the left edge.
 const GRID_X = (DESIGN_WIDTH - SECTOR_COLS * SECTOR_CELL) / 2;
@@ -103,6 +119,11 @@ function mixColour(a: number, b: number, t: number): number {
 // I am going" at a glance.
 const COLOR_START = PALETTE.clothHigh;
 const COLOR_SUMMIT = PALETTE.dust;
+// The boss spine. Same red as the low-HP vignette and the combat numbers, so a
+// floor that can roll a guardian reads as danger before the player knows the
+// word for it. Deliberately unlike every tier colour: at 3px a row the mark has
+// to be recognisable by hue alone.
+const COLOR_BOSS = ROLE.danger;
 
 const LEGEND = [
   { color: COLOR_CURRENT, label: '当前' },
@@ -110,6 +131,28 @@ const LEGEND = [
   { color: COLOR_EXPLORED, label: '已探索' },
   { color: COLOR_LOCKED, label: '未打通' },
 ];
+
+// The floors that can roll a boss, read through encounterSpots' own API.
+//
+// The overview used to carry no boss marker at all: a player reading the map
+// had no way to tell that floor 5, 110 or 50010 has a guardian, which is the
+// one thing the map should warn about before the player walks in.
+//
+// Deliberately NOT a second filter over ENCOUNTER_TABLE: that is the exact
+// expression systems/encounterSpots already makes for its own marker
+// (BOSS_SPOT_FLOORS there), and a copy in the scene is how the map drifts from
+// the game the moment a segment is authored. Asking encounterSpots() per floor
+// delegates to the single source of truth, so a floor whose table gains a boss
+// entry gets its spine here automatically, and one that loses one loses it.
+// The seed is irrelevant to isBoss (it depends only on the floor), so a fixed
+// value reads the table; 0 is the obvious one. Computed once at module level —
+// it reads static data and drawOverview runs on every input.
+//
+// uiLayout.test.ts asserts this set equals [5, 110, 50010], so the derivation
+// is pinned against the table rather than against this expression.
+const BOSS_FLOOR_NUMBERS: readonly number[] = PLAYABLE_FLOORS_V01.filter((floor) =>
+  encounterSpots(0, floor).some((spot) => spot.isBoss),
+);
 
 const LEVEL_TITLE: Record<TowerNavState['level'], string> = {
   overview: '塔楼总览 · 100 个区段',
@@ -142,6 +185,8 @@ export class TowerOverviewScene extends Phaser.Scene {
   private messageText!: Phaser.GameObjects.Text;
 
   private detailObjects: PanelObject[] = [];
+  /** buildPanel's return for the detail card: [fill x PANEL_FILL_BANDS, frame x PANEL_FRAME_PIECES]. */
+  private detailPanelParts: PanelObject[] = [];
   private detailTitle!: Phaser.GameObjects.Text;
   private detailRows: Phaser.GameObjects.Text[] = [];
   private detailAction!: Phaser.GameObjects.Text;
@@ -241,7 +286,18 @@ export class TowerOverviewScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(100);
     this.stateText = this.add
-      .text(12, 26, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 2 } })
+      // Top-centre, under the tier readout — NOT the old (12, 26).
+      //
+      // At x=12 the state line sat at y 26..53 while the 32px title above it
+      // occupied 8..47: both left-aligned, the two printed 21px through each
+      // other (Playwright getBounds). Moving it down to 48 fixes that but puts
+      // its chip over the first sector-number label (37..96 × 63..88), and the
+      // top-right is already crowded (the zoom chip overlaps the 终点 tag by
+      // 88x12px). The top-centre slot is the one free band: the tier readout
+      // above it ends at 41, so 50..77 clears it, the title, the sector labels
+      // and both endpoint tags.
+      .text(DESIGN_WIDTH / 2, 50, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 2 } })
+      .setOrigin(0.5, 0)
       .setScrollFactor(0)
       .setDepth(100);
     this.infoText = this.add
@@ -250,19 +306,19 @@ export class TowerOverviewScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(100);
     this.hintText = this.add
-      .text(12, DESIGN_HEIGHT - 22, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_BODY}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
+      .text(12, DESIGN_HEIGHT - TOWER_FOOT_TOP, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_BODY}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 3 } })
       .setScrollFactor(0)
       .setDepth(100);
     // Colour legend for the sector grid. The map's whole language is colour, so
     // the four states have to be spelled out rather than guessed at.
     this.legendGfx = this.add.graphics().setScrollFactor(0).setDepth(102);
     this.legendText = this.add
-      .text(DESIGN_WIDTH - 12, DESIGN_HEIGHT - 22, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight) })
+      .text(DESIGN_WIDTH - 12, DESIGN_HEIGHT - TOWER_FOOT_TOP, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight) })
       .setOrigin(1, 0)
       .setScrollFactor(0)
       .setDepth(102);
     this.messageText = this.add
-      .text(DESIGN_WIDTH / 2, DESIGN_HEIGHT - 22, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_BODY}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } })
+      .text(DESIGN_WIDTH / 2, DESIGN_HEIGHT - TOWER_FOOT_TOP, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_BODY}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12cc', padding: { x: 8, y: 4 } })
       .setOrigin(0.5, 0)
       .setScrollFactor(0)
       .setDepth(101)
@@ -305,20 +361,38 @@ export class TowerOverviewScene extends Phaser.Scene {
   }
 
   private buildDetailPanel(): void {
-    const w = 460;
-    const h = 178;
+    const w = DETAIL_PANEL_W;
+    const h = DETAIL_PANEL_H;
     const cx = DESIGN_WIDTH / 2;
     const cy = DESIGN_HEIGHT / 2;
     const left = cx - w / 2;
     const top = cy - h / 2;
 
-    this.detailObjects.push(...buildPanel(this, cx, cy, w, h, 'yellow', PANEL_DEPTH.tower.detail));
+    // The skin is captured, not just pushed: refreshDetail re-places it when the
+    // floor's content list wraps past one line (the panel grows around it).
+    this.detailPanelParts = buildPanel(this, cx, cy, w, h, 'yellow', PANEL_DEPTH.tower.detail);
+    this.detailObjects.push(...this.detailPanelParts);
     this.detailTitle = this.add
       .text(cx, top + 22, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_TITLE}px`, color: hex(PALETTE.lightHigh) })
       .setOrigin(0.5);
     this.detailRows = [];
-    for (let i = 0; i < 5; i++) {
-      this.detailRows.push(this.add.text(left + 26, top + 54 + i * 20, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_BODY}px`, color: hex(TEXT.primary) }));
+    for (let i = 0; i < DETAIL_ROW_COUNT; i++) {
+      // The content row (the last one) wraps: a floor with five containers and
+      // ground loot lists up to 1113px of text (measured across seeds 42/7/2026,
+      // worst floor 50008), and a single unwrapped line at that width runs
+      // ~680px past the panel frame. useAdvancedWrap is load-bearing — Chinese
+      // has no spaces, so the basic wrapper never breaks the line at all.
+      const isContent = i === DETAIL_ROW_COUNT - 1;
+      this.detailRows.push(
+        this.add
+          .text(left + DETAIL_ROW_X, top + DETAIL_ROWS_TOP + i * DETAIL_ROW_PITCH, '', {
+            fontFamily: FONT_FAMILY,
+            fontSize: `${TYPE_BODY}px`,
+            color: hex(TEXT.primary),
+            ...(isContent ? { wordWrap: { width: DETAIL_CONTENT_W, useAdvancedWrap: true } } : {}),
+          })
+          .setOrigin(0, 0),
+      );
     }
     this.detailAction = this.add
       .text(cx, top + h - 20, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_BODY}px`, color: hex(PALETTE.clothHigh) })
@@ -371,31 +445,31 @@ export class TowerOverviewScene extends Phaser.Scene {
       g.fillStyle(tierColor(summary.tiers[0].tier), 1);
       // 2px of fill with a 1px gap keeps 100 rows countable as a striped tower
       // instead of one solid block where adjacent sectors share a tier.
-      g.fillRect(STRIP_X, y, STRIP_W, OVERVIEW_ROW_H - 1);
+      g.fillRect(TOWER_STRIP_X, y, TOWER_STRIP_W, OVERVIEW_ROW_H - 1);
       // A lit top edge on every row: at 3px a row there is no room for shading,
       // but one lighter pixel on top turns a flat stripe into a ledge, and it is
       // what stops the overview reading as a bar chart.
       g.fillStyle(PALETTE.dust, 0.3);
-      g.fillRect(STRIP_X, y, STRIP_W, 1);
+      g.fillRect(TOWER_STRIP_X, y, TOWER_STRIP_W, 1);
       if (visited) {
         // A full-height explored stripe along the left edge of the strip: at 3px
         // per sector anything narrower is invisible.
         g.fillStyle(COLOR_EXPLORED, 1);
-        g.fillRect(STRIP_X, y, 8, OVERVIEW_ROW_H - 1);
+        g.fillRect(TOWER_STRIP_X, y, 8, OVERVIEW_ROW_H - 1);
       }
     }
 
     // Current sector: the one thing that must always be visible and legible.
     const cy = this.rowY(currentSector);
     this.currentGfx.fillStyle(COLOR_CURRENT, 1);
-    this.currentGfx.fillRect(STRIP_X, cy, STRIP_W, OVERVIEW_ROW_H);
+    this.currentGfx.fillRect(TOWER_STRIP_X, cy, TOWER_STRIP_W, OVERVIEW_ROW_H);
     this.currentGfx.lineStyle(1, PALETTE.ink, 1);
-    this.currentGfx.strokeRect(STRIP_X - 0.5, cy - 0.5, STRIP_W + 1, OVERVIEW_ROW_H + 1);
+    this.currentGfx.strokeRect(TOWER_STRIP_X - 0.5, cy - 0.5, TOWER_STRIP_W + 1, OVERVIEW_ROW_H + 1);
 
     // Keyboard cursor.
     const ky = this.rowY(this.nav.cursor);
     this.cursorGfx.lineStyle(1, COLOR_CURSOR, 1);
-    this.cursorGfx.strokeRect(STRIP_X - 3, ky - 1, STRIP_W + 6, OVERVIEW_ROW_H + 2);
+    this.cursorGfx.strokeRect(TOWER_STRIP_X - 3, ky - 1, TOWER_STRIP_W + 6, OVERVIEW_ROW_H + 2);
 
     // The two ends of the climb. The summit in particular has to be marked: it
     // is the goal the whole tower is arranged around, and at 3px a row the last
@@ -405,26 +479,47 @@ export class TowerOverviewScene extends Phaser.Scene {
     const startY = this.rowY(0); // the slum, at the base
     const endY = this.rowY(SECTOR_COUNT - 1); // the summit, at the top
     this.currentGfx.fillStyle(COLOR_START, 1);
-    this.currentGfx.fillRect(STRIP_X + STRIP_W - 12, startY, 12, OVERVIEW_ROW_H);
+    this.currentGfx.fillRect(TOWER_STRIP_X + TOWER_STRIP_W - 12, startY, 12, OVERVIEW_ROW_H);
     this.currentGfx.fillStyle(COLOR_SUMMIT, 1);
-    this.currentGfx.fillRect(STRIP_X + STRIP_W - 12, endY, 12, OVERVIEW_ROW_H);
+    this.currentGfx.fillRect(TOWER_STRIP_X + TOWER_STRIP_W - 12, endY, 12, OVERVIEW_ROW_H);
     // Ticks reaching into the right margin, where the labels sit.
     this.currentGfx.fillStyle(COLOR_START, 1);
-    this.currentGfx.fillRect(STRIP_X + STRIP_W, startY + 1, 6, 1);
+    this.currentGfx.fillRect(TOWER_STRIP_X + TOWER_STRIP_W, startY + 1, 6, 1);
     this.currentGfx.fillStyle(COLOR_SUMMIT, 1);
-    this.currentGfx.fillRect(STRIP_X + STRIP_W, endY + 1, 6, 1);
+    this.currentGfx.fillRect(TOWER_STRIP_X + TOWER_STRIP_W, endY + 1, 6, 1);
 
     this.drawTierBands();
     this.drawSectorLabels();
+    this.drawBossSpine();
     this.drawEndpoints();
+  }
+
+  // The boss spine: one red flag down the left edge of every sector whose
+  // floors can roll a guardian. At 3px a row there is no room for a second
+  // colour band inside the strip (the tier colour IS the row), so the mark
+  // lives in the left margin the explored stripe already uses — 8px wide,
+  // full row height, drawn after the explored stripe so it wins where both
+  // apply. Floor 5 and floor 110 share sector 0, which is correct: one sector
+  // with two guardians is still one marked sector.
+  private drawBossSpine(): void {
+    for (const floor of BOSS_FLOOR_NUMBERS) {
+      const y = this.rowY(sectorOf(floor));
+      this.currentGfx.fillStyle(COLOR_BOSS, 1);
+      this.currentGfx.fillRect(TOWER_STRIP_X, y, 8, OVERVIEW_ROW_H - 1);
+      // A 1px tick above the row: at 3px the row's own top edge is the lit
+      // dust line, and without this the spine reads as a darker stripe rather
+      // than a mark standing proud of the row.
+      this.currentGfx.fillStyle(PALETTE.dust, 1);
+      this.currentGfx.fillRect(TOWER_STRIP_X, y - 1, 8, 1);
+    }
   }
 
   // 起点 / 终点 tags in the right margin. At 3px a row neither end can carry its
   // own text, and the summit is the one thing a player must be able to find
   // without counting rows.
   private drawEndpoints(): void {
-    this.endpointLabels[0].setPosition(STRIP_X + STRIP_W + 10, this.rowY(0) - 1);
-    this.endpointLabels[1].setPosition(STRIP_X + STRIP_W + 10, this.rowY(SECTOR_COUNT - 1) - 5);
+    this.endpointLabels[0].setPosition(TOWER_TAG_X, this.rowY(0) - 1);
+    this.endpointLabels[1].setPosition(TOWER_TAG_X, this.rowY(SECTOR_COUNT - 1) - 5);
   }
 
   private drawTierBands(): void {
@@ -434,7 +529,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     for (const tier of TIERS) {
       const y = this.rowY(Math.floor((tier.minFloor - 1) / SECTOR_SIZE));
       g.lineStyle(1, PALETTE.dust, 0.9);
-      g.lineBetween(STRIP_X - 12, y, STRIP_X + STRIP_W + 12, y);
+      g.lineBetween(TOWER_STRIP_X - 12, y, TOWER_STRIP_X + TOWER_STRIP_W + 12, y);
     }
   }
 
@@ -447,7 +542,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.sectorLabels.forEach((label, i) => {
       // Label i names sector i*10, which now sits at rowY(i*10) — low on the
       // strip for low sectors, high for high ones.
-      label.setPosition(STRIP_X - 14, this.rowY(i * 10));
+      label.setPosition(TOWER_STRIP_X - 14, this.rowY(i * 10));
     });
   }
 
@@ -516,6 +611,18 @@ export class TowerOverviewScene extends Phaser.Scene {
     const ky = cellY(this.nav.cursor);
     this.cursorGfx.lineStyle(2, COLOR_CURSOR, 1);
     this.cursorGfx.strokeRect(kx - 2, ky - 2, SECTOR_CELL + 3, SECTOR_CELL + 3);
+
+    // Boss cells: a red rim, the same hue as the overview's spine, so the
+    // guardian's floor is findable inside the sector and not only on the
+    // overview's row. Drawn last so it reads over the cell's own bevel.
+    for (const floor of BOSS_FLOOR_NUMBERS) {
+      if (floor < from || floor > to) continue;
+      const col = (floor - from) % SECTOR_COLS;
+      const bx = originX + col * SECTOR_CELL;
+      const by = cellY(floor);
+      this.currentGfx.lineStyle(2, COLOR_BOSS, 1);
+      this.currentGfx.strokeRect(bx - 1.5, by - 1.5, SECTOR_CELL + 2, SECTOR_CELL + 2);
+    }
   }
 
   private isSectorVisited(sector: number): boolean {
@@ -587,28 +694,57 @@ export class TowerOverviewScene extends Phaser.Scene {
   }
 
   private refreshLegend(): void {
-    // Only the sector grid and the floor detail carry the colour language.
-    const show = this.nav.level === 'sector' || this.nav.level === 'floor';
+    // Only the sector grid, the floor detail and the overview's boss spine
+    // carry a colour language worth spelling out.
+    const level = this.nav.level;
+    const show = level === 'overview' || level === 'sector' || level === 'floor';
     this.legendGfx.setVisible(show);
     this.legendText.setVisible(show);
     if (!show) return;
 
+    // Cleared every pass: the graphics object accumulates fillRects, so without
+    // this the four sector swatches stayed behind when the overview's single
+    // boss swatch replaced them (and came back on the next drill-down).
+    this.legendGfx.clear();
     const swatch = 7;
     const gap = 4;
-    // Lay the four entries out right-to-left from the bottom-right corner, so
-    // the legend never collides with the bottom-left control hint.
-    let x = DESIGN_WIDTH - 12;
-    const y = DESIGN_HEIGHT - 22;
-    for (let i = LEGEND.length - 1; i >= 0; i--) {
-      const { color, label } = LEGEND[i];
-      const textW = label.length * TYPE_AUX * 0.5;
-      const blockW = swatch + gap + textW;
-      x -= blockW;
-      this.legendGfx.fillStyle(color, 1);
-      this.legendGfx.fillRect(x, y + 3, swatch, swatch);
-      x -= gap;
+    // Lay the entries out right-to-left from the bottom-right corner, so the
+    // legend never collides with the bottom-left control hint.
+    const y = DESIGN_HEIGHT - TOWER_FOOT_TOP;
+
+    // The legend spells out every non-tier colour on screen. The overview's
+    // only one is the boss spine — its other marks (当前/起点/终点) carry their
+    // own tags. The sector and floor views add the four cell states, plus the
+    // boss rim when the sector in view actually holds a guardian.
+    const entries: Array<{ color: number; label: string }> =
+      level === 'overview' ? [{ color: COLOR_BOSS, label: '守段者层' }] : [...LEGEND];
+    if (level !== 'overview') {
+      const { from, to } = sectorRange(this.nav.sector);
+      if (BOSS_FLOOR_NUMBERS.some((floor) => floor >= from && floor <= to)) {
+        entries.push({ color: COLOR_BOSS, label: '守段者层' });
+      }
     }
-    this.legendText.setText(LEGEND.map((l) => l.label).join('  '));
+
+    // The swatches have to land on their own labels inside the joined string,
+    // so the layout mirrors that string: label widths and the '  ' separator
+    // measured with the project's estimator (one em per Han glyph — exact for
+    // these labels). The old `label.length * TYPE_AUX * 0.5` halved every Han
+    // glyph, which put the swatches ~150px right of their labels: measured,
+    // "当前" was estimated 22px wide and drawn 44px.
+    const sepW = estimateTextWidth('  ', TYPE_AUX);
+    const widths = entries.map((l) => estimateTextWidth(l.label, TYPE_AUX));
+    const labelRight: number[] = [];
+    let right = DESIGN_WIDTH - 12;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      labelRight[i] = right;
+      right -= widths[i] + (i > 0 ? sepW : 0);
+    }
+    entries.forEach((entry, i) => {
+      const swatchX = labelRight[i] - widths[i] - gap - swatch;
+      this.legendGfx.fillStyle(entry.color, 1);
+      this.legendGfx.fillRect(swatchX, y + 3, swatch, swatch);
+    });
+    this.legendText.setText(entries.map((l) => l.label).join('  '));
   }
 
   private refreshDetail(): void {
@@ -638,8 +774,44 @@ export class TowerOverviewScene extends Phaser.Scene {
     // must read the resolved world (seed rolls applied, taken stacks removed). This
     // scene used to read the loot table instead, so it advertised 布料 in floor 1's
     // cabinet on every seed and kept listing contents already emptied.
-    this.detailRows[4].setText(describeFloorContents(this.state, floor));
+    const contents = describeFloorContents(this.state, floor);
+    this.detailRows[4].setText(contents);
     this.detailAction.setText(enterable.ok ? '按 Enter 进入' : '需先通过实际通路抵达').setColor(enterable.ok ? hex(PALETTE.clothHigh) : hex(TEXT.warn));
+
+    // ── adaptive card ────────────────────────────────────────────────────────
+    // The content row wraps to as many lines as the floor needs, and the card
+    // grows around it: the action line follows the content's bottom, the skin
+    // wraps both, and the whole card keeps its centre on screen. Re-place only —
+    // the objects were built once in buildDetailPanel at the base geometry.
+    const lineH = estimateLineHeight(TYPE_BODY);
+    const contentLines = wrapText(contents, DETAIL_CONTENT_W, TYPE_BODY).length;
+    const contentTop = DETAIL_ROWS_TOP + DETAIL_ROW_PITCH * (DETAIL_ROW_COUNT - 1);
+    const actionTop = contentTop + contentLines * lineH + DETAIL_CONTENT_ACTION_GAP;
+    const panelH = Math.max(DETAIL_PANEL_H, actionTop + lineH + DETAIL_FOOT_PAD);
+
+    const cx = DESIGN_WIDTH / 2;
+    const left = cx - DETAIL_PANEL_W / 2;
+    const top = DESIGN_HEIGHT / 2 - panelH / 2;
+    const right = left + DETAIL_PANEL_W;
+    const bottom = top + panelH;
+
+    const bandH = panelH / PANEL_FILL_BANDS;
+    this.detailPanelParts.slice(0, PANEL_FILL_BANDS).forEach((part, i) => {
+      (part as Phaser.GameObjects.Rectangle).setPosition(cx, top + bandH * (i + 0.5)).setDisplaySize(DETAIL_PANEL_W, bandH + 1);
+    });
+    const [pTL, pTR, pBL, pBR, pT, pB, pL, pR] = this.detailPanelParts.slice(PANEL_FILL_BANDS, PANEL_FILL_BANDS + PANEL_FRAME_PIECES) as Phaser.GameObjects.Image[];
+    pTL.setPosition(left, top);
+    pTR.setPosition(right - PANEL_SLICE, top);
+    pBL.setPosition(left, bottom - PANEL_SLICE);
+    pBR.setPosition(right - PANEL_SLICE, bottom - PANEL_SLICE);
+    pT.setPosition(left + PANEL_SLICE, top).setDisplaySize(DETAIL_PANEL_W - PANEL_SLICE * 2, PANEL_SLICE);
+    pB.setPosition(left + PANEL_SLICE, bottom - PANEL_SLICE).setDisplaySize(DETAIL_PANEL_W - PANEL_SLICE * 2, PANEL_SLICE);
+    pL.setPosition(left, top + PANEL_SLICE).setDisplaySize(PANEL_SLICE, panelH - PANEL_SLICE * 2);
+    pR.setPosition(right - PANEL_SLICE, top + PANEL_SLICE).setDisplaySize(PANEL_SLICE, panelH - PANEL_SLICE * 2);
+
+    this.detailTitle.setPosition(cx, top + 22);
+    this.detailRows.forEach((row, i) => row.setPosition(left + DETAIL_ROW_X, top + DETAIL_ROWS_TOP + i * DETAIL_ROW_PITCH));
+    this.detailAction.setPosition(cx, top + actionTop + lineH / 2);
   }
 
   // ── input ───────────────────────────────────────────────────────────────

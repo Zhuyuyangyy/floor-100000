@@ -21,6 +21,11 @@ export type FurnitureKey = (typeof FURNITURE_KEYS)[number];
 
 export function containerTextureKey(containerId: string): FurnitureKey | null {
   switch (containerId) {
+    // `bed` is both a room fixture (the one you sleep in) and, from the 100-110
+    // segment, a lootable container — a dorm bunk with someone's kit stuffed under
+    // it. Same texture either way; the difference is which system owns it.
+    case 'bed':
+      return 'furn_bed';
     case 'cabinet':
       return 'furn_cabinet';
     case 'shelf':
@@ -39,6 +44,14 @@ export function containerTextureKey(containerId: string): FurnitureKey | null {
       return 'furn_watertank';
     case 'counter':
       return 'furn_counter';
+    // The worker dorm (100-110) stores things in beds and at workbenches, not
+    // only in cabinets. Both textures already exist for the starting room's
+    // furniture, so they are lootable containers here rather than unopenable
+    // props: an unmapped id would make the container invisible. `bed` is both a
+    // fixture (the one you sleep in) and a bunk with someone's kit stuffed under
+    // it — same texture, different system.
+    case 'workbench':
+      return 'furn_workbench';
     default:
       return null;
   }

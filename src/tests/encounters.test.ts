@@ -329,3 +329,19 @@ describe('shouldSkip / markResolved 与非法选择', () => {
     }
   });
 });
+
+// 6-10 层从来没有自己的 FLOOR_LOOT_POOLS，靠的是「表外楼层回落到最深楼层」。
+// 而最深楼层曾经是 10——同样没有自己的池子——于是 lootPoolForFloor 返回
+// undefined，grantLoot 在 `.length` 上抛错。100-110 接上最深楼层之后这条兜底
+// 才第一次拿到真表；这里把「每一层都能结算」钉死，防止下次扩段再踩。
+describe('每个已写楼层的物资池都能结算', () => {
+  it('6-10 与 100-110 的 loot/cache 都不抛错且被消耗', () => {
+    for (const floor of [6, 7, 8, 9, 10, 100, 101, 105, 110]) {
+      for (const kind of ['loot', 'cache'] as const) {
+        const s = createNewGame(42);
+        const r = resolveEncounter(s, makeEncounter(kind, floor), 'take');
+        expect(r.consumed, `${kind} @ floor ${floor}`).toBe(true);
+      }
+    }
+  });
+});

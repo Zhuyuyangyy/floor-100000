@@ -33,7 +33,7 @@ export interface EncounterResult {
 }
 
 // ---------------------------------------------------------------------------
-// 权重表：按 1..5 层配置（PLAYABLE_FLOORS_V01 即 1-5）。
+// 权重表：按段配置。段内越往上 ambush 越重，段顶是守段者。
 // 设计意图：
 //  - 1-2 层 loot 主导：新手期鼓励搜刮、建立资源缓冲，战斗压力低；
 //  - 3-4 层 ambush 权重上升、cache 权重上升：越深越危险，同时需要更好的
@@ -42,6 +42,9 @@ export interface EncounterResult {
 //    「肥」体现在内容质量（见 FLOOR_LOOT_POOLS 与 cache 的 5 层保底），
 //    而非权重——否则关底层会被普通搜刮稀释。
 //  - 总体趋势：层数越高，ambush+cache 合计占比越大、普通 loot 占比越小。
+//  - 100-110（阶层 2 工人宿舍区）有自己的保安，ambush 从段首就高于 1-10 层
+//    的天花板（10 层的 44），一路涨到 109 层；110 层是段顶，守段者的 boss
+//    权重压过 ambush——照抄 5 层的写法。
 // ---------------------------------------------------------------------------
 const FLOOR_WEIGHT_PROFILE: Record<number, Partial<Record<EncounterKind, number>>> = {
   1: { loot: 60, note: 14, trader: 12, cache: 10, ambush: 4 },
@@ -53,12 +56,26 @@ const FLOOR_WEIGHT_PROFILE: Record<number, Partial<Record<EncounterKind, number>
   // 6-10 层（阶层 1 的上半段）：守门人只守第 5 层，所以这里没有 boss；越往上
   // 越像被人搜过，loot 一路降、ambush 一路升。缺了这几行会让 buildEncounterTable
   // 在 k='loot' 第一次查 profile 时就 TypeError —— 表是以 DEEPEST_FLOOR 为兜底的，
-  // 而 DEEPEST_FLOOR 现在就是 10。
+  // 而 DEEPEST_FLOOR 现在就是 110。
   6: { loot: 28, note: 8, trader: 10, cache: 20, ambush: 34 },
   7: { loot: 26, note: 8, trader: 9, cache: 21, ambush: 36 },
   8: { loot: 24, note: 7, trader: 8, cache: 22, ambush: 39 },
   9: { loot: 22, note: 6, trader: 7, cache: 23, ambush: 42 },
   10: { loot: 20, note: 6, trader: 6, cache: 24, ambush: 44 },
+  // 阶层 2：宿舍区有保安巡逻，ambush 是这里的底色。100 层是段首，玩家刚从
+  // 电梯下来，不给 boss；110 层是段顶，守段者把着往 1000 层的货梯。
+  100: { loot: 20, note: 4, trader: 6, cache: 24, ambush: 46 },
+  101: { loot: 19, note: 4, trader: 6, cache: 23, ambush: 48 },
+  102: { loot: 18, note: 4, trader: 5, cache: 23, ambush: 50 },
+  103: { loot: 17, note: 4, trader: 5, cache: 22, ambush: 52 },
+  104: { loot: 16, note: 3, trader: 5, cache: 22, ambush: 54 },
+  105: { loot: 15, note: 3, trader: 5, cache: 21, ambush: 56 },
+  106: { loot: 14, note: 3, trader: 4, cache: 21, ambush: 58 },
+  107: { loot: 13, note: 3, trader: 4, cache: 20, ambush: 60 },
+  108: { loot: 12, note: 2, trader: 4, cache: 20, ambush: 62 },
+  109: { loot: 11, note: 2, trader: 3, cache: 19, ambush: 65 },
+  // boss 32 是当层最高；ambush 30 紧随其后，和 5 层一样由守段者压住普通遭遇。
+  110: { loot: 10, note: 2, trader: 3, cache: 20, ambush: 30, boss: 32 },
 };
 
 // 固定枚举顺序，保证 ENCOUNTER_TABLE 的行顺序与加权 roll 的遍历顺序确定。
@@ -116,10 +133,33 @@ const FLOOR_LOOT_POOLS: Record<number, ItemId[]> = {
   3: ['cloth', 'tape', 'scrap_metal', 'battery', 'wire'],
   4: ['scrap_metal', 'wire', 'battery', 'fuse', 'filter'],
   5: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
+  // 阶层 2：宿舍区的遭遇产出是「体制内」的零件——配给、维修、值班备件，
+  // 没有 1-2 层的面包（食物由楼层容器保底，遭遇池只管材料）。
+  100: ['cloth', 'tape', 'battery', 'scrap_metal', 'wire'],
+  101: ['cloth', 'tape', 'battery', 'scrap_metal', 'wire'],
+  102: ['filter', 'wire', 'battery', 'cloth', 'tape'],
+  103: ['filter', 'wire', 'battery', 'scrap_metal', 'cloth'],
+  104: ['filter', 'wire', 'battery', 'fuse', 'cloth'],
+  105: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
+  106: ['filter', 'fuse', 'battery', 'wire', 'tape'],
+  107: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
+  108: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
+  109: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
+  110: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
 };
 
 function lootPoolForFloor(floor: number): ItemId[] {
-  return FLOOR_LOOT_POOLS[floor] ?? FLOOR_LOOT_POOLS[DEEPEST_FLOOR];
+  // Three fallbacks, for the same reason the weight table has two: DEEPEST_FLOOR
+  // is whatever the playable list ends on, and until 100-110 were authored it
+  // was floor 10 — a floor with no pool of its own, so 6..10 fell through to
+  // `undefined` and grantLoot would have crashed on `.length`. The gatekeeper's
+  // pool is a real table, so it is the last resort.
+  return (
+    FLOOR_LOOT_POOLS[floor] ??
+    FLOOR_LOOT_POOLS[DEEPEST_FLOOR] ??
+    FLOOR_LOOT_POOLS[GATEKEEPER_FLOOR] ??
+    FLOOR_LOOT_POOLS[1]
+  );
 }
 
 // 遭遇出现时的氛围短句（seeded 选取，同 spotId 恒定）。

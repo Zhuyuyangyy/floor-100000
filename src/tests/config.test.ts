@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { PLAYABLE_SEGMENTS } from '../core/segments';
+import { hasFloorContent } from '../data/floorTemplates';
 import { assertGameBalanceConfig, GAME_CONFIG } from '../core/config';
 import { PLAYABLE_FLOORS_V01 } from '../core/constants';
 
@@ -7,15 +9,22 @@ describe('game-balance config', () => {
     expect(GAME_CONFIG.schemaVersion).toBe(1);
   });
 
-  it('declares a contiguous playable range starting at floor 1', () => {
+  it('declares exactly the authored segments, with no holes inside a segment', () => {
     const floors = GAME_CONFIG.world.playableFloorsV01;
-    // The slum segment is authored floor by floor, so it must never shrink below
-    // the five floors the chapter shipped with; the exact count is the config's
-    // business, not this test's.
-    expect(floors.length).toBeGreaterThanOrEqual(5);
-    expect(floors[0]).toBe(1);
-    // No holes and no duplicates: floor N+1 is reachable only through floor N.
-    expect(floors).toEqual(Array.from({ length: floors.length }, (_, i) => i + 1));
+    // The config used to be a single contiguous run and this test asserted 1..N.
+    // The tower is segmented now (1-10, then 100-110), so the honest assertion is
+    // that config and core/segments agree: every floor of every segment, in order,
+    // nothing between them. A hole inside a segment is a bug; a gap between
+    // segments is the point.
+    // Only the segments that actually have floors: the tower declares six, and
+    // config lists the authored ones. Comparing against all six would fail on the
+    // four segments nobody has built yet.
+    const authored = PLAYABLE_SEGMENTS.filter((seg) => hasFloorContent(seg.from));
+    const expected = authored.flatMap((seg) =>
+      Array.from({ length: seg.to - seg.from + 1 }, (_, i) => seg.from + i),
+    );
+    expect(floors).toEqual(expected);
+    expect(new Set(floors).size).toBe(floors.length);
   });
 
   it('starting items match the GDD baseline exactly', () => {

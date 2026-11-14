@@ -13,11 +13,16 @@ import {
   PLAYABLE_FLOORS_V01,
 } from '../core/constants';
 import { getFloorTemplate } from '../data/floorTemplates';
+import { segmentOf } from '../core/segments';
 import type { GameState } from '../core/gameTypes';
 
 // Pure floor/movement rules (docs/02_TECH_SPEC.md §3: core rules are testable,
-// Phaser only renders). Floors are the contiguous v0.1 range 99996..100000;
-// "up" (+1) climbs toward 100000, "down" (-1) descends toward 99996.
+// Phaser only renders). The playable floors are no longer one contiguous range:
+// the tower is authored in segments (1-10, 100-110, ...) with unexplored floors
+// between them. A staircase only ever connects two ADJACENT floors of the SAME
+// segment; crossing the gap is the freight lift's job, never the stairs'.
+//
+// "up" (+1) climbs toward higher floors, "down" (-1) descends.
 
 export type FloorChangeResult =
   | { ok: true; from: number; to: number }
@@ -57,12 +62,29 @@ export function stairBendFor(direction: 1 | -1, style: StairStyle): number {
   return direction === 1 ? 96 : -96;
 }
 
+/**
+ * The floor one step away that a staircase actually reaches, or null.
+ *
+ * The target must be authored AND inside the same segment. That single rule is
+ * what stops 10 -> 100 from working: those two floors are playable, but the 89
+ * floors between them were never built, so a staircase cannot span the gap.
+ * The segment itself is the authority here — the playable list only answers
+ * "is this floor built", never "are these two floors neighbours".
+ */
+function stairNeighbour(floor: number, direction: 1 | -1): number | null {
+  const to = floor + direction;
+  const here = segmentOf(floor);
+  const there = segmentOf(to);
+  if (!here || !there || here.id !== there.id) return null;
+  return PLAYABLE_FLOORS_V01.includes(to) ? to : null;
+}
+
 export function hasUpExit(floor: number): boolean {
-  return PLAYABLE_FLOORS_V01.includes(floor + 1);
+  return stairNeighbour(floor, 1) !== null;
 }
 
 export function hasDownExit(floor: number): boolean {
-  return PLAYABLE_FLOORS_V01.includes(floor - 1);
+  return stairNeighbour(floor, -1) !== null;
 }
 
 export function floorName(floor: number): string {
@@ -111,12 +133,14 @@ export function completeStairTraversal(state: GameState, traversal: StairTravers
 
 // Applies a floor change to state on success (moving the player to the entry
 // point). Returns a typed failure instead of throwing for out-of-range moves.
-// `direction` is ±1, so the target is always adjacent — the range check below is
-// the only way this can fail.
+// `direction` is ±1, so the target is always one number away — but it may be a
+// floor that was never built (10 -> 11, 100 -> 99) and those are refused here.
+// The failure reason stays 'top'/'bottom' because from the player's view the
+// useful fact is "this segment ends here"; the lift takes over at 'top'.
 export function tryChangeFloor(state: GameState, direction: 1 | -1): FloorChangeResult {
   const from = state.currentFloor;
-  const to = from + direction;
-  if (!PLAYABLE_FLOORS_V01.includes(to)) {
+  const to = stairNeighbour(from, direction);
+  if (to === null) {
     return { ok: false, reason: direction === 1 ? 'top' : 'bottom' };
   }
   state.currentFloor = to;

@@ -148,19 +148,27 @@ describe('liftOutcome', () => {
   });
 
   it('refuses a pass-holder when the target segment has no floors yet', () => {
-    // The real world right now: floor 100 is declared but unauthored.
-    expect(hasFloorContent(100)).toBe(false);
-    expect(liftOutcome(badge, 10, hasFloorContent)).toBe('not-connected');
+    // 100-110 are authored now; the segment above them (1000-1010) is not, so
+    // the same refusal must happen at 110 instead of at 10.
+    expect(hasFloorContent(100)).toBe(true);
+    const sticker = { player: { homeUpgrades: ['pass_sticker'] as string[] } };
+    expect(liftOutcome(sticker, 110, hasFloorContent)).toBe('not-connected');
   });
 
   it('only rides when the pass is held and the floor can be built', () => {
     expect(liftOutcome(badge, 10, () => true)).toBe('ok');
     expect(liftOutcome(everything, 10010, () => true)).toBe('ok');
+    // The real world: 100 is authored and the badge is in hand, so the first
+    // lift ride of the game actually completes.
+    expect(liftOutcome(badge, 10, hasFloorContent)).toBe('ok');
   });
 
-  it('matches the authored floors, so floors 1-10 cannot be refused', () => {
+  it('matches the authored floors: both authored segments and neither gap', () => {
     for (let f = 1; f <= 10; f++) expect(hasFloorContent(f)).toBe(true);
+    for (let f = 100; f <= 110; f++) expect(hasFloorContent(f)).toBe(true);
     expect(hasFloorContent(11)).toBe(false);
+    expect(hasFloorContent(50)).toBe(false);
+    expect(hasFloorContent(99)).toBe(false);
     // 100000 resolves through DEV_FLOOR_ALIAS to floor 1's table, but it is not
     // authored content and must NOT read as connected: the lift asks this before
     // moving anyone, and a true here would drop the player onto floor 1's layout

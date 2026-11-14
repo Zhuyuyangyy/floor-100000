@@ -1,4 +1,5 @@
 import type { GameState } from '../core/gameTypes';
+import { segmentOf } from '../core/segments';
 
 // OVERHAUL Wave C2: the paid shortcut — Centum's signature economy move.
 // Its source (docs/RE_COMPETITIVE.md) prices a 2-4 floor skip as
@@ -11,10 +12,15 @@ import type { GameState } from '../core/gameTypes';
 // (a prompt at the up stairwell) and applies the jump through the existing
 // floor-change path.
 
-// The shortcut appears on these floors only: not on the dorm, not on the top
-// floor (the guardian's floor is walked, not skipped past).
+// The shortcut appears on these floors only: not on the dorm, and not on the
+// floor where the segment's stairs end. The second half of that rule is new:
+// callers used to pass the whole tower's top, so once 100-110 were authored
+// floor 10 was "below the top" and the prompt appeared there — the player paid
+// and the jump landed on the 89-floor gap. A shortcut skips floors that exist,
+// so it is confined to the segment, exactly like the stairs.
 export function shortcutAvailable(floor: number, top: number): boolean {
-  return floor >= 2 && floor < top;
+  const here = segmentOf(floor);
+  return floor >= 2 && floor < top && here !== undefined && floor < here.to;
 }
 
 // The price of skipping `floors` floors from `floor`, after `timesTaken`

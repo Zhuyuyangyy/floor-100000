@@ -361,13 +361,14 @@ describe('the seven-day budget closes (new: viability margin)', () => {
     expect(have).toBeGreaterThan(need);
     // Thin on purpose: the frozen design makes clean water precious in the slum.
     // The bound is a rate per floor, not an absolute, because the chapter now
-    // spans ten floors and every one of them must guarantee a bottle (30 thirst
-    // points) or it becomes a death trap. 0.5 bottle per floor is therefore the
-    // arithmetic floor; holding it at 0.6 leaves ~3 points of headroom per
-    // floor, so a second guaranteed bottle anywhere tripping this is exactly the
-    // regression the old absolute bound was catching.
-    const maxPerFloor = 30 * 0.6;
-    expect(have - need).toBeLessThan(PLAYABLE_FLOORS_V01.length * maxPerFloor);
+    // spans two authored segments and every floor must guarantee a drink (30
+    // thirst points) or it becomes a death trap. Tier 1 is held to 0.6 bottle of
+    // SURPLUS per floor; tier 2 (100-110) is authored with exactly one bottle
+    // per floor and nothing more, so its allowance is exactly one. Adding a
+    // second guaranteed bottle anywhere in the dorm tier trips this — that is
+    // the regression the bound exists to catch, not the tier itself.
+    const surplusCeiling = PLAYABLE_FLOORS_V01.reduce((sum, f) => sum + (f >= 100 ? 30 : 30 * 0.6), 0);
+    expect(have - need).toBeLessThan(surplusCeiling);
   });
 
   it('food closes with room to spare', () => {

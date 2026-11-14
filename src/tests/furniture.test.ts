@@ -33,6 +33,9 @@ describe('container furniture mapping', () => {
     expect(containerTextureKey('fuse_box')).toBe('furn_fusebox');
     expect(containerTextureKey('water_tank')).toBe('furn_watertank');
     expect(containerTextureKey('counter')).toBe('furn_counter');
+    // The worker dorm stores supplies in beds and at workbenches.
+    expect(containerTextureKey('bed')).toBe('furn_bed');
+    expect(containerTextureKey('workbench')).toBe('furn_workbench');
   });
 
   it('returns null for an unknown container rather than guessing', () => {
@@ -47,6 +50,7 @@ describe('container furniture mapping', () => {
     const mapped = allContainers.map((id) => [id, containerTextureKey(id)] as const).sort();
     expect(mapped).toEqual(
       [
+        ['bed', 'furn_bed'],
         ['cabinet', 'furn_cabinet'],
         ['counter', 'furn_counter'],
         ['crate_metal', 'furn_crate_metal'],
@@ -55,6 +59,7 @@ describe('container furniture mapping', () => {
         ['pantry', 'furn_shelf'],
         ['shelf', 'furn_shelf'],
         ['water_tank', 'furn_watertank'],
+        ['workbench', 'furn_workbench'],
       ].sort(),
     );
   });

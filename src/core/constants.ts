@@ -12,8 +12,9 @@ export const SAVE_KEY = 'floor100000.save.v1';
 // Derived from config/game-balance.json rather than hand-copied, so editing the
 // JSON cannot leave the code on a stale floor list (GHI-03 m7).
 export const STARTING_FLOOR = GAME_CONFIG.player.startingFloor;
-// The slum range the player starts in (floors 1..5). Floor 100000 is the
-// summit and the long-term goal, never the spawn point.
+// The authored floors, read from the balance config: tier 1 (1-10) and the
+// worker-dorm tier (100-110). The list is NOT contiguous — 11-99 are
+// unexplored, and only the freight lift crosses a gap (see core/segments.ts).
 export const PLAYABLE_FLOORS_V01: readonly number[] = GAME_CONFIG.world.playableFloorsV01;
 
 // Dev-only: the retired v0.1 dorm scene, kept for testing. Reachable only via

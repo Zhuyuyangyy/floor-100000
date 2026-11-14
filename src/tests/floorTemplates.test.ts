@@ -94,9 +94,9 @@ describe('floor templates', () => {
 describe('every playable floor is generated, survivable and reproducible', () => {
   const QA_SEEDS = [1, 42, 2026];
 
-  // Floors 6..10 are the expansion. They must each provision the player: they
-  // are the only stretch with no home, NPC or upgrade floor to fall back on, and
-  // a floor without a guaranteed bottle makes the climb a seed lottery.
+  // Floors 6-10 are the slum's picked-over top and 100-110 are the worker dorm:
+  // none of them has a home, NPC or upgrade floor to fall back on, and a floor
+  // without a guaranteed bottle makes the climb a seed lottery.
   //
   // Floors 1..5 predate the rule and stay as authored — 1 is home (it holds the
   // guaranteed bottle), 2 is the trading hub, 3 is the material store, 4 the
@@ -137,6 +137,74 @@ describe('every playable floor is generated, survivable and reproducible', () =>
   it('the same seed and floor reproduce the same floor', () => {
     for (const floor of PLAYABLE_FLOORS_V01) {
       expect(generateFloor(42, floor), `floor ${floor}`).toEqual(generateFloor(42, floor));
+    }
+  });
+});
+
+// 阶层 2（100-110，工人宿舍区）是第二段亲手写的楼层。它和 1-10 层不是同一种
+// 地方——有编号、有班次、有配给——但生存规矩一样硬：一层没水就是逼人渴死。
+// 这里断言的是模板数据本身（不是某几个 seed 的生成结果），所以一条 guaranteed
+// 被误改成概率时测试会直接红，而不是等某个 seed 抽不到。
+describe('the worker-dorm tier (100-110)', () => {
+  const DORM_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 100);
+  // The container ids that already have furniture art. An unknown id makes
+  // containerTextureKey return null and the container turns invisible.
+  const FURNITURE_IDS = new Set([
+    'cabinet',
+    'shelf',
+    'crate_wood',
+    'crate_metal',
+    'fuse_box',
+    'water_tank',
+    'counter',
+    'bed',
+    'workbench',
+  ]);
+
+  it('is exactly the eleven floors of segment 2', () => {
+    expect(DORM_FLOORS).toEqual([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110]);
+  });
+
+  it('has an authored template for every dorm floor', () => {
+    for (const floor of DORM_FLOORS) {
+      expect(hasFloorContent(floor), `floor ${floor} must be authored`).toBe(true);
+      expect(FLOOR_TEMPLATES[floor].floorNumber, `floor ${floor}`).toBe(floor);
+    }
+  });
+
+  it('guarantees one drink and one meal on every dorm floor', () => {
+    for (const floor of DORM_FLOORS) {
+      const loot = FLOOR_TEMPLATES[floor].containers.flatMap((c) => c.loot);
+      const water = loot.filter(
+        (l) => l.guaranteed === true && (l.itemId === 'clean_water' || l.itemId === 'dirty_water'),
+      );
+      const food = loot.filter(
+        (l) => l.guaranteed === true && (l.itemId === 'ration_pack' || l.itemId === 'bread'),
+      );
+      expect(water.length, `floor ${floor} has no guaranteed drink`).toBeGreaterThan(0);
+      expect(food.length, `floor ${floor} has no guaranteed meal`).toBeGreaterThan(0);
+    }
+  });
+
+  it('uses only existing furniture art, 3-5 containers, and short labels', () => {
+    for (const floor of DORM_FLOORS) {
+      const template = FLOOR_TEMPLATES[floor];
+      expect(template.containers.length, `floor ${floor} container count`).toBeGreaterThanOrEqual(3);
+      expect(template.containers.length, `floor ${floor} container count`).toBeLessThanOrEqual(5);
+      for (const c of template.containers) {
+        expect(FURNITURE_IDS.has(c.id), `floor ${floor}/${c.id} has no furniture texture`).toBe(true);
+        // Two- or three-character labels: longer ones overlap the next
+        // container's title (the 6-10 floors hit exactly that).
+        expect([...c.label].length, `floor ${floor}/${c.id} label "${c.label}"`).toBeLessThanOrEqual(3);
+      }
+      expect(template.description.length, `floor ${floor} description`).toBeGreaterThan(0);
+    }
+  });
+
+  it('reproduces the same dorm floor from the same seed', () => {
+    for (const floor of DORM_FLOORS) {
+      expect(generateFloor(42, floor), `floor ${floor}`).toEqual(generateFloor(42, floor));
+      expect(generateFloor(2026, floor).floorNumber, `floor ${floor}`).toBe(floor);
     }
   });
 });

@@ -1,11 +1,11 @@
 import { deriveSeed, makeRng } from '../core/rng';
 import type { GeneratedContainer, GeneratedFloor, GroundItem, InventoryStack, ItemId } from '../core/gameTypes';
 
-// 6-10 层的容器 id 复用既有家具贴图（cabinet/shelf/crate_wood/crate_metal/
-// fuse_box/water_tank）。containerTextureKey 对未知 id 返回 null，容器会变成不可见，
-// 而这批新楼层没有新家具美术 —— 差异化靠 label 文案，不靠新贴图。
-// label 控制在 2-3 字：一层最多 4 个容器，名字一长就直接压到隔壁容器的标题上（第 6 层
-// 首版「焊死的门柜」「塌了一半的架子」互相叠字，截图可见）。
+// 楼层容器 id 复用既有家具贴图（cabinet/shelf/crate_wood/crate_metal/fuse_box/
+// water_tank/counter/bed/workbench）。containerTextureKey 对未知 id 返回 null，
+// 容器会变成不可见 —— 新楼层没有新家具美术，差异化靠 label 文案，不靠新贴图。
+// label 控制在 2-3 字：一层最多 5 个容器，名字一长就直接压到隔壁容器的标题上
+// （第 6 层首版「焊死的门柜」「塌了一半的架子」互相叠字，截图可见）。
 // Fixed v0.1 floor layouts (docs/01_GDD.md §7). Loot is data-driven: guaranteed
 // entries (critical progression items) always appear; the rest roll by seed, so
 // the same worldSeed reproduces the same world while different seeds can differ.
@@ -376,6 +376,417 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         loot: [
           { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.4 },
           { itemId: 'fuse', min: 1, max: 1, probability: 0.25 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  // ── 阶层 2：工人宿舍区（100-110）──────────────────────────────────────────
+  // 和 1-10 层的区别不是「更破」，而是「更有序」：这里有编号、有班次、有配给、
+  // 有值班的人。容器因此是储物柜、配给箱、工牌架、床铺和值班台，而不是废墟里
+  // 翻出来的木箱。家具 id 仍复用既有九种（没有新美术），差异化全在文案与摆放。
+  //
+  // 每层仍遵守 6-10 层立下的规矩：至少 1 份水 + 1 份食物，且都是 guaranteed —
+  // 一层没水就是逼玩家渴死，不是难度。整段每层只给 1 瓶水（不多给），
+  // survivalBalance.test.ts 的每层水量上限就是按这个写的。
+  100: {
+    floorNumber: 100,
+    name: '工牌闸口',
+    description: '铁闸半开，门侧的工牌架按班次编着号，缺了一格',
+    containers: [
+      {
+        id: 'cabinet',
+        label: '牌架',
+        x: 260,
+        loot: [
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'cloth', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'crate_wood',
+        label: '配给箱',
+        x: 620,
+        loot: [
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 0.35 },
+        ],
+      },
+      {
+        id: 'counter',
+        label: '登记台',
+        x: 980,
+        loot: [
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.5 },
+          { itemId: 'battery', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  101: {
+    floorNumber: 101,
+    name: '宿舍走廊',
+    description: '两排床铺贴墙排到尽头，床头挂着磨旧的名牌',
+    containers: [
+      {
+        id: 'bed',
+        label: '空床铺',
+        x: 200,
+        loot: [
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'cloth', min: 1, max: 2, probability: 0.5 },
+        ],
+      },
+      {
+        id: 'cabinet',
+        label: '铁皮柜',
+        x: 520,
+        loot: [
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'tape', min: 1, max: 1, probability: 0.35 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '洗漱架',
+        x: 850,
+        loot: [
+          { itemId: 'filter', min: 1, max: 1, probability: 0.25 },
+          { itemId: 'battery', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+      {
+        id: 'crate_wood',
+        label: '行李箱',
+        x: 1100,
+        loot: [{ itemId: 'scrap_metal', min: 1, max: 2, probability: 0.45 }],
+      },
+    ],
+    ground: [],
+  },
+  102: {
+    floorNumber: 102,
+    name: '盥洗间',
+    description: '长排水槽还在滴水，镜子上蒙着一层白碱',
+    containers: [
+      {
+        id: 'water_tank',
+        label: '蓄水箱',
+        x: 240,
+        loot: [
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'filter', min: 1, max: 1, probability: 0.2 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '毛巾架',
+        x: 600,
+        loot: [
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'cloth', min: 1, max: 2, probability: 0.5 },
+        ],
+      },
+      {
+        id: 'cabinet',
+        label: '清扫柜',
+        x: 980,
+        loot: [
+          { itemId: 'tape', min: 1, max: 1, probability: 0.35 },
+          { itemId: 'wire', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  103: {
+    floorNumber: 103,
+    name: '配给处',
+    description: '窗口后面的货架按号段分隔，登记本只剩封皮',
+    containers: [
+      {
+        id: 'counter',
+        label: '配给台',
+        x: 320,
+        loot: [
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+        ],
+      },
+      {
+        id: 'crate_wood',
+        label: '口粮箱',
+        x: 700,
+        loot: [
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'battery', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'cabinet',
+        label: '账本柜',
+        x: 1060,
+        loot: [
+          { itemId: 'cloth', min: 1, max: 1, probability: 0.4 },
+          { itemId: 'tape', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  104: {
+    floorNumber: 104,
+    name: '夜班宿舍',
+    description: '白班的人还在睡，帘子后面偶尔传来翻身声',
+    containers: [
+      {
+        id: 'bed',
+        label: '上铺',
+        x: 220,
+        loot: [
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.2 },
+        ],
+      },
+      {
+        id: 'bed',
+        label: '下铺',
+        x: 540,
+        loot: [
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'cloth', min: 1, max: 2, probability: 0.45 },
+        ],
+      },
+      {
+        id: 'cabinet',
+        label: '班次柜',
+        x: 860,
+        loot: [
+          { itemId: 'wire', min: 1, max: 1, probability: 0.3 },
+          { itemId: 'fuse', min: 1, max: 1, probability: 0.25 },
+        ],
+      },
+      {
+        id: 'crate_wood',
+        label: '私物箱',
+        x: 1120,
+        loot: [{ itemId: 'scrap_metal', min: 1, max: 2, probability: 0.4 }],
+      },
+    ],
+    ground: [{ itemId: 'battery', quantity: 1, x: 720 }],
+  },
+  105: {
+    floorNumber: 105,
+    name: '值班室',
+    description: '墙上的考勤板还留着上一班的红叉，电台没有声音',
+    containers: [
+      {
+        id: 'workbench',
+        label: '值班台',
+        x: 340,
+        loot: [
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.5 },
+        ],
+      },
+      {
+        id: 'cabinet',
+        label: '值班柜',
+        x: 700,
+        loot: [
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'tape', min: 1, max: 1, probability: 0.35 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '钥匙架',
+        x: 1040,
+        loot: [
+          { itemId: 'battery', min: 1, max: 2, probability: 0.45 },
+          { itemId: 'wire', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  106: {
+    floorNumber: 106,
+    name: '公共食堂',
+    description: '打饭窗口关着，长桌上还摆着没收走的餐盘',
+    containers: [
+      {
+        id: 'counter',
+        label: '打饭台',
+        x: 300,
+        loot: [
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+        ],
+      },
+      {
+        id: 'crate_wood',
+        label: '菜筐',
+        x: 660,
+        loot: [
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'cloth', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '调料架',
+        x: 980,
+        loot: [
+          { itemId: 'battery', min: 1, max: 1, probability: 0.3 },
+          { itemId: 'tape', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+      {
+        id: 'water_tank',
+        label: '汤桶',
+        x: 1160,
+        loot: [{ itemId: 'filter', min: 1, max: 1, probability: 0.2 }],
+      },
+    ],
+    ground: [],
+  },
+  107: {
+    floorNumber: 107,
+    name: '医务室',
+    description: '药柜锁着，床单叠得整整齐齐，像随时会有人回来',
+    containers: [
+      {
+        id: 'cabinet',
+        label: '药柜',
+        x: 280,
+        loot: [
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.35 },
+        ],
+      },
+      {
+        id: 'bed',
+        label: '病床',
+        x: 640,
+        loot: [
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'cloth', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '器皿架',
+        x: 990,
+        loot: [
+          { itemId: 'filter', min: 1, max: 1, probability: 0.3 },
+          { itemId: 'wire', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  108: {
+    floorNumber: 108,
+    name: '工具间',
+    description: '工具按尺寸挂在墙上，每件下面都写着借用人',
+    containers: [
+      {
+        id: 'workbench',
+        label: '工作台',
+        x: 320,
+        loot: [
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'wire', min: 1, max: 2, probability: 0.5 },
+        ],
+      },
+      {
+        id: 'crate_metal',
+        label: '工具箱',
+        x: 700,
+        loot: [
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.5 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '零件架',
+        x: 1060,
+        loot: [
+          { itemId: 'fuse', min: 1, max: 1, probability: 0.3 },
+          { itemId: 'battery', min: 1, max: 1, probability: 0.4 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  109: {
+    floorNumber: 109,
+    name: '工头宿舍',
+    description: '带门的单间，桌上压着一张写满名字的排班表',
+    containers: [
+      {
+        id: 'bed',
+        label: '工头床',
+        x: 260,
+        loot: [
+          { itemId: 'clean_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'cloth', min: 1, max: 2, probability: 0.5 },
+        ],
+      },
+      {
+        id: 'cabinet',
+        label: '私人柜',
+        x: 640,
+        loot: [
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.25 },
+        ],
+      },
+      {
+        id: 'workbench',
+        label: '写字台',
+        x: 1000,
+        loot: [
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.5 },
+          { itemId: 'wire', min: 1, max: 1, probability: 0.35 },
+        ],
+      },
+    ],
+    ground: [{ itemId: 'bread', quantity: 1, x: 860 }],
+  },
+  110: {
+    floorNumber: 110,
+    name: '守段者岗亭',
+    description: '岗亭的灯还亮着，铁皮柜上的一排编号正好到十一',
+    containers: [
+      {
+        id: 'counter',
+        label: '岗亭台',
+        x: 320,
+        loot: [
+          { itemId: 'clean_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+        ],
+      },
+      {
+        id: 'cabinet',
+        label: '安保柜',
+        x: 640,
+        loot: [
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.5 },
+          { itemId: 'tape', min: 1, max: 1, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'crate_metal',
+        label: '装备箱',
+        x: 960,
+        loot: [
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.6 },
+          { itemId: 'wire', min: 1, max: 2, probability: 0.5 },
         ],
       },
     ],

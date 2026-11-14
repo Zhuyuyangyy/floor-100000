@@ -67,6 +67,61 @@ describe('tryChangeFloor', () => {
   });
 });
 
+// The playable floors are two segments with an 89-floor void between them
+// (core/segments.ts). Stairs connect adjacent floors inside a segment; only the
+// freight lift crosses the void, so the stairwell at a segment top must refuse
+// even though the next playable floor exists as a number.
+describe('stairs stay inside a segment', () => {
+  it('refuses to climb from 10 into the unexplored 11..99 gap', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 10;
+    expect(tryChangeFloor(s, 1)).toEqual({ ok: false, reason: 'top' });
+    expect(s.currentFloor).toBe(10);
+    // There is somewhere playable above (100), which is exactly the trap: the
+    // rule must not be "the target is in the playable list".
+    expect(PLAYABLE_FLOORS_V01).toContain(100);
+  });
+
+  it('refuses to descend from 100 into the unexplored 11..99 gap', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 100;
+    expect(tryChangeFloor(s, -1)).toEqual({ ok: false, reason: 'bottom' });
+    expect(s.currentFloor).toBe(100);
+  });
+
+  it('allows the first step inside the dorm tier (100 -> 101)', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 100;
+    expect(tryChangeFloor(s, 1)).toEqual({ ok: true, from: 100, to: 101 });
+    expect(s.currentFloor).toBe(101);
+  });
+
+  it('walks the whole dorm tier up to 110 and back to 100', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 100;
+    for (let f = 100; f < 110; f++) expect(tryChangeFloor(s, 1).ok).toBe(true);
+    expect(s.currentFloor).toBe(110);
+    for (let f = 110; f > 100; f--) expect(tryChangeFloor(s, -1).ok).toBe(true);
+    expect(s.currentFloor).toBe(100);
+  });
+
+  it('gives 110 a down exit but no up exit, so the lift is the only way on', () => {
+    expect(hasDownExit(110)).toBe(true);
+    expect(hasUpExit(110)).toBe(false);
+    const s = createNewGame(1);
+    s.currentFloor = 110;
+    expect(tryChangeFloor(s, 1)).toEqual({ ok: false, reason: 'top' });
+  });
+
+  it('lays no stair traversal across a segment boundary', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 10;
+    expect(stairTraversalFor(s, 1)).toBeNull();
+    s.currentFloor = 100;
+    expect(stairTraversalFor(s, -1)).toBeNull();
+  });
+});
+
 describe('exit availability', () => {
   it('the bottom floor has no down exit; the top has no up exit', () => {
     const top = Math.max(...PLAYABLE_FLOORS_V01);

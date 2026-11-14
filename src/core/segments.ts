@@ -44,6 +44,29 @@ export function nextSegment(from: number): PlayableSegment | undefined {
   return PLAYABLE_SEGMENTS.find((s) => s.from > from);
 }
 
+/** The segment immediately below `from`, or undefined at the bottom of the tower. */
+export function prevSegment(from: number): PlayableSegment | undefined {
+  return [...PLAYABLE_SEGMENTS].reverse().find((s) => s.to < from);
+}
+
+export type LiftDirection = 'up' | 'down';
+
+/**
+ * Which way the freight lift at `floor` goes, or null where there is no lift.
+ *
+ * The up lift stands on a segment's top floor; the down lift stands on its bottom
+ * floor. Both are needed: the bed and the workbench are on floor 1, so a player
+ * who rode up to 100 with no down lift could not sleep and could not craft the
+ * next pass — the lift would be a one-way door in a game about climbing.
+ */
+export function liftDirection(floor: number): LiftDirection | null {
+  const here = segmentOf(floor);
+  if (!here) return null;
+  if (here.to === floor && nextSegment(floor) !== undefined) return 'up';
+  if (here.from === floor && prevSegment(floor) !== undefined) return 'down';
+  return null;
+}
+
 /**
  * The pass needed to ride the lift out of `from`, or null if there is no lift.
  *

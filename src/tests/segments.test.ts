@@ -3,9 +3,11 @@ import { PASS_UPGRADE_IDS } from '../data/recipes';
 import { hasFloorContent } from '../data/floorTemplates';
 import {
   PLAYABLE_SEGMENTS,
+  liftDirection,
   liftOutcome,
   liftRequirement,
   nextSegment,
+  prevSegment,
   segmentOf,
   skippedFloors,
 } from '../core/segments';
@@ -175,5 +177,26 @@ describe('liftOutcome', () => {
     // while the HUD says 100000. generateFloor still honours the alias, so the dev
     // entry keeps working; only the "can I build this for real" question says no.
     expect(hasFloorContent(100000)).toBe(false);
+  });
+});
+
+describe('lift direction', () => {
+  it('is up on a segment top, down on a segment bottom, and null in between', () => {
+    expect(liftDirection(10)).toBe('up');
+    expect(liftDirection(100)).toBe('down');
+    expect(liftDirection(5)).toBeNull();
+    expect(liftDirection(105)).toBeNull();
+    // The dorm has nothing below it, so its bottom floor has no down lift.
+    expect(liftDirection(1)).toBeNull();
+  });
+
+  it('offers a way back down from every segment except the first', () => {
+    // The bed and the workbench live on floor 1. A one-way lift would strand the
+    // player on 100 with no way to sleep or craft the next pass.
+    expect(prevSegment(100)?.to).toBe(10);
+    expect(prevSegment(1000)?.to).toBe(110);
+    expect(liftDirection(1000)).toBe('down'); // bottom of segment 3
+    expect(liftDirection(1010)).toBe('up');
+    expect(prevSegment(1)).toBeUndefined();
   });
 });

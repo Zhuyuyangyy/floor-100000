@@ -44,7 +44,7 @@ import {
 } from '../systems/FloorSystem';
 import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
 import { hasFloorContent } from '../data/floorTemplates';
-import { liftOutcome, liftRequirement, nextSegment, skippedFloors } from '../core/segments';
+import { liftDirection, liftOutcome, liftRequirement, nextSegment, prevSegment, skippedFloors } from '../core/segments';
 import { countItem, isBagFull, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
 import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, isNight, spendTime } from '../systems/SurvivalSystem';
@@ -1806,9 +1806,10 @@ export class GameScene extends Phaser.Scene {
    * eighty-nine floors.
    */
   private drawLift(floor: number): void {
-    // The floor's own position is the only gate: no lift mid-segment, and none
-    // at the summit where there is nothing above.
-    if (liftRequirement(floor) === null) return;
+    // A lift exists on a segment's top floor (up) and its bottom floor (down).
+    // Mid-segment there is none, and the dorm has nothing below it.
+    const direction = liftDirection(floor);
+    if (direction === null) return;
     const wallBottom = FLOOR_HEIGHT - FLOOR_BAND;
     const w = 52;
     const h = 74;
@@ -1845,7 +1846,7 @@ export class GameScene extends Phaser.Scene {
       .setStrokeStyle(1, PALETTE.stoneLight)
       .setDepth(depth);
     const label = this.add
-      .text(LIFT_X, LIFT_SIGN_Y, '↑ 货运电梯', { fontFamily: FONT_FAMILY, fontSize: `${LIFT_SIGN_FONT}px`, color: hex(PALETTE.clothHigh) })
+      .text(LIFT_X, LIFT_SIGN_Y, direction === 'down' ? '↓ 货运电梯' : '↑ 货运电梯', { fontFamily: FONT_FAMILY, fontSize: `${LIFT_SIGN_FONT}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5)
       .setDepth(depth);
     this.floorObjects.push(g, sign, label);
@@ -3814,7 +3815,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private nearLift(state: GameState): boolean {
-    return liftRequirement(state.currentFloor) !== null && Math.abs(state.player.x - LIFT_X) <= LIFT_REACH;
+    return liftDirection(state.currentFloor) !== null && Math.abs(state.player.x - LIFT_X) <= LIFT_REACH;
   }
 
   /**
@@ -3831,6 +3832,24 @@ export class GameScene extends Phaser.Scene {
   private takeLift(): void {
     const state = getGame();
     const floor = state.currentFloor;
+
+    // Down first: a segment's bottom floor only has the down lift, and it needs no
+    // credential — you already paid to get up here. This is the way back to the
+    // bed and the workbench on floor 1.
+    if (liftDirection(floor) === 'down') {
+      const prev = prevSegment(floor);
+      if (!prev) {
+        this.flash('这一层没有向下的货运电梯');
+        return;
+      }
+      if (!hasFloorContent(prev.to)) {
+        this.flash(`货运电梯停运：${floor} → ${prev.to}，中间 ${floor - prev.to - 1} 层尚未接通`);
+        return;
+      }
+      this.rideLiftTo(prev.to, floor - prev.to - 1);
+      return;
+    }
+
     const outcome = liftOutcome(state, floor, hasFloorContent);
     const target = nextSegment(floor);
     const skipped = skippedFloors(floor);

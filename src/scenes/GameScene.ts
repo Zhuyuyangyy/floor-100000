@@ -36,6 +36,7 @@ import {
   hasUpExit,
   movePlayerX,
   stairBendFor,
+  stairMouthZone,
   stairPosition,
   stairStyleFor,
   stairTraversalFor,
@@ -83,7 +84,7 @@ import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster } from '../syst
 import { guardianDamageMult, lootBonus, moveSpeedMult } from '../systems/relics';
 import { modeGuardianDamageMult } from '../systems/modes';
 import { buy, sell, shopStock, type ShopEntry } from '../systems/shop';
-import { charge, recordShortcut, shortcutAvailable, shortcutPrice, shortcutSkip, timesTaken } from '../systems/shortcut';
+import { charge, recordShortcut, shortcutAvailable, shortcutPlan } from '../systems/shortcut';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
@@ -331,6 +332,10 @@ export class GameScene extends Phaser.Scene {
   private speedX = 0;
   /** transient visual traversal; GameState changes only after landing */
   private stairClimb?: NonNullable<ReturnType<typeof stairTraversalFor>> & { elapsedMs: number };
+  // M1-1: the standing camera bounds of the drawn floor, remembered so a climb
+  // can widen them and the landing can put them back. drawFloor owns the
+  // standing values; these are only a mirror of the last setBounds call.
+  private standingCamBounds?: { top: number; bottom: number };
   // OVERHAUL: a one-shot action clip (search / attack / hurt) and the time it
   // holds the sprite. Without the hold, the walk/idle selection below would
   // switch back on the very next frame and the clip would never be seen.
@@ -703,11 +708,47 @@ export class GameScene extends Phaser.Scene {
     // bounds to one floor keeps the full corridor visible when the player lands
     // at x=40 or x=1240; only the tower's vertical cross-section may scroll.
     cam.setBounds(0, topBound, FLOOR_WIDTH, bottomBound - topBound);
+    this.standingCamBounds = { top: topBound, bottom: bottomBound };
     cam.startFollow(this.player, true, 0.15, 0.15);
     // Centred on the player the moment the floor is drawn: a follow with
     // lerp 0.15 takes a third of a second to catch up, and during that time the
     // camera is still wherever the previous floor left it.
     cam.centerOn(state.player.x, Math.max(topBound + 180, Math.min(bottomBound - 180, PLAYER_FEET_Y - FLOOR_HEIGHT * 0.5)));
+  }
+
+  // ── M1-1: the climb's camera room ────────────────────────────────────────
+  // A stair rises a full FLOOR_HEIGHT, and Phaser clamps the follow to the
+  // camera bounds (Camera.preRender -> clampY). The standing bounds are tuned
+  // for STANDING: on floor 1 they leave one FLOOR_BAND of headroom above the
+  // dorm, on the top floor one below the penthouse. A climber needs a whole
+  // floor more than that. Measured before the fix: the 1->2 climb pinned
+  // scrollY at -64 for all 55 sampled frames and the survivor's head crossed
+  // the top of the viewport by 69.6px; the 50010->50009 descent pinned at
+  // -456 and the feet crossed the bottom by 96px. The bounds are widened in
+  // the climb direction by exactly the room the follow needs to keep the
+  // climber centred at the far end of the rise — no more, so the void above
+  // the dorm still stays hidden while standing. drawFloor resets them on the
+  // landing; the refused-landing path resets them by hand.
+  private openClimbCameraRoom(direction: 1 | -1): void {
+    const cam = this.cameras.main;
+    const standing = this.standingCamBounds;
+    if (!standing) return;
+    // The follow target is the climber's feet minus half the viewport, in
+    // world units; at the far end of the rise the feet sit one STAIR_RISE
+    // above/below STAIR_START_Y. Let the bound reach that target.
+    const halfView = cam.displayHeight / 2;
+    const feetAtFarEnd = STAIR_START_Y + (direction === 1 ? -STAIR_RISE : STAIR_RISE);
+    const top = direction === 1 ? Math.min(standing.top, feetAtFarEnd - halfView) : standing.top;
+    const bottom = direction === 1 ? standing.bottom : Math.max(standing.bottom, feetAtFarEnd + halfView);
+    cam.setBounds(0, top, FLOOR_WIDTH, bottom - top);
+  }
+
+  /** Put the standing bounds back (a refused landing leaves the player put). */
+  private resetCameraBounds(): void {
+    const cam = this.cameras.main;
+    const standing = this.standingCamBounds;
+    if (!standing) return;
+    cam.setBounds(0, standing.top, FLOOR_WIDTH, standing.bottom - standing.top);
   }
 
   // OVERHAUL: plays a one-shot action clip and holds it for `ms`. The frame
@@ -3617,7 +3658,12 @@ export class GameScene extends Phaser.Scene {
       this.takeLift();
       return;
     }
-    const zone = currentInteractionZone(state);
+    // M1-4: a stairwell MOUTH is a question even where no stair stands behind
+    // it. A segment's end floor keeps the mouth and loses the stair — the
+    // climber who just landed there is standing at the mouth by construction,
+    // and pressing E to keep climbing used to get silence. Ask the mouth
+    // itself and let changeFloor answer; its refusal names the freight lift.
+    const zone = currentInteractionZone(state) ?? stairMouthZone(state);
     if (zone === 'up') this.changeFloor(1);
     else if (zone === 'down') this.changeFloor(-1);
   }
@@ -3627,9 +3673,17 @@ export class GameScene extends Phaser.Scene {
   // climbs with every use, so skipping is a budget decision, not free
   // fast-travel. The charge happens before the jump, so a broke player never
   // moves.
+  //
+  // M1-2: the same state machine every other action answers to. F used to
+  // fire from inside a stair climb and from behind an open panel: a press
+  // during the 2->3 climb charged 114 gold AND left the in-flight traversal
+  // to commit on top of the jump, so one keypress moved the player three
+  // floors. A climb or a panel means the world is mid-something; the key
+  // waits, exactly as E does.
   private tryShortcut(): void {
     const state = getGame();
     if (state.status !== 'playing') return;
+    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
     const top = Math.max(...PLAYABLE_FLOORS_V01);
     if (!shortcutAvailable(state.currentFloor, top)) {
       this.flash('这里没有可抄的近路');
@@ -3641,16 +3695,17 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     const salt = (state.runSeed ^ (state.day * 7919) ^ (state.currentFloor * 104729)) >>> 0;
-    const skip = Math.min(shortcutSkip(salt), top - state.currentFloor);
-    const price = shortcutPrice(state.currentFloor, skip, timesTaken(state), salt);
-    if (!charge(state, price)) {
-      this.flash(`抄近路要 ${price} 金，你只有 ${state.player.gold}`);
+    // M1-3: one plan, one price — the prompt, the charge and the jump all read
+    // shortcutPlan, so the number advertised can never drift from the number
+    // taken (the skip is segment-clamped inside the plan, once).
+    const plan = shortcutPlan(state, state.currentFloor, salt);
+    if (!charge(state, plan.price)) {
+      this.flash(`抄近路要 ${plan.price} 金，你只有 ${state.player.gold}`);
       return;
     }
     recordShortcut(state);
     // Apply the jump through the same path a stair uses, then walk the rest.
-    const target = Math.min(top, state.currentFloor + skip);
-    while (state.currentFloor < target) {
+    while (state.currentFloor < plan.target) {
       const r = tryChangeFloor(state, 1);
       if (!r.ok) break;
     }
@@ -3659,7 +3714,7 @@ export class GameScene extends Phaser.Scene {
     this.drawFloor();
     saveToStorage(state);
     this.cameras.main.flash(180, 0, 0, 0);
-    this.flash(`你抄近路跳到了第 ${state.currentFloor} 层（-${price} 金）`);
+    this.flash(`你抄近路跳到了第 ${state.currentFloor} 层（-${plan.price} 金）`);
     playSfx('goal');
   }
 
@@ -3970,15 +4025,31 @@ export class GameScene extends Phaser.Scene {
     this.flash(`正在穿过 ${skipped} 层未探索区 · 到达第 ${target} 层`);
   }
 
+  // M1-4: what the player is told when the stairs refuse. At a segment end
+  // the tower does NOT end — 10 is not "the top", it goes to 100000 — what
+  // ends is the STAIRS, and the freight lift standing at the same stairwell
+  // is the way on. Saying "已到顶层" there is a lie that reads as a bug; the
+  // lift's own sign already says 货运电梯, so the refusal names it too.
+  // Only at the genuine tower extremes (1 below, 100000 above) is the
+  // top/end copy honest.
+  private stairRefusalCopy(direction: 1 | -1): string {
+    const lift = liftDirection(getGame().currentFloor);
+    if (direction === 1) {
+      return lift === 'up' ? '这一层没有向上的楼梯，往上要乘货运电梯' : '已到顶层';
+    }
+    return lift === 'down' ? '这一层没有向下的楼梯，往下要乘货运电梯' : '已到尽头';
+  }
+
   private changeFloor(direction: 1 | -1): void {
     if (this.stairClimb) return;
     const traversal = stairTraversalFor(getGame(), direction);
     if (!traversal) {
-      this.flash(direction === 1 ? '已到顶层' : '已到尽头');
+      this.flash(this.stairRefusalCopy(direction));
       return;
     }
     this.speedX = 0;
     this.stairClimb = { ...traversal, elapsedMs: 0 };
+    this.openClimbCameraRoom(direction);
     this.player.setFlipX(direction < 0);
     this.player.play(walkAnimKey(this.metaSelectedCharacter()), true);
     this.player.anims.timeScale = 1.25;
@@ -4008,8 +4079,12 @@ export class GameScene extends Phaser.Scene {
     const result = completeStairTraversal(state, climb);
     this.stairClimb = undefined;
     if (!result.ok) {
+      // The widened climb bounds go back to the standing ones: drawFloor only
+      // re-sets them on the success path, and a refused landing leaves the
+      // player standing on this floor for good.
+      this.resetCameraBounds();
       this.player.setPosition(state.player.x, PLAYER_FEET_Y);
-      this.flash(result.reason === 'top' ? '已到顶层' : '已到尽头');
+      this.flash(this.stairRefusalCopy(climb.direction));
       return;
     }
 
@@ -4293,10 +4368,12 @@ export class GameScene extends Phaser.Scene {
     else if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
     else if (this.nearLift(state)) this.hintText.setText('按 E 乘货运电梯');
     // OVERHAUL Wave C2: the up stairwell advertises the paid shortcut, priced
-    // live so the player can decide before spending.
+    // live so the player can decide before spending. The price comes from the
+    // same plan the charge spends (M1-3), so the prompt cannot overpromise a
+    // cheaper jump than the purse will actually be billed for.
     else if (zone === 'up' && shortcutAvailable(state.currentFloor, Math.max(...PLAYABLE_FLOORS_V01))) {
       const salt = (state.runSeed ^ (state.day * 7919) ^ (state.currentFloor * 104729)) >>> 0;
-      const price = shortcutPrice(state.currentFloor, shortcutSkip(salt), timesTaken(state), salt);
+      const { price } = shortcutPlan(state, state.currentFloor, salt);
       this.hintText.setText(`按 E 上楼 · F 抄近路（${price} 金）`);
     }
     else if (zone === 'up') this.hintText.setText('按 E 上楼');

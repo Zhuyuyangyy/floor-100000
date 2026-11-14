@@ -20,6 +20,7 @@ import {
   hasDownExit,
   hasUpExit,
   movePlayerX,
+  stairMouthZone,
   stairPosition,
   stairStyleFor,
   stairTraversalFor,
@@ -359,6 +360,56 @@ describe('exit availability', () => {
   });
 });
 
+// M1-4: the refusal copy at a segment end. The scene tells the player the
+// stairs stop here and the freight lift is the way on — but only where a lift
+// actually stands. This is the contract the scene's copy keys off: a refused
+// boundary MUST carry a lift in the refused direction, and the genuine tower
+// extremes must NOT (there the honest copy is 已到顶层 / 已到尽头).
+describe('segment boundaries refuse with a lift to name', () => {
+  it('refuses 10->100, 1000->999, 10000->9999 and 50000->49999', () => {
+    const s = createNewGame(1);
+    for (const [floor, dir] of [
+      [10, 1],
+      [110, 1],
+      [1010, 1],
+      [10010, 1],
+      [50010, 1],
+      [100, -1],
+      [1000, -1],
+      [10000, -1],
+      [50000, -1],
+    ] as const) {
+      s.currentFloor = floor;
+      expect(tryChangeFloor(s, dir).ok, `floor ${floor} dir ${dir}`).toBe(false);
+      expect(s.currentFloor).toBe(floor);
+    }
+  });
+
+  it('every refused segment boundary has a lift in the refused direction', () => {
+    // The scene's refusal names the 货运电梯 only when one is standing there;
+    // this loop is what keeps that copy honest across all five segments.
+    for (const floor of [10, 110, 1010, 10010, 50010]) {
+      expect(hasUpExit(floor), `no up stair at ${floor}`).toBe(false);
+      expect(liftDirection(floor), `up lift at ${floor}`).toBe('up');
+    }
+    for (const floor of [100, 1000, 10000, 50000]) {
+      expect(hasDownExit(floor), `no down stair at ${floor}`).toBe(false);
+      expect(liftDirection(floor), `down lift at ${floor}`).toBe('down');
+    }
+  });
+
+  it('the tower extremes have no lift to name, so 已到顶层/已到尽头 is honest there', () => {
+    // Below the dorm there is nothing at all.
+    expect(hasDownExit(1)).toBe(false);
+    expect(liftDirection(1)).toBeNull();
+    // The summit 100000 is not in the playable list (it is the dev-only
+    // fixture floor), but it is where the last lift ends: its only lift points
+    // DOWN, so an up-refusal there cannot name a lift and 已到顶层 is true.
+    expect(hasUpExit(100000)).toBe(false);
+    expect(liftDirection(100000)).toBe('down');
+  });
+});
+
 describe('natural stair traversal', () => {
   it('uses vertical shafts at the chapter endpoints and steep stairs in the middle', () => {
     expect(stairStyleFor(1, 1)).toBe('vertical');
@@ -517,5 +568,55 @@ describe('currentInteractionZone', () => {
     const s = createNewGame(1);
     s.player.x = DOWN_EXIT_X;
     expect(currentInteractionZone(s)).toBeNull();
+  });
+});
+
+// M1-4: the mouth is positional, the stair is not. A segment's end floor keeps
+// the mouth and loses the stair, and the player standing there pressing E must
+// reach changeFloor's refusal — which names the freight lift — instead of
+// getting silence. The climber who lands on a segment top stands AT the mouth
+// by construction, so this is the very next key they press.
+describe('stairMouthZone', () => {
+  it('reports the mouth where no stair stands (segment ends)', () => {
+    const s = createNewGame(1);
+    for (const floor of [10, 110, 1010, 10010, 50010]) {
+      s.currentFloor = floor;
+      s.player.x = UP_EXIT_X;
+      expect(hasUpExit(floor), `no up stair at ${floor}`).toBe(false);
+      expect(currentInteractionZone(s), `no stair zone at ${floor}`).toBeNull();
+      expect(stairMouthZone(s), `but the mouth is there at ${floor}`).toBe('up');
+    }
+    for (const floor of [100, 1000, 10000, 50000]) {
+      s.currentFloor = floor;
+      s.player.x = DOWN_EXIT_X;
+      expect(hasDownExit(floor), `no down stair at ${floor}`).toBe(false);
+      expect(currentInteractionZone(s), `no stair zone at ${floor}`).toBeNull();
+      expect(stairMouthZone(s), `but the mouth is there at ${floor}`).toBe('down');
+    }
+  });
+
+  it('agrees with currentInteractionZone wherever a stair does stand', () => {
+    const s = createNewGame(1);
+    const floors = [1, 2, 5, 9, 100, 105, 109, 1000, 1005, 1009, 10000, 10005, 10009, 50000, 50005, 50009];
+    for (const floor of floors) {
+      s.currentFloor = floor;
+      if (hasUpExit(floor)) {
+        s.player.x = UP_EXIT_X;
+        expect(stairMouthZone(s), `up mouth at ${floor}`).toBe(currentInteractionZone(s));
+        expect(stairMouthZone(s)).toBe('up');
+      }
+      if (hasDownExit(floor)) {
+        s.player.x = DOWN_EXIT_X;
+        expect(stairMouthZone(s), `down mouth at ${floor}`).toBe(currentInteractionZone(s));
+        expect(stairMouthZone(s)).toBe('down');
+      }
+    }
+  });
+
+  it('reports nothing in the middle of the corridor', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 10;
+    s.player.x = ENTRY_X;
+    expect(stairMouthZone(s)).toBeNull();
   });
 });

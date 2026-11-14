@@ -7,6 +7,7 @@ import { ART_BANNER_WIN_KEY, ART_BANNER_LOSE_KEY, TITLE_BG_KEY } from '../render
 import { PALETTE, ROLE, TEXT, hex } from '../render/palette.ts';
 import { buildPanelHeader, buildPanelWell, FONT_FAMILY } from '../render/uiKit';
 import { buildPanel, PANEL_DEPTH } from '../render/panels';
+import { textClickable } from '../render/pointer';
 import { depthRecord, runScore } from '../systems/progress';
 
 // End screen (docs/01_GDD.md §5): loss on HP 0 with the cause and days survived,
@@ -149,15 +150,19 @@ export class EndScene extends Phaser.Scene {
     for (const o of buildPanelWell(this, left + 12, footY - 14, panelW - 24, 28, depth + 5)) {
       this.add.existing(o as Phaser.GameObjects.GameObject);
     }
-    this.add
-      .text(cx, footY, '按 回车 重新开始', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(PALETTE.clothHigh) })
-      .setOrigin(0.5)
-      .setDepth(depth + 7);
-
-    this.input.keyboard?.once('keydown-ENTER', () => {
+    const restart = (): void => {
       clearSave();
       startNewGame(Date.now() >>> 0);
       this.scene.start('Game');
-    });
+    };
+    const restartLabel = this.add
+      .text(cx, footY, '点击 / 回车 重新开始', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(PALETTE.clothHigh) })
+      .setOrigin(0.5)
+      .setDepth(depth + 7);
+    // Mouse path to the one action this screen has. Same function the key calls,
+    // so a click can never drift from the keyboard.
+    textClickable(restartLabel, hex(PALETTE.clothHigh), hex(PALETTE.lightHot), { onClick: restart });
+
+    this.input.keyboard?.once('keydown-ENTER', restart);
   }
 }

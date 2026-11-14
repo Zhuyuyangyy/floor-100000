@@ -9,6 +9,7 @@ import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, createMarker, PANEL_DEPTH, placeMarker, type PanelObject } from '../render/panels';
 import { buildPhotoTitleBackdrop, buildTitleBackdrop, type TitleBackdrop } from '../render/titleBackdrop';
 import { TITLE_BG_KEY } from '../render/artpack';
+import { hitRect, textClickable } from '../render/pointer';
 
 // Title screen: a keyboard-navigable option list — 开始新游戏 / 继续游戏 (when a
 // save exists) / 操作说明. ↑/↓ to move, Enter to choose (docs/03_TASKS.md#p0-08).
@@ -124,6 +125,22 @@ export class MenuScene extends Phaser.Scene {
         .text(width / 2, MENU_TOP + i * MENU_STEP, entry.label, { fontFamily: FONT_FAMILY, fontSize: '36px', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
         .setOrigin(0.5);
       this.optionTexts.push(t);
+      // Mouse: hover moves the cursor, click does what Enter does. The e2e probe
+      // reads the marker's y, so hover has to go through refreshOptions() rather
+      // than styling the text alone.
+      textClickable(t, hex(TEXT.primary), hex(PALETTE.lightHigh), {
+        onOver: () => {
+          if (this.helpOpen) return;
+          this.selected = i;
+          this.refreshOptions();
+          this.hideMessage();
+        },
+        onClick: () => {
+          this.selected = i;
+          this.refreshOptions();
+          this.activate();
+        },
+      });
       // Entrance: a fade-in only. An earlier version also settled each entry
       // down 8px, which broke the e2e selection probe — it finds the
       // highlighted entry by comparing the marker's y to the entries' y, and a
@@ -272,12 +289,21 @@ export class MenuScene extends Phaser.Scene {
       'A/D 或 ←/→ 移动 · E 交互',
       'E 交互：开箱 / 对话 / 楼梯 / 睡觉',
       'I 背包 · C 制作 · M 地图 · ESC 暂停',
+      '鼠标：点选项 · 点地面走动 · 点物品交互',
       '目标：爬到第 100000 层',
     ];
     const texts = lines.map((line, i) => this.add.text(left + 24, top + 72 + i * 38, line, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }));
     const footer = this.add.text(cx, top + panelH - 30, '按 Enter / ESC 关闭', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
-    this.helpObjects.push(title, ...texts, footer);
+    // Click anywhere on the panel to dismiss it, the same as Enter / ESC.
+    const dismiss = hitRect(this, left, top, panelW, panelH, PANEL_DEPTH.menu.help + 6, {
+      onClick: () => {
+        if (this.helpOpen) this.toggleHelp();
+      },
+    });
+    this.helpObjects.push(title, ...texts, footer, dismiss);
     applyPanelDepth(this.helpObjects, PANEL_DEPTH.menu.help);
+    // The dismiss rect must stay above the panel art it covers.
+    dismiss.setDepth(PANEL_DEPTH.menu.help + 6);
     for (const o of this.helpObjects) o.setVisible(false);
   }
 

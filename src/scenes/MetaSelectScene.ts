@@ -10,6 +10,7 @@ import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { buildPanel, createMarker, PANEL_DEPTH, placeMarker } from '../render/panels';
 import { buildPanelHeader, FONT_FAMILY, TYPE, UI } from '../render/uiKit';
 import { TITLE_BG_KEY, portraitKey } from '../render/artpack';
+import { framedButton, hitRect, textClickable } from '../render/pointer';
 
 // OVERHAUL UI: the character select, rebuilt.
 //
@@ -148,6 +149,22 @@ export class MetaSelectScene extends Phaser.Scene {
         .setDepth(depth + 7);
       this.optionTexts.push(name);
       this.lockTexts.push(lock);
+      // Mouse: hover moves the cursor, click commits the choice of *character*
+      // only. Starting the run is the 出发 button's job — an earlier version also
+      // started on a second click of the selected row, and because row 0 is
+      // selected by default a single stray click on 幸存者 launched the game.
+      hitRect(this, listX - 6, y - 6, listW, 48, depth + 9, {
+        onOver: () => {
+          if (this.selected === i) return;
+          this.selected = i;
+          this.refreshOptions();
+        },
+        onClick: () => {
+          this.selected = i;
+          this.refreshOptions();
+          playSfx('click');
+        },
+      });
     });
     this.invWell(listX - 6, top + 28, listW, 220, depth + 5);
     this.optionTexts.forEach((t) => t.setDepth(depth + 8));
@@ -177,6 +194,33 @@ export class MetaSelectScene extends Phaser.Scene {
         })
         .setDepth(depth + 7);
     });
+
+    // ── mouse targets ───────────────────────────────────────────────────────
+    // Mode: clicking the label cycles it, matching → on the keyboard. A pair of
+    // arrows either side would have been more obvious but the relic column starts
+    // at colX and there is no room above it.
+    const modeHit = hitRect(this, colX - 6, top + 26, 156, 30, depth + 8, {
+      onOver: () => this.modeText.setColor(hex(PALETTE.lightHot)),
+      onClick: () => this.cycleMode(1),
+    });
+    modeHit.on('pointerout', () => this.modeText.setColor(hex(PALETTE.lightHigh)));
+
+    // 出发 / 返回标题: the two things Enter and ESC did.
+    framedButton(this, left + 336, top + 258, 118, 28, '出发', depth + 9, () => this.onConfirm('enter'), {
+      fill: UI.accent,
+      line: PALETTE.clothHigh,
+      text: hex(PALETTE.ink),
+      hover: PALETTE.lightHigh,
+    });
+    textClickable(
+      this.add
+        .text(width - 16, height - 11, '返回标题', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(PALETTE.clothHigh) })
+        .setOrigin(1, 0.5)
+        .setDepth(depth + 4),
+      hex(PALETTE.clothHigh),
+      hex(PALETTE.lightHigh),
+      { onClick: () => this.onConfirm('esc') },
+    );
 
     this.messageText = this.add
       .text(cx, top + panelH - 12, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn) })

@@ -34,6 +34,7 @@ import { describeFloorContents } from '../systems/LootSystem';
 import { saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, PANEL_DEPTH, type PanelObject } from '../render/panels';
+import { hitRect, textClickable } from '../render/pointer';
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import type { GameState } from '../core/gameTypes';
 
@@ -323,6 +324,31 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.detailAction = this.add
       .text(cx, top + h - 20, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_BODY}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5);
+    // Mouse: the action line is the button — clicking it does what Enter does.
+    // Failure still routes through tryEnter(), which explains why.
+    //
+    // A hit rectangle, not setInteractive() on the text: this Text is created
+    // empty and filled later by refreshDetail(), and Phaser sizes a Text's hit
+    // area from its canvas at setInteractive() time — an empty Text gets a
+    // zero-area hit area that setText never re-measures. Measured: the row looked
+    // clickable and swallowed every press. The rect is in WORLD space because the
+    // detail card is drawn in world space and moves with the camera.
+    const actionHit = hitRect(this, cx - 110, top + h - 34, 220, 26, PANEL_DEPTH.tower.detail + 8, {
+      onOver: () => this.detailAction.setColor(hex(PALETTE.lightHot)),
+      onClick: () => this.tryEnter(),
+    });
+    actionHit.on('pointerout', () => this.detailAction.setColor(hex(PALETTE.clothHigh)));
+    // Hidden and shown with the card, so it cannot be clicked behind it.
+    this.detailObjects.push(actionHit);
+    // And a back arrow, pinned to the screen (scrollFactor 0) rather than to the
+    // world: at this level the camera scrolls, and a world-space arrow drifted
+    // 300px up the tower.
+    const back = this.add
+      .text(14, DESIGN_HEIGHT - 22, '← 返回', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_BODY}px`, color: hex(PALETTE.clothHigh) })
+      .setOrigin(0, 0.5)
+      .setScrollFactor(0)
+      .setDepth(PANEL_DEPTH.tower.detail + 6);
+    textClickable(back, hex(PALETTE.clothHigh), hex(PALETTE.lightHot), { onClick: () => this.onBack() });
     this.detailObjects.push(this.detailTitle, ...this.detailRows, this.detailAction);
     applyPanelDepth(this.detailObjects, PANEL_DEPTH.tower.detail);
     for (const o of this.detailObjects) o.setVisible(false);

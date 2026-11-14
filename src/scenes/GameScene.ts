@@ -99,6 +99,7 @@ import {
   drawStatBar,
 } from '../render/uiKit';
 import { ENV_FLOOR_KEY, ENV_WALL_KEY, portraitKey } from '../render/artpack';
+import { framedButton, hitRect } from '../render/pointer';
 import {
   ATTACK_FRAME_START,
   ATTACK_FRAMES,
@@ -398,6 +399,14 @@ export class GameScene extends Phaser.Scene {
   private dialogueMarker!: Phaser.GameObjects.Image;
 
   private pauseOpen = false;
+  // Mouse state. `walkTarget` is the click-to-walk order the update loop steps
+  // toward; `panelBox` is the rectangle of the most recently built panel, so a
+  // click outside it can close the panel the way ESC does.
+  private walkTarget: { x: number; interact: boolean } | null = null;
+  private panelBox: { x: number; y: number; w: number; h: number } | null = null;
+  private hudButtons: Phaser.GameObjects.GameObject[] = [];
+  private readonly pointerHandler = (pointer: Phaser.Input.Pointer, currentlyOver?: unknown[]): void =>
+    this.onPointerDown(pointer, currentlyOver ?? []);
   private pauseObjects: PanelObject[] = [];
   private pauseOptionTexts: Phaser.GameObjects.Text[] = [];
   private pauseMarker!: Phaser.GameObjects.Image;
@@ -916,6 +925,8 @@ export class GameScene extends Phaser.Scene {
     const panelH = 248;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
     const depth = PANEL_DEPTH.game.dialogue;
 
     this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
@@ -942,6 +953,20 @@ export class GameScene extends Phaser.Scene {
           label: getItem(e.itemId).displayName,
           value: `${e.price} 金 · 持 ${countItem(state.player.inventory, e.itemId)}`,
           selected,
+        }),
+      );
+      // Click a row to buy it. Deferred by one tick: this panel is rebuilt from
+      // scratch on every selection change, and destroying the object that is
+      // currently handling the pointer event is how you get a crash inside
+      // Phaser's input list.
+      this.encounterObjects.push(
+        this.panelHit( left + 8, y, panelW - 16, 28, depth + 8, {
+          onClick: () =>
+            this.time.delayedCall(0, () => {
+              this.shopSelected = i;
+              this.buildShopPanel();
+              this.onUse();
+            }),
         }),
       );
       if (!selected) return;
@@ -1124,6 +1149,8 @@ export class GameScene extends Phaser.Scene {
     const panelH = 232;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
     const depth = PANEL_DEPTH.game.dialogue;
     const isBoss = combat.kind === 'boss';
 
@@ -1179,6 +1206,16 @@ export class GameScene extends Phaser.Scene {
         this.encounterObjects.push(this.add.rectangle(left + 12, y, panelW - 24, 24, UI.accent).setOrigin(0, 0).setAlpha(0.14).setDepth(depth + 5));
         this.encounterObjects.push(this.add.rectangle(left + 12, y, 2, 24, UI.accent).setOrigin(0, 0).setDepth(depth + 6));
       }
+      this.encounterObjects.push(
+        this.panelHit( left + 12, y, panelW - 24, 24, depth + 8, {
+          onClick: () =>
+            this.time.delayedCall(0, () => {
+              this.combatSelected = i;
+              this.buildCombatPanel();
+              this.onUse();
+            }),
+        }),
+      );
       this.encounterObjects.push(
         this.add
           .text(left + 22, y + 12, label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary) })
@@ -1432,6 +1469,8 @@ export class GameScene extends Phaser.Scene {
     const panelH = 190;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
 
     const depth = PANEL_DEPTH.game.dialogue;
     this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
@@ -1462,6 +1501,17 @@ export class GameScene extends Phaser.Scene {
             this.add.rectangle(left + 12, y, 2, 26, UI.accent).setOrigin(0, 0).setDepth(depth + 6),
           );
         }
+        this.encounterObjects.push(
+          this.panelHit( left + 12, y, panelW - 24, 26, depth + 8, {
+            onClick: () =>
+              this.time.delayedCall(0, () => {
+                if (!this.encounter) return;
+                this.encounter.selected = i;
+                this.buildEncounterPanel(this.spotMarkers.get(this.encounter.spotId)?.isBoss ?? false);
+                this.onUse();
+              }),
+          }),
+        );
         this.encounterObjects.push(
           this.add
             .text(left + 24, y + 13, CHOICE_LABELS[choice], {
@@ -2161,6 +2211,55 @@ export class GameScene extends Phaser.Scene {
     }
     this.lastStats = '';
     this.refreshGoalHud();
+    this.buildHudButtons();
+  }
+
+  // Four clickable buttons for the four panels the keyboard opens. Placed on the
+  // bottom-right, above the key legend: the top bar is already full (four stat
+  // bars, floor badge, clock, gold, score) and the panel row would have sat on
+  // top of the world's floor labels.
+  //
+  // Every one of them goes through the same guard the keyboard path uses, and
+  // refuses to open a second panel on top of an open one — except its own, which
+  // toggles closed.
+  private buildHudButtons(): void {
+    for (const o of this.hudButtons) o.destroy();
+    this.hudButtons = [];
+    const items: Array<{ label: string; run: () => void; owned: () => boolean }> = [
+      { label: '背包 I', run: () => this.onToggleInventory(), owned: () => this.inventoryOpen },
+      { label: '制作 C', run: () => this.onToggleCrafting(), owned: () => this.craftingOpen },
+      { label: '地图 M', run: () => this.onToggleMap(), owned: () => false },
+      { label: '菜单', run: () => this.onEsc(), owned: () => this.pauseOpen },
+    ];
+    const W = 88;
+    const H = 26;
+    const GAP = 6;
+    const total = items.length * W + (items.length - 1) * GAP;
+    let x = DESIGN_WIDTH - 16 - total;
+    const y = DESIGN_HEIGHT - 56;
+    for (const item of items) {
+      const parts = framedButton(
+        this,
+        x,
+        y,
+        W,
+        H,
+        item.label,
+        104,
+        () => {
+          if (this.stairClimb) return;
+          if (this.anyPanelOpen() && !item.owned()) return;
+          item.run();
+        },
+        { fill: UI.surfaceRaised, line: UI.line, text: hex(TEXT.primary), hover: PALETTE.stoneLight },
+      );
+      for (const part of parts) {
+        const withScroll = part as unknown as { setScrollFactor?: (v: number) => unknown };
+        withScroll.setScrollFactor?.(0);
+        this.hudButtons.push(part);
+      }
+      x += W + GAP;
+    }
   }
 
   // OVERHAUL: the day's objective (rolled lazily on first read of the day) and
@@ -2279,6 +2378,8 @@ export class GameScene extends Phaser.Scene {
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
     const depth = PANEL_DEPTH.game.inventory;
 
     this.invObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
@@ -2324,6 +2425,27 @@ export class GameScene extends Phaser.Scene {
       this.invSlotIcons.push(icon);
       this.invSlotTexts.push(badge);
       this.invObjects.push(cell, border, icon, badge);
+      // Mouse: click selects; clicking the already-selected slot uses the item,
+      // which is what Enter does. Pushed into invObjects so it hides with the
+      // panel — an orphan hit rect would keep eating clicks over the world.
+      this.invObjects.push(
+        this.panelHit( x, y, CELL, CELL, depth + 8, {
+          onOver: () => {
+            if (this.invSelected === i) return;
+            this.invSelected = i;
+            this.refreshInventory();
+          },
+          onClick: () => {
+            if (this.invSelected !== i) {
+              this.invSelected = i;
+              this.refreshInventory();
+              playSfx('click');
+              return;
+            }
+            this.onUse();
+          },
+        }),
+      );
     }
 
     // ── the detail pane ─────────────────────────────────────────────────────
@@ -2509,6 +2631,8 @@ export class GameScene extends Phaser.Scene {
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
 
     this.craftObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.craft));
     // OVERHAUL UI: header strip instead of a centred title floating on a slab.
@@ -2530,6 +2654,24 @@ export class GameScene extends Phaser.Scene {
       const status = this.add.text(left + panelW - 16, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
       this.craftRows.push({ band, name, status });
       this.craftObjects.push(band, name, status);
+      this.craftObjects.push(
+        this.panelHit( left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, PANEL_DEPTH.game.craft + 7, {
+          onOver: () => {
+            if (this.craftSelected === i) return;
+            this.craftSelected = i;
+            this.refreshCraft();
+          },
+          onClick: () => {
+            if (this.craftSelected !== i) {
+              this.craftSelected = i;
+              this.refreshCraft();
+              playSfx('click');
+              return;
+            }
+            this.onUse();
+          },
+        }),
+      );
     }
     const footer = this.add.text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
     this.craftObjects.push(footer, this.craftMarker);
@@ -2604,6 +2746,8 @@ export class GameScene extends Phaser.Scene {
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
 
     this.pauseObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.pause));
     this.pauseObjects.push(...buildPanelHeader(this, left, top, panelW, '已暂停', UI.accent, PANEL_DEPTH.game.pause + 5));
@@ -2619,6 +2763,24 @@ export class GameScene extends Phaser.Scene {
       const t = this.add.text(cx, top + 96 + i * 40, label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE_BODY}px`, color: hex(TEXT.primary) }).setOrigin(0.5);
       this.pauseOptionTexts.push(t);
       this.pauseObjects.push(t);
+      this.pauseObjects.push(
+        this.panelHit( left + 40, top + 96 + i * 40 - 19, panelW - 80, 38, PANEL_DEPTH.game.pause + 7, {
+          onOver: () => {
+            if (this.pauseSelected === i) return;
+            this.pauseSelected = i;
+            this.refreshPause();
+          },
+          onClick: () => {
+            if (this.pauseSelected !== i) {
+              this.pauseSelected = i;
+              this.refreshPause();
+              playSfx('click');
+              return;
+            }
+            this.onUse();
+          },
+        }),
+      );
     });
 
     applyPanelDepth(this.pauseObjects, PANEL_DEPTH.game.pause);
@@ -2774,6 +2936,8 @@ export class GameScene extends Phaser.Scene {
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
 
     const depth = PANEL_DEPTH.game.dialogue;
     this.dialogueObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
@@ -2819,6 +2983,24 @@ export class GameScene extends Phaser.Scene {
       const rule = this.add.rectangle(left + 12, rowY, 2, 26, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 6);
       this.dialogueBands.push({ band, rule });
       this.dialogueObjects.push(band, rule);
+      // Mouse: hover moves the cursor, click confirms — guarded on the option
+      // count because the row list is shorter than the four bands in trade mode.
+      this.dialogueObjects.push(
+        this.panelHit( left + 12, rowY, panelW - 24, 26, depth + 8, {
+          onOver: () => {
+            if (!this.dialogue || this.dialogue.selected === i) return;
+            if (i >= this.dialogueOptionsView().length) return;
+            this.dialogue.selected = i;
+            this.refreshDialogue();
+          },
+          onClick: () => {
+            if (!this.dialogue || i >= this.dialogueOptionsView().length) return;
+            this.dialogue.selected = i;
+            this.refreshDialogue();
+            this.onUse();
+          },
+        }),
+      );
       const icon = this.add.image(left + 30, rowY + 12, 'blank').setOrigin(0.5).setDepth(depth + 7);
       const t = this.add
         .text(left + 46, rowY + 12, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
@@ -3081,6 +3263,14 @@ export class GameScene extends Phaser.Scene {
     this.keyF.on('down', () => this.guard('f', this.tryShortcut), this);
     this.cursors.up.on('down', () => this.guard('up', this.onNavUp), this);
     this.cursors.down.on('down', () => this.guard('down', this.onNavDown), this);
+
+    // Mouse. Scene-level on purpose: it fires for presses that did NOT land on an
+    // interactive object, which is exactly the set that should be read as "walk
+    // here". Rows and buttons get first refusal through `currentlyOver`.
+    // Off-then-on because create() runs again after a scene restart and the input
+    // plugin is not reset with it.
+    this.input.off('pointerdown', this.pointerHandler);
+    this.input.on('pointerdown', this.pointerHandler);
   }
 
   // Accept a key at most once per frame (GHI-03 m9). The action has to be
@@ -3147,6 +3337,65 @@ export class GameScene extends Phaser.Scene {
   private onToggleInventory(): void {
     if (this.stairClimb || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
     this.toggleInventory();
+  }
+
+  // ── mouse ───────────────────────────────────────────────────────────────
+  /** Panel hit targets live in screen space: every panel in this scene is built
+   *  at fixed screen coordinates and pushed through lockToScreen/applyPanelDepth,
+   *  which sets scrollFactor 0. A hit rect left at scrollFactor 1 sits one camera
+   *  scroll above the row it is supposed to cover — measured: 52px off on floor 2,
+   *  which made every click land on the row above. */
+  private panelHit(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    depth: number,
+    handlers: Parameters<typeof hitRect>[6],
+  ): Phaser.GameObjects.Rectangle {
+    return hitRect(this, x, y, w, h, depth, handlers).setScrollFactor(0);
+  }
+
+  private anyPanelOpen(): boolean {
+    return (
+      this.encounterOpen || this.shelterOpen || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen
+    );
+  }
+
+  /** True when something E could act on sits within reach of `x`. */
+  private hasInteractableNear(x: number): boolean {
+    const state = getGame();
+    const near = (v: number): boolean => Math.abs(v - x) <= 36;
+    if (state.currentFloor === NPC_FLOOR && NPCS.some((n) => near(n.x))) return true;
+    if (this.floorView.containers.some((c) => c.items.length > 0 && near(c.x))) return true;
+    for (const marker of this.spotMarkers.values()) if (near(marker.x)) return true;
+    if (near(UP_EXIT_X) || near(DOWN_EXIT_X)) return true;
+    if (state.currentFloor === STARTING_FLOOR && near(BED_X)) return true;
+    return false;
+  }
+
+  private onPointerDown(pointer: Phaser.Input.Pointer, currentlyOver: unknown[]): void {
+    if (this.stairClimb) return;
+    // A row or a button already took this press.
+    if (currentlyOver.length > 0) return;
+
+    if (this.anyPanelOpen()) {
+      // The panel's own background swallows the click; anywhere else is the
+      // mouse's ESC. Without this a click on the world behind an open panel did
+      // nothing at all and the only way out was the keyboard.
+      const box = this.panelBox;
+      const inside =
+        !!box && pointer.x >= box.x && pointer.x <= box.x + box.w && pointer.y >= box.y && pointer.y <= box.y + box.h;
+      if (!inside) this.onEsc();
+      return;
+    }
+    if (getGame().status !== 'playing') return;
+    // The HUD is not the world: clicking a stat bar or the top strip should not
+    // send the player walking to a spot behind it.
+    if (pointer.y < HUD_LAYOUT.contextBottom) return;
+    const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    const x = Phaser.Math.Clamp(world.x, 8, FLOOR_WIDTH - 8);
+    this.walkTarget = { x, interact: this.hasInteractableNear(x) };
   }
 
   private onEsc(): void {
@@ -3483,6 +3732,8 @@ export class GameScene extends Phaser.Scene {
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
     const depth = PANEL_DEPTH.game.dialogue;
     const resolved = state.shelterPlan?.resolved === true;
 
@@ -3508,6 +3759,19 @@ export class GameScene extends Phaser.Scene {
         dim: resolved && state.shelterPlan?.action !== row.action,
       });
       this.shelterObjects.push(...objects);
+      this.shelterObjects.push(
+        this.panelHit( left + 16, rowsTop + index * 26, panelW - 32, 26, depth + 8, {
+          // No buildShelterPanel() here: it re-derives shelterSelected from the
+          // (still unresolved) plan and snaps the cursor back to row 0, so every
+          // click used to schedule 休息 no matter which row was pressed.
+          // activateShelterChoice() rebuilds after it resolves.
+          onClick: () =>
+            this.time.delayedCall(0, () => {
+              this.shelterSelected = index;
+              this.onUse();
+            }),
+        }),
+      );
       const label = objects.find((object) => object instanceof Phaser.GameObjects.Text && object.text === row.label) as Phaser.GameObjects.Text | undefined;
       if (index === this.shelterSelected && label) {
         placeMarker(this.shelterMarker, label);
@@ -3773,6 +4037,23 @@ export class GameScene extends Phaser.Scene {
     let dir = 0;
     if (this.cursors?.left.isDown || this.wasd?.left.isDown) dir -= 1;
     if (this.cursors?.right.isDown || this.wasd?.right.isDown) dir += 1;
+    // Click-to-walk. A held key cancels the order rather than fighting it, so the
+    // player never feels the mouse and the keyboard pulling opposite ways.
+    if (this.walkTarget) {
+      if (dir !== 0) {
+        this.walkTarget = null;
+      } else {
+        const remaining = this.walkTarget.x - state.player.x;
+        if (Math.abs(remaining) <= 6) {
+          const order = this.walkTarget;
+          this.walkTarget = null;
+          // Arrived: if the click landed on something E can use, use it.
+          if (order.interact) this.onInteract();
+        } else {
+          dir = remaining > 0 ? 1 : -1;
+        }
+      }
+    }
     // The speed is ramped rather than switched, so a tap of the key moves a
     // shorter distance than it used to and the run feels like it has weight.
     // OVERHAUL: an empty energy tank slows the walk (0.75x), so "how far can I

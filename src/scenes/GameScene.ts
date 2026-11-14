@@ -617,11 +617,18 @@ export class GameScene extends Phaser.Scene {
     // before the exits so the stairs have a landing to arrive at.
     const lowest = PLAYABLE_FLOORS_V01[0];
     const highest = PLAYABLE_FLOORS_V01[PLAYABLE_FLOORS_V01.length - 1];
+    // Only floors that were actually authored. The cross-section used to draw
+    // every numeric neighbour, so standing on 100 painted floors 99 and 98 as lit
+    // rooms with their own lamps — rooms that do not exist, in a stretch the
+    // design says is empty. The gap now reads as empty, which is the whole point
+    // of saying the other 89 floors are skipped.
     for (let d = 1; d <= STACK_ABOVE; d++) {
-      if (floor - d >= lowest) this.drawNeighbourFloor(floor - d, -FLOOR_HEIGHT * d, true, d);
+      const f = floor - d;
+      if (f >= lowest && hasFloorContent(f)) this.drawNeighbourFloor(f, -FLOOR_HEIGHT * d, true, d);
     }
     for (let d = 1; d <= STACK_BELOW; d++) {
-      if (floor + d <= highest) this.drawNeighbourFloor(floor + d, FLOOR_HEIGHT * d, false, d);
+      const f = floor + d;
+      if (f <= highest && hasFloorContent(f)) this.drawNeighbourFloor(f, FLOOR_HEIGHT * d, false, d);
     }
     this.drawExits(floor);
     // After the exits: the door is drawn over the wall dressing, and it stands

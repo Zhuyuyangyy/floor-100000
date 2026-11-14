@@ -757,14 +757,21 @@ export class GameScene extends Phaser.Scene {
     // was drawn in 0xc6d2da: ninety-four percent of it was the mask, not the
     // weapon. Below the band, at hip height, the grip is inside the silhouette
     // and 34 of the 42 shaft pixels are clear of it.
-    w.setPosition(this.player.x + (flip ? -20 : 20), this.player.y - 56);
+    //
+    // The offsets are tuned to the POSE, not to the character. They were set for
+    // the old procedural walk, which leaned forward with the near arm out at
+    // chest height; the painted v5.2 walk stands upright with both arms hanging,
+    // so the same -56 put the grip in empty air above the hand. -40 drops it to
+    // where that hand actually is. If the walk pose changes again, this number
+    // changes with it - a fixed offset cannot survive a new skeleton.
+    w.setPosition(this.player.x + (flip ? -18 : 18), this.player.y - 40);
     // Facing right the bar leans 17° down and forward. Facing left it has to be
     // a half turn plus that lean, not the negative angle: the texture occupies
     // its 46 pixels on the +x side of the grip no matter how it is flipped, so a
     // negated angle points the weapon up and back over the shoulder instead of
     // down and ahead. The claw's own curl ends up inverted on that side, which
     // at one pixel of curl is not a thing anyone can see.
-    w.setRotation(flip ? Math.PI - 0.3 : 0.3);
+    w.setRotation(flip ? Math.PI - 0.34 : 0.34);
     w.setDepth(ACTOR_DEPTH - 1);
     w.setAlpha(1);
   }

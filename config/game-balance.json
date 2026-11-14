@@ -52,7 +52,7 @@
   },
   "world": {
     "startingFloor": 1,
-    "playableFloorsV01": [1, 2, 3, 4, 5],
+    "playableFloorsV01": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     "targetTotalFloors": 100000,
     "preloadAllFloors": false,
     "fixedQaSeeds": [1, 42, 2026]

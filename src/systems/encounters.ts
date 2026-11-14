@@ -50,6 +50,15 @@ const FLOOR_WEIGHT_PROFILE: Record<number, Partial<Record<EncounterKind, number>
   4: { loot: 24, note: 5, trader: 10, cache: 22, ambush: 39 },
   // boss 24 是当层最高权重；ambush 仍保持高位（22），loot 降权但内容最肥。
   5: { loot: 20, note: 4, trader: 6, cache: 24, ambush: 22, boss: 24 },
+  // 6-10 层（阶层 1 的上半段）：守门人只守第 5 层，所以这里没有 boss；越往上
+  // 越像被人搜过，loot 一路降、ambush 一路升。缺了这几行会让 buildEncounterTable
+  // 在 k='loot' 第一次查 profile 时就 TypeError —— 表是以 DEEPEST_FLOOR 为兜底的，
+  // 而 DEEPEST_FLOOR 现在就是 10。
+  6: { loot: 28, note: 8, trader: 10, cache: 20, ambush: 34 },
+  7: { loot: 26, note: 8, trader: 9, cache: 21, ambush: 36 },
+  8: { loot: 24, note: 7, trader: 8, cache: 22, ambush: 39 },
+  9: { loot: 22, note: 6, trader: 7, cache: 23, ambush: 42 },
+  10: { loot: 20, note: 6, trader: 6, cache: 24, ambush: 44 },
 };
 
 // 固定枚举顺序，保证 ENCOUNTER_TABLE 的行顺序与加权 roll 的遍历顺序确定。
@@ -58,11 +67,22 @@ const ENCOUNTER_KINDS: readonly EncounterKind[] = ['loot', 'ambush', 'trader', '
 // 表外楼层（理论上 v0.1 不可达）回落到最深楼层配置，绝不抛错。
 const DEEPEST_FLOOR = PLAYABLE_FLOORS_V01.length > 0 ? PLAYABLE_FLOORS_V01[PLAYABLE_FLOORS_V01.length - 1] : 1;
 
+// The floor the gatekeeper stands on, which is also the floor that gets the fat
+// cache. It is NOT "the last playable floor": when the list grew to 10, tying the
+// guarantee to DEEPEST_FLOOR silently moved the game's best supply cache from
+// floor 5 to floor 10 and broke the cache test. The gatekeeper stays put, so this
+// number stays put.
+const GATEKEEPER_FLOOR = 5;
+
 function buildEncounterTable(): Record<number, Array<{ kind: EncounterKind; weight: number }>> {
   const table: Record<number, Array<{ kind: EncounterKind; weight: number }>> = {};
   const floors = PLAYABLE_FLOORS_V01.includes(DEEPEST_FLOOR) ? PLAYABLE_FLOORS_V01 : [...PLAYABLE_FLOORS_V01, DEEPEST_FLOOR];
   for (const floor of floors) {
-    const profile = FLOOR_WEIGHT_PROFILE[floor] ?? FLOOR_WEIGHT_PROFILE[DEEPEST_FLOOR];
+    // Two fallbacks, not one: DEEPEST_FLOOR itself can be missing from the table
+    // (that is exactly what broke when the playable list grew to 10), so the floor-1
+    // profile is the last resort. A missing profile must degrade, never throw at
+    // module init — that takes the whole game down before the menu draws.
+    const profile = FLOOR_WEIGHT_PROFILE[floor] ?? FLOOR_WEIGHT_PROFILE[DEEPEST_FLOOR] ?? FLOOR_WEIGHT_PROFILE[1] ?? {};
     table[floor] = ENCOUNTER_KINDS.filter((k) => (profile[k] ?? 0) > 0).map((k) => ({ kind: k, weight: profile[k] ?? 0 }));
   }
   return table;
@@ -265,8 +285,8 @@ export function resolveEncounter(state: GameState, encounter: Encounter, choice:
       if (choice !== 'take') return INVALID_RESULT;
       const items: Array<{ itemId: ItemId; quantity: number }> = [];
       let overflowed = false;
-      if (encounter.floor >= DEEPEST_FLOOR) {
-        // 5 层保底：净水×2 + 医疗包×1，全游戏最肥的补给点。
+      if (encounter.floor === GATEKEEPER_FLOOR) {
+        // 5 层保底：净水×2 + 医疗包×1，全游戏最肥的补给点（守门人这一层）。
         if (grantFixed(state, 'clean_water', 2)) items.push({ itemId: 'clean_water', quantity: 2 });
         else overflowed = true;
         if (grantFixed(state, 'medkit', 1)) items.push({ itemId: 'medkit', quantity: 1 });

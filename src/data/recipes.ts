@@ -45,6 +45,15 @@ export const RECIPES: Recipe[] = [
   { id: 'core_key', displayName: '核心权限', description: '接进塔务系统的临时权限，代价是配电房最后一只保险丝', cost: { fuse: 1, wire: 2, scrap_metal: 1 }, requires: 'vip_card' },
 ];
 
+// The pass chain is stored in homeUpgrades, but a credential is not a facility:
+// anything that lists or counts what the player has BUILT must exclude these, or
+// a run can satisfy the "build an upgrade" daily goal by forging a badge.
+export const PASS_UPGRADE_IDS: readonly UpgradeId[] = ['work_badge', 'pass_sticker', 'permit', 'vip_card', 'core_key'];
+
+export function isPassUpgrade(id: string): boolean {
+  return (PASS_UPGRADE_IDS as readonly string[]).includes(id);
+}
+
 export function getRecipe(id: UpgradeId): Recipe {
   const recipe = RECIPES.find((r) => r.id === id);
   if (!recipe) throw new Error(`unknown recipe: ${id}`);

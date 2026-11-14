@@ -5,6 +5,7 @@ import { PLAYABLE_FLOORS_V01 } from '../core/constants';
 import { addItem, countItem } from './InventorySystem';
 import { hasFlag, once, setFlag, flagKey } from './WorldFlags';
 import type { GameState } from '../core/gameTypes';
+import { isPassUpgrade } from '../data/recipes';
 
 // OVERHAUL W3（docs/OVERHAUL_M1.md）：每日目标。
 //
@@ -94,7 +95,9 @@ export function isDailyGoalDone(state: GameState): boolean {
     case 'containers':
       return openedContainersTotal(state) >= goal.target;
     case 'upgrade':
-      return state.player.homeUpgrades.length >= goal.target;
+      // Passes are credentials, not construction: forging a badge must not tick
+      // the "build an upgrade" goal.
+      return state.player.homeUpgrades.filter((id) => !isPassUpgrade(id)).length >= goal.target;
     case 'floor':
       return state.currentFloor >= goal.target;
   }

@@ -7,9 +7,15 @@ describe('game-balance config', () => {
     expect(GAME_CONFIG.schemaVersion).toBe(1);
   });
 
-  it('declares the 5 playable v0.1 floors including 1', () => {
-    expect(GAME_CONFIG.world.playableFloorsV01).toEqual([1, 2, 3, 4, 5]);
-    expect(GAME_CONFIG.world.playableFloorsV01).toContain(1);
+  it('declares a contiguous playable range starting at floor 1', () => {
+    const floors = GAME_CONFIG.world.playableFloorsV01;
+    // The slum segment is authored floor by floor, so it must never shrink below
+    // the five floors the chapter shipped with; the exact count is the config's
+    // business, not this test's.
+    expect(floors.length).toBeGreaterThanOrEqual(5);
+    expect(floors[0]).toBe(1);
+    // No holes and no duplicates: floor N+1 is reachable only through floor N.
+    expect(floors).toEqual(Array.from({ length: floors.length }, (_, i) => i + 1));
   });
 
   it('starting items match the GDD baseline exactly', () => {

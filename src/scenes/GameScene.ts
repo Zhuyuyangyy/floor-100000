@@ -144,7 +144,7 @@ import {
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
 import { HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
-import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
+import { RECIPES, getRecipe, isPassUpgrade, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
 import { trade } from '../systems/TradeSystem';
 import { aiNpcConfig, archetypeForNpcId, npcFactFromDef } from '../ai/config';
@@ -2509,13 +2509,23 @@ export class GameScene extends Phaser.Scene {
 
   private refreshUpgradeBoard(): void {
     if (!this.upgradeBoard) return;
-    const built = getGame().player.homeUpgrades.map((id) => getRecipe(id as UpgradeId).displayName);
-    this.upgradeBoard.setText(built.length > 0 ? `已建：${built.join('、')}` : '');
+    const owned = getGame().player.homeUpgrades;
+    const built = owned.filter((id) => !isPassUpgrade(id)).map((id) => getRecipe(id as UpgradeId).displayName);
+    const passes = owned.filter((id) => isPassUpgrade(id)).map((id) => getRecipe(id as UpgradeId).displayName);
+    // Two lines, because an eight-recipe list on one line ran past the workbench
+    // and into the wall. Passes get their own line so the player can see what the
+    // crafting panel keeps asking them for.
+    const facilities = built.length > 0 ? `已建：${built.join('、')}` : '';
+    const credentials = passes.length > 0 ? `凭证：${passes.join('、')}` : '';
+    this.upgradeBoard.setText([facilities, credentials].filter(Boolean).join('\n'));
   }
 
   private buildCraftPanel(): void {
     const { width, height } = this.viewSize();
-    const panelW = 460;
+    // 530, not 460: eight recipes means the longest row is a four-character name
+    // plus three materials, and at 460 it ran under the right-aligned status
+    // column (screenshot: 核心权限's cost sat on top of 缺前置).
+    const panelW = 530;
     const panelH = 300;
     const cx = width / 2;
     const cy = height / 2;
@@ -2539,7 +2549,7 @@ export class GameScene extends Phaser.Scene {
       const rowY = top + 30 + i * CRAFT_ROW_PITCH;
       const band = this.add.rectangle(left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.34).setDepth(PANEL_DEPTH.game.craft + 5);
       const name = this.add.text(left + 18, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-      const status = this.add.text(left + panelW - 16, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      const status = this.add.text(left + panelW - 24, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
       this.craftRows.push({ band, name, status });
       this.craftObjects.push(band, name, status);
     }
@@ -2598,20 +2608,22 @@ export class GameScene extends Phaser.Scene {
           .map(([id, n]) => `${getItem(id as ItemId).displayName}${n}`)
           .join(' ');
         row.name.setText(`${recipe.displayName}  ${cost}`);
-        row.name.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
+        // The selected band is the warm accent, so light text on it read as a
+        // smear. Dark ink is the only colour in the palette with contrast on it.
+        row.name.setColor(selected ? hex(PALETTE.ink) : hex(TEXT.primary));
         const built = hasUpgrade(state, entry.id!);
         const check = canCraft(state, entry.id!);
         // A missing credential is not a materials problem: say 缺前置 instead of
         // 材料不足, or the player gathers what they already have enough of.
         const gated = !check.ok && check.reason !== undefined;
         row.status.setText(built ? '已建' : gated ? '缺前置' : check.ok ? '可制作' : '材料不足');
-        row.status.setColor(built ? hex(PALETTE.clothHigh) : gated ? hex(TEXT.warn) : check.ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
+        row.status.setColor(selected ? hex(PALETTE.ink) : built ? hex(PALETTE.clothHigh) : gated ? hex(TEXT.warn) : check.ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
       } else {
         const can = countItem(state.player.inventory, 'dirty_water') >= 1;
         row.name.setText('净化  脏水→净水');
-        row.name.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
+        row.name.setColor(selected ? hex(PALETTE.ink) : hex(TEXT.primary));
         row.status.setText(can ? '可净化' : '缺脏水');
-        row.status.setColor(can ? hex(PALETTE.clothHigh) : hex(TEXT.dim));
+        row.status.setColor(selected ? hex(PALETTE.ink) : can ? hex(PALETTE.clothHigh) : hex(TEXT.dim));
       }
     }
     // "前置：X" for the row the cursor is on. Met reads as quiet grey; unmet is

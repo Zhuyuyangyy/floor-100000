@@ -10,7 +10,10 @@ import { ENV_FILES, FURNITURE_FILES } from '../render/artpack';
 // covers it now, so a container with no key would be invisible rather than
 // plain-looking, which is a much worse failure.
 describe('container furniture mapping', () => {
-  const allContainers = Object.values(FLOOR_TEMPLATES).flatMap((t) => t.containers.map((c) => c.id));
+  // Deduped: floors 6-10 reuse the same container ids as 1-5 on purpose (there is
+  // no second set of furniture art), so the flat list now repeats ids and the exact
+  // table below would compare against duplicates.
+  const allContainers = [...new Set(Object.values(FLOOR_TEMPLATES).flatMap((t) => t.containers.map((c) => c.id)))];
 
   it('knows about every container in the game', () => {
     expect(allContainers.length).toBeGreaterThan(0);

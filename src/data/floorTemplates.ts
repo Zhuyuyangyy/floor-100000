@@ -1,6 +1,11 @@
 import { deriveSeed, makeRng } from '../core/rng';
 import type { GeneratedContainer, GeneratedFloor, GroundItem, InventoryStack, ItemId } from '../core/gameTypes';
 
+// 6-10 层的容器 id 复用既有家具贴图（cabinet/shelf/crate_wood/crate_metal/
+// fuse_box/water_tank）。containerTextureKey 对未知 id 返回 null，容器会变成不可见，
+// 而这批新楼层没有新家具美术 —— 差异化靠 label 文案，不靠新贴图。
+// label 控制在 2-3 字：一层最多 4 个容器，名字一长就直接压到隔壁容器的标题上（第 6 层
+// 首版「焊死的门柜」「塌了一半的架子」互相叠字，截图可见）。
 // Fixed v0.1 floor layouts (docs/01_GDD.md §7). Loot is data-driven: guaranteed
 // entries (critical progression items) always appear; the rest roll by seed, so
 // the same worldSeed reproduces the same world while different seeds can differ.
@@ -184,6 +189,197 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
       },
     ],
     ground: [{ itemId: 'bread', quantity: 1, x: 160 }],
+  },
+  // Floors 6..10 stay inside tier 1 (docs/18_TIER_PROGRESSION.md: the slum's
+  // playable segment is 1-10). They are the picked-over top of the slum: fewer
+  // containers than the floors below, quantities down to a single roll, and the
+  // only thing still reliably stocked is one bottle of water and one meal per
+  // floor — a floor that hands out no drink would make climbing a death
+  // sentence rather than a choice.
+  6: {
+    floorNumber: 6,
+    name: '封门走廊',
+    description: '六层往上的门被木板封死，门缝里塞着旧报纸',
+    containers: [
+      {
+        id: 'cabinet',
+        label: '焊死柜',
+        x: 320,
+        loot: [
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'cloth', min: 1, max: 2, probability: 0.35 },
+        ],
+      },
+      {
+        id: 'crate_wood',
+        label: '报纸堆',
+        x: 720,
+        loot: [
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'tape', min: 1, max: 1, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '塌架',
+        x: 1040,
+        loot: [
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.5 },
+          { itemId: 'battery', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+      {
+        id: 'crate_metal',
+        label: '锈铁桶',
+        x: 480,
+        loot: [
+          { itemId: 'wood', min: 1, max: 1, probability: 0.4 },
+          { itemId: 'cloth', min: 1, max: 1, probability: 0.35 },
+        ],
+      },
+    ],
+    ground: [{ itemId: 'bread', quantity: 1, x: 900 }],
+  },
+  7: {
+    floorNumber: 7,
+    name: '被搜过的储藏间',
+    description: '柜门全敞着，地上只剩翻乱的空盒和断掉的绳头',
+    containers: [
+      {
+        id: 'cabinet',
+        label: '空柜',
+        x: 260,
+        loot: [
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'wire', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+      {
+        id: 'crate_wood',
+        label: '抽屉',
+        x: 640,
+        loot: [
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'fuse', min: 1, max: 1, probability: 0.25 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '塌陷的货架',
+        x: 1020,
+        loot: [
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.45 },
+          { itemId: 'cloth', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+    ],
+    ground: [{ itemId: 'battery', quantity: 1, x: 800 }],
+  },
+  8: {
+    floorNumber: 8,
+    name: '停电的走廊',
+    description: '应急灯全灭，墙上只剩被扯断的线槽',
+    containers: [
+      {
+        id: 'fuse_box',
+        label: '断电箱',
+        x: 380,
+        loot: [
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'wire', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'crate_wood',
+        label: '压扁的木箱',
+        x: 760,
+        loot: [
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'wood', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'cabinet',
+        label: '钉死橱',
+        x: 1120,
+        loot: [
+          { itemId: 'cloth', min: 1, max: 1, probability: 0.3 },
+          { itemId: 'tape', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  9: {
+    floorNumber: 9,
+    name: '漏水的中层',
+    description: '天花板不停往下滴水，墙皮泡得发软，没人愿意在这层久留',
+    containers: [
+      {
+        id: 'water_tank',
+        label: '漏水罐',
+        x: 240,
+        loot: [
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'filter', min: 1, max: 1, probability: 0.2 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '泡烂架',
+        x: 620,
+        loot: [
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          // A lucky find, not a progression gate — same rule as the canteen box.
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.25 },
+        ],
+      },
+      {
+        id: 'crate_wood',
+        label: '发霉的木匣',
+        x: 1000,
+        loot: [
+          { itemId: 'cloth', min: 1, max: 2, probability: 0.4 },
+          { itemId: 'scrap_metal', min: 1, max: 1, probability: 0.35 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  10: {
+    floorNumber: 10,
+    name: '十层尽头',
+    description: '楼梯到这里断开，墙上刻着前人留下的十道横线',
+    containers: [
+      {
+        id: 'cabinet',
+        label: '末柜',
+        x: 300,
+        loot: [
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'battery', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+      {
+        id: 'crate_wood',
+        label: '旧背包',
+        x: 700,
+        loot: [
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'tape', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '封墙龛',
+        x: 1080,
+        loot: [
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.4 },
+          { itemId: 'fuse', min: 1, max: 1, probability: 0.25 },
+        ],
+      },
+    ],
+    ground: [],
   },
 };
 

@@ -46,7 +46,7 @@ describe('describeFloorContents', () => {
 
   it('says so for a floor with no authored content', () => {
     const s = createNewGame(42);
-    expect(describeFloorContents(s, 6)).toContain('未生成');
+    expect(describeFloorContents(s, 50)).toContain('未生成');
   });
 });
 

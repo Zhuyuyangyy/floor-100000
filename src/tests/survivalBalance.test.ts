@@ -46,7 +46,7 @@ function worldSources(): Map<ItemId, { guaranteed: boolean; where: string[] }> {
 }
 
 // The floors the three upgrades draw their materials from. A player chasing the
-// upgrades does not tour all five floors — and cannot: the 12-slot bag overflows
+// upgrades does not tour the whole tower — and cannot: the 12-slot bag overflows
 // long before every container is emptied, so looting is a choice, not a sweep.
 const MATERIAL_FLOORS = [3, 4];
 
@@ -102,8 +102,8 @@ describe('the world supplies enough to build every upgrade (audit D2)', () => {
   });
 
   it('the bag cannot hold everything, so looting stays a choice', () => {
-    // Pins the bag-pressure fact the seed sweep exposed: a blind sweep of all
-    // five floors overflows the 12 slots and silently drops later containers.
+    // Pins the bag-pressure fact the seed sweep exposed: a blind sweep of the
+    // whole tower overflows the 12 slots and silently drops later containers.
     const s = createNewGame(1);
     for (const floor of PLAYABLE_FLOORS_V01) {
       const view = getFloorView(s, floor);
@@ -360,9 +360,14 @@ describe('the seven-day budget closes (new: viability margin)', () => {
     const have = supply().thirst;
     expect(have).toBeGreaterThan(need);
     // Thin on purpose: the frozen design makes clean water precious in the slum.
-    // If this margin ever grows past about a day the chapter stops being a
-    // struggle, and the reason to climb stops being urgent.
-    expect(have - need).toBeLessThan(3 * 24);
+    // The bound is a rate per floor, not an absolute, because the chapter now
+    // spans ten floors and every one of them must guarantee a bottle (30 thirst
+    // points) or it becomes a death trap. 0.5 bottle per floor is therefore the
+    // arithmetic floor; holding it at 0.6 leaves ~3 points of headroom per
+    // floor, so a second guaranteed bottle anywhere tripping this is exactly the
+    // regression the old absolute bound was catching.
+    const maxPerFloor = 30 * 0.6;
+    expect(have - need).toBeLessThan(PLAYABLE_FLOORS_V01.length * maxPerFloor);
   });
 
   it('food closes with room to spare', () => {

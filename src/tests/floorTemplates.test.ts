@@ -30,8 +30,12 @@ describe('the dev-only floor alias', () => {
     }
   });
 
-  it('keeps the authored table at five entries', () => {
-    expect(Object.keys(FLOOR_TEMPLATES)).toHaveLength(5);
+  it('authors exactly one template per playable floor, and nothing else', () => {
+    // Count is not pinned: the assertion is that the authored table and the
+    // playable list name the same floors, so a floor can never be playable
+    // without content (or authored without being reachable).
+    const authored = Object.keys(FLOOR_TEMPLATES).map(Number).sort((a, b) => a - b);
+    expect(authored).toEqual([...PLAYABLE_FLOORS_V01].sort((a, b) => a - b));
   });
 
   it('generates the dev floor under its own number', () => {
@@ -42,11 +46,15 @@ describe('the dev-only floor alias', () => {
 });
 
 describe('floor templates', () => {
-  it('defines all 5 v0.1 floors', () => {
+  it('defines a template for every playable floor', () => {
     for (const f of PLAYABLE_FLOORS_V01) {
-      expect(getFloorTemplate(f)).toBeDefined();
+      expect(getFloorTemplate(f), `floor ${f} must have a template`).toBeDefined();
     }
-    expect(Object.keys(FLOOR_TEMPLATES)).toHaveLength(5);
+    // The key and the template's own floorNumber must agree, or the template is
+    // addressable under one number and generates under another.
+    for (const [key, t] of Object.entries(FLOOR_TEMPLATES)) {
+      expect(t.floorNumber, `FLOOR_TEMPLATES[${key}]`).toBe(Number(key));
+    }
   });
 
   it('the same seed generates the same world', () => {
@@ -75,6 +83,60 @@ describe('floor templates', () => {
 
   it('an unknown floor throws', () => {
     expect(() => generateFloor(1, 12345)).toThrow();
+  });
+});
+
+// The slum's playable segment is floors 1..10 (docs/18_TIER_PROGRESSION.md,
+// tier 1). Ten floors is long enough that a floor with no authored content — or
+// with no guaranteed drink — would only be noticed by dying on it, so it is
+// pinned here rather than left to playtesting.
+describe('every playable floor is generated, survivable and reproducible', () => {
+  const QA_SEEDS = [1, 42, 2026];
+
+  // Floors 6..10 are the expansion. They must each provision the player: they
+  // are the only stretch with no home, NPC or upgrade floor to fall back on, and
+  // a floor without a guaranteed bottle makes the climb a seed lottery.
+  //
+  // Floors 1..5 predate the rule and stay as authored — 1 is home (it holds the
+  // guaranteed bottle), 2 is the trading hub, 3 is the material store, 4 the
+  // water stop and 5 the canteen — so the per-floor invariant is asserted where
+  // it is actually required rather than retro-fitted onto the old balance.
+  const SELF_PROVISIONED_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 6);
+
+  it('generates every playable floor without throwing', () => {
+    for (const floor of PLAYABLE_FLOORS_V01) {
+      expect(() => generateFloor(42, floor), `floor ${floor}`).not.toThrow();
+      expect(generateFloor(42, floor).floorNumber, `floor ${floor}`).toBe(floor);
+    }
+  });
+
+  it('every self-provisioned floor yields a drink', () => {
+    expect(SELF_PROVISIONED_FLOORS.length, 'the climb above the canteen must exist').toBeGreaterThan(0);
+    for (const seed of QA_SEEDS) {
+      for (const floor of SELF_PROVISIONED_FLOORS) {
+        const items = generateFloor(seed, floor).containers.flatMap((c) => c.items);
+        const water = items.filter((i) => i.itemId === 'clean_water' || i.itemId === 'dirty_water');
+        expect(water.length, `seed ${seed} floor ${floor} hands out no water`).toBeGreaterThan(0);
+        expect(water.reduce((n, i) => n + i.quantity, 0), `seed ${seed} floor ${floor}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('every self-provisioned floor yields a meal', () => {
+    expect(SELF_PROVISIONED_FLOORS.length, 'the climb above the canteen must exist').toBeGreaterThan(0);
+    for (const seed of QA_SEEDS) {
+      for (const floor of SELF_PROVISIONED_FLOORS) {
+        const items = generateFloor(seed, floor).containers.flatMap((c) => c.items);
+        const food = items.filter((i) => i.itemId === 'ration_pack' || i.itemId === 'bread');
+        expect(food.length, `seed ${seed} floor ${floor} hands out no food`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('the same seed and floor reproduce the same floor', () => {
+    for (const floor of PLAYABLE_FLOORS_V01) {
+      expect(generateFloor(42, floor), `floor ${floor}`).toEqual(generateFloor(42, floor));
+    }
   });
 });
 

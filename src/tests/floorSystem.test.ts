@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PLAYABLE_FLOORS_V01 } from '../core/constants';
 import { createNewGame } from '../core/gameState';
 import {
   DOWN_EXIT_X,
@@ -53,9 +54,10 @@ describe('tryChangeFloor', () => {
 
   it('blocks climbing above the top of the playable range (failure/boundary)', () => {
     const s = createNewGame(1);
-    s.currentFloor = 5;
+    const top = Math.max(...PLAYABLE_FLOORS_V01);
+    s.currentFloor = top;
     expect(tryChangeFloor(s, 1)).toEqual({ ok: false, reason: 'top' });
-    expect(s.currentFloor).toBe(5);
+    expect(s.currentFloor).toBe(top);
   });
 
   it('blocks descending below the bottom of the playable range (failure/boundary)', () => {
@@ -67,10 +69,11 @@ describe('tryChangeFloor', () => {
 
 describe('exit availability', () => {
   it('the bottom floor has no down exit; the top has no up exit', () => {
+    const top = Math.max(...PLAYABLE_FLOORS_V01);
     expect(hasDownExit(1)).toBe(false);
     expect(hasUpExit(1)).toBe(true);
-    expect(hasUpExit(5)).toBe(false);
-    expect(hasDownExit(5)).toBe(true);
+    expect(hasUpExit(top)).toBe(false);
+    expect(hasDownExit(top)).toBe(true);
   });
 });
 

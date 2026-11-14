@@ -2,6 +2,7 @@ import { GAME_CONFIG } from '../core/config';
 import { DAY_START_MINUTE, MINUTES_PER_DAY } from '../core/constants';
 import { devEntry } from '../core/devMode';
 import type { GameState } from '../core/gameTypes';
+import { grantGrowthXp } from '../core/growth';
 import { modeDecayMult } from './modes';
 import { hungerLossMult } from './relics';
 import { tickEnvironment, type EnvironmentTick } from './EnvironmentSystem';
@@ -180,6 +181,13 @@ export function sleep(state: GameState): SleepResult {
   // immediately rather than a minute later.
   applyRestDecay(state, nightHours);
   state.worldEvents.activeEvent = null; // fresh roll each day
+  // B5: a full night in the dorm is the survival line's "安睡一晚 +10"
+  // (docs/plans/GROWTH_INTERFACES.md §5). The night was already a real
+  // decision — the resting metabolism bill proves it — but it taught the
+  // survival line nothing, so the line could only ever be fed by eating and
+  // drinking. Granted after the clock and the bill are applied, so the reward
+  // describes a night that actually happened.
+  grantGrowthXp(state, 'survival', 10);
   const won = devEntry().legacyWin && isLegacyVictory(state);
   if (won) state.status = 'won';
   return { ok: true, won, newDay: state.day };

@@ -46,6 +46,7 @@ export interface CorridorContext {
 // all belong to the same value structure.
 import { PALETTE } from './palette.ts';
 import { LIGHT_DEPTH } from './lighting';
+import { segmentOf } from '../core/segments';
 import { startFxLoop } from './fx';
 
 const PIPE = PALETTE.stoneLight;
@@ -409,7 +410,21 @@ export function drawCorridorRoom(ctx: CorridorContext): void {
   THEMES[ctx.floor]?.(ctx);
 }
 
+// Per-segment wash, applied where a floor has no tint of its own. The tower
+// shares one wall tile, so without this every tier is the same room with
+// different furniture.
+//
+// Honest limit, measured: on the current wall the wash moves the sampled wall
+// average from RGB(27,43,53) to (32,46,61) — about 7 levels on the blue channel.
+// That is a hint, not a difference. A tier that actually reads as a different
+// building needs its own wall art; this is only a stopgap so the dorm is not
+// byte-identical to the slum.
+export const SEGMENT_TINT: Record<number, { color: number; alpha: number }> = {
+  2: { color: PALETTE.lightHigh, alpha: 0.18 }, // worker dorms: warm, kept lit
+  3: { color: PALETTE.clothHigh, alpha: 0.16 }, // industry: cold, chemical
+};
+
 /** The wall tint for a floor, or null when the floor draws its own base. */
 export function corridorTint(floor: number): { color: number; alpha: number } | null {
-  return CORRIDOR_TINT[floor] ?? null;
+  return CORRIDOR_TINT[floor] ?? SEGMENT_TINT[segmentOf(floor)?.id ?? 0] ?? null;
 }

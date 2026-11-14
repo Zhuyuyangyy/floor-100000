@@ -46,6 +46,26 @@ Third-party assets bundled with this project, with their licence and provenance.
 
 ---
 
+## Character busts — supplied by the project owner
+
+- **Files:** `public/assets/ui/portraits/portrait-{player,alin,xiaozhou,wanderer}.png`
+- **Used for:** the 96x96 face on the character select screen
+  (`src/scenes/MetaSelectScene.ts`) and in the NPC dialogue panel
+  (`GameScene.buildDialoguePanel`).
+- **Contents:** four 96x96 head-and-shoulders portraits, one per roster character.
+- **Provenance:** supplied by the owner as `dorm_survival_art_pack_2026-11-14.zip`
+  (`01_portraits/`), integrated at their instruction. Not sourced from a
+  third-party asset site.
+- **Processing:** the delivered sheet was 384x96 RGB on a `#FF00FF` key colour.
+  Only exact `#FF00FF` pixels were made transparent (19,044 of them); the
+  remaining 16 colours are byte-identical to the source. No quantisation and no
+  resampling, so nothing is lost at 1:1 with `pixelArt: true`. Audit of the
+  shipped files: 0 semi-transparent pixels, 0 magenta fringe pixels on any edge,
+  all four cells share the same 4px bottom margin.
+- **Licence:** the owner's to state.
+
+---
+
 ## pixelfx — MIT
 
 - **Files:** `public/assets/fx/melee/sword-slash/` and

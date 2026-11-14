@@ -43,6 +43,8 @@ import {
   tryChangeFloor,
 } from '../systems/FloorSystem';
 import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
+import { hasFloorContent } from '../data/floorTemplates';
+import { liftOutcome, liftRequirement, nextSegment, skippedFloors } from '../core/segments';
 import { countItem, isBagFull, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
 import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, isNight, spendTime } from '../systems/SurvivalSystem';
@@ -98,7 +100,7 @@ import {
   buildPanelWell,
   drawStatBar,
 } from '../render/uiKit';
-import { ENV_FLOOR_KEY, ENV_WALL_KEY } from '../render/artpack';
+import { ENV_FLOOR_KEY, ENV_WALL_KEY, portraitKey } from '../render/artpack';
 import {
   ATTACK_FRAME_START,
   ATTACK_FRAMES,
@@ -178,6 +180,18 @@ const CRAFT_ROWS = RECIPES.length;
 // resampled and blur the pixel look.
 const TYPE_BODY = 26;
 const TYPE_AUX = 22;
+
+// ── 货运电梯 ────────────────────────────────────────────────────────────────
+// The lift stands beside the down stairwell (x=1240) on the top floor of a
+// segment. 1165 is measured, not chosen: the door is 52 wide (1139..1191), the
+// last container's label ends near 1113 and the stair treads begin at 1225, so
+// 1165 is the only centre that clears both. The reach is 30 rather than the
+// shared 44 so its band (1135..1195) does not overlap either the container's
+// (1036..1124) or the stairwell's (1196..1284): E never has two meanings here.
+const LIFT_X = 1165;
+const LIFT_REACH = 30;
+const LIFT_SIGN_Y = 46;
+const LIFT_SIGN_FONT = 18;
 
 const WANDERER_FLEE_SAFE_DISTANCE = 280;
 const WANDERER_FLEE_EXIT_MARGIN = 24;
@@ -397,6 +411,8 @@ export class GameScene extends Phaser.Scene {
   /** one selection band per dialogue row, toggled in refreshDialogue */
   private dialogueBands: Array<{ band: Phaser.GameObjects.Rectangle; rule: Phaser.GameObjects.Rectangle }> = [];
   private dialogueTitle!: Phaser.GameObjects.Text;
+  private dialoguePortrait!: Phaser.GameObjects.Image;
+  private dialoguePortraitFrame!: Phaser.GameObjects.Rectangle;
   private dialogueMessage!: Phaser.GameObjects.Text;
   private dialogueOptions: Phaser.GameObjects.Text[] = [];
   private dialogueOptionIcons: Phaser.GameObjects.Image[] = [];
@@ -584,7 +600,11 @@ export class GameScene extends Phaser.Scene {
     for (let d = 1; d <= STACK_BELOW; d++) {
       if (floor + d <= highest) this.drawNeighbourFloor(floor + d, FLOOR_HEIGHT * d, false, d);
     }
-    this.drawExits(floor);    this.buildContainers();
+    this.drawExits(floor);
+    // After the exits: the door is drawn over the wall dressing, and it stands
+    // beside the stairwell rather than in front of it.
+    this.drawLift(floor);
+    this.buildContainers();
     this.buildGround();
     if (floor === STARTING_FLOOR) {
       this.drawBed();
@@ -1759,6 +1779,63 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
+   * The freight lift, on the top floor of a playable segment and nowhere else
+   * (docs/18_TIER_PROGRESSION.md §2: a segment is climbed by stairs, a tier
+   * boundary is crossed by the lift).
+   *
+   * There is no lift art in the pack and this task does not add any, so the door
+   * is Graphics in the wall's own ramps: a roller shutter set into a recess, a
+   * lit sign over it, and a call plate on the frame. It is deliberately drawn as
+   * a freight shutter rather than a passenger car — this is the door that skips
+   * eighty-nine floors.
+   */
+  private drawLift(floor: number): void {
+    // The floor's own position is the only gate: no lift mid-segment, and none
+    // at the summit where there is nothing above.
+    if (liftRequirement(floor) === null) return;
+    const wallBottom = FLOOR_HEIGHT - FLOOR_BAND;
+    const w = 52;
+    const h = 74;
+    const top = wallBottom - h;
+    const depth = ACTOR_DEPTH - 1;
+
+    const g = this.add.graphics().setDepth(depth);
+    // The recess, so the shutter reads as set into the wall instead of painted
+    // on it. Without this the door is a rectangle of a different grey.
+    g.fillStyle(PALETTE.ink, 1);
+    g.fillRect(LIFT_X - w / 2 - 4, top - 4, w + 8, h + 4);
+    // Four slats, each catching a little light along its top edge.
+    const slat = h / 4;
+    for (let i = 0; i < 4; i++) {
+      const y = top + i * slat;
+      g.fillStyle(PALETTE.stone, 1);
+      g.fillRect(LIFT_X - w / 2, y, w, slat - 2);
+      g.fillStyle(PALETTE.shadow, 1);
+      g.fillRect(LIFT_X - w / 2, y + slat - 3, w, 2);
+    }
+    // Frame, sill, and a hazard plate: cargo, not passengers.
+    g.lineStyle(2, PALETTE.stoneLight, 1);
+    g.strokeRect(LIFT_X - w / 2 - 2, top - 2, w + 4, h + 2);
+    g.fillStyle(PALETTE.dust, 1);
+    g.fillRect(LIFT_X - w / 2 - 6, wallBottom - 2, w + 12, 3);
+    g.fillStyle(PALETTE.lightHigh, 1);
+    g.fillRect(LIFT_X + w / 2 + 8, top + 34, 6, 10);
+
+    // The sign is the interaction's whole affordance, so it is a plaque rather
+    // than bare text on the wall: at 18px it is the smallest size that stays
+    // legible and still fits between the container's label and the stairwell.
+    const sign = this.add
+      .rectangle(LIFT_X, LIFT_SIGN_Y, 94, 22, PALETTE.ink, 1)
+      .setStrokeStyle(1, PALETTE.stoneLight)
+      .setDepth(depth);
+    const label = this.add
+      .text(LIFT_X, LIFT_SIGN_Y, '↑ 货运电梯', { fontFamily: FONT_FAMILY, fontSize: `${LIFT_SIGN_FONT}px`, color: hex(PALETTE.clothHigh) })
+      .setOrigin(0.5)
+      .setDepth(depth);
+    this.floorObjects.push(g, sign, label);
+  }
+
+  /**
    * One stair, drawn from this floor's band to the neighbour's.
    *
    * `up` climbs toward -Y (the floor above, which sits at -FLOOR_HEIGHT) and
@@ -2820,8 +2897,12 @@ export class GameScene extends Phaser.Scene {
 
   private buildDialoguePanel(): void {
     const { width, height } = this.viewSize();
+    // 300 tall, not 260: the 96px bust needs a column of its own, and squeezing
+    // it into the old height put the second option row through the chin. The
+    // width stays 460 because that already leaves a 332px text column next to a
+    // 96px face.
     const panelW = 460;
-    const panelH = 260;
+    const panelH = 300;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -2841,19 +2922,30 @@ export class GameScene extends Phaser.Scene {
       .text(left + 10, top + 10, '对话', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
       .setOrigin(0, 0.5)
       .setDepth(depth + 6);
-    this.dialogueObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 34, depth + 5));
+    // Left: the speaker's face, on a dark inset so it does not float on the
+    // panel's own texture. Text gets the remaining 332px.
+    this.dialoguePortraitFrame = this.add
+      .rectangle(left + 12, top + 30, 96, 96, PALETTE.ink)
+      .setOrigin(0, 0)
+      .setAlpha(0.85)
+      .setDepth(depth + 5);
+    this.dialoguePortrait = this.add
+      .image(left + 60, top + 78, portraitKey('npc_alin'))
+      .setDepth(depth + 6);
+    this.dialogueObjects.push(this.dialoguePortraitFrame, this.dialoguePortrait);
+    this.dialogueObjects.push(...buildPanelWell(this, left + 116, top + 30, panelW - 128, 44, depth + 5));
     // dialogueTitle MUST be in the list: closeDialogue() hides everything in it,
     // and a name left out of the list stays on screen after the panel closes.
     this.dialogueObjects.push(this.dialogueTitle);
     this.dialogueMessage = this.add
-      .text(cx, top + 45, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: panelW - 44 } })
+      .text(left + 282, top + 52, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: panelW - 144 } })
       .setOrigin(0.5)
       .setDepth(depth + 7);
     this.dialogueObjects.push(this.dialogueMessage);
 
     this.dialogueBands = [];
     for (let i = 0; i < 4; i++) {
-      const rowY = top + 74 + i * 30;
+      const rowY = top + 132 + i * 30;
       // A selection band per row, the same language as every other list: a wash
       // plus a 2px accent rule. Toggled in refreshDialogue.
       const band = this.add.rectangle(left + 12, rowY, panelW - 24, 26, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 5);
@@ -3017,6 +3109,9 @@ export class GameScene extends Phaser.Scene {
     if (!d) return;
     const npc = getNpc(d.npc);
     this.dialogueTitle.setText(`${npc.name}（${npc.title}）`);
+    // NpcId is 'alin'|'xiaozhou'; portrait files are keyed by CharacterKey, so
+    // the prefix is the only translation needed.
+    this.dialoguePortrait.setTexture(portraitKey(`npc_${d.npc}` as CharacterKey));
     this.dialogueMessage.setText(d.message || '……');
     const options = this.dialogueOptionsView();
     if (d.selected >= options.length) d.selected = options.length - 1;
@@ -3401,6 +3496,12 @@ export class GameScene extends Phaser.Scene {
       this.openContainer(container.id);
       return;
     }
+    // Before the stairwell zone, not after: the lift only exists where the up
+    // stairs do not, so the two never compete for the same press.
+    if (this.nearLift(state)) {
+      this.takeLift();
+      return;
+    }
     const zone = currentInteractionZone(state);
     if (zone === 'up') this.changeFloor(1);
     else if (zone === 'down') this.changeFloor(-1);
@@ -3675,6 +3776,65 @@ export class GameScene extends Phaser.Scene {
         this.flash('背包已满：新物品放不下，能叠进的堆才能拾取');
       }
     }
+  }
+
+  private nearLift(state: GameState): boolean {
+    return liftRequirement(state.currentFloor) !== null && Math.abs(state.player.x - LIFT_X) <= LIFT_REACH;
+  }
+
+  /**
+   * Pressing E at the lift. Four outcomes, and exactly one of them moves anyone:
+   * no lift here, no credential, the next segment has no floors yet, or — in the
+   * future, once those segments are authored — ride it.
+   *
+   * The third case is the one that matters today. Every segment above 10 is
+   * declared but not built, and generateFloor throws for a floor with no
+   * template, so "the badge is in your hand" must not be read as "the way is
+   * open". Saying which floors are missing is also the honest version of the
+   * tower: the design requires the skip to be admitted, never faked.
+   */
+  private takeLift(): void {
+    const state = getGame();
+    const floor = state.currentFloor;
+    const outcome = liftOutcome(state, floor, hasFloorContent);
+    const target = nextSegment(floor);
+    const skipped = skippedFloors(floor);
+
+    if (outcome === 'no-lift') {
+      this.flash('这一层没有向上的货运电梯');
+      return;
+    }
+    if (outcome === 'need-pass') {
+      const need = liftRequirement(floor);
+      this.flash(need ? `需要${getRecipe(need).displayName}` : '需要通行凭证');
+      return;
+    }
+    if (outcome === 'not-connected' || !target) {
+      this.flash(`货运电梯停运：${floor + 1} → ${target?.from ?? floor}，中间 ${skipped} 层尚未接通`);
+      return;
+    }
+    this.rideLiftTo(target.from, skipped);
+  }
+
+  /**
+   * Commit a lift ride. The same arrival path a stair landing takes, minus the
+   * climb — and one step rather than `tryChangeFloor` in a loop, because the
+   * floors in between do not exist: a loop would strand the player on the first
+   * missing floor. drawFloor records the visit, so the side effects stay equal.
+   */
+  private rideLiftTo(target: number, skipped: number): void {
+    const state = getGame();
+    state.currentFloor = target;
+    state.player.x = ENTRY_X;
+    this.clearFloor();
+    this.drawFloor();
+    recordDepth(state);
+    // A dwell event belongs to the floor it was rolled on; riding out of it is
+    // the same escape that walking down the stairs is.
+    if (state.worldEvents.activeEvent?.source === 'dwell') state.worldEvents.activeEvent = null;
+    saveToStorage(state);
+    playSfx('goal');
+    this.flash(`正在穿过 ${skipped} 层未探索区 · 到达第 ${target} 层`);
   }
 
   private changeFloor(direction: 1 | -1): void {
@@ -3998,6 +4158,7 @@ export class GameScene extends Phaser.Scene {
     const zone = currentInteractionZone(state);
     if (this.nearestEncounterSpot()) this.hintText.setText('按 E 查看问号点');
     else if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
+    else if (this.nearLift(state)) this.hintText.setText('按 E 乘货运电梯');
     // OVERHAUL Wave C2: the up stairwell advertises the paid shortcut, priced
     // live so the player can decide before spending.
     else if (zone === 'up' && shortcutAvailable(state.currentFloor, Math.max(...PLAYABLE_FLOORS_V01))) {

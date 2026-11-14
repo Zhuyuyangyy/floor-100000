@@ -424,6 +424,14 @@ export function getFloorTemplate(floorNumber: number): FloorTemplate | undefined
   return templateFor(floorNumber);
 }
 
+// Whether a floor can be built at all. generateFloor throws without a template,
+// so anything that moves the player to a floor must ask this first — the freight
+// lift in particular: its target is a segment's first floor, and none of the
+// segments above 10 are authored yet.
+export function hasFloorContent(floorNumber: number): boolean {
+  return templateFor(floorNumber) !== undefined;
+}
+
 export function generateFloor(worldSeed: number, floorNumber: number): GeneratedFloor {
   const template = templateFor(floorNumber);
   if (!template) {

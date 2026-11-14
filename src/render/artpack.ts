@@ -47,6 +47,26 @@ export const CHARACTER_FILES: Record<CharacterKey, string> = {
   wanderer: 'char-wanderer.png',
 };
 
+// 96x96 dialogue busts, one per character, delivered 2026-11-14 as
+// dorm_survival_art_pack. They are a separate file set from CHARACTER_FILES on
+// purpose: the walk sheets are 64x96 side views, the busts are front-facing
+// head-and-shoulders, and the two never substitute for one another.
+//
+// The pack arrived on a #FF00FF key colour (RGB, no alpha); the shipped files are
+// the keyed RGBA versions — 17 unique colours in, 16 out, byte-identical palette,
+// no quantisation. See the audit in .workbuddy/memory/2026-11-14.md.
+export const PORTRAIT_FILES: Record<CharacterKey, string> = {
+  player: 'portrait-player.png',
+  npc_alin: 'portrait-alin.png',
+  npc_xiaozhou: 'portrait-xiaozhou.png',
+  wanderer: 'portrait-wanderer.png',
+};
+
+/** `npc_alin` -> `portrait-alin`, so both the roster ids and NpcIds work. */
+export function portraitKey(character: CharacterKey): string {
+  return `portrait-${character.replace(/^npc_/, '')}`;
+}
+
 // Texture keys for the rest of the pack, so a rename has one home.
 export const ART_SLOT_KEY = 'ui-slot';
 export const ART_BANNER_WIN_KEY = 'art-banner-win';

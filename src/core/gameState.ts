@@ -2,6 +2,7 @@ import { GAME_CONFIG } from './config';
 import { ENTRY_X, PLAYABLE_FLOORS_V01, SCHEMA_VERSION } from './constants';
 import { isItemId } from '../data/items';
 import { addItem } from '../systems/InventorySystem';
+import { createGrowthProfile } from './growth';
 import type { GameState, Inventory, ItemId } from './gameTypes';
 
 export function createInventory(slotCount: number): Inventory {
@@ -81,6 +82,10 @@ export function createNewGame(seed: number): GameState {
     // pick (which owns the meta) right after this; vanilla until then.
     mode: 'adventure',
     relics: [],
+    // 四条成长线（GAME_DESIGN_LOCK §4）：新档从四条 1 级线起步。旧存档没有
+    // 这个字段也不崩——GameState.growth 是可选的，首个读者过 ensureGrowth()
+    // 补默认值（core/growth.ts），不需要为此升 schemaVersion。
+    growth: createGrowthProfile(),
     status: 'playing',
   };
 }

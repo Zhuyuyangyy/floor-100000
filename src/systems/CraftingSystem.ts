@@ -1,8 +1,9 @@
-import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
+import { RECIPES, getRecipe, isPassUpgrade, type UpgradeId } from '../data/recipes';
 import { addItem, countItem, removeItem } from './InventorySystem';
 import { isNight } from './SurvivalSystem';
 import { STARTING_FLOOR } from '../core/constants';
 import { getItem } from '../data/items';
+import { credentialRungs, ensureGrowth, grantGrowthXp, recipeAccessTier } from '../core/growth';
 import type { GameState, ItemId } from '../core/gameTypes';
 
 // Dorm crafting & upgrades (docs/03_TASKS.md#p0-05). Pure rules; Phaser only
@@ -10,6 +11,35 @@ import type { GameState, ItemId } from '../core/gameTypes';
 
 export function hasUpgrade(state: GameState, id: UpgradeId): boolean {
   return state.player.homeUpgrades.includes(id);
+}
+
+// B5: how many bag slots the storage_rack adds. The effect is a real capacity
+// change, not a flag: craft() bumps inventory.slotCount by this much, and every
+// existing capacity reader (addItem's own loop, isBagFull, lootContainer's
+// overflow check, shop.buy) reads that field, so none of them needed a new
+// signature to honour the upgrade. 12 -> 14 is +16.7% carry — enough that a
+// return trip from the material floors stops dropping the sixth stack.
+export const STORAGE_RACK_SLOTS = 2;
+
+// The recipe's design tier (data/recipes.ts) against the power line's
+// recipeAccessTier. This is the registered consumer of growth.ts's tier
+// function — it reports the lock, and nothing else.
+//
+// It deliberately does NOT gate canCraft/craft. Two reasons:
+// 1. A gate would soft-lock the pass chain: power starts at level 1, so a
+//    power>=2 gate on work_badge would make the first credential uncraftable
+//    forever — power XP only comes from crafting credentials (chicken-and-egg).
+//    GAME_DESIGN_LOCK.md §5 forbids soft-locks on progression resources.
+// 2. passChain.test.ts pins the opposite semantics: with every material in
+//    hand, the whole chain must be buildable in order. The gate is not that
+//    test's to rewrite.
+// The field and this reader exist so the tier data is real and wired the day
+// the lead wants to open the gate (with a power XP source that does not depend
+// on the gate).
+export function recipeTierLocked(state: GameState, id: UpgradeId): boolean {
+  const tier = getRecipe(id).tier;
+  if (tier === undefined) return false;
+  return recipeAccessTier(ensureGrowth(state)) < tier;
 }
 
 export interface MissingMaterial {
@@ -54,6 +84,21 @@ export function craft(state: GameState, id: UpgradeId): CraftResult {
     removeItem(state.player.inventory, itemId, need);
   }
   state.player.homeUpgrades.push(id);
+  // B5: the power line's producer is the credential chain — "拿到新凭证
+  // +100×档位" (docs/plans/GROWTH_INTERFACES.md §5). Paid on the rung delta
+  // (credentialRungs reads homeUpgrades, so it never double-counts), and only
+  // for credentials: forging a badge is a political act, bolting a shelf to
+  // the wall is not.
+  if (isPassUpgrade(id)) {
+    const rungs = credentialRungs(state.player.homeUpgrades);
+    grantGrowthXp(state, 'power', 100 * rungs);
+  }
+  // B5: the storage_rack's effect lands here — a persistent capacity bump, so
+  // the save file itself carries the bigger bag and every reader of
+  // inventory.slotCount honours it without a signature change.
+  if (id === 'storage_rack') {
+    state.player.inventory.slotCount += STORAGE_RACK_SLOTS;
+  }
   return { ok: true, id };
 }
 

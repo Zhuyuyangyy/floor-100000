@@ -1,6 +1,7 @@
 import { GAME_CONFIG } from '../core/config';
 import { getItem } from '../data/items';
 import type { AilmentId, GameState, Inventory, InventoryStack, ItemId, StatKey } from '../core/gameTypes';
+import { grantGrowthXp } from '../core/growth';
 import { waterRestoreMult } from './relics';
 import { applyCure } from './SicknessSystem';
 
@@ -134,6 +135,12 @@ export function useConsumable(state: GameState, itemId: ItemId): UseResult {
   // and the one item whose whole purpose is medical would not do the one thing
   // a player reaches for it for.
   const cured = itemId === 'medkit' ? applyCure(state, 'medkit') : [];
+  // B5: drinking/eating and closing a wound are the survival line's producers
+  // (docs/plans/GROWTH_INTERFACES.md §5: 喝净水 +5 / 吃口粮 +5 / 治好一个
+  // 病症 +15). Before this the line had no writer at all — every consumable
+  // was a stat bump and nothing else, so "生存能力" could never level up.
+  // Granted only on a successful use, so a refused item feeds nothing.
+  grantGrowthXp(state, 'survival', cured.length > 0 ? 15 : 5);
   return {
     ok: true,
     stat: item.effect.stat,

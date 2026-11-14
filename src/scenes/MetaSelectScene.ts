@@ -9,8 +9,7 @@ import { playSfx } from '../render/audio';
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { buildPanel, createMarker, PANEL_DEPTH, placeMarker } from '../render/panels';
 import { buildPanelHeader, FONT_FAMILY, TYPE, UI } from '../render/uiKit';
-import { idleAnimKey, walkSheetKey } from '../render/walkcycle';
-import { TITLE_BG_KEY } from '../render/artpack';
+import { TITLE_BG_KEY, portraitKey } from '../render/artpack';
 
 // OVERHAUL UI: the character select, rebuilt.
 //
@@ -21,19 +20,31 @@ import { TITLE_BG_KEY } from '../render/artpack';
 //
 // So it is no longer a list of names on a dark rectangle. The painted backdrop
 // sits behind it (the same render as the title, dimmed), and the selected
-// survivor is drawn at native size as a portrait with a warm lamp glow behind
-// them - the sprite art is 88px tall, which is a portrait if you give it room.
+// survivor is shown as a 96x96 painted bust with a warm lamp glow behind it.
+//
+// The bust replaced the animated walk sheet that used to stand here. The walk
+// sheet is a 64x96 side view: at this size it read as a doll standing on a
+// shelf, and the face - the only thing that makes "choose who you are" land -
+// was three pixels wide. The bust is front-facing and already isolated, so it
+// costs the same 96px and buys an actual face.
 // The four names are compact rows to the right, and the mode and relic
 // information lives in its own column.
 type InputSlot = 'up' | 'down' | 'enter' | 'esc';
 
 const ROSTER = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer'] as const;
 
+// Two lines each, broken by hand at a punctuation mark.
+//
+// The line break is in the data, not in a wordWrap box, because Phaser breaks on
+// spaces and these strings have none: a 132px-wide box rendered each of them as a
+// single 700px line straight across the roster, and a full-panel-width line ran
+// into the relic column instead (the 5th relic row sits at top+252, the caption
+// at top+248). The left 318px of the panel is the only strip this text can own.
 const FLAVOUR: Record<string, string> = {
-  player: '从底层醒来的那个人。没有特长，只有背包。',
-  npc_alin: '宿舍区的老邻居。交易时总能多聊出点门道。',
-  npc_xiaozhou: '跑得快的孩子。撤退总是更容易一些。',
-  wanderer: '在黑暗里游荡的东西。现在它为你引路。',
+  player: '从底层醒来的那个人。\n没有特长，只有背包。',
+  npc_alin: '宿舍区的老邻居。\n交易时总能多聊出点门道。',
+  npc_xiaozhou: '跑得快的孩子。\n撤退总是更容易一些。',
+  wanderer: '在黑暗里游荡的东西。\n现在它为你引路。',
 };
 
 export class MetaSelectScene extends Phaser.Scene {
@@ -49,7 +60,7 @@ export class MetaSelectScene extends Phaser.Scene {
   private keyRight!: Phaser.Input.Keyboard.Key;
   private modeText!: Phaser.GameObjects.Text;
   private modeBlurbText!: Phaser.GameObjects.Text;
-  private portrait?: Phaser.GameObjects.Sprite;
+  private portrait?: Phaser.GameObjects.Image;
   private portraitGlow?: Phaser.GameObjects.Graphics;
   private flavourText!: Phaser.GameObjects.Text;
   private lastInputFrame: Record<InputSlot, number> = { up: -1, down: -1, enter: -1, esc: -1 };
@@ -87,20 +98,24 @@ export class MetaSelectScene extends Phaser.Scene {
     for (const o of buildPanelHeader(this, left, top, panelW, '幸存者', UI.good, depth + 5)) this.add.existing(o as Phaser.GameObjects.GameObject);
 
     // ── the portrait ────────────────────────────────────────────────────────
-    // Left third. The sprite is 88px of figure at native size, which is the
-    // whole reason to give it room instead of a 16px thumbnail.
+    // Left column: 128px wide, so a 96px bust centred at left+62 sits 14px off
+    // the panel edge with 18px of air before the roster. Centred rather than
+    // bottom-anchored: a head-and-shoulders crop anchored to the floor reads as
+    // a head on a shelf, which is what the old full-body sprite looked like.
     const portraitX = left + 62;
-    const portraitFeet = top + panelH - 70;
+    const portraitCy = top + 116;
     this.portraitGlow = this.add.graphics().setDepth(depth + 5);
     this.portrait = this.add
-      .sprite(portraitX, portraitFeet, walkSheetKey('player'))
-      .setOrigin(0.5, 1)
+      .image(portraitX, portraitCy, portraitKey('player'))
       .setDepth(depth + 7);
-    this.portrait.play(idleAnimKey('player'));
 
+    // The caption owns the bottom-left strip only (318px, ending 8px before the
+    // relic column). Two hand-broken lines at 16px: 12 Han glyphs is 192px, the
+    // longest line here is 12, and the whole block clears the last relic row
+    // horizontally even where the two share a y.
     this.flavourText = this.add
-      .text(portraitX, portraitFeet + 10, '', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(TEXT.secondary), align: 'center', wordWrap: { width: 132 } })
-      .setOrigin(0.5, 0)
+      .text(left + 12, top + panelH - 52, '', { fontFamily: FONT_FAMILY, fontSize: '16px', color: hex(TEXT.secondary), align: 'left', lineSpacing: 2 })
+      .setOrigin(0, 0)
       .setDepth(depth + 7);
 
     // ── the roster ──────────────────────────────────────────────────────────
@@ -274,18 +289,25 @@ export class MetaSelectScene extends Phaser.Scene {
     const who = ROSTER[this.selected];
     const unlocked = canSelect(meta, who);
     if (this.portrait) {
-      this.portrait.setTexture(walkSheetKey(who));
-      this.portrait.play(idleAnimKey(who), true);
+      this.portrait.setTexture(portraitKey(who));
       // A locked survivor is a silhouette: visible enough to be a promise,
       // dark enough to be out of reach.
-      this.portrait.setAlpha(unlocked ? 1 : 0.32);
-      this.portrait.setTint(unlocked ? 0xffffff : 0x3a4048);
+      //
+      // 0.32 alpha + a 0x3a4048 multiply was tuned against the old walk sheet,
+      // which was a pale 12-colour figure. The wanderer bust is 6 colours of dark
+      // brown and black, so that pair made it vanish into the panel — measured on
+      // the locked-wanderer screenshot: the hood read as an empty slot. 0.62 keeps
+      // the shape legible and a grey wash (not a dark one) still says "unlit".
+      this.portrait.setAlpha(unlocked ? 1 : 0.62);
+      this.portrait.setTint(unlocked ? 0xffffff : 0x8a95a0);
       this.portraitGlow?.clear();
       if (this.portraitGlow && unlocked) {
         // A warm pool behind the portrait, using the same warm ramp as the lamps.
+        // Sized for the bust, not the old full-body figure: an ellipse 66px tall
+        // behind a 96px head left the light pooling at the chin.
         for (let s = 5; s >= 1; s--) {
           this.portraitGlow.fillStyle(UI.accent, 0.05 * s);
-          this.portraitGlow.fillEllipse(this.portrait.x, this.portrait.y - 34, 40 + s * 12, 66 + s * 16);
+          this.portraitGlow.fillEllipse(this.portrait.x, this.portrait.y + 4, 52 + s * 10, 52 + s * 10);
         }
       }
     }

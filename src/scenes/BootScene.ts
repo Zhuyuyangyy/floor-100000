@@ -21,7 +21,7 @@ const CUSTOM_ENV = import.meta.glob('../assets/env/*.png', {
   query: '?url',
   import: 'default',
 }) as Record<string, string>;
-import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHARACTER_FILES, ENV_FILES, ENV_FLOOR_KEY, ENV_WALL_KEY, FURNITURE_FILES, ITEM_ICON_FILES, TITLE_BG_KEY } from '../render/artpack';
+import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHARACTER_FILES, ENV_FILES, ENV_FLOOR_KEY, ENV_WALL_KEY, FURNITURE_FILES, ITEM_ICON_FILES, PORTRAIT_FILES, TITLE_BG_KEY, portraitKey } from '../render/artpack';
 
 // Bakes all procedural pixel-art textures, loads the licensed UI pack
 // (GHI-04), then shows the title menu (开始新游戏 / 继续游戏 / 操作说明).
@@ -63,6 +63,14 @@ export class BootScene extends Phaser.Scene {
     // The four characters are drawn by tools/build-characters.mjs, not baked here.
     for (const [key, file] of Object.entries(CHARACTER_FILES)) {
       this.load.image(key, `assets/artpack/${file}`);
+    }
+
+    // 96x96 dialogue busts. Loaded under `portrait-*`, never under the character
+    // id: the walk sheet and the bust are different views of the same person and
+    // swapping one for the other by accident would show a profile in a dialogue
+    // box. 1:1 at 96px with pixelArt:true, so no resampling.
+    for (const [key, file] of Object.entries(PORTRAIT_FILES)) {
+      this.load.image(portraitKey(key as keyof typeof PORTRAIT_FILES), `assets/ui/portraits/${file}`);
     }
 
     // The room's wall and floor: single wide images, not 16x16 tiles.

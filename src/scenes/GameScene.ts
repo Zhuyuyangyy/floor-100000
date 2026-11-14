@@ -98,7 +98,7 @@ import {
   buildPanelWell,
   drawStatBar,
 } from '../render/uiKit';
-import { ENV_FLOOR_KEY, ENV_WALL_KEY } from '../render/artpack';
+import { ENV_FLOOR_KEY, ENV_WALL_KEY, portraitKey } from '../render/artpack';
 import {
   ATTACK_FRAME_START,
   ATTACK_FRAMES,
@@ -390,6 +390,8 @@ export class GameScene extends Phaser.Scene {
   /** one selection band per dialogue row, toggled in refreshDialogue */
   private dialogueBands: Array<{ band: Phaser.GameObjects.Rectangle; rule: Phaser.GameObjects.Rectangle }> = [];
   private dialogueTitle!: Phaser.GameObjects.Text;
+  private dialoguePortrait!: Phaser.GameObjects.Image;
+  private dialoguePortraitFrame!: Phaser.GameObjects.Rectangle;
   private dialogueMessage!: Phaser.GameObjects.Text;
   private dialogueOptions: Phaser.GameObjects.Text[] = [];
   private dialogueOptionIcons: Phaser.GameObjects.Image[] = [];
@@ -2762,8 +2764,12 @@ export class GameScene extends Phaser.Scene {
 
   private buildDialoguePanel(): void {
     const { width, height } = this.viewSize();
+    // 300 tall, not 260: the 96px bust needs a column of its own, and squeezing
+    // it into the old height put the second option row through the chin. The
+    // width stays 460 because that already leaves a 332px text column next to a
+    // 96px face.
     const panelW = 460;
-    const panelH = 260;
+    const panelH = 300;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -2783,19 +2789,30 @@ export class GameScene extends Phaser.Scene {
       .text(left + 10, top + 10, '对话', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
       .setOrigin(0, 0.5)
       .setDepth(depth + 6);
-    this.dialogueObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 34, depth + 5));
+    // Left: the speaker's face, on a dark inset so it does not float on the
+    // panel's own texture. Text gets the remaining 332px.
+    this.dialoguePortraitFrame = this.add
+      .rectangle(left + 12, top + 30, 96, 96, PALETTE.ink)
+      .setOrigin(0, 0)
+      .setAlpha(0.85)
+      .setDepth(depth + 5);
+    this.dialoguePortrait = this.add
+      .image(left + 60, top + 78, portraitKey('npc_alin'))
+      .setDepth(depth + 6);
+    this.dialogueObjects.push(this.dialoguePortraitFrame, this.dialoguePortrait);
+    this.dialogueObjects.push(...buildPanelWell(this, left + 116, top + 30, panelW - 128, 44, depth + 5));
     // dialogueTitle MUST be in the list: closeDialogue() hides everything in it,
     // and a name left out of the list stays on screen after the panel closes.
     this.dialogueObjects.push(this.dialogueTitle);
     this.dialogueMessage = this.add
-      .text(cx, top + 45, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: panelW - 44 } })
+      .text(left + 282, top + 52, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: panelW - 144 } })
       .setOrigin(0.5)
       .setDepth(depth + 7);
     this.dialogueObjects.push(this.dialogueMessage);
 
     this.dialogueBands = [];
     for (let i = 0; i < 4; i++) {
-      const rowY = top + 74 + i * 30;
+      const rowY = top + 132 + i * 30;
       // A selection band per row, the same language as every other list: a wash
       // plus a 2px accent rule. Toggled in refreshDialogue.
       const band = this.add.rectangle(left + 12, rowY, panelW - 24, 26, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 5);
@@ -2959,6 +2976,9 @@ export class GameScene extends Phaser.Scene {
     if (!d) return;
     const npc = getNpc(d.npc);
     this.dialogueTitle.setText(`${npc.name}（${npc.title}）`);
+    // NpcId is 'alin'|'xiaozhou'; portrait files are keyed by CharacterKey, so
+    // the prefix is the only translation needed.
+    this.dialoguePortrait.setTexture(portraitKey(`npc_${d.npc}` as CharacterKey));
     this.dialogueMessage.setText(d.message || '……');
     const options = this.dialogueOptionsView();
     if (d.selected >= options.length) d.selected = options.length - 1;

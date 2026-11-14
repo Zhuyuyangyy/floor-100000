@@ -1,0 +1,2153 @@
+{
+  "palette": 16,
+  "summary": {
+    "files": 119,
+    "png": 102,
+    "locked": 21,
+    "open": 80,
+    "staged": 3,
+    "aux": 15,
+    "unclassified": 0,
+    "gateFailures": 0,
+    "missingRefs": 0
+  },
+  "files": [
+    {
+      "path": "artpack/banner-lose.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ART_BANNER_LOSE_KEY"
+        }
+      ],
+      "width": 374,
+      "height": 123,
+      "channels": 4,
+      "opaqueColours": 10478,
+      "strayColours": 10478,
+      "inPalette": false,
+      "transparentPx": 12716,
+      "semiAlphaPx": 0,
+      "bytes": 87366,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/banner-win.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ART_BANNER_WIN_KEY"
+        }
+      ],
+      "width": 368,
+      "height": 107,
+      "channels": 4,
+      "opaqueColours": 10385,
+      "strayColours": 10385,
+      "inPalette": false,
+      "transparentPx": 7073,
+      "semiAlphaPx": 0,
+      "bytes": 79847,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/char-alin.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "CHARACTER_FILES[npc_alin]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 22,
+      "strayColours": 22,
+      "inPalette": false,
+      "transparentPx": 3951,
+      "semiAlphaPx": 0,
+      "bytes": 2283,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/char-player.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "CHARACTER_FILES[player]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 22,
+      "strayColours": 22,
+      "inPalette": false,
+      "transparentPx": 4110,
+      "semiAlphaPx": 0,
+      "bytes": 2254,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/char-wanderer.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "CHARACTER_FILES[wanderer]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 22,
+      "strayColours": 22,
+      "inPalette": false,
+      "transparentPx": 3552,
+      "semiAlphaPx": 0,
+      "bytes": 2542,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/char-xiaozhou.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "CHARACTER_FILES[npc_xiaozhou]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 22,
+      "strayColours": 22,
+      "inPalette": false,
+      "transparentPx": 4348,
+      "semiAlphaPx": 0,
+      "bytes": 2030,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/char-zhouhe-sheet.png",
+      "refs": [],
+      "width": 1280,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 12,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 100325,
+      "semiAlphaPx": 0,
+      "bytes": 16503,
+      "class": "staged",
+      "note": "二十帧行动表；运行时应落位 src/assets/characters/npc_zhouhe.png"
+    },
+    {
+      "path": "artpack/char-zhouhe.png",
+      "refs": [],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 11,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 5087,
+      "semiAlphaPx": 0,
+      "bytes": 1006,
+      "class": "staged",
+      "note": "CHARACTER_FILES 单帧，待 artpack.ts 接线（walkcycle.ts COLORS 属 AG-09）"
+    },
+    {
+      "path": "artpack/furn-badge_rack.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_badge_rack]"
+        }
+      ],
+      "width": 78,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 15,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 414,
+      "semiAlphaPx": 0,
+      "bytes": 3289,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/furn-bed.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_bed]"
+        }
+      ],
+      "width": 94,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 3239,
+      "strayColours": 3239,
+      "inPalette": false,
+      "transparentPx": 1672,
+      "semiAlphaPx": 0,
+      "bytes": 15242,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/furn-boot_rack.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_boot_rack]"
+        }
+      ],
+      "width": 77,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 15,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 659,
+      "semiAlphaPx": 0,
+      "bytes": 3478,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/furn-bunk_bed.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_bunk_bed]"
+        }
+      ],
+      "width": 63,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 12,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 861,
+      "semiAlphaPx": 0,
+      "bytes": 2811,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/furn-cabinet.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_cabinet]"
+        }
+      ],
+      "width": 40,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 1832,
+      "strayColours": 1832,
+      "inPalette": false,
+      "transparentPx": 225,
+      "semiAlphaPx": 0,
+      "bytes": 6947,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/furn-counter.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_counter]"
+        }
+      ],
+      "width": 109,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 3174,
+      "strayColours": 3174,
+      "inPalette": false,
+      "transparentPx": 2086,
+      "semiAlphaPx": 0,
+      "bytes": 16426,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/furn-crate_metal.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_crate_metal]"
+        }
+      ],
+      "width": 66,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 2442,
+      "strayColours": 2442,
+      "inPalette": false,
+      "transparentPx": 563,
+      "semiAlphaPx": 0,
+      "bytes": 10476,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/furn-crate_wood.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_crate_wood]"
+        }
+      ],
+      "width": 59,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 2225,
+      "strayColours": 2225,
+      "inPalette": false,
+      "transparentPx": 535,
+      "semiAlphaPx": 0,
+      "bytes": 9646,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/furn-fusebox.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_fusebox]"
+        }
+      ],
+      "width": 51,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 2322,
+      "strayColours": 2322,
+      "inPalette": false,
+      "transparentPx": 239,
+      "semiAlphaPx": 0,
+      "bytes": 8923,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/furn-key_board.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_key_board]"
+        }
+      ],
+      "width": 61,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 15,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 6,
+      "semiAlphaPx": 0,
+      "bytes": 2807,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/furn-meal_counter.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_meal_counter]"
+        }
+      ],
+      "width": 74,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 15,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 236,
+      "semiAlphaPx": 0,
+      "bytes": 2624,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/furn-ration_dispenser.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_ration_dispenser]"
+        }
+      ],
+      "width": 65,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 15,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 832,
+      "semiAlphaPx": 0,
+      "bytes": 2637,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/furn-security_safe.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_security_safe]"
+        }
+      ],
+      "width": 49,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 15,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 177,
+      "semiAlphaPx": 0,
+      "bytes": 2171,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/furn-shelf.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_shelf]"
+        }
+      ],
+      "width": 50,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 2206,
+      "strayColours": 2206,
+      "inPalette": false,
+      "transparentPx": 292,
+      "semiAlphaPx": 0,
+      "bytes": 8443,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/furn-shift_board.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_shift_board]"
+        }
+      ],
+      "width": 67,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 13,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 180,
+      "semiAlphaPx": 0,
+      "bytes": 2830,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/furn-shift_locker.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_shift_locker]"
+        }
+      ],
+      "width": 32,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 11,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 86,
+      "semiAlphaPx": 0,
+      "bytes": 1600,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/furn-thermos_rack.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_thermos_rack]"
+        }
+      ],
+      "width": 66,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 15,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 477,
+      "semiAlphaPx": 0,
+      "bytes": 2917,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/furn-tool_cage.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_tool_cage]"
+        }
+      ],
+      "width": 47,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 14,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 76,
+      "semiAlphaPx": 0,
+      "bytes": 2338,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/furn-uniform_rack.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_uniform_rack]"
+        }
+      ],
+      "width": 65,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 13,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 924,
+      "semiAlphaPx": 0,
+      "bytes": 3150,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/furn-wash_sink.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_wash_sink]"
+        }
+      ],
+      "width": 56,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 14,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 1222,
+      "semiAlphaPx": 0,
+      "bytes": 2076,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/furn-watertank.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_watertank]"
+        }
+      ],
+      "width": 51,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 2289,
+      "strayColours": 2289,
+      "inPalette": false,
+      "transparentPx": 396,
+      "semiAlphaPx": 0,
+      "bytes": 9315,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/furn-workbench.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_workbench]"
+        }
+      ],
+      "width": 83,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 3140,
+      "strayColours": 3140,
+      "inPalette": false,
+      "transparentPx": 946,
+      "semiAlphaPx": 0,
+      "bytes": 13656,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/furn-worker_locker.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "FURNITURE_FILES[furn_worker_locker]"
+        }
+      ],
+      "width": 60,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 12,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 154,
+      "semiAlphaPx": 0,
+      "bytes": 2315,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/item-battery.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[battery]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 163,
+      "strayColours": 163,
+      "inPalette": false,
+      "transparentPx": 91,
+      "semiAlphaPx": 0,
+      "bytes": 938,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-bread.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[bread]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 145,
+      "strayColours": 145,
+      "inPalette": false,
+      "transparentPx": 110,
+      "semiAlphaPx": 0,
+      "bytes": 826,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-clean_water.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[clean_water]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 183,
+      "strayColours": 183,
+      "inPalette": false,
+      "transparentPx": 73,
+      "semiAlphaPx": 0,
+      "bytes": 934,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-cloth.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[cloth]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 138,
+      "strayColours": 138,
+      "inPalette": false,
+      "transparentPx": 118,
+      "semiAlphaPx": 0,
+      "bytes": 789,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-crowbar.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[crowbar]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 54,
+      "strayColours": 54,
+      "inPalette": false,
+      "transparentPx": 202,
+      "semiAlphaPx": 0,
+      "bytes": 482,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-dirty_water.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[dirty_water]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 183,
+      "strayColours": 183,
+      "inPalette": false,
+      "transparentPx": 71,
+      "semiAlphaPx": 0,
+      "bytes": 883,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-filter.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[filter]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 178,
+      "strayColours": 178,
+      "inPalette": false,
+      "transparentPx": 78,
+      "semiAlphaPx": 0,
+      "bytes": 919,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-flashlight.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[flashlight]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 99,
+      "strayColours": 99,
+      "inPalette": false,
+      "transparentPx": 157,
+      "semiAlphaPx": 0,
+      "bytes": 711,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-fuse.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[fuse]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 85,
+      "strayColours": 85,
+      "inPalette": false,
+      "transparentPx": 169,
+      "semiAlphaPx": 0,
+      "bytes": 651,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-medkit.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[medkit]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 176,
+      "strayColours": 176,
+      "inPalette": false,
+      "transparentPx": 80,
+      "semiAlphaPx": 0,
+      "bytes": 856,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-ration_pack.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[ration_pack]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 142,
+      "strayColours": 142,
+      "inPalette": false,
+      "transparentPx": 114,
+      "semiAlphaPx": 0,
+      "bytes": 810,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-scrap_metal.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[scrap_metal]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 145,
+      "strayColours": 145,
+      "inPalette": false,
+      "transparentPx": 111,
+      "semiAlphaPx": 0,
+      "bytes": 779,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-tape.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[tape]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 160,
+      "strayColours": 160,
+      "inPalette": false,
+      "transparentPx": 92,
+      "semiAlphaPx": 0,
+      "bytes": 845,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-wire.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[wire]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 144,
+      "strayColours": 144,
+      "inPalette": false,
+      "transparentPx": 112,
+      "semiAlphaPx": 0,
+      "bytes": 769,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-wood.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[wood]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 134,
+      "strayColours": 133,
+      "inPalette": false,
+      "transparentPx": 120,
+      "semiAlphaPx": 0,
+      "bytes": 737,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "env/floor.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[ENV_FLOOR_KEY]"
+        }
+      ],
+      "width": 1280,
+      "height": 64,
+      "channels": 3,
+      "opaqueColours": 117,
+      "strayColours": 116,
+      "inPalette": false,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 76898,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "env/tile-door.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[TILE_DOOR_KEY]"
+        }
+      ],
+      "width": 44,
+      "height": 104,
+      "channels": 4,
+      "opaqueColours": 22,
+      "strayColours": 22,
+      "inPalette": false,
+      "transparentPx": 1146,
+      "semiAlphaPx": 0,
+      "bytes": 2542,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "env/tile-window.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[TILE_WINDOW_KEY]"
+        }
+      ],
+      "width": 56,
+      "height": 76,
+      "channels": 4,
+      "opaqueColours": 22,
+      "strayColours": 22,
+      "inPalette": false,
+      "transparentPx": 2121,
+      "semiAlphaPx": 0,
+      "bytes": 1688,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "env/wall-dorm.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[ENV_WALL_DORM_KEY]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 14,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 6310,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "env/wall-industry.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[ENV_WALL_INDUSTRY_KEY]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 14,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 5844,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "env/wall.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[ENV_WALL_KEY]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 15,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 4922,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "fonts/OFL.txt",
+      "refs": [],
+      "class": "aux",
+      "note": "字体许可"
+    },
+    {
+      "path": "fonts/ark-pixel-latin.woff2",
+      "refs": [],
+      "class": "aux",
+      "note": "像素字体"
+    },
+    {
+      "path": "fonts/ark-pixel-zh_hans.woff2",
+      "refs": [],
+      "class": "aux",
+      "note": "像素字体"
+    },
+    {
+      "path": "fx/fire/brazier/brazier.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[brazier]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/fire/brazier/brazier.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[brazier]"
+        }
+      ],
+      "width": 1232,
+      "height": 1332,
+      "channels": 4,
+      "opaqueColours": 40045,
+      "strayColours": 40045,
+      "inPalette": false,
+      "transparentPx": 517634,
+      "semiAlphaPx": 1037786,
+      "bytes": 1096936,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/fire/brazier/contact.png",
+      "refs": [],
+      "width": 1400,
+      "height": 998,
+      "channels": 4,
+      "opaqueColours": 13915,
+      "strayColours": 13915,
+      "inPalette": false,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 248862,
+      "class": "aux",
+      "note": "特效接触表（审阅用）"
+    },
+    {
+      "path": "fx/fire/candle/candle.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[candle]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/fire/candle/candle.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[candle]"
+        }
+      ],
+      "width": 728,
+      "height": 760,
+      "channels": 4,
+      "opaqueColours": 5928,
+      "strayColours": 5928,
+      "inPalette": false,
+      "transparentPx": 234643,
+      "semiAlphaPx": 284159,
+      "bytes": 317046,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/fire/candle/contact.png",
+      "refs": [],
+      "width": 1400,
+      "height": 1022,
+      "channels": 4,
+      "opaqueColours": 2960,
+      "strayColours": 2960,
+      "inPalette": false,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 94692,
+      "class": "aux",
+      "note": "特效接触表（审阅用）"
+    },
+    {
+      "path": "fx/fire/torch/contact.png",
+      "refs": [],
+      "width": 1576,
+      "height": 1190,
+      "channels": 4,
+      "opaqueColours": 7987,
+      "strayColours": 7987,
+      "inPalette": false,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 174462,
+      "class": "aux",
+      "note": "特效接触表（审阅用）"
+    },
+    {
+      "path": "fx/fire/torch/torch.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[torch]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/fire/torch/torch.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[torch]"
+        }
+      ],
+      "width": 720,
+      "height": 720,
+      "channels": 4,
+      "opaqueColours": 18788,
+      "strayColours": 18788,
+      "inPalette": false,
+      "transparentPx": 83023,
+      "semiAlphaPx": 405355,
+      "bytes": 415267,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/impacts/crit-hit/contact.png",
+      "refs": [],
+      "width": 1576,
+      "height": 518,
+      "channels": 4,
+      "opaqueColours": 7742,
+      "strayColours": 7742,
+      "inPalette": false,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 89368,
+      "class": "aux",
+      "note": "特效接触表（审阅用）"
+    },
+    {
+      "path": "fx/impacts/crit-hit/crit-hit.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[crit-hit]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/impacts/crit-hit/crit-hit.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[crit-hit]"
+        }
+      ],
+      "width": 1080,
+      "height": 816,
+      "channels": 4,
+      "opaqueColours": 9499,
+      "strayColours": 9499,
+      "inPalette": false,
+      "transparentPx": 739170,
+      "semiAlphaPx": 134211,
+      "bytes": 139402,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/impacts/ground-slam/contact.png",
+      "refs": [],
+      "width": 1488,
+      "height": 966,
+      "channels": 4,
+      "opaqueColours": 10675,
+      "strayColours": 10674,
+      "inPalette": false,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 151057,
+      "class": "aux",
+      "note": "特效接触表（审阅用）"
+    },
+    {
+      "path": "fx/impacts/ground-slam/ground-slam.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[ground-slam]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/impacts/ground-slam/ground-slam.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[ground-slam]"
+        }
+      ],
+      "width": 2592,
+      "height": 2288,
+      "channels": 4,
+      "opaqueColours": 30966,
+      "strayColours": 30966,
+      "inPalette": false,
+      "transparentPx": 5263106,
+      "semiAlphaPx": 592071,
+      "bytes": 955463,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/impacts/hit-flash/contact.png",
+      "refs": [],
+      "width": 1496,
+      "height": 686,
+      "channels": 4,
+      "opaqueColours": 3202,
+      "strayColours": 3202,
+      "inPalette": false,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 50665,
+      "class": "aux",
+      "note": "特效接触表（审阅用）"
+    },
+    {
+      "path": "fx/impacts/hit-flash/hit-flash.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[hit-flash]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/impacts/hit-flash/hit-flash.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[hit-flash]"
+        }
+      ],
+      "width": 320,
+      "height": 256,
+      "channels": 4,
+      "opaqueColours": 3016,
+      "strayColours": 3016,
+      "inPalette": false,
+      "transparentPx": 66358,
+      "semiAlphaPx": 10041,
+      "bytes": 22092,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/impacts/hit-spark/contact.png",
+      "refs": [],
+      "width": 1592,
+      "height": 246,
+      "channels": 4,
+      "opaqueColours": 2841,
+      "strayColours": 2841,
+      "inPalette": false,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 27274,
+      "class": "aux",
+      "note": "特效接触表（审阅用）"
+    },
+    {
+      "path": "fx/impacts/hit-spark/hit-spark.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[hit-spark]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/impacts/hit-spark/hit-spark.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[hit-spark]"
+        }
+      ],
+      "width": 544,
+      "height": 320,
+      "channels": 4,
+      "opaqueColours": 2545,
+      "strayColours": 2545,
+      "inPalette": false,
+      "transparentPx": 160165,
+      "semiAlphaPx": 13001,
+      "bytes": 21565,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/impacts/parry/parry.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[parry]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/impacts/parry/parry.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[parry]"
+        }
+      ],
+      "width": 1000,
+      "height": 784,
+      "channels": 4,
+      "opaqueColours": 2750,
+      "strayColours": 2750,
+      "inPalette": false,
+      "transparentPx": 717439,
+      "semiAlphaPx": 61618,
+      "bytes": 87323,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/melee/sword-slash/sword-slash.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[sword-slash]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/melee/sword-slash/sword-slash.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[sword-slash]"
+        }
+      ],
+      "width": 680,
+      "height": 520,
+      "channels": 4,
+      "opaqueColours": 5608,
+      "strayColours": 5607,
+      "inPalette": false,
+      "transparentPx": 313382,
+      "semiAlphaPx": 35346,
+      "bytes": 59020,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/pickups/coin-spin/coin-spin.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[coin-spin]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/pickups/coin-spin/coin-spin.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[coin-spin]"
+        }
+      ],
+      "width": 392,
+      "height": 392,
+      "channels": 4,
+      "opaqueColours": 3740,
+      "strayColours": 3740,
+      "inPalette": false,
+      "transparentPx": 104925,
+      "semiAlphaPx": 39889,
+      "bytes": 60292,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/pickups/coin-spin/contact.png",
+      "refs": [],
+      "width": 1400,
+      "height": 782,
+      "channels": 4,
+      "opaqueColours": 2206,
+      "strayColours": 2206,
+      "inPalette": false,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 53997,
+      "class": "aux",
+      "note": "特效接触表（审阅用）"
+    },
+    {
+      "path": "fx/pickups/collect-burst/collect-burst.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[collect-burst]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/pickups/collect-burst/collect-burst.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[collect-burst]"
+        }
+      ],
+      "width": 784,
+      "height": 648,
+      "channels": 4,
+      "opaqueColours": 3595,
+      "strayColours": 3595,
+      "inPalette": false,
+      "transparentPx": 463396,
+      "semiAlphaPx": 40543,
+      "bytes": 91390,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/pickups/collect-burst/contact.png",
+      "refs": [],
+      "width": 1400,
+      "height": 758,
+      "channels": 4,
+      "opaqueColours": 2090,
+      "strayColours": 2090,
+      "inPalette": false,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 61653,
+      "class": "aux",
+      "note": "特效接触表（审阅用）"
+    },
+    {
+      "path": "fx/status/poisoned/contact.png",
+      "refs": [],
+      "width": 1576,
+      "height": 686,
+      "channels": 4,
+      "opaqueColours": 4307,
+      "strayColours": 4307,
+      "inPalette": false,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 69698,
+      "class": "aux",
+      "note": "特效接触表（审阅用）"
+    },
+    {
+      "path": "fx/status/poisoned/poisoned.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[poisoned]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/status/poisoned/poisoned.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[poisoned]"
+        }
+      ],
+      "width": 504,
+      "height": 448,
+      "channels": 4,
+      "opaqueColours": 7033,
+      "strayColours": 7033,
+      "inPalette": false,
+      "transparentPx": 148037,
+      "semiAlphaPx": 55255,
+      "bytes": 97149,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/water/drip/contact.png",
+      "refs": [],
+      "width": 1576,
+      "height": 902,
+      "channels": 4,
+      "opaqueColours": 1150,
+      "strayColours": 1150,
+      "inPalette": false,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 38635,
+      "class": "aux",
+      "note": "特效接触表（审阅用）"
+    },
+    {
+      "path": "fx/water/drip/drip.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[drip]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/water/drip/drip.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[drip]"
+        }
+      ],
+      "width": 576,
+      "height": 528,
+      "channels": 4,
+      "opaqueColours": 1496,
+      "strayColours": 1495,
+      "inPalette": false,
+      "transparentPx": 234272,
+      "semiAlphaPx": 53988,
+      "bytes": 33986,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/water/ripples/contact.png",
+      "refs": [],
+      "width": 1592,
+      "height": 190,
+      "channels": 4,
+      "opaqueColours": 4166,
+      "strayColours": 4166,
+      "inPalette": false,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 52169,
+      "class": "aux",
+      "note": "特效接触表（审阅用）"
+    },
+    {
+      "path": "fx/water/ripples/ripples.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[ripples]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/water/ripples/ripples.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[ripples]"
+        }
+      ],
+      "width": 680,
+      "height": 624,
+      "channels": 4,
+      "opaqueColours": 3638,
+      "strayColours": 3638,
+      "inPalette": false,
+      "transparentPx": 184080,
+      "semiAlphaPx": 222909,
+      "bytes": 219875,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "title/dorm-corridor-2x.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "TITLE_BG_KEY"
+        }
+      ],
+      "width": 1280,
+      "height": 720,
+      "channels": 4,
+      "opaqueColours": 256,
+      "strayColours": 255,
+      "inPalette": false,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 603493,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-green-bl.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-green-bl"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 399,
+      "strayColours": 399,
+      "inPalette": false,
+      "transparentPx": 365,
+      "semiAlphaPx": 0,
+      "bytes": 2384,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-green-bottom.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-green-bottom"
+        }
+      ],
+      "width": 8,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 132,
+      "strayColours": 132,
+      "inPalette": false,
+      "transparentPx": 64,
+      "semiAlphaPx": 0,
+      "bytes": 679,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-green-br.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-green-br"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 304,
+      "strayColours": 304,
+      "inPalette": false,
+      "transparentPx": 462,
+      "semiAlphaPx": 0,
+      "bytes": 2315,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-green-left.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-green-left"
+        }
+      ],
+      "width": 28,
+      "height": 8,
+      "channels": 4,
+      "opaqueColours": 159,
+      "strayColours": 159,
+      "inPalette": false,
+      "transparentPx": 56,
+      "semiAlphaPx": 0,
+      "bytes": 772,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-green-right.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-green-right"
+        }
+      ],
+      "width": 28,
+      "height": 8,
+      "channels": 4,
+      "opaqueColours": 117,
+      "strayColours": 117,
+      "inPalette": false,
+      "transparentPx": 103,
+      "semiAlphaPx": 0,
+      "bytes": 786,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-green-tl.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-green-tl"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 304,
+      "strayColours": 304,
+      "inPalette": false,
+      "transparentPx": 458,
+      "semiAlphaPx": 0,
+      "bytes": 2416,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-green-top.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-green-top"
+        }
+      ],
+      "width": 8,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 130,
+      "strayColours": 130,
+      "inPalette": false,
+      "transparentPx": 72,
+      "semiAlphaPx": 0,
+      "bytes": 742,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-green-tr.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-green-tr"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 247,
+      "strayColours": 247,
+      "inPalette": false,
+      "transparentPx": 533,
+      "semiAlphaPx": 0,
+      "bytes": 2390,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-yellow-bl.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-yellow-bl"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 393,
+      "strayColours": 393,
+      "inPalette": false,
+      "transparentPx": 365,
+      "semiAlphaPx": 0,
+      "bytes": 2374,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-yellow-bottom.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-yellow-bottom"
+        }
+      ],
+      "width": 8,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 133,
+      "strayColours": 133,
+      "inPalette": false,
+      "transparentPx": 64,
+      "semiAlphaPx": 0,
+      "bytes": 684,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-yellow-br.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-yellow-br"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 306,
+      "strayColours": 306,
+      "inPalette": false,
+      "transparentPx": 462,
+      "semiAlphaPx": 0,
+      "bytes": 2297,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-yellow-left.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-yellow-left"
+        }
+      ],
+      "width": 28,
+      "height": 8,
+      "channels": 4,
+      "opaqueColours": 158,
+      "strayColours": 158,
+      "inPalette": false,
+      "transparentPx": 56,
+      "semiAlphaPx": 0,
+      "bytes": 776,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-yellow-right.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-yellow-right"
+        }
+      ],
+      "width": 28,
+      "height": 8,
+      "channels": 4,
+      "opaqueColours": 119,
+      "strayColours": 119,
+      "inPalette": false,
+      "transparentPx": 103,
+      "semiAlphaPx": 0,
+      "bytes": 788,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-yellow-tl.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-yellow-tl"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 298,
+      "strayColours": 298,
+      "inPalette": false,
+      "transparentPx": 458,
+      "semiAlphaPx": 0,
+      "bytes": 2409,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-yellow-top.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-yellow-top"
+        }
+      ],
+      "width": 8,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 130,
+      "strayColours": 130,
+      "inPalette": false,
+      "transparentPx": 72,
+      "semiAlphaPx": 0,
+      "bytes": 743,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-yellow-tr.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-yellow-tr"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 245,
+      "strayColours": 245,
+      "inPalette": false,
+      "transparentPx": 533,
+      "semiAlphaPx": 0,
+      "bytes": 2380,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/marker.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "load.image('ui-marker')"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 3,
+      "strayColours": 3,
+      "inPalette": false,
+      "transparentPx": 136,
+      "semiAlphaPx": 0,
+      "bytes": 202,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/portraits/portrait-alin.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "PORTRAIT_FILES[npc_alin]"
+        }
+      ],
+      "width": 96,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 12,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 4646,
+      "semiAlphaPx": 0,
+      "bytes": 4041,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "ui/portraits/portrait-player.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "PORTRAIT_FILES[player]"
+        }
+      ],
+      "width": 96,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 13,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 4677,
+      "semiAlphaPx": 0,
+      "bytes": 3735,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "ui/portraits/portrait-wanderer.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "PORTRAIT_FILES[wanderer]"
+        }
+      ],
+      "width": 96,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 5,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 4305,
+      "semiAlphaPx": 0,
+      "bytes": 1860,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "ui/portraits/portrait-xiaozhou.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "PORTRAIT_FILES[npc_xiaozhou]"
+        }
+      ],
+      "width": 96,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 11,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 5416,
+      "semiAlphaPx": 0,
+      "bytes": 3279,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "ui/portraits/portrait-zhouhe.png",
+      "refs": [],
+      "width": 96,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 12,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 4655,
+      "semiAlphaPx": 0,
+      "bytes": 2537,
+      "class": "staged",
+      "note": "PORTRAIT_FILES 头像，待 artpack.ts 接线"
+    },
+    {
+      "path": "ui/slot.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ART_SLOT_KEY"
+        }
+      ],
+      "width": 22,
+      "height": 22,
+      "channels": 4,
+      "opaqueColours": 234,
+      "strayColours": 234,
+      "inPalette": false,
+      "transparentPx": 84,
+      "semiAlphaPx": 0,
+      "bytes": 1188,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    }
+  ]
+}

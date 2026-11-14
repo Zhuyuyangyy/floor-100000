@@ -72,7 +72,9 @@ export function decodePng(file) {
   }
 
   if (bitDepth !== 8) throw new Error(`bit depth ${bitDepth} not supported`);
-  const channels = colorType === 6 ? 4 : colorType === 2 ? 3 : colorType === 0 ? 1 : 0;
+  // Palette images (colorType 3) carry one index byte per pixel in the raw
+  // stream; the PLTE/tRNS expansion happens after the unfilter below.
+  const channels = colorType === 6 ? 4 : colorType === 2 ? 3 : colorType === 0 || colorType === 3 ? 1 : 0;
   if (!channels) throw new Error(`color type ${colorType} not supported`);
 
   const raw = inflateSync(Buffer.concat(idat));
@@ -104,15 +106,18 @@ export function decodePng(file) {
   }
 
   // Palette -> RGB, tRNS -> alpha, so every caller sees 3 or 4 channels.
+  // tRNS on a palette image is one alpha byte per index, not a single gray key,
+  // so an indexed PNG with transparency comes back RGBA.
   if (colorType === 3 && palette) {
-    const rgb = Buffer.alloc(width * height * 3);
-    for (let p = 0, q = 0; p < out.length; p++, q += 3) {
+    const rgba = Buffer.alloc(width * height * 4);
+    for (let p = 0, q = 0; p < out.length; p++, q += 4) {
       const idx = out[p] * 3;
-      rgb[q] = palette[idx];
-      rgb[q + 1] = palette[idx + 1];
-      rgb[q + 2] = palette[idx + 2];
+      rgba[q] = palette[idx];
+      rgba[q + 1] = palette[idx + 1];
+      rgba[q + 2] = palette[idx + 2];
+      rgba[q + 3] = trns && out[p] < trns.length ? trns[out[p]] : 255;
     }
-    return { width, height, channels: 3, pixels: rgb };
+    return { width, height, channels: 4, pixels: rgba };
   }
   if (colorType === 0 && trns && trns.length >= 2) {
     const key = trns.readUInt16BE(0);

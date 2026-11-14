@@ -141,3 +141,13 @@ AG-03 报告称有 6 个提交（cced1ce 等），**实际分支 HEAD 仍停在�
 3. AG-05 → bagFullCount / shelterLightDim / waterPurifierRuns 三个消费方
 4. AG-06 → NPC 渲染层（`executeBarter` / `npcAutonomyFor` / `planNightWanderer`）
 5. AG-08 遗留 → 床标签/工作台招牌 depth 0 被 HUD 吞（存量缺陷）、NPC 名签、塔楼右上角缩放读数重叠
+
+## AG-03 缺陷复核（2026-11-15 03:40）
+AG-03 报告的 BUG-QA-01「塔楼总览起/终点标签出画布右缘 14px+」是在**它自己分支**（基线 48e1225，无 AG-08 修复）上测的。
+在集成分支实测复核：TowerOverview 全部 17 个可见 Text，**越界者 0**（AG-08 的 fdb1e41 已修：TOWER_STRIP_X=110 / STRIP_W 按 DESIGN_WIDTH 反算 / TOWER_TAG_X 派生）。
+**结论：该缺陷已被 AG-08 的工作修掉，无需再派工。** AG-03 的 e2e firstChapter 面板断言（right <= DESIGN_WIDTH）在集成上应转绿，建议下一轮在集成分支上重跑一次该 spec 确认。
+
+另：AG-03 补交 `8b29e1a`（STALE_E2E.md + 验收报告第 6/7 节），已合入。
+它还指出两个环境/架构问题，记入下一轮：
+- 本机 Playwright teardown 病态慢（context close >346s），疑似 1.1G test-results 堆积；建议清理。
+- `src/core/config.ts` 裸 JSON import 与 Node ESM（"type":"module"）不兼容，e2e 无法 import 链上模块；建议补 `with { type: 'json' }`。

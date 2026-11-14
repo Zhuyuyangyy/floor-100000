@@ -13,9 +13,11 @@ export const SAVE_KEY = 'floor100000.save.v1';
 // Derived from config/game-balance.json rather than hand-copied, so editing the
 // JSON cannot leave the code on a stale floor list (GHI-03 m7).
 export const STARTING_FLOOR = GAME_CONFIG.player.startingFloor;
-// The authored floors, read from the balance config: tier 1 (1-10) and the
-// worker-dorm tier (100-110). The list is NOT contiguous — 11-99 are
-// unexplored, and only the freight lift crosses a gap (see core/segments.ts).
+// The authored floors, read from the balance config: tier 1 (1-10), the
+// worker-dorm tier (100-110), the industrial tier (1000-1010) and the
+// commercial tier (10000-10010). The list is NOT contiguous — 11-99, 111-999
+// and 1011-9999 are unexplored, and only the freight lift crosses a gap (see
+// core/segments.ts).
 export const PLAYABLE_FLOORS_V01: readonly number[] = GAME_CONFIG.world.playableFloorsV01;
 
 // Dev-only: the retired v0.1 dorm scene, kept for testing. Reachable only via
@@ -122,6 +124,11 @@ const SEGMENT_ENVIRONMENT: Record<number, FloorEnvironment> = {
   1: { label: '底层贫民区', cold: 1.2, humidity: 0.35, danger: 0.45, hostile: true },
   100: { label: '工人宿舍区', cold: 1.4, humidity: 0.3, danger: 0.5, hostile: true },
   1000: { label: '工业与交易区', cold: 2.6, humidity: 0.5, danger: 0.85, hostile: true },
+  // 中产与商业区（10000-10010）。比工业区高一层，暖气也停得更早（cold 2.8
+  // > 2.6），但这里有地毯和坏掉的中央空调，不是管道井——所以比工业区干燥
+  // （humidity 0.45 < 0.5）。私人武装加实验体雏形让危险度成为已创作四段里
+  // 最高的一档（danger 0.95 > 0.85）：这一层没有保安队，只有合同。
+  10000: { label: '中产与商业区', cold: 2.8, humidity: 0.45, danger: 0.95, hostile: true },
 };
 
 export function environmentFor(floor: number): FloorEnvironment {

@@ -207,7 +207,8 @@ describe('the worker-dorm tier (100-110)', () => {
 // 额度，所以这里钉的是「恰好一份水」而不是「至少一份」：多一瓶就踩穿上限。
 // 容器 id 仍只能落在有贴图的家具上（没有新美术），问 containerTextureKey。
 describe('the industrial tier (1000-1010)', () => {
-  const INDUSTRIAL_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 1000);
+  // 只圈阶层 3 自己：10000-10010 是阶层 4，另有一段 describe 钉它。
+  const INDUSTRIAL_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 1000 && f < 10000);
 
   it('is exactly the eleven floors of segment 3', () => {
     expect(INDUSTRIAL_FLOORS).toEqual([1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010]);
@@ -249,6 +250,67 @@ describe('the industrial tier (1000-1010)', () => {
 
   it('reproduces the same industrial floor from the same seed', () => {
     for (const floor of INDUSTRIAL_FLOORS) {
+      expect(generateFloor(42, floor), `floor ${floor}`).toEqual(generateFloor(42, floor));
+      expect(generateFloor(2026, floor).floorNumber, `floor ${floor}`).toBe(floor);
+    }
+  });
+});
+
+// 阶层 4（10000-10010，中产与商业区）是第四段亲手写的楼层：地毯、招牌、
+// 私人武装和实验室。生存规矩和前三段一样硬——每层恰好一瓶水、一份口粮，
+// 都是 guaranteed；survivalBalance 的「分层盈余」按每层一瓶水给这一段记 30
+// 点额度，所以这里同样钉「恰好一份水」：多一瓶（哪怕是概率掉落的）就踩穿
+// 上限。物资是四段里最超高级的：filter/medkit/fuse 的权重全面高于工业区，
+// 水只在机房（10005）与实验室（10008）两层是脏水，其余是净水。容器 id 仍
+// 只能落在有贴图的家具上（没有新美术），问 containerTextureKey。
+describe('the commercial tier (10000-10010)', () => {
+  const COMMERCIAL_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 10000);
+
+  it('is exactly the eleven floors of segment 4', () => {
+    expect(COMMERCIAL_FLOORS).toEqual([
+      10000, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010,
+    ]);
+  });
+
+  it('has an authored template for every commercial floor', () => {
+    for (const floor of COMMERCIAL_FLOORS) {
+      expect(hasFloorContent(floor), `floor ${floor} must be authored`).toBe(true);
+      expect(FLOOR_TEMPLATES[floor].floorNumber, `floor ${floor}`).toBe(floor);
+    }
+  });
+
+  it('guarantees exactly one drink and one meal on every commercial floor', () => {
+    for (const floor of COMMERCIAL_FLOORS) {
+      const loot = FLOOR_TEMPLATES[floor].containers.flatMap((c) => c.loot);
+      const water = loot.filter(
+        (l) => l.guaranteed === true && (l.itemId === 'clean_water' || l.itemId === 'dirty_water'),
+      );
+      const food = loot.filter(
+        (l) => l.guaranteed === true && (l.itemId === 'ration_pack' || l.itemId === 'bread'),
+      );
+      expect(water.length, `floor ${floor} must guarantee exactly one drink`).toBe(1);
+      expect(food.length, `floor ${floor} has no guaranteed meal`).toBeGreaterThanOrEqual(1);
+      // 一条就够：概率性的第二瓶水会让「分层盈余」的上限被悄悄踩穿。
+      const anyWater = loot.filter((l) => l.itemId === 'clean_water' || l.itemId === 'dirty_water');
+      expect(anyWater.length, `floor ${floor} hands out more than one drink`).toBe(1);
+    }
+  });
+
+  it('uses only existing furniture art, 3-5 containers, and short labels', () => {
+    for (const floor of COMMERCIAL_FLOORS) {
+      const template = FLOOR_TEMPLATES[floor];
+      expect(template.containers.length, `floor ${floor} container count`).toBeGreaterThanOrEqual(3);
+      expect(template.containers.length, `floor ${floor} container count`).toBeLessThanOrEqual(5);
+      for (const c of template.containers) {
+        expect(containerTextureKey(c.id), `floor ${floor}/${c.id} has no furniture texture`).not.toBeNull();
+        expect([...c.label].length, `floor ${floor}/${c.id} label "${c.label}"`).toBeLessThanOrEqual(3);
+      }
+      expect(template.description.length, `floor ${floor} description`).toBeGreaterThan(0);
+    }
+  });
+
+  it('reproduces the same commercial floor from the same seed', () => {
+    for (const floor of COMMERCIAL_FLOORS) {
       expect(generateFloor(42, floor), `floor ${floor}`).toEqual(generateFloor(42, floor));
       expect(generateFloor(2026, floor).floorNumber, `floor ${floor}`).toBe(floor);
     }

@@ -34,6 +34,12 @@ describe('floor environments', () => {
     expect(environmentFor(6).label).toBe('底层贫民区'); // segment 1 has its own
     expect(environmentFor(1000).label).toBe('工业与交易区'); // segment 3 has its own
     expect(environmentFor(105).label).toBe('工人宿舍区'); // segment 2 has its own
+    expect(environmentFor(10000).label).toBe('中产与商业区'); // segment 4 has its own
+    expect(environmentFor(10005).label).toBe('中产与商业区');
+    // The gaps between segments have no entry of their own, so they take the
+    // ladder down rather than the segment above them.
+    expect(environmentFor(9999).label).toBe(environmentFor(5).label);
+    expect(environmentFor(10011).label).toBe(environmentFor(5).label);
   });
 
   it('gets colder and damper the higher you go, until the canteen', () => {

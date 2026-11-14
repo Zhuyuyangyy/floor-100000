@@ -1279,6 +1279,493 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     ],
     ground: [],
   },
+  // ── 阶层 4：中产与商业区（10000-10010）──────────────────────────────────
+  // 和工业区的区别不是「更破」或「更严」，而是「更干净、更贵」：这里铺着地毯、
+  // 招牌全亮着、闸机还通着电——管这套地方的不是军队，是私人武装和一纸合同。
+  // 容器因此是收银台、展架、样品柜、监控台和闸口台，而不是管道层的铁皮柜。
+  // 容器 id 仍复用既有贴图（没有新美术），差异化全在文案与摆放。
+  //
+  // 生存规矩与前三段一致，且最硬：每层恰好 1 份 guaranteed 水 + 1 份
+  // guaranteed 食物。survivalBalance.test.ts 的「分层盈余」按每层一瓶水给
+  // 这一段记 30 点额度——10000-10010 共 11 层，任何一层多出一瓶水（哪怕是
+  // 概率掉落的）都会踩穿上限，所以每层只写一条水，且必是 guaranteed。
+  // 物资是四段里最「超高级」的：filter/medkit/fuse 的权重全面高于工业区，
+  // 食物以压缩口粮为主（餐饮层 10002 给面包），水在机房与实验室两层是脏水，
+  // 其余都是净水——中产区的水管还没断，断的是别的东西。
+  //
+  // 整段不放 boss：把着往 50000 层货梯的是许可证，不是怪物（阶层 5 才放
+  // 守段者，见 docs/18_TIER_PROGRESSION.md §3 与 encounterTableCoverage 的
+  // BOSS_FLOORS）。段顶 10010 与 110/1010 同构：闸口台 + 安保柜 + 装备箱。
+  10000: {
+    floorNumber: 10000,
+    name: '门禁大堂',
+    description: '闸机还通着电，地毯从门口一直铺到电梯厅，招牌亮得刺眼',
+    containers: [
+      {
+        id: 'badge_rack',
+        label: '牌架',
+        x: 260,
+        loot: [
+          { itemId: 'clean_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'cloth', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'counter',
+        label: '接待台',
+        x: 620,
+        loot: [
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'battery', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'security_safe',
+        label: '安保柜',
+        x: 960,
+        loot: [
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.4 },
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.45 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '导视架',
+        x: 1140,
+        loot: [
+          { itemId: 'filter', min: 1, max: 1, probability: 0.3 },
+          { itemId: 'wire', min: 1, max: 2, probability: 0.35 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  10001: {
+    floorNumber: 10001,
+    name: '商铺街',
+    description: '招牌全亮着，收银台排成一排，像还在营业',
+    containers: [
+      {
+        id: 'counter',
+        label: '收银台',
+        x: 240,
+        loot: [
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'battery', min: 1, max: 2, probability: 0.45 },
+        ],
+      },
+      {
+        id: 'crate_wood',
+        label: '货箱',
+        x: 560,
+        loot: [
+          { itemId: 'clean_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'cloth', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '展架',
+        x: 880,
+        loot: [
+          { itemId: 'filter', min: 1, max: 1, probability: 0.3 },
+          { itemId: 'fuse', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+      {
+        id: 'security_safe',
+        label: '安保柜',
+        x: 1140,
+        loot: [
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.4 },
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+    ],
+    ground: [{ itemId: 'battery', quantity: 1, x: 900 }],
+  },
+  10002: {
+    floorNumber: 10002,
+    name: '餐饮层',
+    description: '取餐口擦得很亮，保温台里剩最后几份，没人来领',
+    containers: [
+      {
+        id: 'meal_counter',
+        label: '餐台',
+        x: 300,
+        loot: [
+          // 商业区的食物以压缩口粮为主，唯独餐饮层给面包——这一层的库存
+          // 断之前，是真的有人在卖热食的。
+          { itemId: 'bread', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'battery', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'water_tank',
+        label: '饮水机',
+        x: 620,
+        loot: [
+          { itemId: 'clean_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'filter', min: 1, max: 1, probability: 0.25 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '货架',
+        x: 920,
+        loot: [
+          { itemId: 'wire', min: 1, max: 2, probability: 0.35 },
+          { itemId: 'cloth', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+      {
+        id: 'counter',
+        label: '收银台',
+        x: 1160,
+        loot: [
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.4 },
+          { itemId: 'tape', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  10003: {
+    floorNumber: 10003,
+    name: '写字间',
+    description: '工位隔板上贴着排班，地毯厚得吞掉脚步',
+    containers: [
+      {
+        id: 'cabinet',
+        label: '文件柜',
+        x: 260,
+        loot: [
+          { itemId: 'clean_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'cloth', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'workbench',
+        label: '工位',
+        x: 620,
+        loot: [
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'wire', min: 1, max: 2, probability: 0.45 },
+        ],
+      },
+      {
+        id: 'key_board',
+        label: '钥匙架',
+        x: 920,
+        loot: [
+          { itemId: 'battery', min: 1, max: 2, probability: 0.45 },
+          { itemId: 'fuse', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+      {
+        id: 'security_safe',
+        label: '安保柜',
+        x: 1140,
+        loot: [
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.4 },
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.45 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  10004: {
+    floorNumber: 10004,
+    name: '公寓层',
+    description: '带门套的住户，鞋柜上摆着全家福，窗帘拉得整整齐齐',
+    containers: [
+      {
+        id: 'bed',
+        label: '公寓床',
+        x: 240,
+        loot: [
+          { itemId: 'clean_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'cloth', min: 1, max: 2, probability: 0.5 },
+        ],
+      },
+      {
+        id: 'cabinet',
+        label: '衣柜',
+        x: 560,
+        loot: [
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'battery', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'bunk_bed',
+        label: '客床',
+        x: 880,
+        loot: [
+          { itemId: 'filter', min: 1, max: 1, probability: 0.3 },
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.25 },
+        ],
+      },
+      {
+        id: 'wash_sink',
+        label: '洗漱台',
+        x: 1140,
+        loot: [
+          { itemId: 'wire', min: 1, max: 2, probability: 0.35 },
+          { itemId: 'scrap_metal', min: 1, max: 1, probability: 0.35 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  10005: {
+    floorNumber: 10005,
+    name: '物业机房',
+    description: '管线井里轰隆作响，墙角渗出一小片水，报修单压在工具下',
+    containers: [
+      {
+        id: 'fuse_box',
+        label: '配电箱',
+        x: 260,
+        loot: [
+          // 商业区唯一一段还流着脏水的地方：机房渗水，没人来修。
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'battery', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'tool_cage',
+        label: '工具架',
+        x: 600,
+        loot: [
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'fuse', min: 1, max: 1, probability: 0.35 },
+        ],
+      },
+      {
+        id: 'crate_metal',
+        label: '装备箱',
+        x: 920,
+        loot: [
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.5 },
+          { itemId: 'wire', min: 1, max: 2, probability: 0.45 },
+        ],
+      },
+      {
+        id: 'workbench',
+        label: '抢修台',
+        x: 1140,
+        loot: [
+          { itemId: 'filter', min: 1, max: 1, probability: 0.3 },
+          { itemId: 'tape', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  10006: {
+    floorNumber: 10006,
+    name: '私人安保室',
+    description: '监控墙黑着，装备柜按编号锁着，防弹背心叠成一边',
+    containers: [
+      {
+        id: 'security_safe',
+        label: '安保柜',
+        x: 260,
+        loot: [
+          { itemId: 'clean_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.45 },
+        ],
+      },
+      {
+        id: 'crate_metal',
+        label: '装备箱',
+        x: 600,
+        loot: [
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.55 },
+        ],
+      },
+      {
+        id: 'key_board',
+        label: '钥匙架',
+        x: 920,
+        loot: [
+          { itemId: 'fuse', min: 1, max: 1, probability: 0.35 },
+          { itemId: 'battery', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'counter',
+        label: '监控台',
+        x: 1140,
+        loot: [
+          { itemId: 'wire', min: 1, max: 2, probability: 0.5 },
+          { itemId: 'filter', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  10007: {
+    floorNumber: 10007,
+    name: '样品间',
+    description: '封好的箱子沿墙码齐，面上一张标签都没有，轮子朝外',
+    containers: [
+      {
+        id: 'crate_metal',
+        label: '样本箱',
+        x: 240,
+        loot: [
+          { itemId: 'clean_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'cabinet',
+        label: '样品柜',
+        x: 560,
+        loot: [
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'filter', min: 1, max: 1, probability: 0.35 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '存放架',
+        x: 880,
+        loot: [
+          { itemId: 'fuse', min: 1, max: 1, probability: 0.3 },
+          { itemId: 'battery', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'security_safe',
+        label: '安保柜',
+        x: 1140,
+        loot: [
+          { itemId: 'wire', min: 1, max: 2, probability: 0.4 },
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  10008: {
+    floorNumber: 10008,
+    name: '实验室',
+    description: '值班灯还亮着，笼架的位置已经空了，登记簿停在最后一页',
+    containers: [
+      {
+        id: 'counter',
+        label: '实验台',
+        x: 260,
+        loot: [
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'filter', min: 1, max: 2, probability: 0.45 },
+        ],
+      },
+      {
+        id: 'cabinet',
+        label: '药品柜',
+        x: 600,
+        loot: [
+          // 实验用水：这一层的水没人敢直饮，和底层一样得先净化。
+          { itemId: 'dirty_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.5 },
+        ],
+      },
+      {
+        id: 'crate_metal',
+        label: '样本箱',
+        x: 920,
+        loot: [
+          { itemId: 'battery', min: 1, max: 2, probability: 0.45 },
+          { itemId: 'fuse', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+      {
+        id: 'shelf',
+        label: '器皿架',
+        x: 1140,
+        loot: [
+          { itemId: 'wire', min: 1, max: 2, probability: 0.4 },
+          { itemId: 'cloth', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+    ],
+    ground: [{ itemId: 'cloth', quantity: 1, x: 800 }],
+  },
+  10009: {
+    floorNumber: 10009,
+    name: '高管层',
+    description: '整层只有一户，地毯换成厚的，签字笔还插在笔筒里',
+    containers: [
+      {
+        id: 'bed',
+        label: '高管床',
+        x: 260,
+        loot: [
+          { itemId: 'clean_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'cloth', min: 1, max: 2, probability: 0.5 },
+        ],
+      },
+      {
+        id: 'workbench',
+        label: '写字台',
+        x: 640,
+        loot: [
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'wire', min: 1, max: 2, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'security_safe',
+        label: '保险柜',
+        x: 1000,
+        loot: [
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.45 },
+          { itemId: 'fuse', min: 1, max: 1, probability: 0.3 },
+        ],
+      },
+    ],
+    ground: [],
+  },
+  10010: {
+    floorNumber: 10010,
+    name: '货梯闸',
+    description: '货梯闸的灯还亮着，读卡器等着一张更贵的卡',
+    containers: [
+      {
+        id: 'counter',
+        label: '闸口台',
+        x: 320,
+        loot: [
+          { itemId: 'clean_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+        ],
+      },
+      {
+        id: 'security_safe',
+        label: '安保柜',
+        x: 640,
+        loot: [
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.5 },
+          { itemId: 'tape', min: 1, max: 1, probability: 0.4 },
+        ],
+      },
+      {
+        id: 'crate_metal',
+        label: '装备箱',
+        x: 960,
+        loot: [
+          { itemId: 'scrap_metal', min: 1, max: 2, probability: 0.6 },
+          { itemId: 'wire', min: 1, max: 2, probability: 0.5 },
+        ],
+      },
+    ],
+    ground: [],
+  },
 };
 
 function resolveLoot(

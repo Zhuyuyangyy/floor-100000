@@ -45,12 +45,18 @@ export interface EncounterResult {
 //  - 100-110（阶层 2 工人宿舍区）有自己的保安，ambush 从段首就高于 1-10 层
 //    的天花板（10 层的 44），一路涨到 109 层；110 层是段顶，守段者的 boss
 //    权重压过 ambush——照抄 5 层的写法。
-//  - 1000-1010（阶层 3 工业与交易区）是军队级安保：ambush 从段首（66）就
-//    高于工人宿舍区的天花板（109 层的 65），一路涨到段顶 1010 的军方检查
-//    站（80）；交易区的 trader 权重整体也高于宿舍区。这一段没有守段者——
-//    货梯顶把着的是通行证，不是怪物（见 encounterTableCoverage 的
-//    BOSS_FLOORS），所以 1010 不放 boss。
-// ---------------------------------------------------------------------------
+  //  - 1000-1010（阶层 3 工业与交易区）是军队级安保：ambush 从段首（66）就
+  //    高于工人宿舍区的天花板（109 层的 65），一路涨到段顶 1010 的军方检查
+  //    站（80）；交易区的 trader 权重整体也高于宿舍区。这一段没有守段者——
+  //    货梯顶把着的是通行证，不是怪物（见 encounterTableCoverage 的
+  //    BOSS_FLOORS），所以 1010 不放 boss。
+  //  - 10000-10010（阶层 4 中产与商业区）是私人武装 + 实验体雏形：ambush 从
+  //    段首（82）就高于工业区的天花板（1010 层的 80），一路涨到段顶 10010
+  //    的货梯闸（92）；trader 权重是四段里最高的（13-15，黑市在中产区变成
+  //    了明面上的商铺街），这是「商业区」的本体。这一段同样没有守段者——
+  //    把着往 50000 层货梯的是许可证，不是怪物，所以整段不放 boss。loot
+  //    继续降权（7→4），cache 维持高位支撑上行。
+  // ---------------------------------------------------------------------------
 const FLOOR_WEIGHT_PROFILE: Record<number, Partial<Record<EncounterKind, number>>> = {
   1: { loot: 60, note: 14, trader: 12, cache: 10, ambush: 4 },
   2: { loot: 50, note: 10, trader: 13, cache: 12, ambush: 15 },
@@ -97,6 +103,22 @@ const FLOOR_WEIGHT_PROFILE: Record<number, Partial<Record<EncounterKind, number>
   1008: { loot: 8, note: 2, trader: 9, cache: 18, ambush: 76 },
   1009: { loot: 7, note: 2, trader: 8, cache: 19, ambush: 78 },
   1010: { loot: 7, note: 2, trader: 8, cache: 19, ambush: 80 },
+  // 阶层 4：中产与商业区（10000-10010）。私人武装 + 实验体雏形——ambush 从
+  // 段首就高于工业区的天花板（80），一路涨到段顶 10010 的货梯闸（92）；商铺
+  // 街让 trader 成为四段里最活跃的一类（13-15，工业区最高才 12）。整段没有
+  // 守段者：10010 把着的是往 50000 层的货梯和许可证，不是怪物。loot 是四段
+  // 里最低的（7→4），cache 维持高位支撑上行。
+  10000: { loot: 7, note: 2, trader: 15, cache: 16, ambush: 82 },
+  10001: { loot: 7, note: 2, trader: 15, cache: 16, ambush: 83 },
+  10002: { loot: 6, note: 2, trader: 14, cache: 17, ambush: 84 },
+  10003: { loot: 6, note: 2, trader: 14, cache: 17, ambush: 85 },
+  10004: { loot: 6, note: 2, trader: 14, cache: 17, ambush: 86 },
+  10005: { loot: 5, note: 1, trader: 14, cache: 18, ambush: 87 },
+  10006: { loot: 5, note: 1, trader: 13, cache: 18, ambush: 88 },
+  10007: { loot: 5, note: 1, trader: 13, cache: 18, ambush: 89 },
+  10008: { loot: 4, note: 1, trader: 13, cache: 19, ambush: 90 },
+  10009: { loot: 4, note: 1, trader: 13, cache: 19, ambush: 91 },
+  10010: { loot: 4, note: 1, trader: 13, cache: 20, ambush: 92 },
 };
 
 // 固定枚举顺序，保证 ENCOUNTER_TABLE 的行顺序与加权 roll 的遍历顺序确定。
@@ -181,6 +203,22 @@ const FLOOR_LOOT_POOLS: Record<number, ItemId[]> = {
   1008: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
   1009: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
   1010: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
+  // 阶层 4：中产与商业区的遭遇产出在工业件之外多了一档——医疗包。商业区
+  // 的私人武装带着战地急救包，实验体雏形的样品间也锁着库存，所以 ambush
+  // 与 loot 问号点开始能摸到 medkit（前三段只有 cache 稳定给）。滤芯、保险
+  // 丝、电线、电池照旧，废金属留着「拆实验设备」的用途（docs/18 §5 的跨阶层
+  // 复用表）；仍然没有面包——食物由楼层容器保底。
+  10000: ['filter', 'medkit', 'fuse', 'battery', 'wire', 'scrap_metal'],
+  10001: ['filter', 'medkit', 'fuse', 'battery', 'wire', 'scrap_metal'],
+  10002: ['filter', 'medkit', 'fuse', 'battery', 'wire', 'scrap_metal'],
+  10003: ['filter', 'fuse', 'battery', 'wire', 'medkit', 'scrap_metal'],
+  10004: ['filter', 'fuse', 'battery', 'wire', 'medkit', 'scrap_metal'],
+  10005: ['filter', 'fuse', 'battery', 'wire', 'medkit', 'scrap_metal'],
+  10006: ['fuse', 'filter', 'battery', 'wire', 'medkit', 'scrap_metal'],
+  10007: ['fuse', 'filter', 'battery', 'wire', 'medkit', 'scrap_metal'],
+  10008: ['fuse', 'filter', 'battery', 'wire', 'medkit', 'scrap_metal'],
+  10009: ['battery', 'wire', 'fuse', 'filter', 'medkit', 'scrap_metal'],
+  10010: ['battery', 'wire', 'fuse', 'filter', 'medkit', 'scrap_metal'],
 };
 
 function lootPoolForFloor(floor: number): ItemId[] {

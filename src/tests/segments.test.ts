@@ -150,13 +150,17 @@ describe('liftOutcome', () => {
   });
 
   it('refuses a pass-holder when the target segment has no floors yet', () => {
-    // 1000-1010 are authored now, so the ride from 110 completes; the segment
-    // above them (10000-10010) is not, so the same refusal happens at 1010.
+    // 1000-1010 and 10000-10010 are authored now, so the rides from 110 and
+    // 1010 complete; the segment above them (50000-50010) is not, so the same
+    // refusal happens at 10010.
     expect(hasFloorContent(1000)).toBe(true);
+    expect(hasFloorContent(10000)).toBe(true);
     const sticker = { player: { homeUpgrades: ['pass_sticker'] as string[] } };
+    const permit = { player: { homeUpgrades: ['permit'] as string[] } };
     const everything = { player: { homeUpgrades: [...PASS_UPGRADE_IDS] as string[] } };
     expect(liftOutcome(sticker, 110, hasFloorContent)).toBe('ok');
-    expect(liftOutcome(everything, 1010, hasFloorContent)).toBe('not-connected');
+    expect(liftOutcome(permit, 1010, hasFloorContent)).toBe('ok');
+    expect(liftOutcome(everything, 10010, hasFloorContent)).toBe('not-connected');
   });
 
   it('only rides when the pass is held and the floor can be built', () => {
@@ -167,15 +171,20 @@ describe('liftOutcome', () => {
     expect(liftOutcome(badge, 10, hasFloorContent)).toBe('ok');
   });
 
-  it('matches the authored floors: all three authored segments and neither gap', () => {
+  it('matches the authored floors: all four authored segments and neither gap', () => {
     for (let f = 1; f <= 10; f++) expect(hasFloorContent(f)).toBe(true);
     for (let f = 100; f <= 110; f++) expect(hasFloorContent(f)).toBe(true);
     for (let f = 1000; f <= 1010; f++) expect(hasFloorContent(f)).toBe(true);
+    for (let f = 10000; f <= 10010; f++) expect(hasFloorContent(f)).toBe(true);
     expect(hasFloorContent(11)).toBe(false);
     expect(hasFloorContent(50)).toBe(false);
     expect(hasFloorContent(99)).toBe(false);
     expect(hasFloorContent(111)).toBe(false);
     expect(hasFloorContent(999)).toBe(false);
+    expect(hasFloorContent(1011)).toBe(false);
+    expect(hasFloorContent(9999)).toBe(false);
+    expect(hasFloorContent(10011)).toBe(false);
+    expect(hasFloorContent(49999)).toBe(false);
     // 100000 resolves through DEV_FLOOR_ALIAS to floor 1's table, but it is not
     // authored content and must NOT read as connected: the lift asks this before
     // moving anyone, and a true here would drop the player onto floor 1's layout
@@ -200,8 +209,11 @@ describe('lift direction', () => {
     // player on 100 with no way to sleep or craft the next pass.
     expect(prevSegment(100)?.to).toBe(10);
     expect(prevSegment(1000)?.to).toBe(110);
+    expect(prevSegment(10000)?.to).toBe(1010);
     expect(liftDirection(1000)).toBe('down'); // bottom of segment 3
     expect(liftDirection(1010)).toBe('up');
+    expect(liftDirection(10000)).toBe('down'); // bottom of segment 4
+    expect(liftDirection(10010)).toBe('up');
     expect(prevSegment(1)).toBeUndefined();
   });
 });

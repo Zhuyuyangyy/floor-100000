@@ -1,3 +1,4 @@
+import { shopStock } from '../systems/shop';
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { FLOOR_ENVIRONMENT, WARMTH_SOURCES, environmentFor } from '../core/constants';
@@ -25,8 +26,14 @@ describe('floor environments', () => {
     for (const f of Object.keys(FLOOR_ENVIRONMENT)) {
       expect(environmentFor(Number(f)).label.length).toBeGreaterThan(0);
     }
-    // an out-of-range floor falls back rather than returning undefined
-    expect(environmentFor(99).label).toBe(environmentFor(2).label);
+    // The bands are a ladder, so an unlisted floor takes the highest band at or
+    // below it rather than the dorm's numbers. Floor 99 is unreachable, but the
+    // rule also covers 6-110 and 1000-1010, which are very much reachable and
+    // used to be answered with a neighbour's damp.
+    expect(environmentFor(99).label).toBe(environmentFor(5).label); // in no segment: ladder down
+    expect(environmentFor(6).label).toBe('底层贫民区'); // segment 1 has its own
+    expect(environmentFor(1000).label).toBe('工业与交易区'); // segment 3 has its own
+    expect(environmentFor(105).label).toBe('工人宿舍区'); // segment 2 has its own
   });
 
   it('gets colder and damper the higher you go, until the canteen', () => {
@@ -197,5 +204,19 @@ describe('the HUD line', () => {
     expect(environmentLabel(3)).toContain('夜间危险');
     expect(environmentLabel(3)).not.toContain('有热源');
     expect(environmentLabel(4)).not.toContain('有热源');
+  });
+});
+
+describe('per-band fallbacks are ladders, not cliffs', () => {
+  it('hands the industrial tier the best stock it can, not the cheapest', () => {
+    // The stock table's own comment says "the higher the floor, the better the
+    // stock"; the fallback used to hand every unlisted floor floor-2 prices.
+    const cheap = shopStock(2).map((e: { itemId: string; price: number }) => e.price);
+    for (const f of [6, 100, 105, 1000, 1010]) {
+      const prices = shopStock(f).map((e: { itemId: string; price: number }) => e.price);
+      expect(prices.length, `floor ${f} should have stock`).toBeGreaterThan(0);
+      expect(Math.max(...prices), `floor ${f} should not be stuck at the cheapest band`)
+        .toBeGreaterThanOrEqual(Math.max(...cheap));
+    }
   });
 });

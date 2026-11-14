@@ -6,7 +6,8 @@ import { PLAYABLE_FLOORS_V01 } from '../core/constants';
 // init, so a missing weight profile does not fail a test — it fails the whole
 // game before the menu draws ("Cannot read properties of undefined (reading
 // 'loot')", because 'loot' is the first kind the filter probes). That happened
-// when the list grew to 10, and again when tier 2 (100-110) was authored.
+// when the list grew to 10, again when tier 2 (100-110) was authored, and once
+// more when tier 3 (1000-1010) was.
 describe('every playable floor can roll an encounter', () => {
   it('has a non-empty weighted table for all playable floors', () => {
     for (const floor of PLAYABLE_FLOORS_V01) {
@@ -20,7 +21,8 @@ describe('every playable floor can roll an encounter', () => {
   // Two authored segment closers carry a guard: floor 5 ends the slum chapter
   // (the gatekeeper), floor 110 ends the dorm tier (the segment keeper). The
   // floors in between, including every segment top that has no authored
-  // content above it, must not roll a boss.
+  // content above it, must not roll a boss — the industrial tier's top (1010)
+  // is gated by the freight lift's pass, not by a guardian.
   const BOSS_FLOORS = new Set([5, 110]);
 
   it('keeps the boss on the two authored segment closers only', () => {
@@ -31,12 +33,28 @@ describe('every playable floor can roll an encounter', () => {
     }
   });
 
-  it('gives the dorm tier a heavier ambush than any slum floor', () => {
+  it('gives both upper tiers a heavier ambush than any slum floor', () => {
     const ambush = (floor: number): number =>
       ENCOUNTER_TABLE[floor].find((e) => e.kind === 'ambush')?.weight ?? 0;
     const worstSlum = Math.max(...PLAYABLE_FLOORS_V01.filter((f) => f < 100).map(ambush));
     for (const floor of PLAYABLE_FLOORS_V01.filter((f) => f >= 100 && f !== 110)) {
       expect(ambush(floor), `floor ${floor} ambush`).toBeGreaterThan(worstSlum);
+    }
+  });
+
+  it('makes the industrial tier the most dangerous stretch so far', () => {
+    // 军队级安保：工业与交易区（1000-1010）的 ambush 高于工人宿舍区的天花板
+    // （109 层的 65），交易区的 trader 权重也高于宿舍区。这一段没有守段者。
+    const weight = (floor: number, kind: 'ambush' | 'trader'): number =>
+      ENCOUNTER_TABLE[floor].find((e) => e.kind === kind)?.weight ?? 0;
+    const dorm = PLAYABLE_FLOORS_V01.filter((f) => f >= 100 && f < 1000);
+    const industrial = PLAYABLE_FLOORS_V01.filter((f) => f >= 1000);
+    expect(industrial).toEqual([1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010]);
+    const worstDormAmbush = Math.max(...dorm.map((f) => weight(f, 'ambush')));
+    const bestDormTrader = Math.max(...dorm.map((f) => weight(f, 'trader')));
+    for (const floor of industrial) {
+      expect(weight(floor, 'ambush'), `floor ${floor} ambush`).toBeGreaterThan(worstDormAmbush);
+      expect(weight(floor, 'trader'), `floor ${floor} trader`).toBeGreaterThan(bestDormTrader);
     }
   });
 });

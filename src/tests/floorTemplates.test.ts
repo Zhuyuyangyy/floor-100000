@@ -147,7 +147,8 @@ describe('every playable floor is generated, survivable and reproducible', () =>
 // 这里断言的是模板数据本身（不是某几个 seed 的生成结果），所以一条 guaranteed
 // 被误改成概率时测试会直接红，而不是等某个 seed 抽不到。
 describe('the worker-dorm tier (100-110)', () => {
-  const DORM_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 100);
+  // 只圈阶层 2 自己：1000-1010 是阶层 3，另有一段 describe 钉它。
+  const DORM_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 100 && f < 1000);
   // Was a hard-coded whitelist of the nine shared textures. It drifted the moment
   // the dorm got its own props, so ask the mapper instead: an id with no texture
   // makes the container invisible, and that is the property worth pinning.
@@ -194,6 +195,60 @@ describe('the worker-dorm tier (100-110)', () => {
 
   it('reproduces the same dorm floor from the same seed', () => {
     for (const floor of DORM_FLOORS) {
+      expect(generateFloor(42, floor), `floor ${floor}`).toEqual(generateFloor(42, floor));
+      expect(generateFloor(2026, floor).floorNumber, `floor ${floor}`).toBe(floor);
+    }
+  });
+});
+
+// 阶层 3（1000-1010，工业与交易区）是第三段亲手写的楼层：军队级安保、货梯、
+// 管道、黑市。生存规矩和前两段一样硬，而且更严——每层恰好一瓶水、一份军粮，
+// 都是 guaranteed。survivalBalance 的「分层盈余」按每层一瓶水给这一段记 30 点
+// 额度，所以这里钉的是「恰好一份水」而不是「至少一份」：多一瓶就踩穿上限。
+// 容器 id 仍只能落在有贴图的家具上（没有新美术），问 containerTextureKey。
+describe('the industrial tier (1000-1010)', () => {
+  const INDUSTRIAL_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 1000);
+
+  it('is exactly the eleven floors of segment 3', () => {
+    expect(INDUSTRIAL_FLOORS).toEqual([1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010]);
+  });
+
+  it('has an authored template for every industrial floor', () => {
+    for (const floor of INDUSTRIAL_FLOORS) {
+      expect(hasFloorContent(floor), `floor ${floor} must be authored`).toBe(true);
+      expect(FLOOR_TEMPLATES[floor].floorNumber, `floor ${floor}`).toBe(floor);
+    }
+  });
+
+  it('guarantees exactly one drink and one meal on every industrial floor', () => {
+    for (const floor of INDUSTRIAL_FLOORS) {
+      const loot = FLOOR_TEMPLATES[floor].containers.flatMap((c) => c.loot);
+      const water = loot.filter(
+        (l) => l.guaranteed === true && (l.itemId === 'clean_water' || l.itemId === 'dirty_water'),
+      );
+      const food = loot.filter(
+        (l) => l.guaranteed === true && (l.itemId === 'ration_pack' || l.itemId === 'bread'),
+      );
+      expect(water.length, `floor ${floor} must guarantee exactly one drink`).toBe(1);
+      expect(food.length, `floor ${floor} has no guaranteed meal`).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('uses only existing furniture art, 3-5 containers, and short labels', () => {
+    for (const floor of INDUSTRIAL_FLOORS) {
+      const template = FLOOR_TEMPLATES[floor];
+      expect(template.containers.length, `floor ${floor} container count`).toBeGreaterThanOrEqual(3);
+      expect(template.containers.length, `floor ${floor} container count`).toBeLessThanOrEqual(5);
+      for (const c of template.containers) {
+        expect(containerTextureKey(c.id), `floor ${floor}/${c.id} has no furniture texture`).not.toBeNull();
+        expect([...c.label].length, `floor ${floor}/${c.id} label "${c.label}"`).toBeLessThanOrEqual(3);
+      }
+      expect(template.description.length, `floor ${floor} description`).toBeGreaterThan(0);
+    }
+  });
+
+  it('reproduces the same industrial floor from the same seed', () => {
+    for (const floor of INDUSTRIAL_FLOORS) {
       expect(generateFloor(42, floor), `floor ${floor}`).toEqual(generateFloor(42, floor));
       expect(generateFloor(2026, floor).floorNumber, `floor ${floor}`).toBe(floor);
     }

@@ -1,5 +1,6 @@
-import { DOWN_EXIT_X, FLOOR_WIDTH, PLAYABLE_FLOORS_V01, STARTING_FLOOR, UP_EXIT_X } from '../core/constants';
+import { DOWN_EXIT_X, FLOOR_WIDTH, STARTING_FLOOR, UP_EXIT_X } from '../core/constants';
 import { hashString } from '../core/rng';
+import { ENCOUNTER_TABLE } from './encounters';
 
 // OVERHAUL: where the "?" encounter spots sit on each floor (W1's rollEncounter
 // decides what is behind them; this decides where they are). Deterministic per
@@ -12,10 +13,24 @@ export interface EncounterSpot {
   isBoss: boolean;
 }
 
-// The top playable floor carries the first boss, parked past the up-exit so the
-// player cannot leave without meeting it. That is ALTACIMA's every-10-floors
-// boss, compressed to the M1 chapter's shape: floor 5 is the run's ending.
-const TOP_FLOOR = Math.max(...PLAYABLE_FLOORS_V01);
+// The floors that can actually roll a boss carry the boss marker, parked past
+// the up-exit so the player cannot leave without meeting it. That is ALTACIMA's
+// every-10-floors boss, compressed to the M1 chapter's shape: floor 5 is the
+// run's ending, floor 110 closes the dorm tier.
+//
+// The set is DERIVED from the encounter table, not from the playable list. It
+// used to be `Math.max(...PLAYABLE_FLOORS_V01)`, which quietly followed the
+// list's end: the marker sat on 5, then drifted to 10 and then to 110 as
+// segments were authored, and with tier 3 (1000-1010) it would have jumped to
+// 1010 — a floor whose table has no boss at all, so the red marker would roll
+// ordinary loot while floor 110 silently lost its guardian. Reading the table
+// keeps the marker on the floors that can roll one, now and when the segments
+// above are authored.
+const BOSS_SPOT_FLOORS: ReadonlySet<number> = new Set(
+  Object.keys(ENCOUNTER_TABLE)
+    .map(Number)
+    .filter((floor) => ENCOUNTER_TABLE[floor].some((e) => e.kind === 'boss')),
+);
 
 // Spots must never land where E already reaches for something else — a marker
 // inside a stairwell's, container's or NPC's interact radius hijacks the key
@@ -102,18 +117,19 @@ export function placeClearX(
 export function encounterSpots(seed: number, floor: number): EncounterSpot[] {
   if (floor === STARTING_FLOOR) return []; // the dorm has no question marks
   const spots: EncounterSpot[] = [];
-  // The exits first, so every placed spot avoids them; on the top floor the
-  // boss's fixed position joins the list so the rumours stay clear of it too.
+  // The exits first, so every placed spot avoids them; on a boss floor the
+  // guardian's fixed position joins the list so the rumours stay clear of it too.
   const taken: number[] = [UP_EXIT_X, DOWN_EXIT_X];
-  if (floor === TOP_FLOOR) taken.push(UP_EXIT_X + 70);
+  const isBossFloor = BOSS_SPOT_FLOORS.has(floor);
+  if (isBossFloor) taken.push(UP_EXIT_X + 70);
 
-  const count = floor >= TOP_FLOOR ? 1 : 2;
+  const count = isBossFloor ? 1 : 2;
   for (let i = 0; i < count; i++) {
     const x = placeSpot(seed, floor, i, taken, SPOT_CLEARANCE);
     taken.push(x);
     spots.push({ id: `${floor}:spot${i}`, x, isBoss: false });
   }
-  if (floor === TOP_FLOOR) {
+  if (isBossFloor) {
     spots.push({ id: `${floor}:boss`, x: UP_EXIT_X + 70, isBoss: true });
   }
   return spots;

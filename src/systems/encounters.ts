@@ -45,6 +45,11 @@ export interface EncounterResult {
 //  - 100-110（阶层 2 工人宿舍区）有自己的保安，ambush 从段首就高于 1-10 层
 //    的天花板（10 层的 44），一路涨到 109 层；110 层是段顶，守段者的 boss
 //    权重压过 ambush——照抄 5 层的写法。
+//  - 1000-1010（阶层 3 工业与交易区）是军队级安保：ambush 从段首（66）就
+//    高于工人宿舍区的天花板（109 层的 65），一路涨到段顶 1010 的军方检查
+//    站（80）；交易区的 trader 权重整体也高于宿舍区。这一段没有守段者——
+//    货梯顶把着的是通行证，不是怪物（见 encounterTableCoverage 的
+//    BOSS_FLOORS），所以 1010 不放 boss。
 // ---------------------------------------------------------------------------
 const FLOOR_WEIGHT_PROFILE: Record<number, Partial<Record<EncounterKind, number>>> = {
   1: { loot: 60, note: 14, trader: 12, cache: 10, ambush: 4 },
@@ -76,6 +81,22 @@ const FLOOR_WEIGHT_PROFILE: Record<number, Partial<Record<EncounterKind, number>
   109: { loot: 11, note: 2, trader: 3, cache: 19, ambush: 65 },
   // boss 32 是当层最高；ambush 30 紧随其后，和 5 层一样由守段者压住普通遭遇。
   110: { loot: 10, note: 2, trader: 3, cache: 20, ambush: 30, boss: 32 },
+  // 阶层 3：工业与交易区（1000-1010）。军队级安保——ambush 从段首就高于
+  // 工人宿舍区的天花板（65），一路涨到段顶 1010；交易区——trader 权重整体
+  // 高于宿舍区（黑市比配给窗活跃）。没有守段者：1010 把着的是往 10000 层
+  // 的货梯和通行证，不是怪物，所以整段不放 boss。loot 继续降权，cache 维持
+  // 高位支撑上行。
+  1000: { loot: 12, note: 3, trader: 12, cache: 17, ambush: 66 },
+  1001: { loot: 11, note: 3, trader: 12, cache: 17, ambush: 68 },
+  1002: { loot: 11, note: 3, trader: 11, cache: 17, ambush: 69 },
+  1003: { loot: 10, note: 3, trader: 11, cache: 17, ambush: 70 },
+  1004: { loot: 10, note: 2, trader: 10, cache: 17, ambush: 71 },
+  1005: { loot: 9, note: 2, trader: 10, cache: 18, ambush: 72 },
+  1006: { loot: 9, note: 2, trader: 10, cache: 18, ambush: 73 },
+  1007: { loot: 8, note: 2, trader: 9, cache: 18, ambush: 75 },
+  1008: { loot: 8, note: 2, trader: 9, cache: 18, ambush: 76 },
+  1009: { loot: 7, note: 2, trader: 8, cache: 19, ambush: 78 },
+  1010: { loot: 7, note: 2, trader: 8, cache: 19, ambush: 80 },
 };
 
 // 固定枚举顺序，保证 ENCOUNTER_TABLE 的行顺序与加权 roll 的遍历顺序确定。
@@ -146,6 +167,20 @@ const FLOOR_LOOT_POOLS: Record<number, ItemId[]> = {
   108: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
   109: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
   110: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
+  // 阶层 3：工业与交易区的遭遇产出是纯工业件——滤芯、保险丝、电线、电池
+  // 加废金属，没有面包（食物照旧由楼层容器保底），也没有宿舍区的抹布和
+  // 胶带：军队管一切的地方不差这点零碎。整段同一个池子，顺序按层微调。
+  1000: ['battery', 'wire', 'fuse', 'filter', 'scrap_metal'],
+  1001: ['battery', 'wire', 'fuse', 'filter', 'scrap_metal'],
+  1002: ['wire', 'fuse', 'battery', 'filter', 'scrap_metal'],
+  1003: ['wire', 'fuse', 'battery', 'filter', 'scrap_metal'],
+  1004: ['fuse', 'battery', 'wire', 'filter', 'scrap_metal'],
+  1005: ['fuse', 'battery', 'wire', 'filter', 'scrap_metal'],
+  1006: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
+  1007: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
+  1008: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
+  1009: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
+  1010: ['filter', 'fuse', 'battery', 'wire', 'scrap_metal'],
 };
 
 function lootPoolForFloor(floor: number): ItemId[] {

@@ -1,4 +1,5 @@
 import { GAME_CONFIG } from './config';
+import { segmentOf } from './segments';
 
 // Save protocol constants (docs/02_TECH_SPEC.md §6).
 // v2: GHI-03 M1/M2 changed the loot key format and the seed derivation, so a v1
@@ -114,8 +115,26 @@ export const FLOOR_ENVIRONMENT: Record<number, FloorEnvironment> = {
   5: { label: '食堂', cold: 2.0, humidity: 0.5, danger: 0.6, hostile: true },
 };
 
+// One entry per segment start, so a whole tier can have an environment without
+// enumerating its floors. The 1-5 entries above stay per-floor: the shanty floors
+// differ from each other, and the ladder below them is the fallback.
+const SEGMENT_ENVIRONMENT: Record<number, FloorEnvironment> = {
+  1: { label: '底层贫民区', cold: 1.2, humidity: 0.35, danger: 0.45, hostile: true },
+  100: { label: '工人宿舍区', cold: 1.4, humidity: 0.3, danger: 0.5, hostile: true },
+  1000: { label: '工业与交易区', cold: 2.6, humidity: 0.5, danger: 0.85, hostile: true },
+};
+
 export function environmentFor(floor: number): FloorEnvironment {
-  return FLOOR_ENVIRONMENT[floor] ?? FLOOR_ENVIRONMENT[2];
+  // Exact floor first, then the segment it stands in, then the ladder down — an
+  // unlisted floor must never be answered with a neighbour's numbers, which is
+  // what made floor 1000 a 1.6-degree 食堂.
+  if (FLOOR_ENVIRONMENT[floor]) return FLOOR_ENVIRONMENT[floor];
+  const seg = segmentOf(floor);
+  if (seg && SEGMENT_ENVIRONMENT[seg.from]) return SEGMENT_ENVIRONMENT[seg.from];
+  for (const key of Object.keys(FLOOR_ENVIRONMENT).map(Number).sort((a, b) => b - a)) {
+    if (key <= floor) return FLOOR_ENVIRONMENT[key];
+  }
+  return FLOOR_ENVIRONMENT[1];
 }
 
 // A warmth source: where it stands and how far its heat reaches. The brazier on

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { PLAYABLE_FLOORS_V01 } from '../core/constants';
 import { createNewGame } from '../core/gameState';
+import { liftDirection, liftRequirement, segmentOf } from '../core/segments';
+import { hasFloorContent } from '../data/floorTemplates';
 import {
   DOWN_EXIT_X,
   ENTRY_X,
@@ -67,10 +69,11 @@ describe('tryChangeFloor', () => {
   });
 });
 
-// The playable floors are two segments with an 89-floor void between them
-// (core/segments.ts). Stairs connect adjacent floors inside a segment; only the
-// freight lift crosses the void, so the stairwell at a segment top must refuse
-// even though the next playable floor exists as a number.
+// The playable floors are authored segments with unexplored voids between them
+// (core/segments.ts: 1-10, 100-110, 1000-1010). Stairs connect adjacent floors
+// inside a segment; only the freight lift crosses the void, so the stairwell at
+// a segment top must refuse even though the next playable floor exists as a
+// number.
 describe('stairs stay inside a segment', () => {
   it('refuses to climb from 10 into the unexplored 11..99 gap', () => {
     const s = createNewGame(1);
@@ -118,6 +121,75 @@ describe('stairs stay inside a segment', () => {
     s.currentFloor = 10;
     expect(stairTraversalFor(s, 1)).toBeNull();
     s.currentFloor = 100;
+    expect(stairTraversalFor(s, -1)).toBeNull();
+  });
+});
+
+// Segment 3 (1000-1010, 工业与交易区) is the third authored stretch: military
+// security, freight lift, pipes, black market. The same segment rule applies —
+// stairs connect adjacent floors inside it, the lift at its ends is the only
+// way across the gap — and it carries no guardian: the way on from 1010 is a
+// pass-gated freight lift, not a boss.
+describe('stairs stay inside the industrial tier (1000-1010)', () => {
+  it('allows the first step inside the segment (1000 -> 1001)', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 1000;
+    expect(tryChangeFloor(s, 1)).toEqual({ ok: true, from: 1000, to: 1001 });
+    expect(s.currentFloor).toBe(1001);
+  });
+
+  it('refuses to climb from 1010 into the unexplored 1011..9999 gap', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 1010;
+    expect(tryChangeFloor(s, 1)).toEqual({ ok: false, reason: 'top' });
+    expect(s.currentFloor).toBe(1010);
+    // The gap above is real: 1011 belongs to no segment, and the next segment's
+    // first floor (10000) has no authored content — so the freight lift, never
+    // the stairs, is the only thing that could cross it.
+    expect(segmentOf(1011)).toBeUndefined();
+    expect(hasFloorContent(10000)).toBe(false);
+  });
+
+  it('refuses to descend from 1000 into the unexplored 111..999 gap', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 1000;
+    expect(tryChangeFloor(s, -1)).toEqual({ ok: false, reason: 'bottom' });
+    expect(s.currentFloor).toBe(1000);
+  });
+
+  it('walks the whole industrial tier up to 1010 and back to 1000', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 1000;
+    for (let f = 1000; f < 1010; f++) expect(tryChangeFloor(s, 1).ok).toBe(true);
+    expect(s.currentFloor).toBe(1010);
+    for (let f = 1010; f > 1000; f--) expect(tryChangeFloor(s, -1).ok).toBe(true);
+    expect(s.currentFloor).toBe(1000);
+  });
+
+  it('gives 1000 an up exit but no down exit, and 1010 the reverse', () => {
+    expect(hasUpExit(1000)).toBe(true);
+    expect(hasDownExit(1000)).toBe(false);
+    expect(hasUpExit(1010)).toBe(false);
+    expect(hasDownExit(1010)).toBe(true);
+  });
+
+  it('puts the freight lift at the segment ends: down at 1000, up at 1010', () => {
+    expect(liftDirection(1000)).toBe('down');
+    expect(liftDirection(1010)).toBe('up');
+  });
+
+  it('gates the lift out of 1010 on the pass the segment above requires', () => {
+    // The lift out of a segment top carries the NEXT segment's pass: out of
+    // 1010 that is segment 4's permit, not the sticker that entered segment 3.
+    expect(liftRequirement(1010)).toBe('permit');
+    expect(liftRequirement(110)).toBe('pass_sticker');
+  });
+
+  it('lays no stair traversal across the segment boundaries', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 1010;
+    expect(stairTraversalFor(s, 1)).toBeNull();
+    s.currentFloor = 1000;
     expect(stairTraversalFor(s, -1)).toBeNull();
   });
 });

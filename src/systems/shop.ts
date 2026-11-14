@@ -53,7 +53,13 @@ export function traderX(seed: number, floor: number): number {
 }
 
 export function shopStock(floor: number): readonly ShopEntry[] {
-  return SHOP_STOCK[floor] ?? SHOP_STOCK[2];
+  // Same ladder as the stock table's comment claims: the higher the floor, the
+  // better the stock. The old fallback handed every unlisted floor the cheapest
+  // band, so the industrial tier traded at floor-2 prices.
+  for (const key of Object.keys(SHOP_STOCK).map(Number).sort((a, b) => b - a)) {
+    if (key <= floor) return SHOP_STOCK[key];
+  }
+  return SHOP_STOCK[2];
 }
 
 // What the trader pays for the player's things. Sell prices are the buy price

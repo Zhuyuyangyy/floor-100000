@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { bossSpotId, encounterSpots, nudgeSpotX } from '../systems/encounterSpots';
+import { ENCOUNTER_TABLE } from '../systems/encounters';
 import { DOWN_EXIT_X, INTERACT_DISTANCE, PLAYABLE_FLOORS_V01, STARTING_FLOOR, UP_EXIT_X } from '../core/constants';
 import { getFloorTemplate } from '../data/floorTemplates';
 import { NPCS, NPC_FLOOR } from '../data/npcs';
@@ -22,13 +23,31 @@ describe('encounter spots', () => {
     expect(encounterSpots(42, STARTING_FLOOR)).toEqual([]);
   });
 
-  it('parks the boss past the up-exit on the top floor', () => {
+  // The marker belongs to the floors that can roll a boss, read off the
+  // encounter table — NOT to whatever floor the playable list ends on. It used
+  // to be the list's top, which drifted 5 -> 10 -> 110 as segments were
+  // authored; with tier 3 it would have landed on 1010, a floor with no boss in
+  // its table, while 110 silently lost its guardian.
+  it('parks the boss past the up-exit on every floor that can roll one', () => {
+    const bossFloors = PLAYABLE_FLOORS_V01.filter((f) =>
+      ENCOUNTER_TABLE[f].some((e) => e.kind === 'boss'),
+    );
+    expect(bossFloors).toEqual([5, 110]);
+    for (const floor of bossFloors) {
+      const spots = encounterSpots(42, floor);
+      const boss = spots.find((s) => s.isBoss);
+      expect(boss, `floor ${floor} must carry the guardian`).toBeDefined();
+      expect(boss!.id).toBe(bossSpotId(floor));
+      expect(boss!.x).toBeGreaterThan(UP_EXIT_X);
+    }
+  });
+
+  it('leaves the tower top bare when its table has no boss', () => {
+    // 1010 closes the industrial tier and its row carries no boss, so the red
+    // marker must not follow the list's end up to it.
     const top = Math.max(...PLAYABLE_FLOORS_V01);
-    const spots = encounterSpots(42, top);
-    const boss = spots.find((s) => s.isBoss);
-    expect(boss).toBeDefined();
-    expect(boss!.id).toBe(bossSpotId(top));
-    expect(boss!.x).toBeGreaterThan(UP_EXIT_X);
+    expect(ENCOUNTER_TABLE[top].some((e) => e.kind === 'boss')).toBe(false);
+    expect(encounterSpots(42, top).some((s) => s.isBoss)).toBe(false);
   });
 
   it('keeps every spot inside the floor and apart from the others', () => {

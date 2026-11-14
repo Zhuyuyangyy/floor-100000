@@ -149,7 +149,12 @@
     },
     {
       "path": "artpack/char-zhouhe.png",
-      "refs": [],
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "CHARACTER_FILES[npc_zhouhe]"
+        }
+      ],
       "width": 64,
       "height": 96,
       "channels": 4,
@@ -2116,7 +2121,12 @@
     },
     {
       "path": "ui/portraits/portrait-zhouhe.png",
-      "refs": [],
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "PORTRAIT_FILES[npc_zhouhe]"
+        }
+      ],
       "width": 96,
       "height": 96,
       "channels": 4,

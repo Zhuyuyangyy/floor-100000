@@ -12,13 +12,15 @@ import type { MetaProgress } from '../core/gameTypes';
 
 const META_KEY = 'floor100000.meta.v1';
 
-// The four playable survivors and the depth each demands. The player starts
+// The five playable survivors and the depth each demands. The player starts
 // alone; the others are the game's answer to "one more run" — the neighbour
-// you have been trading with, the kid, and the thing in the dark.
+// you have been trading with, the kid, the resident on the laundry floor, and
+// the thing in the dark.
 export const CHARACTER_UNLOCKS: Record<string, number> = {
   player: 0,
   npc_alin: 2,
   npc_xiaozhou: 3,
+  npc_zhouhe: 4,
   wanderer: 5,
 };
 
@@ -27,6 +29,7 @@ export const CHARACTER_NAMES: Record<string, string> = {
   player: '幸存者',
   npc_alin: '阿林',
   npc_xiaozhou: '小周',
+  npc_zhouhe: '周禾',
   wanderer: '流浪者',
 };
 

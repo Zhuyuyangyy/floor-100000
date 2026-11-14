@@ -31,7 +31,7 @@ import { TITLE_BG_KEY, portraitKey } from '../render/artpack';
 // information lives in its own column.
 type InputSlot = 'up' | 'down' | 'enter' | 'esc';
 
-const ROSTER = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer'] as const;
+const ROSTER = ['player', 'npc_alin', 'npc_xiaozhou', 'npc_zhouhe', 'wanderer'] as const;
 
 const FLAVOUR: Record<string, string> = {
   player: '从底层醒来的那个人。没有特长，只有背包。',

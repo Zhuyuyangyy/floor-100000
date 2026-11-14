@@ -36,7 +36,7 @@ export const ITEM_ICON_FILES: Record<ItemId, string> = {
 // Explicit rather than derived: the game asks for these four keys by literal
 // ('player', 'wanderer') or by expression (npc_alin / npc_xiaozhou), and a
 // missing entry has to be a compile error rather than a green placeholder box.
-export const CHARACTER_KEYS = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer'] as const;
+export const CHARACTER_KEYS = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer', 'npc_zhouhe'] as const;
 
 export type CharacterKey = (typeof CHARACTER_KEYS)[number];
 
@@ -45,6 +45,7 @@ export const CHARACTER_FILES: Record<CharacterKey, string> = {
   npc_alin: 'char-alin.png',
   npc_xiaozhou: 'char-xiaozhou.png',
   wanderer: 'char-wanderer.png',
+  npc_zhouhe: 'char-zhouhe.png',
 };
 
 // 96x96 dialogue busts, one per character, delivered 2026-11-14 as
@@ -60,6 +61,7 @@ export const PORTRAIT_FILES: Record<CharacterKey, string> = {
   npc_alin: 'portrait-alin.png',
   npc_xiaozhou: 'portrait-xiaozhou.png',
   wanderer: 'portrait-wanderer.png',
+  npc_zhouhe: 'portrait-zhouhe.png',
 };
 
 /** `npc_alin` -> `portrait-alin`, so both the roster ids and NpcIds work. */

@@ -69,10 +69,11 @@ describe('meta progress', () => {
     expect(applyDepth(freshMeta(), 1)).toEqual([]);
   });
 
-  it('unlocks the neighbour at depth 2 and the kid at 3', () => {
+  it('unlocks the neighbour at depth 2, the kid at 3, the resident at 4', () => {
     expect(applyDepth(freshMeta(), 2)).toEqual(['npc_alin']);
     expect(applyDepth(freshMeta(), 3)).toEqual(['npc_alin', 'npc_xiaozhou']);
-    expect(applyDepth(freshMeta(), 5)).toEqual(['npc_alin', 'npc_xiaozhou', 'wanderer']);
+    expect(applyDepth(freshMeta(), 4)).toEqual(['npc_alin', 'npc_xiaozhou', 'npc_zhouhe']);
+    expect(applyDepth(freshMeta(), 5)).toEqual(['npc_alin', 'npc_xiaozhou', 'npc_zhouhe', 'wanderer']);
   });
 
   it('never re-announces an unlock', () => {
@@ -119,10 +120,11 @@ describe('meta progress', () => {
     expect(loadMeta(hostile)).toEqual(freshMeta());
   });
 
-  it('covers all four characters with names and unlock depths', () => {
-    expect(Object.keys(CHARACTER_UNLOCKS).sort()).toEqual(['npc_alin', 'npc_xiaozhou', 'player', 'wanderer']);
+  it('covers all five characters with names and unlock depths', () => {
+    expect(Object.keys(CHARACTER_UNLOCKS).sort()).toEqual(['npc_alin', 'npc_xiaozhou', 'npc_zhouhe', 'player', 'wanderer']);
     expect(Object.keys(CHARACTER_NAMES).sort()).toEqual(Object.keys(CHARACTER_UNLOCKS).sort());
     expect(CHARACTER_UNLOCKS.player).toBe(0);
+    expect(CHARACTER_UNLOCKS.npc_zhouhe).toBe(4);
     expect(MODES).toEqual(['quick', 'adventure', 'easy']);
   });
 });

@@ -17,6 +17,8 @@ export interface ArchetypeDef {
   goal: string;
   /** 该原型的记忆条目上限；敌对型记得更久，伺机报复 */
   memoryLimit: number;
+  /** 夜间自主游荡时的仇恨范围（像素）。hostile 之外无意义。 */
+  aggroRange?: number;
 }
 
 export const ARCHETYPES: Record<NpcArchetype, ArchetypeDef> = {
@@ -46,6 +48,8 @@ export const ARCHETYPES: Record<NpcArchetype, ArchetypeDef> = {
     traits: { altruism: 0.0, pragmatism: 0.5, aggression: 0.9, loyalty: 0.2, caution: 0.5 },
     goal: '夜间觅食，驱逐闯入者',
     memoryLimit: 32,
+    // 夜间仇恨范围：玩家进入 260px 即被盯上；结仇（关系 <= -30）时放大到 1.5 倍
+    aggroRange: 260,
   },
 };
 

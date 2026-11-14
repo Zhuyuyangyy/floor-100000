@@ -7,6 +7,7 @@ import { isNight } from '../systems/SurvivalSystem';
 import { recall, visibleEvents } from '../systems/NpcMemory';
 import { ARCHETYPE_ACTIONS } from '../data/npcPersonalities';
 import { validateProposal, type NpcFact, type ValidatedAction } from '../ai/rulesExecutor';
+import { reputationOf } from '../ai/npcEconomy';
 import type { NpcActionKind, NpcBrain, NpcObservation, NpcPersistedState } from '../ai/types';
 import type { GameState } from '../core/gameTypes';
 
@@ -63,6 +64,9 @@ export function buildObservation(
     },
     self: { floor: npc.floor, x: npc.x, hp: npc.hp },
     availableActions: allowedActions ?? (ARCHETYPE_ACTIONS[npcState.archetype] as NpcActionKind[]),
+    // 信誉分级由关系值确定性推导：模型可以参照它组织台词，
+    // 但价格/商品差异走 npcEconomy 纯函数，不依赖推理时序。
+    reputation: reputationOf(npcState),
     // 只带该 NPC 有权知道的事件（亲历/公共），全局日记不过滤等于情报泄漏
     recentEvents: visibleEvents(npc.id, state.diary ?? []).slice(-3).map((d) => d.message),
   };

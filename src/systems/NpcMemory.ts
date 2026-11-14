@@ -5,8 +5,9 @@
 // 「权重最低 → 最旧」的条目，防止存档与 prompt 无限膨胀。
 
 import type { DiaryEvent, GameState } from '../core/gameTypes';
+import { isItemId } from '../data/items';
 import { ARCHETYPES } from '../data/npcPersonalities';
-import type { MemoryEntry, NpcPersistedState } from '../ai/types';
+import type { MemoryEntry, NpcInventory, NpcPersistedState } from '../ai/types';
 
 /** 记忆种类 → 基础情感权重（-1 仇 .. 1 恩），再按人格 loyalty 缩放。 */
 const KIND_WEIGHT: Record<string, number> = {
@@ -167,6 +168,38 @@ function isValidMemory(v: unknown): v is MemoryEntry {
 }
 
 /**
+ * 一条库存条目的形状校验。quantity 可为 0（卖光了但条目还在），
+ * max 必须 >= 1，restockPerDay 允许 0（玩家赠品不补货）。
+ */
+function isValidStockEntry(v: unknown): boolean {
+  if (typeof v !== 'object' || v === null) return false;
+  const e = v as Record<string, unknown>;
+  return (
+    typeof e.itemId === 'string' &&
+    isItemId(e.itemId) &&
+    Number.isInteger(e.quantity) &&
+    (e.quantity as number) >= 0 &&
+    Number.isInteger(e.max) &&
+    (e.max as number) >= 1 &&
+    (e.quantity as number) <= (e.max as number) &&
+    Number.isInteger(e.restockPerDay) &&
+    (e.restockPerDay as number) >= 0
+  );
+}
+
+/**
+ * 真实库存的形状校验（阶段 C 新增字段）。
+ * 老存档没有 inventory —— 缺字段放行，读取时按默认库存补建；
+ * 字段存在但畸形 → 判坏，与「坏状态整体重建」的哲学一致。
+ */
+function isValidNpcInventory(v: unknown): v is NpcInventory {
+  if (typeof v !== 'object' || v === null) return false;
+  const inv = v as Record<string, unknown>;
+  if (!Array.isArray(inv.entries) || !inv.entries.every(isValidStockEntry)) return false;
+  return Number.isInteger(inv.lastRestockDay) && (inv.lastRestockDay as number) >= 1;
+}
+
+/**
  * NPC 持久状态的完整 Schema 校验。任何字段坏了都返回 null——
  * 让调用方按「首次遇到」重建，而不是把畸形状态喂给推理层。
  */
@@ -188,7 +221,14 @@ export function isValidNpcState(v: unknown): v is NpcPersistedState {
     if (!isFiniteNumber(value) || value < -100 || value > 100) return false;
   }
   if (!Array.isArray(s.memory) || !s.memory.every(isValidMemory)) return false;
+  // 真实库存（阶段 C）：缺字段 = 老存档，放行；存在则必须形状合法。
+  if (s.inventory !== undefined && !isValidNpcInventory(s.inventory)) return false;
   return true;
+}
+
+/** NPC 对某 actor 的关系值（缺省 0）。信誉分级的输入。 */
+export function relationshipWith(npcState: NpcPersistedState, actor = 'player'): number {
+  return npcState.relationship[actor] ?? 0;
 }
 
 export function saveNpcState(state: GameState, npcId: string, npc: NpcPersistedState): void {

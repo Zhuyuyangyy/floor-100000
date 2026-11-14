@@ -8,8 +8,9 @@
 
 import { ARCHETYPES } from '../data/npcPersonalities';
 import type { NpcFact } from './rulesExecutor';
+import { syncNpcInventory } from './npcInventory';
 import type { NpcArchetype } from './types';
-import type { InventoryStack, ItemId } from '../core/gameTypes';
+import type { GameState, InventoryStack, ItemId } from '../core/gameTypes';
 import type { NpcDef } from '../data/npcs';
 
 export interface AiNpcConfig {
@@ -68,6 +69,8 @@ export function archetypeForNpcId(npcId: string): NpcArchetype {
 /**
  * 由静态报价表推导 NPC 持有物（第一阶段：每个报价的 give 物品各一份）。
  * 这让「NPC 没有的货」在规则执行器里可判——AI 不能虚空造物。
+ * 阶段 C 起真实库存见 npcInventory.ts（有数量、会耗尽、会补充）；
+ * 本函数保留为「无存档时的默认持有物」推导。
  */
 export function npcInventoryFromDef(npc: NpcDef): InventoryStack[] {
   const totals = new Map<ItemId, number>();
@@ -77,14 +80,24 @@ export function npcInventoryFromDef(npc: NpcDef): InventoryStack[] {
   return [...totals.entries()].map(([itemId, quantity]) => ({ itemId, quantity }));
 }
 
-/** data/npcs.ts 的居民 → 执行器眼中的 NpcFact。 */
-export function npcFactFromDef(npc: NpcDef, hp = 30): NpcFact {
+/** data/npcs.ts 的居民 → 执行器眼中的 NpcFact。可传入真实库存（阶段 C）。 */
+export function npcFactFromDef(npc: NpcDef, hp = 30, inventory?: InventoryStack[]): NpcFact {
   return {
     id: npc.id,
     archetype: archetypeForNpcId(npc.id),
     floor: 2, // NPC_FLOOR；此处不 import 常量，避免配置模块牵连场景层
     x: npc.x,
     hp,
-    inventory: npcInventoryFromDef(npc),
+    inventory: inventory ?? npcInventoryFromDef(npc),
   };
+}
+
+/**
+ * 带真实库存的事实（阶段 C）：从 npcStates 读已结算的库存转成执行器
+ * 形状。老存档/首次遇到时退回静态报价表推导。场景在请求推理前调用它，
+ * 模型看到的才是「NPC 现在真的有什么」。
+ */
+export function npcFactFor(state: GameState, npc: NpcDef, hp = 30): NpcFact {
+  const { inventory } = syncNpcInventory(state, npc);
+  return npcFactFromDef(npc, hp, inventory.entries.map((e) => ({ itemId: e.itemId, quantity: e.quantity })));
 }

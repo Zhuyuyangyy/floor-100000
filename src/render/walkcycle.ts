@@ -967,7 +967,7 @@ export function pickupAnimKey(who: CharacterKey): string {
   return `pickup-${who}`;
 }
 
-export const WALK_CHARACTERS: readonly CharacterKey[] = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer'];
+export const WALK_CHARACTERS: readonly CharacterKey[] = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer', 'npc_zhouhe'];
 
 // Frames per second for the walk playback. The scene scales timeScale by the
 // player's actual speed, so this is the rate at top speed — 4Hz matches the
@@ -1032,6 +1032,10 @@ const COLORS: Record<CharacterKey, CharacterColors> = {
   npc_alin: ALIN_COLORS,
   npc_xiaozhou: XIAOZHOU_COLORS,
   wanderer: WANDERER_COLORS,
+  // 周禾（docs/assets/AUDIT.md §6 第 2 步）：专属三色待美术 Owner 定，先沿用
+  // 玩家配色让接线跑起来；bakeWalkSheets 会为他烘一张程序化 sheet， artpack
+  // 的 char-zhouhe-sheet.png 落位后由 BootScene 的 CUSTOM_CHARACTER_SHEETS 覆盖。
+  npc_zhouhe: PLAYER_COLORS,
 };
 
 // Registers the walk, idle and the W5 one-shot animations once. Guarded because

@@ -395,7 +395,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     description: '铁闸半开，门侧的工牌架按班次编着号，缺了一格',
     containers: [
       {
-        id: 'cabinet',
+        id: 'badge_rack',
         label: '牌架',
         x: 260,
         loot: [
@@ -404,7 +404,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         ],
       },
       {
-        id: 'crate_wood',
+        id: 'ration_dispenser',
         label: '配给箱',
         x: 620,
         loot: [
@@ -430,7 +430,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     description: '两排床铺贴墙排到尽头，床头挂着磨旧的名牌',
     containers: [
       {
-        id: 'bed',
+        id: 'bunk_bed',
         label: '空床铺',
         x: 200,
         loot: [
@@ -439,7 +439,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         ],
       },
       {
-        id: 'cabinet',
+        id: 'worker_locker',
         label: '铁皮柜',
         x: 520,
         loot: [
@@ -448,7 +448,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         ],
       },
       {
-        id: 'shelf',
+        id: 'wash_sink',
         label: '洗漱架',
         x: 850,
         loot: [
@@ -480,7 +480,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         ],
       },
       {
-        id: 'shelf',
+        id: 'uniform_rack',
         label: '毛巾架',
         x: 600,
         loot: [
@@ -489,7 +489,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         ],
       },
       {
-        id: 'cabinet',
+        id: 'worker_locker',
         label: '清扫柜',
         x: 980,
         loot: [
@@ -506,7 +506,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     description: '窗口后面的货架按号段分隔，登记本只剩封皮',
     containers: [
       {
-        id: 'counter',
+        id: 'meal_counter',
         label: '配给台',
         x: 320,
         loot: [
@@ -524,7 +524,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         ],
       },
       {
-        id: 'cabinet',
+        id: 'shift_locker',
         label: '账本柜',
         x: 1060,
         loot: [
@@ -541,7 +541,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     description: '白班的人还在睡，帘子后面偶尔传来翻身声',
     containers: [
       {
-        id: 'bed',
+        id: 'bunk_top',
         label: '上铺',
         x: 220,
         loot: [
@@ -550,7 +550,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         ],
       },
       {
-        id: 'bed',
+        id: 'bunk_bottom',
         label: '下铺',
         x: 540,
         loot: [
@@ -559,7 +559,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         ],
       },
       {
-        id: 'cabinet',
+        id: 'shift_locker',
         label: '班次柜',
         x: 860,
         loot: [
@@ -591,7 +591,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         ],
       },
       {
-        id: 'cabinet',
+        id: 'shift_locker',
         label: '值班柜',
         x: 700,
         loot: [
@@ -600,7 +600,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         ],
       },
       {
-        id: 'shelf',
+        id: 'key_board',
         label: '钥匙架',
         x: 1040,
         loot: [
@@ -617,7 +617,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     description: '打饭窗口关着，长桌上还摆着没收走的餐盘',
     containers: [
       {
-        id: 'counter',
+        id: 'meal_counter',
         label: '打饭台',
         x: 300,
         loot: [
@@ -644,7 +644,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         ],
       },
       {
-        id: 'water_tank',
+        id: 'thermos_rack',
         label: '汤桶',
         x: 1160,
         loot: [{ itemId: 'filter', min: 1, max: 1, probability: 0.2 }],
@@ -658,7 +658,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     description: '药柜锁着，床单叠得整整齐齐，像随时会有人回来',
     containers: [
       {
-        id: 'cabinet',
+        id: 'shift_locker',
         label: '药柜',
         x: 280,
         loot: [
@@ -702,7 +702,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         ],
       },
       {
-        id: 'crate_metal',
+        id: 'tool_cage',
         label: '工具箱',
         x: 700,
         loot: [
@@ -737,7 +737,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         ],
       },
       {
-        id: 'cabinet',
+        id: 'worker_locker',
         label: '私人柜',
         x: 640,
         loot: [
@@ -772,7 +772,7 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         ],
       },
       {
-        id: 'cabinet',
+        id: 'security_safe',
         label: '安保柜',
         x: 640,
         loot: [

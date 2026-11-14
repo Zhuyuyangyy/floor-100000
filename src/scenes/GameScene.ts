@@ -205,6 +205,9 @@ const TYPE_AUX = 22;
 // 1165 is the only centre that clears both. The reach is 30 rather than the
 // shared 44 so its band (1135..1195) does not overlap either the container's
 // (1036..1124) or the stairwell's (1196..1284): E never has two meanings here.
+/** Floors that are sleeping quarters rather than workplaces: they get the bed row. */
+const SLEEPING_FLOORS = new Set([101, 104, 109]);
+
 /** Container name size, shared by the text and its backing plate. */
 const CONTAINER_LABEL_FONT = 22;
 
@@ -624,6 +627,7 @@ export class GameScene extends Phaser.Scene {
     // After the exits: the door is drawn over the wall dressing, and it stands
     // beside the stairwell rather than in front of it.
     this.drawLift(floor);
+    this.drawDormBunks(floor);
     this.buildContainers();
     this.buildGround();
     if (floor === STARTING_FLOOR) {
@@ -2096,6 +2100,34 @@ export class GameScene extends Phaser.Scene {
     // standing on, and the eye went to the background.
     layer.setAlpha(1 - 0.09 * distance);
     this.floorObjects.push(layer);
+  }
+
+  /**
+   * A row of bunks in the background of a sleeping floor.
+   *
+   * One bed on a floor of a hundred-thousand-storey tower reads as a private room,
+   * which is the one thing this building does not have. The row is drawn before the
+   * containers (so it sits behind them), tinted down and slightly transparent so it
+   * reads as the far wall of a mass dormitory rather than as more things to search,
+   * and it skips any slot within reach of a real container so the two never
+   * compete for the same pixels.
+   */
+  private drawDormBunks(floor: number): void {
+    if (!SLEEPING_FLOORS.has(floor)) return;
+    const state = getGame();
+    if (state.currentFloor !== floor) return;
+    const { width } = this.viewSize();
+    const y = FLOOR_HEIGHT - 64;
+    const taken = this.floorView.containers.map((c) => c.x);
+    for (let x = 76; x <= width - 76; x += 128) {
+      if (taken.some((cx) => Math.abs(cx - x) < 80)) continue;
+      const bunk = this.add
+        .image(x, y - 4, 'furn_bunk_bed')
+        .setOrigin(0.5, 1)
+        .setTint(0x9aa4b0)
+        .setAlpha(0.86);
+      this.floorObjects.push(bunk);
+    }
   }
 
   private buildContainers(): void {

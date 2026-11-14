@@ -1,3 +1,4 @@
+import { containerTextureKey } from '../render/furniture';
 import { describe, expect, it } from 'vitest';
 import {
   containerItemKey,
@@ -147,19 +148,9 @@ describe('every playable floor is generated, survivable and reproducible', () =>
 // 被误改成概率时测试会直接红，而不是等某个 seed 抽不到。
 describe('the worker-dorm tier (100-110)', () => {
   const DORM_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 100);
-  // The container ids that already have furniture art. An unknown id makes
-  // containerTextureKey return null and the container turns invisible.
-  const FURNITURE_IDS = new Set([
-    'cabinet',
-    'shelf',
-    'crate_wood',
-    'crate_metal',
-    'fuse_box',
-    'water_tank',
-    'counter',
-    'bed',
-    'workbench',
-  ]);
+  // Was a hard-coded whitelist of the nine shared textures. It drifted the moment
+  // the dorm got its own props, so ask the mapper instead: an id with no texture
+  // makes the container invisible, and that is the property worth pinning.
 
   it('is exactly the eleven floors of segment 2', () => {
     expect(DORM_FLOORS).toEqual([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110]);
@@ -192,7 +183,7 @@ describe('the worker-dorm tier (100-110)', () => {
       expect(template.containers.length, `floor ${floor} container count`).toBeGreaterThanOrEqual(3);
       expect(template.containers.length, `floor ${floor} container count`).toBeLessThanOrEqual(5);
       for (const c of template.containers) {
-        expect(FURNITURE_IDS.has(c.id), `floor ${floor}/${c.id} has no furniture texture`).toBe(true);
+        expect(containerTextureKey(c.id), `floor ${floor}/${c.id} has no furniture texture`).not.toBeNull();
         // Two- or three-character labels: longer ones overlap the next
         // container's title (the 6-10 floors hit exactly that).
         expect([...c.label].length, `floor ${floor}/${c.id} label "${c.label}"`).toBeLessThanOrEqual(3);

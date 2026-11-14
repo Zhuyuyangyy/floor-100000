@@ -42,7 +42,7 @@ describe('container furniture mapping', () => {
     expect(containerTextureKey('not_a_container')).toBeNull();
   });
 
-  it('never maps two different containers to the same texture by accident', () => {
+  it('maps every container id to its own texture, except the three bunk ids', () => {
     // Crates no longer share one texture — a wooden crate and a military crate
     // look nothing alike. Shelves still do: 邻居货架 and 补给架 are both shelves.
     // Compared order-independently — Object.values iterates integer-like keys in
@@ -58,6 +58,20 @@ describe('container furniture mapping', () => {
         ['fuse_box', 'furn_fusebox'],
         ['pantry', 'furn_shelf'],
         ['shelf', 'furn_shelf'],
+        ['badge_rack', 'furn_badge_rack'],
+        ['bunk_bed', 'furn_bunk_bed'],
+        ['bunk_bottom', 'furn_bunk_bed'],
+        ['bunk_top', 'furn_bunk_bed'],
+        ['key_board', 'furn_key_board'],
+        ['meal_counter', 'furn_meal_counter'],
+        ['ration_dispenser', 'furn_ration_dispenser'],
+        ['security_safe', 'furn_security_safe'],
+        ['shift_locker', 'furn_shift_locker'],
+        ['thermos_rack', 'furn_thermos_rack'],
+        ['tool_cage', 'furn_tool_cage'],
+        ['uniform_rack', 'furn_uniform_rack'],
+        ['wash_sink', 'furn_wash_sink'],
+        ['worker_locker', 'furn_worker_locker'],
         ['water_tank', 'furn_watertank'],
         ['workbench', 'furn_workbench'],
       ].sort(),

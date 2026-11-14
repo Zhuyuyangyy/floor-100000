@@ -15,6 +15,21 @@ export const FURNITURE_KEYS = [
   'furn_fusebox',
   'furn_shelf',
   'furn_counter',
+  // 工人宿舍区（100-110）。这批是独立道具，不和上面九张通用家具抢语义。
+  'furn_badge_rack',
+  'furn_bunk_bed',
+  'furn_meal_counter',
+  'furn_shift_locker',
+  'furn_security_safe',
+  'furn_worker_locker',
+  'furn_ration_dispenser',
+  'furn_shift_board',
+  'furn_boot_rack',
+  'furn_wash_sink',
+  'furn_uniform_rack',
+  'furn_tool_cage',
+  'furn_thermos_rack',
+  'furn_key_board',
 ] as const;
 
 export type FurnitureKey = (typeof FURNITURE_KEYS)[number];
@@ -44,6 +59,38 @@ export function containerTextureKey(containerId: string): FurnitureKey | null {
       return 'furn_watertank';
     case 'counter':
       return 'furn_counter';
+    // 工人宿舍区（100-110）：一个容器 id 一个专属贴图，同层两个容器不再长得一样。
+    // bunk_top / bunk_bottom 共用一张双层床：一间宿舍里上下铺本来就是同一件东西。
+    case 'badge_rack':
+      return 'furn_badge_rack';
+    case 'bunk_bed':
+    case 'bunk_top':
+    case 'bunk_bottom':
+      return 'furn_bunk_bed';
+    case 'meal_counter':
+      return 'furn_meal_counter';
+    case 'shift_locker':
+      return 'furn_shift_locker';
+    case 'security_safe':
+      return 'furn_security_safe';
+    case 'worker_locker':
+      return 'furn_worker_locker';
+    case 'ration_dispenser':
+      return 'furn_ration_dispenser';
+    case 'shift_board':
+      return 'furn_shift_board';
+    case 'boot_rack':
+      return 'furn_boot_rack';
+    case 'wash_sink':
+      return 'furn_wash_sink';
+    case 'uniform_rack':
+      return 'furn_uniform_rack';
+    case 'tool_cage':
+      return 'furn_tool_cage';
+    case 'thermos_rack':
+      return 'furn_thermos_rack';
+    case 'key_board':
+      return 'furn_key_board';
     // The worker dorm (100-110) stores things in beds and at workbenches, not
     // only in cabinets. Both textures already exist for the starting room's
     // furniture, so they are lootable containers here rather than unopenable

@@ -1607,22 +1607,49 @@ export class GameScene extends Phaser.Scene {
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
     const isBoss = enc.encounter.kind === 'boss';
-    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.dialogue));
+    // Every other panel in this scene ends in lockToScreen() or
+    // applyPanelDepth(); this one was rebuilt from scratch on every resolve and
+    // neither was ever called, so its four texts sat at scrollFactor 1 and
+    // depth 0 — world space, behind everything. Measured on floor 2 (camera
+    // scrollY -200): the panel drew empty in the middle of the screen while
+    // 「一张纸条」 and the note itself floated 220px below it, over the floor.
+    const depth = PANEL_DEPTH.game.dialogue;
+    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
     this.encounterObjects.push(
-      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: FONT_FAMILY, fontSize: '32px', color: isBoss ? hex(TEXT.warn) : hex(PALETTE.lightHigh) }).setOrigin(0.5),
+      this.add
+        .text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: FONT_FAMILY, fontSize: '32px', color: isBoss ? hex(TEXT.warn) : hex(PALETTE.lightHigh) })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(depth + 7),
     );
     this.encounterObjects.push(
-      this.add.text(left + 20, top + 44, result.message, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+      this.add
+        .text(left + 20, top + 44, result.message, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } })
+        .setOrigin(0, 0)
+        .setScrollFactor(0)
+        .setDepth(depth + 7),
     );
     const loot = result.items.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、');
     if (loot) {
       this.encounterObjects.push(
-        this.add.text(left + 20, top + 104, `获得：${loot}`, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+        this.add
+          .text(left + 20, top + 104, `获得：${loot}`, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } })
+          .setOrigin(0, 0)
+          .setScrollFactor(0)
+          .setDepth(depth + 7),
       );
     }
     this.encounterObjects.push(
-      this.add.text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.dim) }).setOrigin(0.5),
+      this.add
+        .text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.dim) })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(depth + 7),
     );
+    // Belt as well as braces: the panel is rebuilt on every resolve, so nothing
+    // else will ever run a lock pass over this list.
+    lockToScreen(this.encounterObjects);
+    this.assertPanelContent('encounter-outcome', this.encounterObjects);
     if (state.status === 'lost') {
       this.scene.start('End');
     }
@@ -2847,7 +2874,15 @@ export class GameScene extends Phaser.Scene {
       const stack = slots[i];
       if (stack) {
         // Keyed by item id, never by display name — see itemIconKey().
-        icon.setTexture(itemIconKey(stack.itemId)).setVisible(true);
+        //
+        // No setVisible(true): refreshInventory() also runs while the panel is
+        // CLOSED — looting a container, a shop trade and a neighbour trade all
+        // call it. Showing the icon here used to float the bag's first row over
+        // the world with no panel behind it: four icons straddling the top
+        // frame of whatever panel happened to be open. Visibility is
+        // toggleInventory's job — it sets the whole list, and the empty slots
+        // below hide themselves again.
+        icon.setTexture(itemIconKey(stack.itemId));
         badge.setText(stack.quantity > 1 ? `${stack.quantity}` : '');
       } else {
         icon.setVisible(false);
@@ -2862,7 +2897,8 @@ export class GameScene extends Phaser.Scene {
 
     const selected = slots[this.invSelected];
     const cell = this.invCells[this.invSelected];
-    this.invMarker.setVisible(selected !== undefined && cell !== undefined);
+    // Same rule as the icons: the marker belongs to the open panel.
+    this.invMarker.setVisible(this.inventoryOpen && selected !== undefined && cell !== undefined);
     if (selected && cell) placeMarkerLeftOf(this.invMarker, cell);
 
     if (selected) {
@@ -2877,6 +2913,9 @@ export class GameScene extends Phaser.Scene {
       this.invDetailMeta?.setText('');
       this.invDetailBody?.setText('空格子。搜刮、制作或交易都往这里放东西。');
     }
+    // Safety net for the next caller that forgets: with the panel closed there
+    // is nothing of the bag on screen, whatever the data did on the way here.
+    if (!this.inventoryOpen) for (const o of this.invObjects) o.setVisible(false);
   }
 
 
@@ -4028,12 +4067,23 @@ export class GameScene extends Phaser.Scene {
   // UI can produce: it looks like the game broke. This runs in dev only and
   // names the panel in the console the moment it opens empty, so a report of
   // "a big empty box appeared" becomes a one-line diagnosis instead of a hunt.
-  private assertPanelContent(panel: string, objects: PanelObject[]): void {
+  private assertPanelContent(panel: string, objects: ReadonlyArray<Phaser.GameObjects.GameObject>): void {
     if (!import.meta.env.DEV) return;
-    const readable = objects.some(
-      (o) => o instanceof Phaser.GameObjects.Text && o.visible && (o.text ?? '').trim().length > 0,
-    );
+    const texts = objects.filter((o): o is Phaser.GameObjects.Text => o instanceof Phaser.GameObjects.Text);
+    const readable = texts.some((o) => o.visible && (o.text ?? '').trim().length > 0);
     if (!readable) console.warn(`[ui] panel "${panel}" opened with no visible text — it will look like an empty box`);
+    // The other half of "it will look like an empty box": a text that is
+    // visible but not screen-locked is drawn in world space, so it appears
+    // somewhere the camera put it rather than inside the panel. This is the
+    // second panel to ship that way (the first was the frame and fill, fixed in
+    // buildPanel's own comment), and both times the symptom was a correctly
+    // framed panel with its words floating elsewhere on screen.
+    for (const o of texts) {
+      if (!o.visible) continue;
+      if (o.scrollFactorX !== 0 || o.scrollFactorY !== 0) {
+        console.warn(`[ui] panel "${panel}" has a text at scrollFactor (${o.scrollFactorX}, ${o.scrollFactorY}) — it will not sit inside the panel`);
+      }
+    }
   }
 
   // What the foot bar should say while a panel is open: the panel's own keys.

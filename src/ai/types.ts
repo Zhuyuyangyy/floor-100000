@@ -35,6 +35,42 @@ export interface MemoryEntry {
   weight: number;
 }
 
+/**
+ * NPC 真实库存的一条：有数量、有上限、有每日补货量。
+ * 交易会耗尽 quantity，跨天结算按 restockPerDay 补充（封顶 max）。
+ * restockPerDay = 0 的条目（如玩家赠品）永不补充——NPC 不会虚空造物。
+ */
+export interface NpcStockEntry {
+  itemId: ItemId;
+  quantity: number;
+  max: number;
+  restockPerDay: number;
+}
+
+/** NPC 真实库存。随 npcStates 的 JSON 持久化；老存档没有该字段时按默认库存重建。 */
+export interface NpcInventory {
+  entries: NpcStockEntry[];
+  /** 最近一次按天结算（需求消耗 + 补货）的游戏日；同日重复结算为恒等操作 */
+  lastRestockDay: number;
+}
+
+/** 信誉分级：由 relationship['player'] 确定性推导，驱动价格/商品/台词差异。 */
+export type ReputationTier = 'trusted' | 'neutral' | 'disliked' | 'hostile';
+
+/** 日程锚点：一段游戏时间内 NPC 的目标位置与目标（data/npcs.ts 按居民配置）。 */
+export interface ScheduleSlot {
+  /** 起始游戏分钟（0..1439） */
+  from: number;
+  /** 结束游戏分钟；小于 from 表示跨午夜（如 1230 → 360 即 21:00 到次日 06:00） */
+  to: number;
+  /** 日程标签（如 '睡觉'），进观察快照 */
+  label: string;
+  /** 该时段的目标 x（像素，楼层内坐标） */
+  x: number;
+  /** 该时段的人格目标（纯文本，进 prompt） */
+  goal: string;
+}
+
 /** 存进 GameState.npcStates[npcId]（JSON 字符串）的 NPC 持久状态。 */
 export interface NpcPersistedState {
   archetype: NpcArchetype;
@@ -47,6 +83,8 @@ export interface NpcPersistedState {
   memory: MemoryEntry[];
   /** 当前情绪 -1..1 */
   mood: number;
+  /** 真实库存。可选：老存档没有该字段，读取时按默认库存补建 */
+  inventory?: NpcInventory;
 }
 
 /** 出站观察快照：游戏 → AI。只读，不含任何可直接改状态的句柄。 */
@@ -64,6 +102,8 @@ export interface NpcObservation {
   /** NPC 当前可执行的合法动作菜单（选项树降级路径的并集） */
   availableActions: NpcActionKind[];
   recentEvents: string[];
+  /** 由 relationship['player'] 确定性推导的信誉分级；驱动价格/商品/台词的差异 */
+  reputation?: ReputationTier;
   /** Optional high-signal context for autonomous hostile NPC decisions. */
   situation?: {
     eventType: 'wanderer';

@@ -5,6 +5,7 @@ import {
   charge,
   recordShortcut,
   shortcutAvailable,
+  shortcutPlan,
   shortcutPrice,
   shortcutSkip,
   timesTaken,
@@ -82,5 +83,74 @@ describe('charging', () => {
     recordShortcut(s);
     expect(timesTaken(s)).toBe(2);
     expect(shortcutPrice(3, 2, timesTaken(s), 7)).toBeGreaterThan(shortcutPrice(3, 2, 0, 7));
+  });
+});
+
+// M1-3: ONE plan, ONE price. The prompt at the stairwell, the charge and the
+// jump all read shortcutPlan, so the number on screen can never drift from
+// the number taken. The regression this pins: the prompt used to price the
+// raw seeded roll while the jump walked only as far as the segment allows,
+// so at floor 9 a roll of 4 was advertised (and charged) as a 4-floor skip
+// and then skipped 1 — the player paid 30 gold for three floors of nothing.
+describe('shortcutPlan is the single source of price', () => {
+  it('mid-segment the plan is the raw roll, unchanged', () => {
+    const s = createNewGame(1);
+    // Floors 2..6 have at least four floors of room inside segment 1 (top is
+    // 10), so the seeded roll is never clamped and the plan is the raw roll.
+    for (let floor = 2; floor <= 6; floor++) {
+      for (let salt = 0; salt < 30; salt++) {
+        const plan = shortcutPlan(s, floor, salt);
+        expect(plan.skip).toBe(shortcutSkip(salt));
+        expect(plan.target).toBe(floor + plan.skip);
+        expect(plan.price).toBe(shortcutPrice(floor, plan.skip, timesTaken(s), salt));
+      }
+    }
+  });
+
+  it('clamps the skip to the segment, so the price buys real floors', () => {
+    const s = createNewGame(1);
+    // Floor 9 has exactly one floor of room inside segment 1 (top is 10).
+    for (let salt = 0; salt < 30; salt++) {
+      const plan = shortcutPlan(s, 9, salt);
+      expect(plan.skip).toBe(1);
+      expect(plan.target).toBe(10);
+      expect(plan.price).toBe(shortcutPrice(9, 1, timesTaken(s), salt));
+      // The old prompt priced the unclamped roll whenever it beat the room.
+      if (shortcutSkip(salt) > 1) {
+        expect(plan.price).toBeLessThan(shortcutPrice(9, shortcutSkip(salt), timesTaken(s), salt));
+      }
+    }
+  });
+
+  it('clamps at every segment top-1, not just the first tier', () => {
+    const s = createNewGame(1);
+    for (const floor of [9, 109, 1009, 10009, 50009]) {
+      const plan = shortcutPlan(s, floor, 2); // salt 2 rolls a skip of 4
+      expect(plan.skip).toBe(1);
+      expect(plan.target).toBe(floor + 1);
+    }
+  });
+
+  it('charges exactly the planned price and lands on the planned floor', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 4;
+    s.player.gold = 500;
+    const plan = shortcutPlan(s, s.currentFloor, 11);
+    expect(charge(s, plan.price)).toBe(true);
+    expect(s.player.gold).toBe(500 - plan.price);
+    // The scene's jump loop is bounded by the plan's target, never the raw
+    // roll: the same plan that priced the jump decides where it ends.
+    expect(plan.target).toBeGreaterThan(s.currentFloor);
+    expect(plan.target - s.currentFloor).toBe(plan.skip);
+  });
+
+  it('the inflation counts previous uses inside the plan', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 4;
+    const first = shortcutPlan(s, 4, 5).price;
+    recordShortcut(s);
+    const second = shortcutPlan(s, 4, 5).price;
+    expect(second).toBeGreaterThan(first);
+    expect(second - first).toBe(25 + (5 % 11));
   });
 });

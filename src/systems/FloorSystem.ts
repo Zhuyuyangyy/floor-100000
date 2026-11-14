@@ -198,3 +198,22 @@ export function currentInteractionZone(state: GameState): InteractionZone {
   }
   return null;
 }
+
+/**
+ * Which stairwell MOUTH the player is standing at, by position alone — no
+ * reference to whether a stair actually stands there.
+ *
+ * A segment's end floor keeps the mouth and loses the stair (10, 110, 1010,
+ * 10010, 50010 have no up stair; 100, 1000, 10000, 50000 have no down stair),
+ * and the player standing there asking to go that way deserves the refusal
+ * copy — "这一层没有向上的楼梯，往上要乘货运电梯" — not silence. The climber
+ * who just landed on a segment top is standing AT the mouth by construction,
+ * so this is the key they press next. currentInteractionZone reports only
+ * mouths that have a stair; this reports the mouth itself, so the scene can
+ * hand the question to changeFloor and let its refusal answer it.
+ */
+export function stairMouthZone(state: GameState): InteractionZone {
+  if (Math.abs(state.player.x - UP_EXIT_X) <= INTERACT_DISTANCE) return 'up';
+  if (Math.abs(state.player.x - DOWN_EXIT_X) <= INTERACT_DISTANCE) return 'down';
+  return null;
+}

@@ -37,6 +37,28 @@ export function shortcutSkip(salt: number): number {
   return 2 + (salt % 3);
 }
 
+export interface ShortcutPlan {
+  /** Floors the shortcut will actually skip, clamped to the segment. */
+  skip: number;
+  /** What it costs — the same number the prompt shows and the charge spends. */
+  price: number;
+  /** The floor the player lands on. */
+  target: number;
+}
+
+// ONE plan, ONE price. The prompt, the charge and the jump all read this, so
+// the number on screen can never drift from the number taken. The skip is
+// clamped to the segment here, once: the prompt used to price the raw roll
+// while the jump walked only as far as the stairs allow, so at floor 9 a
+// roll of 4 was advertised and charged as a 4-floor skip and then skipped 1.
+// Depth is the asset; the price now buys exactly the depth it names.
+export function shortcutPlan(state: GameState, floor: number, salt: number): ShortcutPlan {
+  const here = segmentOf(floor);
+  const room = here ? here.to - floor : 0;
+  const skip = Math.max(0, Math.min(shortcutSkip(salt), room));
+  return { skip, price: shortcutPrice(floor, skip, timesTaken(state), salt), target: floor + skip };
+}
+
 // Whether the player can afford it right now.
 export function canAfford(state: GameState, price: number): boolean {
   return state.player.gold >= price;

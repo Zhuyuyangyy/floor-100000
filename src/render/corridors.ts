@@ -45,6 +45,7 @@ export interface CorridorContext {
 // palette role or a named mix of two, so a crate, a pipe and the wall behind it
 // all belong to the same value structure.
 import { PALETTE } from './palette.ts';
+import { ENV_WALL_DORM_KEY, ENV_WALL_INDUSTRY_KEY, ENV_WALL_KEY } from './artpack';
 import { LIGHT_DEPTH } from './lighting';
 import { segmentOf } from '../core/segments';
 import { startFxLoop } from './fx';
@@ -423,6 +424,19 @@ export const SEGMENT_TINT: Record<number, { color: number; alpha: number }> = {
   2: { color: PALETTE.lightHigh, alpha: 0.18 }, // worker dorms: warm, kept lit
   3: { color: PALETTE.clothHigh, alpha: 0.16 }, // industry: cold, chemical
 };
+
+/**
+ * Which wall a floor stands in front of. Tiers 2 and 3 have their own art; the
+ * slum keeps the original, and anything above 1010 falls back to it until its
+ * art exists — a tier that borrows the wrong wall is worse than one that borrows
+ * the oldest.
+ */
+export function wallKeyFor(floor: number): string {
+  const tier = segmentOf(floor)?.id;
+  if (tier === 2) return ENV_WALL_DORM_KEY;
+  if (tier === 3) return ENV_WALL_INDUSTRY_KEY;
+  return ENV_WALL_KEY;
+}
 
 /** The wall tint for a floor, or null when the floor draws its own base. */
 export function corridorTint(floor: number): { color: number; alpha: number } | null {

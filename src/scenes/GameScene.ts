@@ -100,7 +100,7 @@ import {
   buildPanelWell,
   drawStatBar,
 } from '../render/uiKit';
-import { ENV_FLOOR_KEY, ENV_WALL_KEY, portraitKey } from '../render/artpack';
+import { ENV_FLOOR_KEY, portraitKey } from '../render/artpack';
 import {
   estimateTextWidth,
   DIALOG_PADDING,
@@ -138,7 +138,7 @@ import {
 import { WEAPON_GRIP_X, WEAPON_GRIP_Y, WEAPON_H, WEAPON_KEY, WEAPON_W } from '../render/weapon.ts';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
-import { corridorTint, drawCorridorRoom } from '../render/corridors';
+import { corridorTint, drawCorridorRoom, wallKeyFor } from '../render/corridors';
 import {
   ACTOR_DEPTH,
   DUST_DEPTH,
@@ -1613,7 +1613,7 @@ export class GameScene extends Phaser.Scene {
   private drawDormRoom(): void {
     const wallH = FLOOR_HEIGHT - FLOOR_BAND;
 
-    const wall = this.add.image(0, 8, ENV_WALL_KEY).setOrigin(0, 0);
+    const wall = this.add.image(0, 8, wallKeyFor(STARTING_FLOOR)).setOrigin(0, 0);
     const floor = this.add.image(0, wallH, ENV_FLOOR_KEY).setOrigin(0, 0);
 
     const g = this.add.graphics();
@@ -1732,7 +1732,8 @@ export class GameScene extends Phaser.Scene {
     const wallH = FLOOR_HEIGHT - FLOOR_BAND;
     const tint = corridorTint(floor);
 
-    const wall = this.add.image(0, 8, ENV_WALL_KEY).setOrigin(0, 0);
+    // The wall belongs to the tier, not to the floor: see wallKeyFor.
+    const wall = this.add.image(0, 8, wallKeyFor(floor)).setOrigin(0, 0);
     const floorBand = this.add.image(0, wallH, ENV_FLOOR_KEY).setOrigin(0, 0);
     this.floorObjects.push(wall, floorBand);
 
@@ -1964,7 +1965,7 @@ export class GameScene extends Phaser.Scene {
     };
 
     // Base art. Same wall and floor band as every other floor of the tower.
-    add(this.add.image(0, 8, ENV_WALL_KEY).setOrigin(0, 0));
+    add(this.add.image(0, 8, wallKeyFor(floor)).setOrigin(0, 0));
     add(this.add.image(0, wallH, ENV_FLOOR_KEY).setOrigin(0, 0));
     if (tint) add(this.add.rectangle(FLOOR_WIDTH / 2, 8 + (wallH - 8) / 2, FLOOR_WIDTH, wallH - 8, tint.color, tint.alpha));
     const ceilingSeam = this.add.graphics();

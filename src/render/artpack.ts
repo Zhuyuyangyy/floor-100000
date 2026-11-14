@@ -82,6 +82,8 @@ export const ART_BANNER_LOSE_KEY = 'art-banner-lose';
 // characters became 64x96 — a door shorter than the person walking through it. The
 // owner's renders are rebuilt at 44x104 and 56x76 instead.
 export const ENV_WALL_KEY = 'env-wall';
+export const ENV_WALL_DORM_KEY = 'env-wall-dorm';
+export const ENV_WALL_INDUSTRY_KEY = 'env-wall-industry';
 export const ENV_FLOOR_KEY = 'env-floor';
 export const TILE_DOOR_KEY = 'tile_door';
 export const TILE_WINDOW_KEY = 'tile_window';
@@ -95,6 +97,8 @@ export const TITLE_BG_KEY = 'title-dorm';
 
 export const ENV_FILES: Record<string, string> = {
   [ENV_WALL_KEY]: 'wall.png',
+  [ENV_WALL_DORM_KEY]: 'wall-dorm.png',
+  [ENV_WALL_INDUSTRY_KEY]: 'wall-industry.png',
   [ENV_FLOOR_KEY]: 'floor.png',
   [TILE_DOOR_KEY]: 'tile-door.png',
   [TILE_WINDOW_KEY]: 'tile-window.png',

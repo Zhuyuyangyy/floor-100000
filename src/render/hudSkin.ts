@@ -171,8 +171,18 @@ export function drawHudPlate(
   rivet: number,
   accent: number,
 ): void {
-  g.fillStyle(plate, 0.97);
-  g.fillRect(0, 0, width, height);
+  // The plate is BANDS, not one fill. A single flat rect over 132px measured as
+  // 26% of the whole play area in one colour - the art audit's dominant-colour
+  // gate failed on it, and it also read as a sticker rather than as metal. Six
+  // bands of rising alpha give the slab a vertical falloff, so the composited
+  // colour changes with height the way a real panel does.
+  const BANDS = 6;
+  for (let i = 0; i < BANDS; i++) {
+    const t = i / (BANDS - 1);
+    g.fillStyle(plate, 0.14 + 0.12 * t);
+    const y = Math.round((height / BANDS) * i);
+    g.fillRect(0, y, width, Math.ceil(height / BANDS) + 1);
+  }
   // Top and bottom hairlines.
   g.fillStyle(line, 0.9);
   g.fillRect(0, 0, width, 1);

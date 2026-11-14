@@ -2115,65 +2115,264 @@ export class GameScene extends Phaser.Scene {
   // in any character sheet (the walk sheets are 64x96 standing side views), and
   // rotating one would resample it. A blanket, a head and a hairline read as
   // "someone sleeping" at this size, which is the whole job.
+  // One bed, drawn in a shallow 3/4 view: a parallelogram for the mattress top,
+  // a front face below it, a headboard at the head end and a foot board at the
+  // foot. The top face is the whole point - a flat side view read as a drawing
+  // of a bed, and the sliver of visible sheet is what makes it read as an object
+  // standing in a room.
+  //
+  // `scale` < 1 is used for the back row: smaller and higher on the wall, which
+  // is the depth cue, and the caller tints it to push it further back.
+  private drawBed3D(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    floorY: number,
+    o: { blanket: number; fold: number; scale: number; sleeper: boolean },
+  ): void {
+    const s = o.scale;
+    const W = Math.round(80 * s); // bed length along the floor
+    const H = Math.round(18 * s); // frame height off the floor
+    const D = Math.round(18 * s); // how far back the mattress top sits
+    const HUMP = Math.round(11 * s); // how high the blanket rides over the body
+    const y0 = floorY - H; // the mattress' front edge
+    const y1 = y0 - D; // ...and its back edge
+    const quad = (pts: Array<[number, number]>, color: number): void => {
+      g.fillStyle(color, 1);
+      g.fillPoints(pts.map(([px, py]) => new Phaser.Math.Vector2(Math.round(px), Math.round(py))), true, true);
+    };
+
+    // Floor contact shadow, so the bed is standing on something.
+    g.fillStyle(PALETTE.ink, 0.4 * s);
+    g.fillRect(x - 4 * s, floorY - 2, W + 10 * s, 3);
+
+    // Mattress top: the sheet, as a parallelogram leaning back. The sheet shows
+    // at the head end and along the front edge - that band is what sells the
+    // third dimension.
+    quad(
+      [
+        [x, y0],
+        [x + W, y0],
+        [x + W + 5 * s, y1],
+        [x + 5 * s, y1],
+      ],
+      0x3a352e,
+    );
+    // Frame front face below the mattress, with a lit top edge where the sheet
+    // overhangs it.
+    quad(
+      [
+        [x, y0],
+        [x + W, y0],
+        [x + W, floorY],
+        [x, floorY],
+      ],
+      0x3a2c1c,
+    );
+    quad(
+      [
+        [x, y0],
+        [x + W, y0],
+        [x + W, y0 + 2 * s],
+        [x, y0 + 2 * s],
+      ],
+      0x4a3a28,
+    );
+    // Frame legs at both ends.
+    g.fillStyle(0x2a2018, 1);
+    g.fillRect(x + 3 * s, floorY - 2, 5 * s, 2);
+    g.fillRect(x + W - 8 * s, floorY - 2, 5 * s, 2);
+
+    if (o.sleeper) {
+      // Pillow at the head end.
+      quad(
+        [
+          [x + 5 * s, y1 + 1 * s],
+          [x + 22 * s, y1 + 1 * s],
+          [x + 24 * s, y0 - 1 * s],
+          [x + 7 * s, y0 - 1 * s],
+        ],
+        0x64646e,
+      );
+      // The blanket: one quad whose back edge rides HUMP above the mattress'
+      // back edge. That rise is the body under it - a blanket laid flat on the
+      // mattress read as a green placemat.
+      quad(
+        [
+          [x + 20 * s, y1 - HUMP],
+          [x + W + 5 * s, y1 - HUMP],
+          [x + W + 5 * s, y0 - 1 * s],
+          [x + 22 * s, y0 - 1 * s],
+        ],
+        o.blanket,
+      );
+      // Fold across the chest, and the lit top edge of the blanket.
+      quad(
+        [
+          [x + 20 * s, y1 - HUMP],
+          [x + W + 5 * s, y1 - HUMP],
+          [x + W + 5 * s, y1 - HUMP + 2 * s],
+          [x + 20 * s, y1 - HUMP + 2 * s],
+        ],
+        o.fold,
+      );
+      quad(
+        [
+          [x + 20 * s, y1 - HUMP],
+          [x + W + 5 * s, y1 - HUMP],
+          [x + W + 5 * s, y1 - HUMP + 1 * s],
+          [x + 20 * s, y1 - HUMP + 1 * s],
+        ],
+        PALETTE.clothHigh,
+      );
+      // A drape over the mattress' front edge, so the blanket has thickness.
+      quad(
+        [
+          [x + 22 * s, y0 - 1 * s],
+          [x + W + 5 * s, y0 - 1 * s],
+          [x + W + 5 * s, y0 + 3 * s],
+          [x + 22 * s, y0 + 3 * s],
+        ],
+        o.fold,
+      );
+      // Head: skin, hair across the top, the far side in shadow.
+      const hx = x + 13 * s;
+      const hy = y1 - HUMP - 5 * s;
+      g.fillStyle(PALETTE.skinLight, 1);
+      g.fillCircle(hx, hy, Math.max(3, Math.round(6 * s)));
+      g.fillStyle(PALETTE.ink, 1);
+      g.fillRect(hx - Math.round(6 * s), hy - Math.round(7 * s), Math.round(13 * s), Math.max(2, Math.round(4 * s)));
+      g.fillStyle(PALETTE.skinDeep, 1);
+      g.fillRect(hx + Math.round(1 * s), hy + Math.round(1 * s), Math.round(5 * s), Math.max(2, Math.round(3 * s)));
+    } else {
+      // An unused bed: the blanket folded back at the foot, mattress bare.
+      quad(
+        [
+          [x + 5 * s, y1 + 1 * s],
+          [x + W + 5 * s, y1 + 1 * s],
+          [x + W + 5 * s, y0 - 1 * s],
+          [x + 5 * s, y0 - 1 * s],
+        ],
+        o.blanket,
+      );
+    }
+
+    // Headboard standing off the mattress at the head end, and a foot board at
+    // the foot end. Both are boards rather than frames: the camera sees their
+    // edge, which is another depth cue.
+    quad(
+      [
+        [x - 5 * s, y1],
+        [x - 1 * s, y1 - 4 * s],
+        [x - 1 * s, floorY],
+        [x - 5 * s, floorY],
+      ],
+      0x6a4a2a,
+    );
+    quad(
+      [
+        [x - 3 * s, y1],
+        [x - 1 * s, y1 - 4 * s],
+        [x - 1 * s, floorY],
+        [x - 3 * s, floorY],
+      ],
+      0x8a6a3a,
+    );
+    quad(
+      [
+        [x + W + 5 * s, y1],
+        [x + W + 9 * s, y1 - 4 * s],
+        [x + W + 9 * s, floorY],
+        [x + W + 5 * s, floorY],
+      ],
+      0x6a4a2a,
+    );
+  }
+
+  // The dorm's other beds, and the roommates asleep in them.
+  //
+  // Floor 1 used to read as a store-room: one cabinet, one workbench, the
+  // player's own bed, and seeded debris everywhere else. A dorm is people asleep
+  // in a crowded room, so there are now two rows - a back row set higher and
+  // smaller for depth, and a front row on the floor line - with a figure under
+  // every blanket.
+  //
+  // The figures are drawn rather than sprited on purpose: no character sheet has
+  // a lying pose (the walk sheets are 64x96 standing side views) and rotating one
+  // would resample it. A torso over lower legs, a fold, a lit edge and a head
+  // read as "someone sleeping" at this size, which is the whole job.
   private drawDormBeds(): void {
-    const floorY = FLOOR_HEIGHT - 60; // the bed images' own bottom edge
-    // Chosen to clear the cabinet (160), the workbench (480) and the player's
-    // own bed (1120): a 94px bed needs ~120px of pitch to keep its label from
-    // touching its neighbour's.
-    const spots = [250, 370, 620, 760, 940];
+    const floorY = FLOOR_HEIGHT - 60; // the front row's floor line
+    const backY = floorY - 26; // the back row stands further from the camera
     const g = this.add.graphics().setDepth(4);
     this.floorObjects.push(g);
+    const backG = this.add.graphics().setDepth(2);
+    this.floorObjects.push(backG);
 
-    spots.forEach((x, i) => {
-      this.floorObjects.push(this.add.image(x, floorY, 'furn_bed').setOrigin(0.5, 1));
-      // Pillow at the head end, then the body under the blanket. Two cloth tones
-      // alternate so the row does not read as one repeated stamp.
-      //
-      // The blanket is drawn as a torso block over a lower legs block rather than
-      // as one flat rectangle: a single slab read as a green box parked on the
-      // mattress, and the step between the two heights is what says "there is a
-      // person under this".
-      const blanket = i % 2 === 0 ? PALETTE.cloth : PALETTE.clothDeep;
-      const fold = i % 2 === 0 ? PALETTE.clothDeep : PALETTE.cloth;
-      g.fillStyle(PALETTE.dust, 0.9);
-      g.fillRect(x - 46, floorY - 22, 16, 9);
-      g.fillStyle(blanket, 1);
-      g.fillRect(x - 32, floorY - 32, 40, 26); // shoulders and torso
-      g.fillRect(x + 8, floorY - 26, 36, 20); // legs
-      g.fillRect(x + 42, floorY - 28, 4, 22); // feet
-      // The blanket's lit top edge and the fold across the chest.
-      g.fillStyle(PALETTE.clothHigh, 0.5);
-      g.fillRect(x - 32, floorY - 32, 78, 2);
-      g.fillStyle(fold, 1);
-      g.fillRect(x - 4, floorY - 32, 2, 26);
-      g.fillStyle(PALETTE.ink, 0.35);
-      g.fillRect(x - 32, floorY - 8, 78, 2);
-      // Head: skin, with hair across the top and the far side in shadow.
-      g.fillStyle(PALETTE.skinLight, 1);
-      g.fillCircle(x - 36, floorY - 32, 6);
-      g.fillStyle(PALETTE.ink, 1);
-      g.fillRect(x - 42, floorY - 39, 13, 4);
-      g.fillStyle(PALETTE.skinDeep, 1);
-      g.fillRect(x - 36, floorY - 30, 6, 3);
-      // A contact shadow so the bed sits on the floor rather than on it.
-      this.floorObjects.push(...addContactShadow(this, x, floorY + 2, 60, 2, 0.4));
+    const cloths: Array<[number, number]> = [
+      [PALETTE.cloth, PALETTE.clothDeep],
+      [PALETTE.clothDeep, PALETTE.cloth],
+      [PALETTE.cloth, PALETTE.clothDeep],
+      [PALETTE.clothDeep, PALETTE.cloth],
+      [PALETTE.cloth, PALETTE.clothDeep],
+    ];
 
+    // Back row first, so the front row overlaps it. Half a pitch offset from the
+    // front row, which is what stops the two rows reading as one long row.
+    const back = [268, 372, 640, 744, 848];
+    back.forEach((x, i) => {
+      const [blanket, fold] = cloths[i % cloths.length];
+      this.drawBed3D(backG, x, backY, { blanket, fold, scale: 0.72, sleeper: true });
+    });
+
+    // Front row: clear of the cabinet (160), the workbench (480) and the player's
+    // own bed (1120). Pitch 96 so the row is crowded - beds nearly touching.
+    const front = [236, 332, 428, 588, 684, 780, 876, 972];
+    front.forEach((x, i) => {
+      const [blanket, fold] = cloths[i % cloths.length];
+      this.drawBed3D(g, x, floorY, { blanket, fold, scale: 1, sleeper: true });
+      this.floorObjects.push(...addContactShadow(this, x + 40, floorY + 2, 70, 2, 0.35));
+
+      // Label and Z sit above the headboard line and beside the head. Both are
+      // placed against the bed's own top (floorY-58 for a sleeper), not against a
+      // fixed offset from the floor: a taller bed pushed the label into the
+      // sleeper's hair.
       const label = this.add
-        .text(x, floorY - 66, '室友', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(TEXT.dim) })
+        .text(x + 41, floorY - 64, '室友', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(TEXT.dim) })
         .setOrigin(0.5);
       const z = this.add
-        .text(x + 34, floorY - 58, 'Z z', { fontFamily: FONT_FAMILY, fontSize: '16px', color: hex(TEXT.dim) })
+        .text(x + 72, floorY - 52, 'Z z', { fontFamily: FONT_FAMILY, fontSize: '16px', color: hex(TEXT.dim) })
         .setOrigin(0.5);
       this.floorObjects.push(label, z);
       this.dormSleepers.push({ z, baseY: z.y, phase: i * 1.7 });
     });
+
+    // The back row gets its labels too, dimmer, so the two rows do not compete.
+    back.forEach((x, i) => {
+      const z = this.add
+        .text(x + 36, backY - 38, 'Z z', { fontFamily: FONT_FAMILY, fontSize: '14px', color: hex(TEXT.disabledDeep) })
+        .setOrigin(0.5);
+      this.floorObjects.push(z);
+      this.dormSleepers.push({ z, baseY: z.y, phase: 3.4 + i * 1.3 });
+    });
   }
 
+  // The player's own bed, in the same 3/4 view as the roommates' so the row
+  // reads as one set of furniture rather than a sprite next to drawings.
   private drawBed(): void {
-    const y = FLOOR_HEIGHT - 64;
-    const bed = this.add.image(BED_X, y + 4, 'furn_bed').setOrigin(0.5, 1);
-    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5);
-    this.floorObjects.push(bed, bedLabel);
+    const floorY = FLOOR_HEIGHT - 60;
+    const g = this.add.graphics().setDepth(4);
+    this.floorObjects.push(g);
+    this.drawBed3D(g, BED_X - 41, floorY, {
+      blanket: PALETTE.clothDeep,
+      fold: PALETTE.cloth,
+      scale: 1,
+      sleeper: false,
+    });
+    this.floorObjects.push(...addContactShadow(this, BED_X, floorY + 2, 70, 2, 0.35));
+    const bedLabel = this.add
+      .text(BED_X, floorY - 62, '床（睡觉）', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) })
+      .setOrigin(0.5);
+    this.floorObjects.push(bedLabel);
   }
 
   // ── HUD & inventory UI ─────────────────────────────────────────────────

@@ -88,7 +88,7 @@ AG-02（导航）、AG-03（QA）仍在跑。
 **教训（第五次）**：**每个工单只能有一个活会话；派发后必须用任务清单核对，不能信 spawn 返回值。**
 
 ## 集成进度（2026-11-15 02:50）——9 / 10 已合入
-**集成分支 `integrate/sprint-01`：66 测试文件 / 1064 测试全绿，tsc 干净。**
+**集成分支 `integrate/sprint-01`：67 测试文件 / 1080 测试全绿，tsc 干净。10/10 全部合入。**
 
 | Agent | 提交 | 状态 |
 |---|---|---|
@@ -112,3 +112,32 @@ AG-02（导航）、AG-03（QA）仍在跑。
 4. AG-06 遗留：NPC 未接渲染层（交易换 `executeBarter`、移动用 `npcAutonomyFor`、夜间用 `planNightWanderer`）
 5. AG-02 遗留：50010→100000 下行电梯文案缺 route 参数（硬编码 fallback）
 6. AG-08 收尾提交
+
+## 最终状态（2026-11-15 03:20）——10 / 10 合入完成
+
+**集成分支 `integrate/sprint-01`：67 个测试文件 / 1080 个测试全绿，tsc 干净。**
+
+| Agent | 提交 | 交付 |
+|---|---|---|
+| AG-01 | d4069bc | 四条成长线 + 存档迁移 |
+| AG-02 | 2d87e4a | M1 四连修（相机裁切/E-F 竞态/近路价格/段顶文案） |
+| AG-03 | 562a02a | e2e 去硬编码 + 首章关键路径 + CI + craft 反馈 + 冒险模式 |
+| AG-04 | c52df2d | 十万层确定性生成 |
+| AG-05 | 9808fd3 | 经济闭环 13 处断点 + 成长线接入 |
+| AG-06 | cd2edcc | NPC 库存/交易/夜间导演器/日程 |
+| AG-07 | 4ddd62a | 资产对账 + 周禾量化 + Manifest |
+| AG-08 | 6d1b22e + fdb1e41 | 面板体检 10 项 + 对话自适应 + 名签避让 + boss 标记 |
+| AG-09 | e4a8a30 + 2e1edf4 | 对象数降 3.6-4.6 倍 + 周禾 walkcycle |
+| AG-10 | 1a90f54 | 8 条任务 + 18 纸条咬合 |
+| 总控 | 716ee59 | 周禾五步接线（artpack/metaProgress/MetaSelectScene/manifest） |
+
+## 必须记录的一次 Agent 报告失实
+AG-03 报告称有 6 个提交（cced1ce 等），**实际分支 HEAD 仍停在基线 48e1225、reflog 无记录，提交不存在**。工作以未提交状态留在磁盘上。由总控逐文件 review 后落盘（562a02a）并合入。
+**教训**：Agent 自报的 commit hash 必须回查验证，不能直接采信。
+
+## 下一轮待接线（功能已就绪，缺调用方）
+1. AG-04 worldgen → 电梯文案 `crossingSummary()` + 塔楼总览 `summarizeFloor()`
+2. AG-10 quests → 任务面板 `evaluateAllQuests()`
+3. AG-05 → bagFullCount / shelterLightDim / waterPurifierRuns 三个消费方
+4. AG-06 → NPC 渲染层（`executeBarter` / `npcAutonomyFor` / `planNightWanderer`）
+5. AG-08 遗留 → 床标签/工作台招牌 depth 0 被 HUD 吞（存量缺陷）、NPC 名签、塔楼右上角缩放读数重叠

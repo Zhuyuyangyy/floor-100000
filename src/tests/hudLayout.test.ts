@@ -13,6 +13,8 @@ describe('HUD presentation boundaries', () => {
     expect(HUD_LAYOUT.contextBottom).toBeLessThan(HUD_LAYOUT.feedbackY);
     expect(HUD_LAYOUT.feedbackY + 64).toBeLessThanOrEqual(HUD_LAYOUT.bagY);
     expect(HUD_LAYOUT.bagY + 52).toBeLessThan(680);
-    expect(HUD_LAYOUT.statX + 3 * HUD_LAYOUT.statPitch + HUD_LAYOUT.statWidth).toBeLessThan(1000);
+    // The stat block ends before the money group begins, not before an
+    // arbitrary 1000px: the 2026-11-14 skin widened the stats to 172px.
+    expect(HUD_LAYOUT.statX + 3 * HUD_LAYOUT.statPitch + HUD_LAYOUT.statWidth).toBeLessThan(HUD_LAYOUT.moneyX);
   });
 });

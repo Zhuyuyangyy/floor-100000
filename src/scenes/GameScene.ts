@@ -8,6 +8,7 @@ import {
   BED_X,
   CRAFT_X,
   DOWN_EXIT_X,
+  environmentFor,
   FLOOR_VIEW_ZOOM,
   ENTRY_X,
   FLOOR_BAND,
@@ -54,7 +55,6 @@ import {
   BODY_TEMP_MAX,
   COLD_THRESHOLD,
   bodyTempOf,
-  environmentLabel,
   warmthAt,
 } from '../systems/EnvironmentSystem';
 import { ailmentLabel, inflict } from '../systems/SicknessSystem';
@@ -100,6 +100,7 @@ import {
 } from '../render/uiKit';
 import { ENV_FLOOR_KEY, ENV_WALL_KEY, portraitKey } from '../render/artpack';
 import { framedButton, hitRect } from '../render/pointer';
+import { drawHazardStripe, drawHudIcon, drawHudPlate, type HudIconName } from '../render/hudSkin';
 import {
   ATTACK_FRAME_START,
   ATTACK_FRAMES,
@@ -181,11 +182,11 @@ const WANDERER_FLEE_EXIT_MARGIN = 24;
 // Row pitch for the four HUD stat bars. 15px gives an 11px label plus a 7px bar
 // with breathing room; 13px was too cramped to read at a glance.
 
-const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: string; color: number }> = [
-  { key: 'hp', label: '生命', color: 0xe56d63 },
-  { key: 'hunger', label: '饥饿', color: 0xf4b66a },
-  { key: 'thirst', label: '口渴', color: 0x6aa8e5 },
-  { key: 'energy', label: '精力', color: 0x77c6a4 },
+const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: string; color: number; icon: HudIconName }> = [
+  { key: 'hp', label: '生命', color: 0xe56d63, icon: 'cross' },
+  { key: 'hunger', label: '饥饿', color: 0xf4b66a, icon: 'hunger' },
+  { key: 'thirst', label: '口渴', color: 0x6aa8e5, icon: 'thirst' },
+  { key: 'energy', label: '精力', color: 0x77c6a4, icon: 'energy' },
 ];
 
 // Body heat gets its own readout rather than a fifth bar: it is the one stat a
@@ -320,8 +321,14 @@ export class GameScene extends Phaser.Scene {
   private floorBadge?: Phaser.GameObjects.Text;
   private goldText?: Phaser.GameObjects.Text;
   private goalText?: Phaser.GameObjects.Text;
-  /** the floor's environment line, right of the daily objective */
+  // The environment row is four chips, one per reading, each with its own icon:
+  // 体温值 / 区域 / 潮湿 / 夜间危险. They used to be one string, which meant one
+  // icon's worth of meaning for four unrelated facts.
   private environmentText?: Phaser.GameObjects.Text;
+  private envRegionText?: Phaser.GameObjects.Text;
+  private envHumidText?: Phaser.GameObjects.Text;
+  private envNightText?: Phaser.GameObjects.Text;
+  private hudIcons?: Phaser.GameObjects.Graphics;
   private scoreText?: Phaser.GameObjects.Text;
   /** the low-HP edge warning: bands with their own base weights */
   private vignetteParts: Array<{ rect: Phaser.GameObjects.Rectangle; weight: number }> = [];
@@ -2106,6 +2113,14 @@ export class GameScene extends Phaser.Scene {
     this.lastGoalKey = '';
     this.environmentText?.destroy();
     this.environmentText = undefined;
+    this.envRegionText?.destroy();
+    this.envRegionText = undefined;
+    this.envHumidText?.destroy();
+    this.envHumidText = undefined;
+    this.envNightText?.destroy();
+    this.envNightText = undefined;
+    this.hudIcons?.destroy();
+    this.hudIcons = undefined;
     this.goalText?.destroy();
     this.goalText = undefined;
     this.scoreText?.destroy();
@@ -2117,45 +2132,73 @@ export class GameScene extends Phaser.Scene {
     this.goldText?.destroy();
     this.goldText = undefined;
 
-    // A fixed screen-space instrument strip, then two independent context rows.
-    // The world's existing palette stays intact; generous gutters separate
-    // survival, location and money so none of them borrow another field's space.
+    // The 2026-11-14 HUD skin: one riveted plate holding three rows —
+    // instruments, the day's objective, the environment readout. See
+    // render/hudSkin.ts for why this is drawn rather than dropped in as the
+    // concept PNGs.
     const hud = HUD_LAYOUT;
-    this.add.rectangle(0, 0, DESIGN_WIDTH, hud.topHeight, UI.surface).setOrigin(0).setAlpha(0.98).setScrollFactor(0).setDepth(100);
-    this.add.rectangle(0, hud.topHeight, DESIGN_WIDTH, hud.contextBottom - hud.topHeight, UI.surface).setOrigin(0).setAlpha(0.94).setScrollFactor(0).setDepth(100);
-    const chrome = this.add.graphics().setScrollFactor(0).setDepth(101);
-    chrome.lineStyle(1, UI.line, 0.85);
-    for (const x of [196, 1000]) chrome.lineBetween(x, 14, x, hud.topHeight - 14);
-    chrome.lineBetween(16, hud.topHeight - 1, DESIGN_WIDTH - 16, hud.topHeight - 1);
-    chrome.lineBetween(16, hud.contextBottom - 1, DESIGN_WIDTH - 16, hud.contextBottom - 1);
-    chrome.fillStyle(UI.accent, 1);
-    chrome.fillRect(0, 0, 4, hud.topHeight);
+    this.add.rectangle(0, 0, DESIGN_WIDTH, hud.contextBottom, UI.surface).setOrigin(0).setAlpha(0.98).setScrollFactor(0).setDepth(100);
+    const plate = this.add.graphics().setScrollFactor(0).setDepth(101);
+    drawHudPlate(plate, DESIGN_WIDTH, hud.contextBottom, 0x0b0f12, UI.line, PALETTE.stoneLight, PALETTE.light);
+    // Group dividers: floor block | stats | money.
+    plate.fillStyle(UI.line, 0.85);
+    plate.fillRect(268, 12, 1, hud.topHeight - 24);
+    plate.fillRect(hud.moneyX - 16, 12, 1, hud.topHeight - 24);
+    // Row separators.
+    plate.fillRect(16, hud.topHeight, DESIGN_WIDTH - 32, 1);
+    plate.fillRect(16, hud.environmentY - 10, DESIGN_WIDTH - 32, 1);
+    // The concept's hazard stripe under the right end of the environment row.
+    drawHazardStripe(plate, hud.hazardX, hud.environmentY - 6, 176, 12, PALETTE.lightDeep);
 
-    this.floorBadge = this.add.text(20, 6, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
+    // Static glyphs. Only the numbers and the two context rows move, so the
+    // icons are drawn once here and never touched again.
+    this.hudIcons = this.add.graphics().setScrollFactor(0).setDepth(103);
+    const icon = (name: HudIconName, x: number, y: number, color: number): void => {
+      drawHudIcon(this.hudIcons as Phaser.GameObjects.Graphics, name, x, y, 16, color);
+    };
+    icon('tower', 20, hud.row1Y, PALETTE.lightHigh);
+    icon('calendar', 20, hud.row1Y + 28, TEXT.secondary);
+    icon('coins', hud.moneyX, hud.row1Y, PALETTE.light);
+    icon('star', hud.moneyX, hud.row1Y + 28, TEXT.highlight);
+    icon('clipboard', 20, hud.goalY - 4, PALETTE.lightHigh);
+    hud.envChipX.forEach((cx, i) => {
+      const names: HudIconName[] = ['thermo', 'wind', 'drop', 'moon'];
+      icon(names[i], cx, hud.environmentY - 4, i === 0 ? PALETTE.light : TEXT.secondary);
+    });
+    STAT_BARS.forEach((stat, i) => icon(stat.icon, hud.statX + i * hud.statPitch, hud.row1Y, STAT_COLORS[stat.key]));
+
+    this.floorBadge = this.add.text(46, hud.row1Y - 2, '', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.lightHigh) })
       .setName('hud-floor').setScrollFactor(0).setDepth(103);
-    this.clockText = this.add.text(20, 38, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+    this.clockText = this.add.text(42, hud.row1Y + 28, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
       .setName('hud-clock').setScrollFactor(0).setDepth(103);
     this.refreshClock();
 
     this.barsGfx = this.add.graphics().setName('hud-stat-bars').setScrollFactor(0).setDepth(103);
     STAT_BARS.forEach((stat, i) => {
       const x = hud.statX + i * hud.statPitch;
-      this.statLabels.push(this.add.text(x, 10, stat.label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+      this.statLabels.push(this.add.text(x + 24, hud.row1Y, stat.label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
         .setName(`hud-stat-${stat.key}`).setScrollFactor(0).setDepth(103));
-      this.statValues.push(this.add.text(x + hud.statWidth, 10, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+      this.statValues.push(this.add.text(x + hud.statWidth, hud.row1Y, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
         .setOrigin(1, 0).setName(`hud-value-${stat.key}`).setScrollFactor(0).setDepth(103));
     });
     this.refreshStats();
 
-    this.goldText = this.add.text(DESIGN_WIDTH - 20, 6, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
-      .setOrigin(1, 0).setName('hud-gold').setScrollFactor(0).setDepth(103);
-    this.scoreText = this.add.text(DESIGN_WIDTH - 20, 34, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
-      .setOrigin(1, 0).setName('hud-score').setScrollFactor(0).setDepth(103);
+    this.goldText = this.add.text(hud.moneyX + 24, hud.row1Y, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
+      .setOrigin(0, 0).setName('hud-gold').setScrollFactor(0).setDepth(103);
+    this.scoreText = this.add.text(hud.moneyX + 24, hud.row1Y + 28, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
+      .setOrigin(0, 0).setName('hud-score').setScrollFactor(0).setDepth(103);
 
-    this.goalText = this.add.text(20, hud.goalY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
+    this.goalText = this.add.text(44, hud.goalY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
       .setName('hud-goal').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
-    this.environmentText = this.add.text(20, hud.environmentY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
-      .setName('hud-environment').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    // Four environment chips. Each owns one reading, so a player scanning for
+    // "is it night" does not have to parse a sentence.
+    const chip = (x: number, name: string, color: string): Phaser.GameObjects.Text =>
+      this.add.text(x + 24, hud.environmentY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color })
+        .setName(name).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    this.environmentText = chip(hud.envChipX[0], 'hud-environment', hex(TEXT.secondary));
+    this.envRegionText = chip(hud.envChipX[1], 'hud-region', hex(TEXT.secondary));
+    this.envHumidText = chip(hud.envChipX[2], 'hud-humid', hex(TEXT.secondary));
+    this.envNightText = chip(hud.envChipX[3], 'hud-night', hex(TEXT.secondary));
 
     // Feedback has a dedicated lower lane. It remains above modal panels but
     // can never collide with the daily objective or the permanent environment.
@@ -2291,7 +2334,7 @@ export class GameScene extends Phaser.Scene {
       this.goldText.setFontSize(TYPE.caption);
       if (this.goldText.width > 240) this.goldText.setFontSize(18);
     }
-    this.fitHudLine(this.goalText, 1240);
+    this.fitHudLine(this.goalText, 1200);
   }
 
   /** Preserve legible type; shorten only exceptional overlong HUD strings. */
@@ -2327,7 +2370,9 @@ export class GameScene extends Phaser.Scene {
     values.forEach((v, i) => {
       const x = HUD_LAYOUT.statX + i * HUD_LAYOUT.statPitch;
       const color = STAT_COLORS[STAT_BARS[i].key] ?? UI.good;
-      drawStatBar(this.barsGfx, x, 40, HUD_LAYOUT.statWidth, 8, v / 100, color);
+      // 10 segments at 10px: the concept sheet's bar, which reads as discrete
+      // pips rather than one continuous fill.
+      drawStatBar(this.barsGfx, x, HUD_LAYOUT.barY, HUD_LAYOUT.statWidth, HUD_LAYOUT.barH, v / 100, color, HUD_LAYOUT.barSegments);
       this.statValues[i]?.setText(String(Math.round(v)));
     });
     // The most urgent bar's label turns red, so the critical slot is findable
@@ -2345,7 +2390,7 @@ export class GameScene extends Phaser.Scene {
    * frame loop instead is what keeps the line honest.
    */
   private refreshEnvironmentHud(): void {
-    if (!this.environmentText) return;
+    if (!this.environmentText || !this.envRegionText || !this.envHumidText || !this.envNightText) return;
     const state = getGame();
     const temp = bodyTempOf(state);
     // The readout says what the heat is doing, not just the number: "回暖中" next
@@ -2356,13 +2401,27 @@ export class GameScene extends Phaser.Scene {
     else if (temp <= COLD_THRESHOLD) mood = '寒冷';
     else if (temp >= 85) mood = '暖和';
     else mood = '微凉';
-    // An ailment outranks the weather on this line: being ill is more urgent than
-    // being chilly, and this line is the only place either is stated.
+    // An ailment outranks the weather: being ill is more urgent than being
+    // chilly, and this row is the only place either is stated.
     const ill = ailmentLabel(state);
-    const envPart = ill ? `${ill} · ${environmentLabel(state.currentFloor)}` : environmentLabel(state.currentFloor);
-    this.environmentText.setText(`${TEMP_LABEL} ${Math.round(temp)} ${mood} · ${envPart}`);
+    const env = environmentFor(state.currentFloor);
+    const night = isNight(state.gameMinuteOfDay);
+
+    this.environmentText.setText(`${TEMP_LABEL} ${Math.round(temp)} ${mood}`);
     this.environmentText.setColor(temp <= COLD_THRESHOLD || ill !== '' ? hex(TEXT.warn) : hex(TEXT.secondary));
-    this.fitHudLine(this.environmentText, 1240);
+
+    // Region, with the ailment folded in when there is one — it is a property of
+    // the player, not the floor, so it rides on the region chip rather than
+    // getting a fifth slot.
+    this.envRegionText.setText(`区域 ${ill ? `${ill} · ` : ''}${env.label}`);
+    this.envRegionText.setColor(ill !== '' ? hex(TEXT.warn) : hex(TEXT.secondary));
+
+    this.envHumidText.setText(env.humidity >= 0.5 ? '潮湿' : '干燥');
+    this.envNightText.setText(env.hostile && night ? '夜间危险' : night ? '夜间' : '安全');
+
+    this.fitHudLine(this.envRegionText, HUD_LAYOUT.envChipX[2] - HUD_LAYOUT.envChipX[1] - 28);
+    this.fitHudLine(this.envHumidText, HUD_LAYOUT.envChipX[3] - HUD_LAYOUT.envChipX[2] - 28);
+    this.fitHudLine(this.envNightText, HUD_LAYOUT.hazardX - HUD_LAYOUT.envChipX[3] - 28);
   }
 
   private buildInventoryPanel(): void {

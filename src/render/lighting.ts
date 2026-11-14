@@ -1,6 +1,12 @@
-import Phaser from 'phaser';
+import type Phaser from 'phaser';
 
 import { PALETTE } from './palette.ts';
+
+// Phaser.BlendModes.ADD 的字面值（= 1）。写成常量而不是 Phaser.BlendModes.ADD，
+// 是为了让本模块对 Phaser 保持 type-only 依赖：Phaser 的 ESM 入口在 import 时
+// 就访问 window，Node 单测里一 import 就崩，而 renderPerf.test.ts 要直接在 Node
+// 里跑本模块的产出（对象预算/确定性）。值与 Phaser 4.2.1 的枚举一致。
+const BLEND_ADD = 1;
 
 // OVERHAUL Art Pass: the lighting layer — the fix for "everything is the same
 // grey-dark".
@@ -134,7 +140,7 @@ export function addGlow(
 ): Phaser.GameObjects.Image {
   const size = Math.max(8, Math.round(radius * 2));
   ensureGlowTexture(scene, size);
-  return scene.add.image(x, y, glowKey(size)).setBlendMode(Phaser.BlendModes.ADD).setAlpha(alpha).setDepth(depth);
+  return scene.add.image(x, y, glowKey(size)).setBlendMode(BLEND_ADD).setAlpha(alpha).setDepth(depth);
 }
 
 export interface LightLayer {
@@ -209,33 +215,43 @@ export function buildLightLayer(
     // `strength` is the peak alpha now, not a multiplicative factor: at 1.0 an
     // ADD glow washes the wall to white, so the pools sit around 0.5.
     const base = pool.strength * 0.5;
-    const img = scene.add.image(pool.x, pool.y, glowKey(size)).setBlendMode(Phaser.BlendModes.ADD).setAlpha(base).setDepth(LIGHT_DEPTH);
+    const img = scene.add.image(pool.x, pool.y, glowKey(size)).setBlendMode(BLEND_ADD).setAlpha(base).setDepth(LIGHT_DEPTH);
     poolImages.push({ img, base, phase: pool.x * 0.7 % 10 });
     owned.push(img);
   }
 
   // Banded ambient, not one rectangle: the top band keeps the wall PNG's own
   // light, the wall band takes a light cold wash, the floor band a strong one.
+  //
+  // One Graphics for both bands, not two Rectangles: a Graphics fillRect and a
+  // Rectangle submit the same flat quad to the same batch, so the image is
+  // identical — see the RectBatcher note in render/roomDepth.ts, which is where
+  // the other ~1100 rectangles per floor went.
   const clearY = height * AMBIENT_CLEAR_TOP;
   const floorTop = height * 0.62;
-  owned.push(
-    scene.add.rectangle(width / 2, (clearY + floorTop) / 2, width, floorTop - clearY, amb.color).setAlpha(amb.wallAlpha).setDepth(0),
-  );
-  owned.push(
-    scene.add.rectangle(width / 2, (floorTop + height) / 2, width, height - floorTop, amb.color).setAlpha(amb.floorAlpha).setDepth(0),
-  );
+  const ambient = scene.add.graphics().setDepth(0);
+  ambient.fillStyle(amb.color, amb.wallAlpha);
+  ambient.fillRect(0, clearY, width, floorTop - clearY);
+  ambient.fillStyle(amb.color, amb.floorAlpha);
+  ambient.fillRect(0, floorTop, width, height - floorTop);
+  owned.push(ambient);
 
+  // Stepped vignette bands, batched for the same reason. Same colours, same
+  // alphas, same positions — one object instead of sixteen.
+  const vignette = scene.add.graphics().setDepth(8);
   for (let i = 0; i < VIGNETTE_BANDS.length; i++) {
     const a = VIGNETTE_BANDS[i];
     const inset = i * VIGNETTE_BAND_H;
     const mk = (x: number, y: number, w: number, h: number): void => {
-      owned.push(scene.add.rectangle(x, y, w, h, VIGNETTE_COLOR).setAlpha(a).setDepth(8));
+      vignette.fillStyle(VIGNETTE_COLOR, a);
+      vignette.fillRect(x - w / 2, y - h / 2, w, h);
     };
     mk(width / 2, inset + VIGNETTE_BAND_H / 2, width, VIGNETTE_BAND_H);
     mk(width / 2, height - inset - VIGNETTE_BAND_H / 2, width, VIGNETTE_BAND_H);
     mk(inset + VIGNETTE_BAND_H / 2, height / 2, VIGNETTE_BAND_H, height);
     mk(width - inset - VIGNETTE_BAND_H / 2, height / 2, VIGNETTE_BAND_H, height);
   }
+  owned.push(vignette);
 
   // Each pool breathes on its own offset, so the light is alive — a lit room in
   // an abandoned tower is never perfectly steady.

@@ -1,4 +1,4 @@
-import Phaser from 'phaser';
+import type Phaser from 'phaser';
 
 import { addGlow, LIGHT_DEPTH } from './lighting';
 import { startFxLoop } from './fx';
@@ -45,9 +45,91 @@ export interface RoomDepthOpts {
   bottom?: number;
 }
 
+// ── batching the static scenery ───────────────────────────────────────────
+// Measured before (AG-09, Playwright census of the Game scene's display tree,
+// floors 1/5/100/10000): a floor owned 1420-2093 GameObjects, of which
+// 1184-1812 were Rectangles — the wall dressing alone was ~300 of them, and
+// with STACK_ABOVE/STACK_BELOW neighbours the same scenery was built three to
+// five times per floor. Every floor change destroyed and rebuilt all of it.
+//
+// RectBatcher draws those rectangles into one Graphics per depth instead.
+//
+// Fidelity: a Graphics fillRect and a Rectangle both submit one flat quad to
+// the same BatchHandlerTriFlat batch (see Phaser's FillRect render node), so
+// the composited image is identical — same colour, alpha, size and order. Only
+// the object count changes: the dressing becomes 3 Graphics instead of ~300
+// objects.
+//
+// Tint transparency: drawNeighbourFloor dims a neighbour by calling setTint on
+// everything that has one. Verified against Phaser 4.2.1 at runtime: Rectangle
+// mixes in no Tint component (Shape's mixin list has none), so neighbour
+// rectangles have never been dimmed that way — and a Graphics has no setTint
+// either, so batching does not change what the dimming touches. The one
+// Rectangle-specific branch in that loop (the ceiling tube's lightHot fill
+// swap) keeps its object: buildCeilingLights still returns the tube as a
+// Rectangle.
+//
+// Order: within one depth, Phaser sorts by insertion, and a batcher emits one
+// Graphics per depth at the position of that depth's first rectangle, so the
+// relative order of same-depth rectangles — the only order the renderer sees —
+// is exactly what it was. Across depths nothing changes, because depth is the
+// primary sort key.
+
+/** One Graphics per depth, collecting this floor's static rectangles. */
+class RectBatcher {
+  private readonly scene: Phaser.Scene;
+  private readonly layers = new Map<number, Phaser.GameObjects.Graphics>();
+
+  constructor(scene: Phaser.Scene) {
+    this.scene = scene;
+  }
+
+  private layer(depth: number): Phaser.GameObjects.Graphics {
+    let g = this.layers.get(depth);
+    if (!g) {
+      g = this.scene.add.graphics().setDepth(depth);
+      this.layers.set(depth, g);
+    }
+    return g;
+  }
+
+  /** Top-left anchored, which is how every rectangle in this file is drawn. */
+  add(x: number, y: number, w: number, h: number, color: number, alpha: number, depth: number): void {
+    const g = this.layer(depth);
+    g.fillStyle(color, alpha);
+    g.fillRect(x, y, w, h);
+  }
+
+  /** Centre-anchored, for the few rectangles drawn around a centre point. */
+  addCentred(x: number, y: number, w: number, h: number, color: number, alpha: number, depth: number): void {
+    this.add(x - w / 2, y - h / 2, w, h, color, alpha, depth);
+  }
+
+  /**
+   * A rectangle rotated around its top-left corner — the one shape a flat
+   * fillRect cannot express (the fallen plank in buildFloorClutter). Drawn
+   * with the Graphics' own transform stack so it stays inside the batch
+   * instead of costing an object of its own.
+   */
+  addRotatedAtOrigin(x: number, y: number, w: number, h: number, angleDeg: number, color: number, alpha: number, depth: number): void {
+    const g = this.layer(depth);
+    g.save();
+    g.translateCanvas(x, y);
+    g.rotateCanvas((angleDeg * Math.PI) / 180);
+    g.fillStyle(color, alpha);
+    g.fillRect(0, 0, w, h);
+    g.restore();
+  }
+
+  /** The batched Graphics, in the order their first rectangle appeared. */
+  out(): Phaser.GameObjects.GameObject[] {
+    return [...this.layers.values()];
+  }
+}
+
 /** Stepped vertical gradient: an opaque-ish band at the top fading to nothing. */
-function verticalFade(
-  scene: Phaser.Scene,
+function verticalFadeInto(
+  batch: RectBatcher,
   x: number,
   y: number,
   w: number,
@@ -55,34 +137,27 @@ function verticalFade(
   color: number,
   fromAlpha: number,
   depth: number,
-): Phaser.GameObjects.GameObject[] {
-  const out: Phaser.GameObjects.GameObject[] = [];
+): void {
   const steps = 6;
   for (let i = 0; i < steps; i++) {
     const t = i / steps;
-    const band = scene.add
-      .rectangle(x, y + h * t, w, h / steps + 1, color)
-      .setOrigin(0, 0)
-      .setAlpha(fromAlpha * (1 - t) * (1 - t))
-      .setDepth(depth);
-    out.push(band);
+    batch.add(x, y + h * t, w, h / steps + 1, color, fromAlpha * (1 - t) * (1 - t), depth);
   }
-  return out;
 }
 
 export function buildRoomDepth(scene: Phaser.Scene, opts: RoomDepthOpts): Phaser.GameObjects.GameObject[] {
   const { width, wallBottom, height } = opts;
   const bottom = opts.bottom ?? height;
-  const out: Phaser.GameObjects.GameObject[] = [];
+  const batch = new RectBatcher(scene);
 
   // 1. Ceiling: the top of the wall falls into shadow. Without this the wall is
   //    one flat value from floor to ceiling and the room has no ceiling.
-  out.push(...verticalFade(scene, 0, 8, width, Math.round(wallBottom * 0.42), 0x05080b, 0.62, 0));
+  verticalFadeInto(batch, 0, 8, width, Math.round(wallBottom * 0.42), 0x05080b, 0.62, 0);
 
   // 2. Baseboard: a hard dark seam plus a short soft shadow under it, so the
   //    wall meets the floor instead of dissolving into it.
-  out.push(scene.add.rectangle(0, wallBottom - 3, width, 3, 0x05080b).setOrigin(0, 0).setAlpha(0.75).setDepth(0));
-  out.push(...verticalFade(scene, 0, wallBottom, width, 10, 0x05080b, 0.5, 0));
+  batch.add(0, wallBottom - 3, width, 3, 0x05080b, 0.75, 0);
+  verticalFadeInto(batch, 0, wallBottom, width, 10, 0x05080b, 0.5, 0);
 
   // 3. Floor: a shallow gradient running away from the wall — lighter at the
   //    seam (light falls there), darker toward the viewer. This is what stops
@@ -90,14 +165,10 @@ export function buildRoomDepth(scene: Phaser.Scene, opts: RoomDepthOpts): Phaser
   const floorH = bottom - wallBottom;
   for (let i = 0; i < 5; i++) {
     const t = i / 5;
-    out.push(
-      scene.add
-        .rectangle(0, wallBottom + floorH * t, width, floorH / 5 + 1, 0x03060a)
-        .setOrigin(0, 0)
-        .setAlpha(0.06 + t * 0.3)
-        .setDepth(0),
-    );
+    batch.add(0, wallBottom + floorH * t, width, floorH / 5 + 1, 0x03060a, 0.06 + t * 0.3, 0);
   }
+
+  const out = batch.out();
 
   // 4. Reflections: each warm light throws a soft streak down the floor toward
   //    the viewer. One stretched glow each — cheap, and it is the cue that
@@ -145,7 +216,7 @@ function h01(n: number): number {
 
 export function buildForeground(scene: Phaser.Scene, opts: ForegroundOpts): Phaser.GameObjects.GameObject[] {
   const { width, height, wallBottom, seed } = opts;
-  const out: Phaser.GameObjects.GameObject[] = [];
+  const batch = new RectBatcher(scene);
   // Depth 30: above the player (10), the light pools (20 is below this) and the
   // vignette's lower bands. Foreground has to be in front of everything or it is
   // not foreground.
@@ -153,10 +224,10 @@ export function buildForeground(scene: Phaser.Scene, opts: ForegroundOpts): Phas
 
   // 1. The ceiling overhang: a beam across the top, with a few hangers. It crops
   //    the top of the wall and makes the room feel enclosed.
-  out.push(scene.add.rectangle(0, 0, width, 14, FG).setOrigin(0, 0).setAlpha(0.92).setDepth(FG_DEPTH));
+  batch.add(0, 0, width, 14, FG, 0.92, FG_DEPTH);
   for (let x = 40; x < width; x += 118) {
     const h = 8 + Math.round(h01(seed + x) * 10);
-    out.push(scene.add.rectangle(x, 0, 3, 14 + h, FG).setOrigin(0, 0).setAlpha(0.92).setDepth(FG_DEPTH));
+    batch.add(x, 0, 3, 14 + h, FG, 0.92, FG_DEPTH);
   }
 
   // 2. Floor debris along the bottom edge: low, irregular, and never taller than
@@ -166,14 +237,12 @@ export function buildForeground(scene: Phaser.Scene, opts: ForegroundOpts): Phas
   while (x < width) {
     const w = 18 + Math.round(h01(seed + i * 7.3) * 46);
     const h = 4 + Math.round(h01(seed + i * 3.1) * 12);
-    out.push(
-      scene.add.rectangle(x, height - h, w, h, FG).setOrigin(0, 0).setAlpha(0.9).setDepth(FG_DEPTH),
-    );
+    batch.add(x, height - h, w, h, FG, 0.9, FG_DEPTH);
     // A slightly taller lump every few pieces, so the edge is not a sawtooth.
     if (h01(seed + i * 11.7) > 0.72) {
       const tallW = 10 + Math.round(h01(seed + i) * 16);
       const tallH = 10 + Math.round(h01(seed + i * 5.5) * 16);
-      out.push(scene.add.rectangle(x + 4, height - tallH, tallW, tallH, FG).setOrigin(0, 0).setAlpha(0.9).setDepth(FG_DEPTH));
+      batch.add(x + 4, height - tallH, tallW, tallH, FG, 0.9, FG_DEPTH);
     }
     x += w + 6 + Math.round(h01(seed + i * 2.2) * 26);
     i++;
@@ -181,10 +250,10 @@ export function buildForeground(scene: Phaser.Scene, opts: ForegroundOpts): Phas
 
   // 3. Side margins: a narrow dark edge at the left and right of the frame. In a
   //    scrolling camera these read as the near walls of the room you are in.
-  out.push(scene.add.rectangle(0, 0, 10, wallBottom, FG).setOrigin(0, 0).setAlpha(0.55).setDepth(FG_DEPTH));
-  out.push(scene.add.rectangle(width - 10, 0, 10, wallBottom, FG).setOrigin(0, 0).setAlpha(0.55).setDepth(FG_DEPTH));
+  batch.add(0, 0, 10, wallBottom, FG, 0.55, FG_DEPTH);
+  batch.add(width - 10, 0, 10, wallBottom, FG, 0.55, FG_DEPTH);
 
-  return out;
+  return batch.out();
 }
 
 // ── surface detail ─────────────────────────────────────────────────────────
@@ -215,7 +284,7 @@ export interface SurfaceDetailOpts {
 
 export function buildSurfaceDetail(scene: Phaser.Scene, opts: SurfaceDetailOpts): Phaser.GameObjects.GameObject[] {
   const { width, wallBottom, height, seed } = opts;
-  const out: Phaser.GameObjects.GameObject[] = [];
+  const batch = new RectBatcher(scene);
   // Depth 1: above the base art and the depth wash, below the props and the
   // player, so the detail reads as part of the wall rather than as paint on top.
   const D = 1;
@@ -227,22 +296,14 @@ export function buildSurfaceDetail(scene: Phaser.Scene, opts: SurfaceDetailOpts)
     const len = 24 + Math.round(h(seed + i * 9.1) * (wallBottom * 0.62));
     const w = h(seed + i * 5.3) > 0.7 ? 2 : 1;
     const alpha = 0.05 + h(seed + i * 1.9) * 0.1;
-    out.push(
-      scene.add
-        .rectangle(x, 8, w, len, 0x03060a)
-        .setOrigin(0, 0)
-        .setAlpha(alpha)
-        .setDepth(D),
-    );
+    batch.add(x, 8, w, len, 0x03060a, alpha, D);
   }
 
   // Panel seams: the wall is poured concrete in bays, and a few vertical lines
   // break the surface into readable sections.
   for (let x = 96; x < width; x += 192) {
     const jitter = Math.round(h(seed + x) * 6) - 3;
-    out.push(
-      scene.add.rectangle(x + jitter, 8, 1, wallBottom - 10, 0x03060a).setOrigin(0, 0).setAlpha(0.3).setDepth(D),
-    );
+    batch.add(x + jitter, 8, 1, wallBottom - 10, 0x03060a, 0.3, D);
   }
 
   // Base stains: a darker, irregular band where damp collects along the skirting.
@@ -251,13 +312,7 @@ export function buildSurfaceDetail(scene: Phaser.Scene, opts: SurfaceDetailOpts)
   while (bx < width) {
     const w = 30 + Math.round(h(seed + k * 4.4) * 90);
     const hh = 6 + Math.round(h(seed + k * 8.2) * 22);
-    out.push(
-      scene.add
-        .rectangle(bx, wallBottom - hh, w, hh, 0x02050a)
-        .setOrigin(0, 0)
-        .setAlpha(0.18 + h(seed + k * 2.6) * 0.2)
-        .setDepth(D),
-    );
+    batch.add(bx, wallBottom - hh, w, hh, 0x02050a, 0.18 + h(seed + k * 2.6) * 0.2, D);
     bx += w + 20 + Math.round(h(seed + k * 6.1) * 60);
     k++;
   }
@@ -265,24 +320,20 @@ export function buildSurfaceDetail(scene: Phaser.Scene, opts: SurfaceDetailOpts)
   // Floor: tile lines running away from the wall, plus puddle highlights.
   const floorH = height - wallBottom;
   for (let x = 0; x < width; x += 64) {
-    out.push(
-      scene.add.rectangle(x, wallBottom, 1, floorH, 0x02050a).setOrigin(0, 0).setAlpha(0.22).setDepth(D),
-    );
+    batch.add(x, wallBottom, 1, floorH, 0x02050a, 0.22, D);
   }
   for (let y = wallBottom + 10; y < height; y += 14) {
-    out.push(scene.add.rectangle(0, y, width, 1, 0x02050a).setOrigin(0, 0).setAlpha(0.12).setDepth(D));
+    batch.add(0, y, width, 1, 0x02050a, 0.12, D);
   }
   // Puddles: wide, very low-alpha ellipses that catch the light. Drawn as
   // flattened glows so they brighten rather than darken - a puddle reflects.
   for (let i = 0; i < 7; i++) {
     const x = 60 + Math.round(h(seed + i * 12.9) * (width - 120));
     const y = wallBottom + 12 + Math.round(h(seed + i * 7.7) * (floorH - 24));
-    const p = scene.add.rectangle(x, y, 40 + Math.round(h(seed + i * 3.3) * 60), 5, 0x22384a);
-    p.setOrigin(0.5).setAlpha(0.3).setDepth(D + 1);
-    out.push(p);
+    batch.addCentred(x, y, 40 + Math.round(h(seed + i * 3.3) * 60), 5, 0x22384a, 0.3, D + 1);
   }
 
-  return out;
+  return batch.out();
 }
 
 // ── ceiling fixtures ──────────────────────────────────────────────────────
@@ -303,6 +354,11 @@ export interface CeilingLightOpts {
 export function buildCeilingLights(scene: Phaser.Scene, opts: CeilingLightOpts): Phaser.GameObjects.GameObject[] {
   const { width, seed, top } = opts;
   const out: Phaser.GameObjects.GameObject[] = [];
+  // Housing and hangers batch together; the tube stays its own Rectangle
+  // because drawNeighbourFloor dims a neighbour's lightHot tubes by swapping
+  // their fill (an instanceof Rectangle check), and a Graphics cannot answer
+  // it. Two rectangles per strip is a fair price for keeping that branch.
+  const batch = new RectBatcher(scene);
   const spacing = 224;
   for (let i = 0; x_ok(i); i++) {
     const x = 112 + i * spacing;
@@ -310,7 +366,7 @@ export function buildCeilingLights(scene: Phaser.Scene, opts: CeilingLightOpts):
     const w = h(seed + i * 4.1) > 0.5 ? 46 : 34;
     // The housing: a dark bar with a bright tube inside it. The tube is the
     // brightest thing in the frame on purpose - it is the light source.
-    out.push(scene.add.rectangle(x - w / 2, top, w, 5, PALETTE.shadow).setOrigin(0, 0).setDepth(3));
+    batch.add(x - w / 2, top, w, 5, PALETTE.shadow, 1, 3);
     out.push(scene.add.rectangle(x - w / 2 + 2, top + 1, w - 4, 3, PALETTE.lightHot).setOrigin(0, 0).setDepth(3));
     // Its spill: a wide flat glow under the tube. Flattened so it reads as light
     // falling from a strip rather than a point.
@@ -331,10 +387,10 @@ export function buildCeilingLights(scene: Phaser.Scene, opts: CeilingLightOpts):
     glow.setScale(1.5, 0.8);
     out.push(glow);
     // Two thin hangers up to the ceiling.
-    out.push(scene.add.rectangle(x - w / 2 + 6, top - 8, 1, 8, PALETTE.ink).setOrigin(0, 0).setDepth(3));
-    out.push(scene.add.rectangle(x + w / 2 - 7, top - 8, 1, 8, PALETTE.ink).setOrigin(0, 0).setDepth(3));
+    batch.add(x - w / 2 + 6, top - 8, 1, 8, PALETTE.ink, 1, 3);
+    batch.add(x + w / 2 - 7, top - 8, 1, 8, PALETTE.ink, 1, 3);
   }
-  return out;
+  return [...batch.out(), ...out];
 }
 
 /** Kept as a named predicate so the loop reads as intent, not arithmetic. */
@@ -359,7 +415,7 @@ export function addContactShadow(
   depth = 2,
   alpha = 0.5,
 ): Phaser.GameObjects.GameObject[] {
-  const out: Phaser.GameObjects.GameObject[] = [];
+  const batch = new RectBatcher(scene);
   const w = Math.max(8, width);
   // Three nested ellipses: the middle is the darkest and the outer two fade, so
   // the edge is soft without a gradient texture per object.
@@ -369,15 +425,9 @@ export function addContactShadow(
     [0.45, alpha],
   ];
   for (const [scale, a] of layers) {
-    out.push(
-      scene.add
-        .rectangle(x, feetY - 1, w * scale, Math.max(2, w * 0.13 * scale), PALETTE.ink)
-        .setOrigin(0.5, 0.5)
-        .setAlpha(a)
-        .setDepth(depth),
-    );
+    batch.addCentred(x, feetY - 1, w * scale, Math.max(2, w * 0.13 * scale), PALETTE.ink, a, depth);
   }
-  return out;
+  return batch.out();
 }
 
 // ── wall dressing and floor clutter ───────────────────────────────────────
@@ -411,7 +461,7 @@ export interface DressingOpts {
 
 export function buildWallDressing(scene: Phaser.Scene, opts: DressingOpts): Phaser.GameObjects.GameObject[] {
   const { width, wallBottom, seed, keepClear } = opts;
-  const out: Phaser.GameObjects.GameObject[] = [];
+  const batch = new RectBatcher(scene);
   const D = 1; // background plane: above the art, below the props
   // The band a wall-mounted thing can occupy.
   const top = 26;
@@ -422,10 +472,10 @@ export function buildWallDressing(scene: Phaser.Scene, opts: DressingOpts): Phas
   for (let x = 70; x < width; x += 150 + Math.round(hh(seed + x) * 60)) {
     if (!clear(x)) continue;
     const w = hh(seed + x * 2.1) > 0.6 ? 4 : 3;
-    out.push(scene.add.rectangle(x, top - 10, w, bottom - top + 14, PALETTE.ink).setOrigin(0, 0).setAlpha(0.85).setDepth(D));
-    out.push(scene.add.rectangle(x, top - 10, 1, bottom - top + 14, PALETTE.dust).setOrigin(0, 0).setAlpha(0.75).setDepth(D));
+    batch.add(x, top - 10, w, bottom - top + 14, PALETTE.ink, 0.85, D);
+    batch.add(x, top - 10, 1, bottom - top + 14, PALETTE.dust, 0.75, D);
     for (let y = top + 6; y < bottom; y += 44) {
-      out.push(scene.add.rectangle(x - 2, y, w + 4, 2, PALETTE.dust).setOrigin(0, 0).setAlpha(0.8).setDepth(D));
+      batch.add(x - 2, y, w + 4, 2, PALETTE.dust, 0.8, D);
     }
   }
 
@@ -440,12 +490,12 @@ export function buildWallDressing(scene: Phaser.Scene, opts: DressingOpts): Phas
   const runs = [0.22, 0.42, 0.62];
   for (let ri = 0; ri < runs.length; ri++) {
     const y = Math.round(8 + (wallBottom - 8) * runs[ri]);
-    out.push(scene.add.rectangle(0, y, width, 5, PALETTE.ink).setOrigin(0, 0).setAlpha(0.8).setDepth(D));
-    out.push(scene.add.rectangle(0, y, width, 1, PALETTE.dust).setOrigin(0, 0).setAlpha(0.55).setDepth(D + 1));
+    batch.add(0, y, width, 5, PALETTE.ink, 0.8, D);
+    batch.add(0, y, width, 1, PALETTE.dust, 0.55, D + 1);
     // Clamps every few metres, so the run has rhythm instead of being a stripe.
     for (let x = 20; x < width; x += 84) {
-      out.push(scene.add.rectangle(x, y - 2, 4, 9, PALETTE.stoneLight).setOrigin(0, 0).setAlpha(0.9).setDepth(D + 1));
-      out.push(scene.add.rectangle(x, y - 2, 1, 9, PALETTE.ink).setOrigin(0, 0).setAlpha(0.5).setDepth(D + 2));
+      batch.add(x, y - 2, 4, 9, PALETTE.stoneLight, 0.9, D + 1);
+      batch.add(x, y - 2, 1, 9, PALETTE.ink, 0.5, D + 2);
     }
   }
 
@@ -459,15 +509,15 @@ export function buildWallDressing(scene: Phaser.Scene, opts: DressingOpts): Phas
     const y = top + 20 + Math.round(hh(seed + i * 5.9) * (bottom - top - 60));
     if (hh(seed + i * 7.7) > 0.5) {
       // vent: a dark recess with slats
-      out.push(scene.add.rectangle(x, y, 26, 14, PALETTE.ink).setOrigin(0, 0).setAlpha(0.95).setDepth(D));
+      batch.add(x, y, 26, 14, PALETTE.ink, 0.95, D);
       for (let s = 0; s < 4; s++) {
-        out.push(scene.add.rectangle(x + 3, y + 2 + s * 3, 20, 1, PALETTE.stoneLight).setOrigin(0, 0).setAlpha(0.9).setDepth(D + 1));
+        batch.add(x + 3, y + 2 + s * 3, 20, 1, PALETTE.stoneLight, 0.9, D + 1);
       }
     } else {
       // junction box with a conduit down to the skirting
-      out.push(scene.add.rectangle(x, y, 16, 12, PALETTE.stoneLight).setOrigin(0, 0).setAlpha(0.95).setDepth(D));
-      out.push(scene.add.rectangle(x + 2, y + 2, 12, 1, PALETTE.dust).setOrigin(0, 0).setAlpha(0.9).setDepth(D + 1));
-      out.push(scene.add.rectangle(x + 7, y + 12, 2, bottom - (y + 12), PALETTE.ink).setOrigin(0, 0).setAlpha(0.85).setDepth(D));
+      batch.add(x, y, 16, 12, PALETTE.stoneLight, 0.95, D);
+      batch.add(x + 2, y + 2, 12, 1, PALETTE.dust, 0.9, D + 1);
+      batch.add(x + 7, y + 12, 2, bottom - (y + 12), PALETTE.ink, 0.85, D);
     }
   }
 
@@ -477,17 +527,17 @@ export function buildWallDressing(scene: Phaser.Scene, opts: DressingOpts): Phas
     const x = 90 + Math.round(hh(seed + i * 23.1) * (width - 180));
     if (!clear(x)) continue;
     const y = 48 + Math.round(hh(seed + i * 3.7) * 70);
-    out.push(scene.add.rectangle(x, y, 22, 14, PALETTE.dust).setOrigin(0, 0).setAlpha(0.72).setDepth(D));
-    out.push(scene.add.rectangle(x + 3, y + 4, 16, 1, PALETTE.shadow).setOrigin(0, 0).setAlpha(0.5).setDepth(D + 1));
-    out.push(scene.add.rectangle(x + 3, y + 8, 11, 1, PALETTE.shadow).setOrigin(0, 0).setAlpha(0.5).setDepth(D + 1));
+    batch.add(x, y, 22, 14, PALETTE.dust, 0.72, D);
+    batch.add(x + 3, y + 4, 16, 1, PALETTE.shadow, 0.5, D + 1);
+    batch.add(x + 3, y + 8, 11, 1, PALETTE.shadow, 0.5, D + 1);
   }
 
-  return out;
+  return batch.out();
 }
 
 export function buildFloorClutter(scene: Phaser.Scene, opts: DressingOpts): Phaser.GameObjects.GameObject[] {
   const { width, wallBottom, seed, keepClear } = opts;
-  const out: Phaser.GameObjects.GameObject[] = [];
+  const batch = new RectBatcher(scene);
   // Midground: ON the floor, in front of the wall, behind the player.
   const D = 3;
   const clear = (x: number): boolean => keepClear.every((k) => Math.abs(k - x) > 56);
@@ -499,23 +549,22 @@ export function buildFloorClutter(scene: Phaser.Scene, opts: DressingOpts): Phas
     if (kind < 0.34) {
       // a slumped sack / refuse bag
       const w = 12 + Math.round(hh(seed + i) * 10);
-      out.push(scene.add.rectangle(x, wallBottom - 9, w, 9, PALETTE.ink).setOrigin(0, 0).setAlpha(1).setDepth(D));
-      out.push(scene.add.rectangle(x + 1, wallBottom - 9, w - 2, 2, PALETTE.dust).setOrigin(0, 0).setAlpha(0.8).setDepth(D + 1));
+      batch.add(x, wallBottom - 9, w, 9, PALETTE.ink, 1, D);
+      batch.add(x + 1, wallBottom - 9, w - 2, 2, PALETTE.dust, 0.8, D + 1);
     } else if (kind < 0.64) {
       // scattered paper / a flattened box
-      out.push(scene.add.rectangle(x, wallBottom - 2, 14 + Math.round(hh(seed + i * 2.2) * 8), 2, PALETTE.dust).setOrigin(0, 0).setAlpha(0.5).setDepth(D));
+      batch.add(x, wallBottom - 2, 14 + Math.round(hh(seed + i * 2.2) * 8), 2, PALETTE.dust, 0.5, D);
     } else if (kind < 0.85) {
-      // a fallen plank leaning on the wall
-      out.push(
-        scene.add.rectangle(x, wallBottom - 22, 3, 22, PALETTE.dust).setOrigin(0, 0).setAlpha(0.85).setDepth(D).setAngle(8),
-      );
+      // a fallen plank leaning on the wall — the one rotated shape, drawn
+      // through the Graphics' transform stack so it stays in the batch
+      batch.addRotatedAtOrigin(x, wallBottom - 22, 3, 22, 8, PALETTE.dust, 0.85, D);
     } else {
       // a small pile of rubble
-      out.push(scene.add.rectangle(x, wallBottom - 6, 10, 6, PALETTE.ink).setOrigin(0, 0).setAlpha(1).setDepth(D));
-      out.push(scene.add.rectangle(x + 8, wallBottom - 4, 6, 4, PALETTE.stoneLight).setOrigin(0, 0).setAlpha(0.95).setDepth(D));
+      batch.add(x, wallBottom - 6, 10, 6, PALETTE.ink, 1, D);
+      batch.add(x + 8, wallBottom - 4, 6, 4, PALETTE.stoneLight, 0.95, D);
     }
   }
-  return out;
+  return batch.out();
 }
 
 // ── aerial perspective ────────────────────────────────────────────────────
@@ -541,7 +590,7 @@ export interface HazeOpts {
 export function buildAerialHaze(scene: Phaser.Scene, opts: HazeOpts): Phaser.GameObjects.GameObject[] {
   const { width, wallBottom, hazeColor } = opts;
   const strength = opts.strength ?? 0.3;
-  const out: Phaser.GameObjects.GameObject[] = [];
+  const batch = new RectBatcher(scene);
   // Six bands from the top of the wall down: strongest at the top (furthest),
   // gone by the floor line. Depth 2, above the surface detail, below the props.
   const bands = 6;
@@ -550,15 +599,9 @@ export function buildAerialHaze(scene: Phaser.Scene, opts: HazeOpts): Phaser.Gam
     const t1 = (i + 1) / bands;
     // The top band is the farthest, so alpha falls as we come down.
     const a = strength * (1 - t0) * (1 - t0);
-    out.push(
-      scene.add
-        .rectangle(0, 8 + (wallBottom - 8) * t0, width, (wallBottom - 8) * (t1 - t0) + 1, hazeColor)
-        .setOrigin(0, 0)
-        .setAlpha(a * 0.42)
-        .setDepth(2),
-    );
+    batch.add(0, 8 + (wallBottom - 8) * t0, width, (wallBottom - 8) * (t1 - t0) + 1, hazeColor, a * 0.42, 2);
   }
-  return out;
+  return batch.out();
 }
 
 // ── the leak ──────────────────────────────────────────────────────────────

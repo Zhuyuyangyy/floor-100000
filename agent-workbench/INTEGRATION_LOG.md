@@ -30,3 +30,33 @@
 **根因**：早期重发的 Agent 没有真正退出（`general-purpose-9`、第一个 AG-09），和我后续的重发形成**重复会话同写一个 worktree**，导致并发计数一直压在 9/8，后续 6 次派发全部 429。
 **处置**：TaskStop 掉 `agent-c2876548`（AG-09 副本）和 `agent-7ce93398`（空转 23 分钟的 AG-08 副本），保留各自正在汇报的那个会话。
 **教训**：429 挡回不等于会话结束——**派发后要用 TaskStop 清单核对实际在跑的任务**，不能只看 spawn 返回成功。
+
+## 集成进度（2026-11-15 01:25）
+
+**已合入 `integrate/sprint-01` 并验收：6 个 Agent**
+
+| Agent | 提交 | 内容 |
+|---|---|---|
+| AG-01 | `d4069bc` | 四条成长线（survival/wealth/connections/power）+ GrowthProfile 存档 + 迁移收口 |
+| AG-04 | `c52df2d` | 十万层确定性生成（worldgen.ts 499 行 + 38 测试） |
+| AG-05 | `ce11e85`→`e05b245` | 经济闭环（13 处断点全修）、节能/安睡券/宿舍建设、41 测试 |
+| AG-06 | `cd2edcc` | NPC 真实库存、人格参数化交易、夜间流浪者导演器、居民日程 |
+| AG-07 | `4ddd62a` | 101 文件资产对账、周禾三件套量化（staged 未接线）、Manifest 工具链 |
+| AG-10 | `1a90f54` | 8 条任务（6 主线 + 2 支线）、18 条纸条全咬合、防软锁选择网 |
+
+**集成分支全量：65 测试文件 / 1010 测试全绿（基线 840，+170），tsc 干净。**
+浏览器冒烟：启动 0 page error、背包/制作/塔楼总览三面板开关正常、刷新后"继续游戏"读回 growth（floor=1, hasGrowth=true）。
+
+## 待接线项（等 AG-02/08/09 交活后统一做）
+1. **周禾五步接线**（AG-07 已写进 `docs/assets/AUDIT.md` §6）：
+   artpack.ts 三个映射 + walkcycle.ts `COLORS`/`WALK_CHARACTERS` + `MetaSelectScene.ts` 的 `ROSTER` + 复制 sheet 到 `src/assets/characters/npc_zhouhe.png` + **重新生成 manifest（否则 assetManifest 测试会因为 staged 文件变红）**。
+2. **AG-04 worldgen 接线**：电梯"穿过 N 层"文案用 `crossingSummary()`；塔楼总览用 `summarizeFloor()`。
+3. **AG-10 quests 接线**：任务面板读 `evaluateAllQuests(state)`，分支置灰用 `BranchEvaluation.blockers`。
+4. **AG-05 遗留**：bagFullCount/shelterLightDim/waterPurifierRuns 三个消费方未接；productionDecay/priceJitter 未在场景调用。
+5. **AG-06 遗留**：NPC 未接渲染层（ag-06 分支自跑 e2e 0 passed——它没起服务，不是红）；recruiter 等 5 个新发布者无楼层实体。
+
+## 派工事故记录（2026-11-15 01:10 与 01:30 两次）
+**根因**：429 挡回后会话没有真正退出，重发形成**重复会话同写一个 worktree**。
+**第一次处置**：停掉 `agent-c2876548`（AG-09 副本）与 `agent-7ce93398`（空转 23 分钟的 AG-08 副本）。
+**第二次处置**：停掉 `agent-388d814d`（general-purpose-9 新实例，11 分钟）与 `agent-cb2c6a6d`（general-purpose-7 新实例，1 分钟）。
+**教训**：① 429 挡回 ≠ 会话结束；② 派发后必须用 TaskStop 清单核对实际在跑的任务；③ AG-08 自查澄清"新文件是自己的测量产物"——**杀会话前先让 Owner 确认**，差点误杀正在干活的会话。

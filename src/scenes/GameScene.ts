@@ -410,6 +410,9 @@ export class GameScene extends Phaser.Scene {
   // toward; `panelBox` is the rectangle of the most recently built panel, so a
   // click outside it can close the panel the way ESC does.
   private walkTarget: { x: number; interact: boolean } | null = null;
+  // The dorm's sleeping roommates: the floating Z is animated from update(), so it
+  // lives here rather than in a tween that would outlive the floor it belongs to.
+  private dormSleepers: Array<{ z: Phaser.GameObjects.Text; baseY: number; phase: number }> = [];
   private panelBox: { x: number; y: number; w: number; h: number } | null = null;
   private hudButtons: Phaser.GameObjects.GameObject[] = [];
   private readonly pointerHandler = (pointer: Phaser.Input.Pointer, currentlyOver?: unknown[]): void =>
@@ -682,6 +685,9 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.stopFollow();
     for (const o of this.floorObjects) o.destroy();
     this.floorObjects = [];
+    // The Zzz texts were floor objects; a stale reference here would animate a
+    // destroyed Text after the next floor change.
+    this.dormSleepers = [];
     // The crowbar went with the floor; drop the reference so drawFloor builds a
     // new one instead of trying to reuse a destroyed image.
     this.weapon = undefined;
@@ -1671,6 +1677,10 @@ export class GameScene extends Phaser.Scene {
 
     this.floorObjects.push(wall, floor, g);
 
+    // The other beds, with their sleeping roommates. Before this the room was
+    // furniture the player uses and nothing that makes it a shared space.
+    this.drawDormBeds();
+
     // OVERHAUL Art Pass 2: ceiling shadow, baseboard seam, floor gradient and
     // reflections under the lights — the four cues that make a flat side view
     // read as a room with depth.
@@ -2092,6 +2102,71 @@ export class GameScene extends Phaser.Scene {
     if (stale.length > 0) this.floorObjects = this.floorObjects.filter((o) => !stale.includes(o));
     this.groundObjs.clear();
     this.buildGround();
+  }
+
+  // The dorm's other beds, each with a roommate asleep in it.
+  //
+  // Floor 1 is the player's dormitory, and it used to read as a store-room: one
+  // cabinet, one workbench, the player's own bed, and seeded debris everywhere
+  // else. A dorm is people asleep, so the room now has five more beds along the
+  // wall, each with a figure under a blanket.
+  //
+  // The figures are drawn rather than sprited on purpose: there is no lying pose
+  // in any character sheet (the walk sheets are 64x96 standing side views), and
+  // rotating one would resample it. A blanket, a head and a hairline read as
+  // "someone sleeping" at this size, which is the whole job.
+  private drawDormBeds(): void {
+    const floorY = FLOOR_HEIGHT - 60; // the bed images' own bottom edge
+    // Chosen to clear the cabinet (160), the workbench (480) and the player's
+    // own bed (1120): a 94px bed needs ~120px of pitch to keep its label from
+    // touching its neighbour's.
+    const spots = [250, 370, 620, 760, 940];
+    const g = this.add.graphics().setDepth(4);
+    this.floorObjects.push(g);
+
+    spots.forEach((x, i) => {
+      this.floorObjects.push(this.add.image(x, floorY, 'furn_bed').setOrigin(0.5, 1));
+      // Pillow at the head end, then the body under the blanket. Two cloth tones
+      // alternate so the row does not read as one repeated stamp.
+      //
+      // The blanket is drawn as a torso block over a lower legs block rather than
+      // as one flat rectangle: a single slab read as a green box parked on the
+      // mattress, and the step between the two heights is what says "there is a
+      // person under this".
+      const blanket = i % 2 === 0 ? PALETTE.cloth : PALETTE.clothDeep;
+      const fold = i % 2 === 0 ? PALETTE.clothDeep : PALETTE.cloth;
+      g.fillStyle(PALETTE.dust, 0.9);
+      g.fillRect(x - 46, floorY - 22, 16, 9);
+      g.fillStyle(blanket, 1);
+      g.fillRect(x - 32, floorY - 32, 40, 26); // shoulders and torso
+      g.fillRect(x + 8, floorY - 26, 36, 20); // legs
+      g.fillRect(x + 42, floorY - 28, 4, 22); // feet
+      // The blanket's lit top edge and the fold across the chest.
+      g.fillStyle(PALETTE.clothHigh, 0.5);
+      g.fillRect(x - 32, floorY - 32, 78, 2);
+      g.fillStyle(fold, 1);
+      g.fillRect(x - 4, floorY - 32, 2, 26);
+      g.fillStyle(PALETTE.ink, 0.35);
+      g.fillRect(x - 32, floorY - 8, 78, 2);
+      // Head: skin, with hair across the top and the far side in shadow.
+      g.fillStyle(PALETTE.skinLight, 1);
+      g.fillCircle(x - 36, floorY - 32, 6);
+      g.fillStyle(PALETTE.ink, 1);
+      g.fillRect(x - 42, floorY - 39, 13, 4);
+      g.fillStyle(PALETTE.skinDeep, 1);
+      g.fillRect(x - 36, floorY - 30, 6, 3);
+      // A contact shadow so the bed sits on the floor rather than on it.
+      this.floorObjects.push(...addContactShadow(this, x, floorY + 2, 60, 2, 0.4));
+
+      const label = this.add
+        .text(x, floorY - 66, '室友', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(TEXT.dim) })
+        .setOrigin(0.5);
+      const z = this.add
+        .text(x + 34, floorY - 58, 'Z z', { fontFamily: FONT_FAMILY, fontSize: '16px', color: hex(TEXT.dim) })
+        .setOrigin(0.5);
+      this.floorObjects.push(label, z);
+      this.dormSleepers.push({ z, baseY: z.y, phase: i * 1.7 });
+    });
   }
 
   private drawBed(): void {
@@ -4069,6 +4144,18 @@ export class GameScene extends Phaser.Scene {
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
     this.refreshBagFullWarning();
+    // The dorm's sleeping roommates breathe. Each Z carries its own phase, so
+    // five beds do not pulse in unison — a shared phase reads as one blinking
+    // overlay rather than as five people asleep. Driven from here rather than by
+    // tweens because a tween outlives the floor objects it targets.
+    if (this.dormSleepers.length > 0) {
+      const now = this.time.now;
+      for (const sleeper of this.dormSleepers) {
+        const wave = Math.sin(now / 900 + sleeper.phase);
+        sleeper.z.setAlpha(0.4 + 0.4 * wave);
+        sleeper.z.y = sleeper.baseY - 2 * wave;
+      }
+    }
     // The crowbar is stepped here, above the panel early-return.
     //
     // A fight holds encounterOpen for its whole duration and this method bails

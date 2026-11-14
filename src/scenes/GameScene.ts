@@ -102,6 +102,22 @@ import {
 } from '../render/uiKit';
 import { ENV_FLOOR_KEY, ENV_WALL_KEY, portraitKey } from '../render/artpack';
 import {
+  DIALOG_PADDING,
+  DIALOG_PANEL_H,
+  DIALOG_PANEL_W,
+  DIALOG_PORTRAIT_SIZE,
+  DIALOG_PORTRAIT_TOP,
+  DIALOG_ROW_PITCH,
+  DIALOG_ROW_H,
+  DIALOG_ROWS_TOP,
+  DIALOG_TEXT_LEFT,
+  DIALOG_TEXT_W,
+  DIALOG_WELL_H,
+  DIALOG_WELL_LEFT,
+  DIALOG_WELL_TOP,
+  DIALOG_WELL_W,
+} from '../render/dialogueLayout';
+import {
   ATTACK_FRAME_START,
   ATTACK_FRAMES,
   FRAME_H,
@@ -2897,12 +2913,12 @@ export class GameScene extends Phaser.Scene {
 
   private buildDialoguePanel(): void {
     const { width, height } = this.viewSize();
-    // 300 tall, not 260: the 96px bust needs a column of its own, and squeezing
-    // it into the old height put the second option row through the chin. The
-    // width stays 460 because that already leaves a 332px text column next to a
-    // 96px face.
-    const panelW = 460;
-    const panelH = 300;
+    // Geometry lives in render/dialogueLayout: the portrait column, the gap the
+    // text must keep from it, and the wrap width all have to agree, and they did
+    // not (the text started 84px inside the 96px face). dialogueLayout.test.ts
+    // holds the numbers against the real dialogue strings.
+    const panelW = DIALOG_PANEL_W;
+    const panelH = DIALOG_PANEL_H;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -2923,38 +2939,57 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0, 0.5)
       .setDepth(depth + 6);
     // Left: the speaker's face, on a dark inset so it does not float on the
-    // panel's own texture. Text gets the remaining 332px.
+    // panel's own texture. Drawn at its native 96x96 — scaling a bust down is
+    // what makes pixel art look like a photo.
+    const portraitLeft = left + DIALOG_PADDING;
     this.dialoguePortraitFrame = this.add
-      .rectangle(left + 12, top + 30, 96, 96, PALETTE.ink)
+      .rectangle(portraitLeft, top + DIALOG_PORTRAIT_TOP, DIALOG_PORTRAIT_SIZE, DIALOG_PORTRAIT_SIZE, PALETTE.ink)
       .setOrigin(0, 0)
       .setAlpha(0.85)
       .setDepth(depth + 5);
     this.dialoguePortrait = this.add
-      .image(left + 60, top + 78, portraitKey('npc_alin'))
+      .image(portraitLeft + DIALOG_PORTRAIT_SIZE / 2, top + DIALOG_PORTRAIT_TOP + DIALOG_PORTRAIT_SIZE / 2, portraitKey('npc_alin'))
       .setDepth(depth + 6);
     this.dialogueObjects.push(this.dialoguePortraitFrame, this.dialoguePortrait);
-    this.dialogueObjects.push(...buildPanelWell(this, left + 116, top + 30, panelW - 128, 44, depth + 5));
+    // The speech well starts a full DIALOG_TEXT_GAP right of the face and ends
+    // DIALOG_TEXT_RIGHT_PAD left of the panel edge, and is tall enough for the
+    // two wrapped lines the longest authored line needs.
+    this.dialogueObjects.push(
+      ...buildPanelWell(this, left + DIALOG_WELL_LEFT, top + DIALOG_WELL_TOP, DIALOG_WELL_W, DIALOG_WELL_H, depth + 5),
+    );
     // dialogueTitle MUST be in the list: closeDialogue() hides everything in it,
     // and a name left out of the list stays on screen after the panel closes.
     this.dialogueObjects.push(this.dialogueTitle);
+    // Left-aligned and vertically centred in the well. Centred text looked tidy
+    // on a one-line greeting but threw a wrapped line out to both sides, which
+    // is how it ended up on the portrait and past the frame.
     this.dialogueMessage = this.add
-      .text(left + 282, top + 52, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: panelW - 144 } })
-      .setOrigin(0.5)
+      .text(left + DIALOG_TEXT_LEFT, top + DIALOG_WELL_TOP + DIALOG_WELL_H / 2, '……', {
+        fontFamily: FONT_FAMILY,
+        fontSize: `${TYPE.body}px`,
+        color: hex(TEXT.primary),
+        align: 'left',
+        // useAdvancedWrap is load-bearing: the basic wrapper only breaks on
+        // spaces, and Chinese has none, so the width was ignored entirely and
+        // the line ran straight through the portrait.
+        wordWrap: { width: DIALOG_TEXT_W, useAdvancedWrap: true },
+      })
+      .setOrigin(0, 0.5)
       .setDepth(depth + 7);
     this.dialogueObjects.push(this.dialogueMessage);
 
     this.dialogueBands = [];
     for (let i = 0; i < 4; i++) {
-      const rowY = top + 132 + i * 30;
+      const rowY = top + DIALOG_ROWS_TOP + i * DIALOG_ROW_PITCH;
       // A selection band per row, the same language as every other list: a wash
       // plus a 2px accent rule. Toggled in refreshDialogue.
-      const band = this.add.rectangle(left + 12, rowY, panelW - 24, 26, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 5);
-      const rule = this.add.rectangle(left + 12, rowY, 2, 26, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 6);
+      const band = this.add.rectangle(left + DIALOG_PADDING, rowY, panelW - DIALOG_PADDING * 2, DIALOG_ROW_H, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 5);
+      const rule = this.add.rectangle(left + DIALOG_PADDING, rowY, 2, DIALOG_ROW_H, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 6);
       this.dialogueBands.push({ band, rule });
       this.dialogueObjects.push(band, rule);
-      const icon = this.add.image(left + 30, rowY + 12, 'blank').setOrigin(0.5).setDepth(depth + 7);
+      const icon = this.add.image(left + 30, rowY + DIALOG_ROW_H / 2, 'blank').setOrigin(0.5).setDepth(depth + 7);
       const t = this.add
-        .text(left + 46, rowY + 12, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
+        .text(left + 46, rowY + DIALOG_ROW_H / 2, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
         .setOrigin(0, 0.5)
         .setDepth(depth + 7);
       this.dialogueOptionIcons.push(icon);

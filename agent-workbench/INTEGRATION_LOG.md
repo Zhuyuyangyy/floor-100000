@@ -86,3 +86,29 @@ AG-02（导航）、AG-03（QA）仍在跑。
 **根因**：AG-08 工单一共派发 4 次（general-purpose-9/11/20/22），前几次 429 挡回但会话未退出。
 **处置**：停掉 `agent-7ff1a641`（30 分钟），保留 `agent-b9229de7`（持有最新批示、持续汇报）。核对其子进程只剩本窗口的。
 **教训（第五次）**：**每个工单只能有一个活会话；派发后必须用任务清单核对，不能信 spawn 返回值。**
+
+## 集成进度（2026-11-15 02:50）——9 / 10 已合入
+**集成分支 `integrate/sprint-01`：66 测试文件 / 1064 测试全绿，tsc 干净。**
+
+| Agent | 提交 | 状态 |
+|---|---|---|
+| AG-01 成长线 | d4069bc | ✅ 已合入 |
+| AG-02 导航 | 2d87e4a | ✅ 已合入（M1 四连修） |
+| AG-03 QA | — | 🔄 仍在跑 |
+| AG-04 世界生成 | c52df2d | ✅ 已合入 |
+| AG-05 经济 | 9808fd3 | ✅ 已合入 |
+| AG-06 NPC | cd2edcc | ✅ 已合入 |
+| AG-07 美术 | 4ddd62a | ✅ 已合入 |
+| AG-08 UI | 6d1b22e | ✅ 主成果已合入，收尾（MetaSelect/TowerOverview/uiLayout.test）未提交 |
+| AG-09 渲染 | e4a8a30 + 2e1edf4 | ✅ 已合入 |
+| AG-10 剧情 | 1a90f54 | ✅ 已合入 |
+
+**周禾五步接线已完成**（提交 716ee59）：AG-07 量化资产但故意不接（单独接会让 tsc 红，说明书写在 AUDIT.md §6）；AG-09 交第 2 步（walkcycle）；集成方补第 1/3/4/5 步（artpack 三处、metaProgress 深度 4 + 名字、MetaSelectScene ROSTER、manifest 重生成）。浏览器验证：角色选择出现 5 人（幸存者/阿林/小周/周禾/流浪者），0 页面错误。
+
+**待接线项（剩余）**
+1. AG-04 worldgen：电梯"穿过 N 层"文案接 `crossingSummary()`；塔楼总览接 `summarizeFloor()`
+2. AG-10 quests：任务面板接 `evaluateAllQuests(state)`，置灰用 `BranchEvaluation.blockers`
+3. AG-05 遗留：bagFullCount / shelterLightDim / waterPurifierRuns 三个消费方；productionDecay / priceJitter 场景调用
+4. AG-06 遗留：NPC 未接渲染层（交易换 `executeBarter`、移动用 `npcAutonomyFor`、夜间用 `planNightWanderer`）
+5. AG-02 遗留：50010→100000 下行电梯文案缺 route 参数（硬编码 fallback）
+6. AG-08 收尾提交

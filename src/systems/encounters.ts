@@ -6,6 +6,8 @@
 import { deriveSeed, makeRng } from '../core/rng';
 import type { Rng } from '../core/rng';
 import { PLAYABLE_FLOORS_V01 } from '../core/constants';
+import { tierOf } from '../core/tower';
+import type { TierId } from '../core/tower';
 import type { GameState, ItemId } from '../core/gameTypes';
 import { addItem, countItem, removeItem } from './InventorySystem';
 import { hasFlag, setFlag, flagKey } from './WorldFlags';
@@ -110,13 +112,55 @@ const ENCOUNTER_MESSAGES: Record<EncounterKind, string[]> = {
   boss: ['楼梯间的铁门后传来沉重的呼吸', '整层楼回荡着不属于人的脚步声'],
 };
 
-// note 'read' 轮换的纸条文案（3-4 条，seeded 选一条）。
-const NOTE_TEXTS: string[] = [
-  '「别喝没过滤的水。第七批人走了一半。」——字迹被水泡开了',
-  '「楼上那东西怕光。电池还够，撑到五楼。」',
-  '「我把药箱留在墙缝里。后来的人，替我用好它。」',
-  '「门后不是出口。是它睡觉的地方。」',
-];
+// Note texts are grouped by tier (see core/tower.ts for the 1..6 boundaries)
+// instead of being one shared pool: a note on floor 1 should read like the
+// ground-floor slum, while floor 90000 should read like the core. Each tier
+// keeps 3 entries so the seeded pick still rotates within a tier.
+export const NOTE_TEXTS_BY_TIER: Record<TierId, readonly string[]> = {
+  1: [
+    '「停电表贴在配电房。周三、周五。有人签字。」',
+    '「水要烧开。别信楼下的净水口。」',
+    '「第七批人走了一半。名字划在食堂墙上。」',
+  ],
+  2: [
+    '「工牌要交回。别问为什么。——上一块还挂在墙上」',
+    '「三号楼梯口的保安认得脸。换个班次走。」',
+    '「工头收饭票，也收消息。」',
+  ],
+  3: [
+    '「三号货梯别开。里面有东西在撞门。」',
+    '「军队不是来救人的。他们守的是往上的门。」',
+    '「管道里有声音。不像是水。」',
+  ],
+  4: [
+    '「志愿者名单上有我弟弟。他签的时候以为是招工。」',
+    '「实验室送出来的箱子，从来不写里面是什么。」',
+    '「他们说这是为了所有人。我不信，但我不敢说。」',
+  ],
+  5: [
+    '「他们在楼上养着它，像养一条看门狗。」',
+    '「花钱能买到通行。买不到下楼的理由。」',
+    '「盛宴那天，整个塔都安静得不对。」',
+  ],
+  6: [
+    '「钥匙在你手里。现在你也是这套系统的一部分。」',
+    '「停电表、配给表、处决名单，是同一支笔写的。」',
+    '「你要么关上它，要么坐上它。」',
+  ],
+};
+
+// tierOf() throws for non-integer / out-of-tower floors (assertFloor). Encounters
+// are rolled from state data that an old save could conceivably put out of
+// range, so this never throws: an unknown floor or a tier we forgot to fill
+// falls back to the tier 1 pool. The seeded rng is untouched by the fallback,
+// so reproducibility for valid floors is unaffected.
+function noteTextsForFloor(floor: number): readonly string[] {
+  try {
+    return NOTE_TEXTS_BY_TIER[tierOf(floor).id] ?? NOTE_TEXTS_BY_TIER[1];
+  } catch {
+    return NOTE_TEXTS_BY_TIER[1];
+  }
+}
 
 function pickFrom<T>(rng: Rng, list: readonly T[]): T {
   return list[rng.nextInt(0, list.length - 1)];
@@ -299,7 +343,9 @@ export function resolveEncounter(state: GameState, encounter: Encounter, choice:
 
     case 'note': {
       if (choice !== 'read') return INVALID_RESULT;
-      return { hpChange: 0, items: [], message: pickFrom(rng, NOTE_TEXTS), consumed: true };
+      // rng 的抽取次数与旧版一致（仍是 pickFrom 一次），所以同一 seed /
+      // 楼层 / spotId 的纸条依旧可复现，只是候选池换成了本阶层的 3 条。
+      return { hpChange: 0, items: [], message: pickFrom(rng, noteTextsForFloor(encounter.floor)), consumed: true };
     }
 
     case 'boss': {

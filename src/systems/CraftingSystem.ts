@@ -18,11 +18,17 @@ export interface MissingMaterial {
   have: number;
 }
 
-export type CanCraftResult = { ok: true } | { ok: false; missing: MissingMaterial[] };
+export type CanCraftResult = { ok: true } | { ok: false; missing: MissingMaterial[]; reason?: string };
 
 export function canCraft(state: GameState, id: UpgradeId): CanCraftResult {
+  // 前置资格 is checked before materials: a gated recipe the player cannot walk up
+  // to yet must say so, rather than report 材料不足 and send them gathering.
+  const recipe = getRecipe(id);
+  if (recipe.requires && !hasUpgrade(state, recipe.requires)) {
+    return { ok: false, missing: [], reason: `需要先获得${getRecipe(recipe.requires).displayName}` };
+  }
   const missing: MissingMaterial[] = [];
-  for (const [itemId, need] of Object.entries(getRecipe(id).cost) as Array<[ItemId, number]>) {
+  for (const [itemId, need] of Object.entries(recipe.cost) as Array<[ItemId, number]>) {
     const have = countItem(state.player.inventory, itemId);
     if (have < need) missing.push({ itemId, need, have });
   }
@@ -38,6 +44,9 @@ export function craft(state: GameState, id: UpgradeId): CraftResult {
   if (hasUpgrade(state, id)) return { ok: false, reason: `${recipe.displayName} 已建造` };
   const check = canCraft(state, id);
   if (!check.ok) {
+    // A missing prerequisite must never be reported as (or bypassed by) a
+    // material problem, so it short-circuits before the material detail.
+    if (check.reason) return { ok: false, reason: check.reason };
     const detail = check.missing.map((m) => `${getItem(m.itemId).displayName} ${m.have}/${m.need}`).join('，');
     return { ok: false, reason: `材料不足：${detail}` };
   }

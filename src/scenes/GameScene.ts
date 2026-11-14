@@ -168,6 +168,11 @@ const INVENTORY_SLOTS = 12;
 // gap either side, and keeps every offset an integer (no scaling, no blur).
 // Crafting rows: same 16px icon, 24px pitch keeps the cost text readable.
 const CRAFT_ROW_PITCH = 24;
+// One row per recipe. This used to be a hard-coded 4, which was fine while the
+// workbench had three recipes and a purify entry — the pass chain adds five more,
+// and a fixed four rows would have let the selection walk off the bottom of the
+// list (Enter would have crafted an entry nobody could see).
+const CRAFT_ROWS = RECIPES.length;
 // HUD type scale (docs/05_ART_GUIDE.md §2: no size too small to read). Title 16 /
 // body 13 / auxiliary 11 — all integer pixels, since any fractional size would be
 // resampled and blur the pixel look.
@@ -359,6 +364,8 @@ export class GameScene extends Phaser.Scene {
   private craftObjects: PanelObject[] = [];
   private craftRows: Array<{ band: Phaser.GameObjects.Rectangle; name: Phaser.GameObjects.Text; status: Phaser.GameObjects.Text }> = [];
   private craftMarker!: Phaser.GameObjects.Image;
+  /** "前置：X" line for the selected recipe; sits in the space under the rows */
+  private craftReqText!: Phaser.GameObjects.Text;
   private craftSelected = 0;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
   /** the warm pool the player carries; only visible once night falls */
@@ -2528,7 +2535,7 @@ export class GameScene extends Phaser.Scene {
     // rows tinted), a fixed-cost column and a right-aligned status, so a row reads
     // like a row instead of a sentence.
     this.craftRows = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < CRAFT_ROWS; i++) {
       const rowY = top + 30 + i * CRAFT_ROW_PITCH;
       const band = this.add.rectangle(left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.34).setDepth(PANEL_DEPTH.game.craft + 5);
       const name = this.add.text(left + 18, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
@@ -2536,8 +2543,17 @@ export class GameScene extends Phaser.Scene {
       this.craftRows.push({ band, name, status });
       this.craftObjects.push(band, name, status);
     }
+    // The pass chain gates one recipe behind another, so the selected row needs a
+    // line that says which credential it wants. It goes under the last band (the
+    // list never reached this far when it was four rows) rather than in the row:
+    // the row is already 名称 + 材料 and a third column would collide with the
+    // right-aligned status at this panel width.
+    this.craftReqText = this.add
+      .text(left + 18, top + 246, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+      .setOrigin(0, 0.5)
+      .setDepth(PANEL_DEPTH.game.craft + 6);
     const footer = this.add.text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-    this.craftObjects.push(footer, this.craftMarker);
+    this.craftObjects.push(this.craftReqText, footer, this.craftMarker);
 
     applyPanelDepth(this.craftObjects, PANEL_DEPTH.game.craft);
     this.assertPanelContent('craft', this.craftObjects);
@@ -2554,30 +2570,42 @@ export class GameScene extends Phaser.Scene {
     const state = getGame();
     const entries = this.craftEntries();
     if (this.craftSelected >= entries.length) this.craftSelected = Math.max(0, entries.length - 1);
-    for (let i = 0; i < 4; i++) {
+    // The list can be one entry longer than the rows — the purify entry appears
+    // once the purifier is built — so the window slides instead of letting the
+    // selection sit on a row that is not drawn.
+    const rows = this.craftRows.length;
+    const first = Math.max(0, Math.min(this.craftSelected - rows + 1, entries.length - rows));
+    for (let i = 0; i < rows; i++) {
       const row = this.craftRows[i];
       if (!row) continue;
-      const entry = entries[i];
+      const index = first + i;
+      const entry = entries[index];
       if (!entry) {
         row.name.setText('');
         row.status.setText('');
         row.band.setAlpha(0);
         continue;
       }
-      const selected = i === this.craftSelected;
+      const selected = index === this.craftSelected;
       row.band.setAlpha(selected ? 0.72 : 0.3);
       row.band.setFillStyle(selected ? UI.accent : UI.surfaceRaised, 1);
       if (entry.kind === 'recipe') {
         const recipe = getRecipe(entry.id!);
+        // No "×" between material and count: the pass chain's rows carry a
+        // four-character name plus three three-character materials, and with the
+        // multiplier they ran under the right-aligned status column at 460px.
         const cost = Object.entries(recipe.cost)
-          .map(([id, n]) => `${getItem(id as ItemId).displayName}×${n}`)
+          .map(([id, n]) => `${getItem(id as ItemId).displayName}${n}`)
           .join(' ');
         row.name.setText(`${recipe.displayName}  ${cost}`);
         row.name.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
         const built = hasUpgrade(state, entry.id!);
-        const ok = canCraft(state, entry.id!).ok;
-        row.status.setText(built ? '已建' : ok ? '可制作' : '材料不足');
-        row.status.setColor(built ? hex(PALETTE.clothHigh) : ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
+        const check = canCraft(state, entry.id!);
+        // A missing credential is not a materials problem: say 缺前置 instead of
+        // 材料不足, or the player gathers what they already have enough of.
+        const gated = !check.ok && check.reason !== undefined;
+        row.status.setText(built ? '已建' : gated ? '缺前置' : check.ok ? '可制作' : '材料不足');
+        row.status.setColor(built ? hex(PALETTE.clothHigh) : gated ? hex(TEXT.warn) : check.ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
       } else {
         const can = countItem(state.player.inventory, 'dirty_water') >= 1;
         row.name.setText('净化  脏水→净水');
@@ -2586,7 +2614,18 @@ export class GameScene extends Phaser.Scene {
         row.status.setColor(can ? hex(PALETTE.clothHigh) : hex(TEXT.dim));
       }
     }
-    const selectedRow = this.craftRows[this.craftSelected];
+    // "前置：X" for the row the cursor is on. Met reads as quiet grey; unmet is
+    // the warning colour so the locked rung explains itself before Enter does.
+    const selectedEntry = entries[this.craftSelected];
+    const requires = selectedEntry?.kind === 'recipe' ? getRecipe(selectedEntry.id!).requires : undefined;
+    if (requires) {
+      const met = hasUpgrade(state, requires);
+      this.craftReqText.setText(`前置：${getRecipe(requires).displayName} · ${met ? '已获得' : '未获得'}`);
+      this.craftReqText.setColor(met ? hex(TEXT.dim) : hex(TEXT.warn));
+    } else {
+      this.craftReqText.setText('');
+    }
+    const selectedRow = this.craftRows[this.craftSelected - first];
     this.craftMarker.setVisible(entries[this.craftSelected] !== undefined && selectedRow !== undefined);
     if (entries[this.craftSelected] && selectedRow) placeMarkerLeftOf(this.craftMarker, selectedRow.name);
   }

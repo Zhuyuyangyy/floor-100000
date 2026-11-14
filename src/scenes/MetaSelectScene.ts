@@ -33,6 +33,15 @@ type InputSlot = 'up' | 'down' | 'enter' | 'esc';
 
 const ROSTER = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer'] as const;
 
+// The caption's wrap width, under the portrait column. 108 keeps it clear of the
+// roster well (which starts at left + 122) with 6px to spare, and the longest
+// flavour string (21 characters) wraps to four lines at 18px — 80px of text,
+// which fits between the bust's bottom (top+164) and the message line
+// (top+288) with room over.
+const FLAVOUR_W = 108;
+/** Where the caption's first line opens, measured from the panel top. */
+const FLAVOUR_TOP = 176;
+
 const FLAVOUR: Record<string, string> = {
   player: '从底层醒来的那个人。没有特长，只有背包。',
   npc_alin: '宿舍区的老邻居。交易时总能多聊出点门道。',
@@ -102,16 +111,24 @@ export class MetaSelectScene extends Phaser.Scene {
       .image(portraitX, portraitCy, portraitKey('player'))
       .setDepth(depth + 7);
 
-    // Caption across the panel's bottom strip, not under the portrait.
+    // Caption under the portrait, not across the panel's bottom strip.
     //
-    // It used to be a 132px-wide box centred on the portrait column, which does
-    // nothing for Chinese: Phaser's word wrap breaks on spaces, and these strings
-    // have none, so each one rendered as a single 700px line straight through the
-    // roster rows. At 18px the longest string is 378px, so the full panel width
-    // holds it on one line with no wrap at all.
+    // It used to be centred at cx on the bottom strip, where the mode/relic
+    // column also lives: measured, the 360px caption ran to x=820 and printed
+    // straight through the relic rows (overlap with "◇ 第 5 层": 77x16px). The
+    // portrait column is the one place with room — the caption wraps under the
+    // bust at the column's own width. useAdvancedWrap is load-bearing: these
+    // strings have no spaces, so Phaser's basic wrapper never breaks them and
+    // each would render as one 700px line.
     this.flavourText = this.add
-      .text(cx, top + panelH - 36, '', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(TEXT.secondary), align: 'center' })
-      .setOrigin(0.5)
+      .text(portraitX, top + FLAVOUR_TOP, '', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '18px',
+        color: hex(TEXT.secondary),
+        align: 'center',
+        wordWrap: { width: FLAVOUR_W, useAdvancedWrap: true },
+      })
+      .setOrigin(0.5, 0)
       .setDepth(depth + 7);
 
     // ── the roster ──────────────────────────────────────────────────────────

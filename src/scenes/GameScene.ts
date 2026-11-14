@@ -166,7 +166,7 @@ import {
   buildWallDressing,
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
-import { HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
+import { CONTAINER_LABEL_DROP, HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
 import { RECIPES, getRecipe, isPassUpgrade, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
 import { trade } from '../systems/TradeSystem';
@@ -215,17 +215,6 @@ const SLEEPING_FLOORS = new Set([101, 104, 109]);
 /** Container name size, shared by the text and its backing plate. */
 const CONTAINER_LABEL_FONT = 22;
 /**
- * How far the container name drops from the prop's base (FLOOR_HEIGHT - 68).
- *
- * The old anchor was `propTop - 8`, which measured as a plate at y 53..83: it
- * hugged the full-width structural band at 52..78 (so the name read as part of
- * the wall, not part of the crate) and its bottom edge dipped ~4px onto the
- * prop's own art. 36 puts the plate at y 81..111 — on the prop's face, clear of
- * the band — and lands it on exactly the band the stair labels already use
- * (FLOOR_HEIGHT - 104 = 96), so every nameplate on the floor shares one line.
- */
-const CONTAINER_LABEL_DROP = 36;
-/**
  * The player-proximity fade, in px before INTERACT_DISTANCE.
  *
  * The label band crosses the player's head and shoulders (figure spans
@@ -236,6 +225,7 @@ const CONTAINER_LABEL_DROP = 36;
  * when the foot bar starts reading "按 E 打开 储物柜" — the name is on screen
  * exactly when it is actionable, and never under the player's chin.
  * Distance-proportional rather than a hard cut so walking past does not pop.
+ * (The drop itself lives in render/hudLayout as CONTAINER_LABEL_DROP.)
  */
 const CONTAINER_LABEL_FADE_PX = 24;
 /**
@@ -2234,8 +2224,15 @@ export class GameScene extends Phaser.Scene {
       // reason. 9 sits above the actors (ACTOR_DEPTH 5) and the spot markers (8)
       // and below the lighting layer (LIGHT_DEPTH 24), so a name is always on top
       // of the room but still under the light.
-      plate.setDepth(9);
-      label.setDepth(10);
+      //
+      // 105/106, not 9/10: the HUD's context band (y 64..124) is an alpha-0.94
+      // surface at depth 100, and a label at 9/10 is painted UNDER it — measured
+      // on floor 1: the plate's own pixels came back as flat HUD colour, the name
+      // was simply not there. Above the band (100) and its hairline chrome (101),
+      // below the HUD's own feedback lane (300), so the name reads on the band it
+      // now sits on without covering the objective text.
+      plate.setDepth(105);
+      label.setDepth(106);
       this.containerObjs.set(c.id, { box, label, plate });
       this.floorObjects.push(box, plate, label);
       this.setContainerEmptyVisual(c.id, c.items.length === 0);

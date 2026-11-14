@@ -66,3 +66,13 @@
 **根因**：AG-08 工单我先后派发 4 次（general-purpose-9 / 11 / 20 / 22），前几个被 429 挡回但会话未退出。
 **处置**：停掉 `agent-fcd5369a`，保留持有最新批示（对话面板硬边界、boss 标记单一真相源）的 `agent-b9229de7`。已要求其先 `tsc --noEmit` + 全量 vitest 自检、逐文件 git diff 判断半成品，再提交稳定部分——**明确禁止 `git checkout --` 整体回滚**（会丢自己没提交的工作）。
 **教训（第三次踩同一个坑）**：① 每个工单只允许一个活会话；② 派发前先用 TaskStop 清单核对；③ 停会话前先让 Owner 确认——AG-08 上一次就澄清过"新文件是我的测量产物"，差点误杀。
+
+## 派工事故记录（第四次，2026-11-15 02:05）
+**现象**：AG-08 再次报告僵尸进程——01:56:53 有 `playwright test e2e/_ag08_probe.spec.ts` 在跑，其 GameScene.ts 在两次工具调用之间被改（65 行 layoutDialogue 被外部删除）。
+**根因（新）**：**TaskStop 只杀 agent 本身，不杀它启动的子进程**（playwright / vite / dev server）。子进程活下来继续读写 worktree。
+**处置**：清出进程清单，杀掉 `floor-100000-portraits` 工作树的孤儿 vite（PID 4556，挂了 6 小时）；01:56 的僵尸 playwright 已自行退出；保留 AG-08 本窗口 02:02 启动的进程。
+**教训**：杀会话后必须核一遍子进程，不能只信任 TaskStop 返回值。
+
+## 总控自己的错误（一并记录）
+1. 我告诉 AG-08"读 `encounterSpots.ts` 导出的 `bossFloors`"——**该文件并没有导出这个符号**，只有内部 `BOSS_SPOT_FLOORS`。AG-08 自行找到正确做法（`encounterSpots(0,f).some(s=>s.isBoss)` + memo），已确认按它的方案。**派工指令里的文件路径/符号名必须自己先核过再写。**
+2. 同一工单重复派发 4 次造成双会话（第三次事故）。

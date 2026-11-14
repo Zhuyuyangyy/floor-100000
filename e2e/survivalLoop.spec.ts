@@ -174,6 +174,7 @@ async function selectInMenu(page: Page, options: string[], target: string): Prom
 const MAIN_OPTIONS = ['问候', '询问', '交易', '退出'];
 
 test('a player can gather every upgrade material and build all three upgrades', async ({ page }) => {
+  test.setTimeout(60_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
 

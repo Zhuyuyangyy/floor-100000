@@ -102,6 +102,7 @@ import {
 } from '../render/uiKit';
 import { ENV_FLOOR_KEY, ENV_WALL_KEY, portraitKey } from '../render/artpack';
 import {
+  estimateTextWidth,
   DIALOG_PADDING,
   DIALOG_PANEL_H,
   DIALOG_PANEL_W,
@@ -204,6 +205,9 @@ const TYPE_AUX = 22;
 // 1165 is the only centre that clears both. The reach is 30 rather than the
 // shared 44 so its band (1135..1195) does not overlap either the container's
 // (1036..1124) or the stairwell's (1196..1284): E never has two meanings here.
+/** Container name size, shared by the text and its backing plate. */
+const CONTAINER_LABEL_FONT = 22;
+
 const LIFT_X = 1165;
 const LIFT_REACH = 30;
 const LIFT_SIGN_Y = 46;
@@ -298,7 +302,7 @@ export class GameScene extends Phaser.Scene {
   private keyEnter!: Phaser.Input.Keyboard.Key;
 
   private floorView!: GeneratedFloor;
-  private containerObjs = new Map<string, { box: Phaser.GameObjects.Graphics | Phaser.GameObjects.Image; label: Phaser.GameObjects.Text }>();
+  private containerObjs = new Map<string, { box: Phaser.GameObjects.Graphics | Phaser.GameObjects.Image; label: Phaser.GameObjects.Text; plate: Phaser.GameObjects.Rectangle }>();
   private groundObjs = new Map<string, Phaser.GameObjects.Rectangle>();
   private floorObjects: Phaser.GameObjects.GameObject[] = [];
   private wanderer?: Phaser.GameObjects.Sprite;
@@ -2107,11 +2111,43 @@ export class GameScene extends Phaser.Scene {
       // The props are ~80px tall now rather than 16-32, so the label has to sit
       // above the prop instead of at a fixed offset from the floor line — at the
       // old spot it would be printed straight across the middle of the crate.
+      // A backing plate behind the name. The wall art is a busy grid of pinned
+      // notices and service pipes, and 22px text straight on top of it reads as
+      // one more rectangle on the wall rather than as a name — worst on the floors
+      // that have four containers. Same affordance as the lift's plaque.
+      //
+      // The plate is created BEFORE the label on purpose: display order in this
+      // scene is insertion order, and moveBelow() did not survive (the plate drew
+      // over its own text). The width is a rough guess — one em per glyph — and is
+      // corrected to the measured text width immediately after.
+      const labelY = y - 4 - box.displayHeight - 8;
+      // Sized from the text, not from label.width: the pixel font is still loading
+      // when the floor is built, so Text.width comes back as a placeholder and the
+      // plate ends up narrower than its own label (the text then spills past the
+      // backing and reads as clipped). estimateTextWidth is font-independent.
+      const plateW = Math.ceil(estimateTextWidth(c.label, CONTAINER_LABEL_FONT)) + 14;
+      const plate = this.add
+        .rectangle(c.x, labelY, plateW, CONTAINER_LABEL_FONT + 8, PALETTE.ink, 0.94)
+        .setOrigin(0.5)
+        .setStrokeStyle(1, PALETTE.shadow);
       const label = this.add
-        .text(c.x, y - 4 - box.displayHeight - 8, c.label, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) })
+        .text(c.x, labelY, c.label, { fontFamily: FONT_FAMILY, fontSize: `${CONTAINER_LABEL_FONT}px`, color: hex(TEXT.primary) })
         .setOrigin(0.5);
-      this.containerObjs.set(c.id, { box, label });
-      this.floorObjects.push(box, label);
+      // The labels are created early enough that later passes (neighbour floors,
+      // the night overlay, the encounter markers) end up drawn over them — measured
+      // at display index 31 while the props were at 423. A name you cannot read is
+      // the same as no name, so the plate and its text are lifted above the floor
+      // dressing once, here.
+      // Depth, not order: these labels are created at depth 0, and everything the
+      // floor adds later (props, neighbours, markers, glows) sorts above them
+      // regardless of insertion index. bringToTop() did nothing for exactly that
+      // reason. 9 sits above the actors (ACTOR_DEPTH 5) and the spot markers (8)
+      // and below the lighting layer (LIGHT_DEPTH 24), so a name is always on top
+      // of the room but still under the light.
+      plate.setDepth(9);
+      label.setDepth(10);
+      this.containerObjs.set(c.id, { box, label, plate });
+      this.floorObjects.push(box, plate, label);
       this.setContainerEmptyVisual(c.id, c.items.length === 0);
     }
   }
@@ -2122,6 +2158,9 @@ export class GameScene extends Phaser.Scene {
     const label = this.floorView.containers.find((c) => c.id === id)?.label ?? id;
     obj.box.setAlpha(empty ? 0.35 : 1);
     obj.label.setText(empty ? `${label}（空）` : label);
+    // The plate is fitted to the text, so "（空）" has to re-fit it or the extra
+    // two glyphs hang off the edge of the backing.
+    obj.plate.setDisplaySize(Math.ceil(estimateTextWidth(obj.label.text, CONTAINER_LABEL_FONT)) + 14, CONTAINER_LABEL_FONT + 8);
   }
 
   private buildGround(): void {

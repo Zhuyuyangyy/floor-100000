@@ -1,6 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
+import { PLAYABLE_SEGMENTS } from '../src/core/segments';
 
-// Visual baseline for the five playable floors (docs/05_ART_GUIDE.md §3).
+// Visual baseline for the five floors with authored room identities
+// (docs/05_ART_GUIDE.md §3): the dorm and the four rooms above it, all inside
+// the first segment. The floors are derived from the segment rather than
+// written as "1..5" — the tower is six segments now, and a spec that claims
+// "the five playable floors" rots the moment the tower grows again.
 //
 // The floors are meant to be readable as *places*, not as five differently
 // coloured voids: floor 1 is the player's dorm, 2 lived-in worker housing, 3 a
@@ -8,6 +13,9 @@ import { expect, test, type Page } from '@playwright/test';
 // screenshots are the artifact that claim is checked against — they are
 // regenerated on every run, so a regression in the room dressing shows up as a
 // diff rather than as "it looked fine last week".
+
+const FIRST_SEGMENT = PLAYABLE_SEGMENTS[0];
+const ART_FLOORS: readonly number[] = Array.from({ length: 5 }, (_, i) => FIRST_SEGMENT.from + i);
 
 interface State {
   currentFloor: number;
@@ -93,8 +101,12 @@ test('every playable floor has a distinct, readable room', async ({ page }) => {
   }
   await waitForScene(page, 'Game');
 
-  for (const floor of [1, 2, 3, 4, 5]) {
-    if (floor > 1) await climbTo(page, floor);
+  // Every art-guide floor must sit inside the first segment, or the climb below
+  // would be walking into a gap the stairs cannot cross.
+  expect(ART_FLOORS[ART_FLOORS.length - 1]).toBeLessThanOrEqual(FIRST_SEGMENT.to);
+
+  for (const floor of ART_FLOORS) {
+    if (floor > FIRST_SEGMENT.from) await climbTo(page, floor);
     expect((await readState(page)).currentFloor).toBe(floor);
     // Let the floor finish drawing before the shutter.
     await page.waitForTimeout(250);

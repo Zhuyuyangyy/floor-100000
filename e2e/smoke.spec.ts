@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
 
+// The summit the title screen advertises, from the tower model rather than a
+// literal: the number is the tower's own, and it is the one thing about it that
+// must never drift from the map.
+import { TOTAL_FLOORS } from '../src/core/tower';
+
 // Boot smoke: the game opens to the pixel title menu, Enter starts a run into the
 // game scene, the player + floor HUD render, and there are no uncaught errors /
 // 404s. Phaser renders into the canvas, so we assert on real game state via the
@@ -33,7 +38,7 @@ test('boots to the pixel title and Enter starts into the game scene', async ({ p
 
   await page.goto('/?seed=42');
   await waitForScene(page, 'Menu');
-  expect(await hasVisibleText(page, '第100000层')).toBe(true);
+  expect(await hasVisibleText(page, `第${TOTAL_FLOORS}层`)).toBe(true);
   expect(await hasVisibleText(page, '开始新游戏')).toBe(true);
 
   await page.keyboard.press('Enter');

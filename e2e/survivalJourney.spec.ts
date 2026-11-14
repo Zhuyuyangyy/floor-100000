@@ -3,6 +3,12 @@ import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { E2EGameState } from './globals';
 
+// The home floor is the tower's own start, not a pinned "1": the journey begins
+// wherever the first playable segment begins.
+import { PLAYABLE_SEGMENTS } from '../src/core/segments';
+
+const HOME_FLOOR = PLAYABLE_SEGMENTS[0].from;
+
 // The balance file is the single source of truth for starting values, and this
 // spec asserts against them at boot. Read it here rather than copying numbers:
 // B3-16 moved the starts to 65 and a pinned 79.5 failed for the wrong reason.
@@ -179,9 +185,9 @@ test.describe('B3-02 full survival journey', () => {
     }
     await waitForScene(page, 'Game');
 
-    // ── 1. wake on floor 1 ──────────────────────────────────────────────
+    // ── 1. wake on the home floor ─────────────────────────────────────────
     const start = await readState(page);
-    expect(start.currentFloor).toBe(1);
+    expect(start.currentFloor).toBe(HOME_FLOOR);
     expect(start.day).toBe(1);
     expect(start.player.hp).toBe(100);
     // A frame or two of decay has already run, so these are near-exact, not
@@ -264,8 +270,8 @@ test.describe('B3-02 full survival journey', () => {
     await takeStairs(page, 'down', 1);
 
     const home = await readState(page);
-    expect(home.currentFloor).toBe(1);
-    expect(home.player.x).toBe(1240); // floor 1's down-stair landing
+    expect(home.currentFloor).toBe(HOME_FLOOR);
+    expect(home.player.x).toBe(1240); // the home floor's down-stair landing
     // Nothing was lost on the way: the bag, the survival stats, the clock.
     expect(home.player.hp).toBe(beforeReturn.player.hp);
     expect(home.player.hunger).toBeLessThanOrEqual(beforeReturn.player.hunger);
@@ -384,7 +390,7 @@ test.describe('B3-02 full survival journey', () => {
 
     const resumed = await readState(page);
     expect(resumed.day).toBe(2);
-    expect(resumed.currentFloor).toBe(1);
+    expect(resumed.currentFloor).toBe(HOME_FLOOR);
     // The upgrades survived the reload — they were built from floors 3 and 4's
     // materials, so losing them here would lose the point of the trip.
     expect(resumed.player.homeUpgrades.sort()).toEqual(['lamp', 'purifier', 'reinforced_door']);

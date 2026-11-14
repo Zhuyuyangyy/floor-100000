@@ -18,15 +18,16 @@ describe('every playable floor can roll an encounter', () => {
     }
   });
 
-  // Two authored segment closers carry a guard: floor 5 ends the slum chapter
-  // (the gatekeeper), floor 110 ends the dorm tier (the segment keeper). The
-  // floors in between, including every segment top that has no authored
-  // content above it, must not roll a boss — the industrial tier's top (1010)
-  // is gated by the freight lift's pass, not by a guardian, and so is the
-  // commercial tier's top (10010): the boss belongs to tier 5's segment.
-  const BOSS_FLOORS = new Set([5, 110]);
+  // Three authored segment closers carry a guard: floor 5 ends the slum chapter
+  // (the gatekeeper), floor 110 ends the dorm tier (the segment keeper) and
+  // 50010 ends the VIP tier (the thing they keep upstairs). The floors in
+  // between, including every segment top that has no authored content above
+  // it, must not roll a boss — the industrial tier's top (1010) and the
+  // commercial tier's top (10010) are gated by the freight lift's pass, not by
+  // a guardian; the summit (100000) has no authored content yet at all.
+  const BOSS_FLOORS = new Set([5, 110, 50010]);
 
-  it('keeps the boss on the two authored segment closers only', () => {
+  it('keeps the boss on the three authored segment closers only', () => {
     for (const floor of PLAYABLE_FLOORS_V01) {
       const hasBoss = ENCOUNTER_TABLE[floor].some((e) => e.kind === 'boss');
       if (BOSS_FLOORS.has(floor)) expect(hasBoss, `floor ${floor} should have a boss`).toBe(true);
@@ -69,7 +70,7 @@ describe('every playable floor can roll an encounter', () => {
     const weight = (floor: number, kind: 'ambush' | 'trader' | 'loot'): number =>
       ENCOUNTER_TABLE[floor].find((e) => e.kind === kind)?.weight ?? 0;
     const industrial = PLAYABLE_FLOORS_V01.filter((f) => f >= 1000 && f < 10000);
-    const commercial = PLAYABLE_FLOORS_V01.filter((f) => f >= 10000);
+    const commercial = PLAYABLE_FLOORS_V01.filter((f) => f >= 10000 && f < 50000);
     expect(commercial).toEqual([
       10000, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010,
     ]);
@@ -82,5 +83,41 @@ describe('every playable floor can roll an encounter', () => {
     // ambush 逐层上行、loot 逐层降权：这也是「每一行都是自己的」的形状。
     expect(commercial.map((f) => weight(f, 'ambush'))).toEqual([82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92]);
     expect(commercial.map((f) => weight(f, 'loot'))).toEqual([7, 7, 6, 6, 6, 5, 5, 5, 4, 4, 4]);
+  });
+
+  it('makes the VIP tier the most dangerous stretch so far, and its top the keeper', () => {
+    // 生物兵器正式登场：富人特权区（50000-50010）的 ambush 高于中产区的天花板
+    // （10010 层的 92）——五段里最高的一档，因为这一层游荡的不是保安，是养在
+    // 楼上的东西。trader 略降（11→8，富人区不卖东西给穷人）但不为 0：纸条说
+    // 「花钱能买到通行」，交易和近路都还在，只是更贵。loot 是五段里最低的
+    // （4→2），cache 维持高位支撑上行。段顶 50010 放守段者：boss 108 是当层
+    // 最高权重，压过 ambush 104，照 5 层和 110 的写法。权重逐层钉死，而不是
+    // 只比大小：DEEPEST_FLOOR 现在就是 50010，哪一行权重表漏填都会被最深楼层
+    // 的配置静默顶掉——只比大小的断言抓不到那种「整行变成邻居」的事故。
+    const weight = (floor: number, kind: 'ambush' | 'trader' | 'loot' | 'cache'): number =>
+      ENCOUNTER_TABLE[floor].find((e) => e.kind === kind)?.weight ?? 0;
+    const commercial = PLAYABLE_FLOORS_V01.filter((f) => f >= 10000 && f < 50000);
+    const vip = PLAYABLE_FLOORS_V01.filter((f) => f >= 50000);
+    expect(vip).toEqual([
+      50000, 50001, 50002, 50003, 50004, 50005, 50006, 50007, 50008, 50009, 50010,
+    ]);
+    const worstCommercialAmbush = Math.max(...commercial.map((f) => weight(f, 'ambush')));
+    const bestCommercialTrader = Math.max(...commercial.map((f) => weight(f, 'trader')));
+    for (const floor of vip) {
+      expect(weight(floor, 'ambush'), `floor ${floor} ambush`).toBeGreaterThan(worstCommercialAmbush);
+      // 略降但不为 0：富人区不卖东西给穷人，可通行终究是能买到的。
+      expect(weight(floor, 'trader'), `floor ${floor} trader`).toBeGreaterThan(0);
+      expect(weight(floor, 'trader'), `floor ${floor} trader`).toBeLessThan(bestCommercialTrader);
+    }
+    // ambush 逐层上行、loot 逐层降权、cache 维持高位：每一行都是自己的。
+    expect(vip.map((f) => weight(f, 'ambush'))).toEqual([94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104]);
+    expect(vip.map((f) => weight(f, 'loot'))).toEqual([4, 4, 3, 3, 3, 3, 2, 2, 2, 2, 2]);
+    expect(vip.map((f) => weight(f, 'trader'))).toEqual([11, 11, 10, 10, 10, 9, 9, 9, 8, 8, 8]);
+    expect(vip.map((f) => weight(f, 'cache'))).toEqual([18, 18, 19, 19, 19, 20, 20, 20, 21, 21, 22]);
+    // 段顶 50010：boss 是当层最高权重（守楼关底，见面概率最大）。
+    const top = ENCOUNTER_TABLE[50010];
+    const boss = top.find((e) => e.kind === 'boss');
+    expect(boss, 'floor 50010 should have a boss').toBeDefined();
+    expect(boss!.weight).toBe(Math.max(...top.map((e) => e.weight)));
   });
 });

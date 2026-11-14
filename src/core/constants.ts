@@ -14,10 +14,10 @@ export const SAVE_KEY = 'floor100000.save.v1';
 // JSON cannot leave the code on a stale floor list (GHI-03 m7).
 export const STARTING_FLOOR = GAME_CONFIG.player.startingFloor;
 // The authored floors, read from the balance config: tier 1 (1-10), the
-// worker-dorm tier (100-110), the industrial tier (1000-1010) and the
-// commercial tier (10000-10010). The list is NOT contiguous — 11-99, 111-999
-// and 1011-9999 are unexplored, and only the freight lift crosses a gap (see
-// core/segments.ts).
+// worker-dorm tier (100-110), the industrial tier (1000-1010), the
+// commercial tier (10000-10010) and the VIP tier (50000-50010). The list is
+// NOT contiguous — 11-99, 111-999, 1011-9999 and 10011-49999 are unexplored,
+// and only the freight lift crosses a gap (see core/segments.ts).
 export const PLAYABLE_FLOORS_V01: readonly number[] = GAME_CONFIG.world.playableFloorsV01;
 
 // Dev-only: the retired v0.1 dorm scene, kept for testing. Reachable only via
@@ -129,6 +129,12 @@ const SEGMENT_ENVIRONMENT: Record<number, FloorEnvironment> = {
   // （humidity 0.45 < 0.5）。私人武装加实验体雏形让危险度成为已创作四段里
   // 最高的一档（danger 0.95 > 0.85）：这一层没有保安队，只有合同。
   10000: { label: '中产与商业区', cold: 2.8, humidity: 0.45, danger: 0.95, hostile: true },
+  // 富人特权区（50000-50010）。塔里最高的可玩段，暖气停得最早（cold 3.0
+  // > 2.8），地毯和中央空调让这一层比中产区更干燥（humidity 0.4 < 0.45）——
+  // 渗水的管道在下面，不在贵宾走廊里。danger 0.98 是五段最高：生物兵器
+  // 在这一段正式登场，富人不只知道，他们买单——夜间在走廊里游荡的不是
+  // 保安，是养在楼上的东西（docs/18_TIER_PROGRESSION.md §3）。
+  50000: { label: '富人特权区', cold: 3.0, humidity: 0.4, danger: 0.98, hostile: true },
 };
 
 export function environmentFor(floor: number): FloorEnvironment {

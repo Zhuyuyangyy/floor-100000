@@ -264,7 +264,8 @@ describe('the industrial tier (1000-1010)', () => {
 // 水只在机房（10005）与实验室（10008）两层是脏水，其余是净水。容器 id 仍
 // 只能落在有贴图的家具上（没有新美术），问 containerTextureKey。
 describe('the commercial tier (10000-10010)', () => {
-  const COMMERCIAL_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 10000);
+  // 只圈阶层 4 自己：50000-50010 是阶层 5，另有一段 describe 钉它。
+  const COMMERCIAL_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 10000 && f < 50000);
 
   it('is exactly the eleven floors of segment 4', () => {
     expect(COMMERCIAL_FLOORS).toEqual([
@@ -311,6 +312,69 @@ describe('the commercial tier (10000-10010)', () => {
 
   it('reproduces the same commercial floor from the same seed', () => {
     for (const floor of COMMERCIAL_FLOORS) {
+      expect(generateFloor(42, floor), `floor ${floor}`).toEqual(generateFloor(42, floor));
+      expect(generateFloor(2026, floor).floorNumber, `floor ${floor}`).toBe(floor);
+    }
+  });
+});
+
+// 阶层 5（50000-50010，富人特权区）是第五段亲手写的楼层，也是倒数第二段：
+// 地毯、招牌、保险柜，和已经空了的笼架——生物兵器正式登场，富人不只知道，
+// 他们买单。生存规矩和前四段一样硬：每层恰好一瓶水、一份食物，都是
+// guaranteed；survivalBalance 的「分层盈余」按每层一瓶水给这一段记 30 点
+// 额度，所以这里钉「恰好一份水」：多一瓶（哪怕是概率掉落的）就踩穿上限。
+// 物资是五段里最稀有的：medkit/filter/fuse/battery 的权重全面高于中产区，
+// 水以净水为主，只有喂养层（50005）与楼上实验室（50008）是脏水。容器 id
+// 仍只能落在有贴图的家具上（没有新美术），问 containerTextureKey。
+describe('the VIP tier (50000-50010)', () => {
+  // 只圈阶层 5 自己：100000 是统治核心，还没有创作内容。
+  const VIP_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 50000);
+
+  it('is exactly the eleven floors of segment 5', () => {
+    expect(VIP_FLOORS).toEqual([
+      50000, 50001, 50002, 50003, 50004, 50005, 50006, 50007, 50008, 50009, 50010,
+    ]);
+  });
+
+  it('has an authored template for every VIP floor', () => {
+    for (const floor of VIP_FLOORS) {
+      expect(hasFloorContent(floor), `floor ${floor} must be authored`).toBe(true);
+      expect(FLOOR_TEMPLATES[floor].floorNumber, `floor ${floor}`).toBe(floor);
+    }
+  });
+
+  it('guarantees exactly one drink and one meal on every VIP floor', () => {
+    for (const floor of VIP_FLOORS) {
+      const loot = FLOOR_TEMPLATES[floor].containers.flatMap((c) => c.loot);
+      const water = loot.filter(
+        (l) => l.guaranteed === true && (l.itemId === 'clean_water' || l.itemId === 'dirty_water'),
+      );
+      const food = loot.filter(
+        (l) => l.guaranteed === true && (l.itemId === 'ration_pack' || l.itemId === 'bread'),
+      );
+      expect(water.length, `floor ${floor} must guarantee exactly one drink`).toBe(1);
+      expect(food.length, `floor ${floor} has no guaranteed meal`).toBeGreaterThanOrEqual(1);
+      // 一条就够：概率性的第二瓶水会让「分层盈余」的上限被悄悄踩穿。
+      const anyWater = loot.filter((l) => l.itemId === 'clean_water' || l.itemId === 'dirty_water');
+      expect(anyWater.length, `floor ${floor} hands out more than one drink`).toBe(1);
+    }
+  });
+
+  it('uses only existing furniture art, 3-5 containers, and short labels', () => {
+    for (const floor of VIP_FLOORS) {
+      const template = FLOOR_TEMPLATES[floor];
+      expect(template.containers.length, `floor ${floor} container count`).toBeGreaterThanOrEqual(3);
+      expect(template.containers.length, `floor ${floor} container count`).toBeLessThanOrEqual(5);
+      for (const c of template.containers) {
+        expect(containerTextureKey(c.id), `floor ${floor}/${c.id} has no furniture texture`).not.toBeNull();
+        expect([...c.label].length, `floor ${floor}/${c.id} label "${c.label}"`).toBeLessThanOrEqual(3);
+      }
+      expect(template.description.length, `floor ${floor} description`).toBeGreaterThan(0);
+    }
+  });
+
+  it('reproduces the same VIP floor from the same seed', () => {
+    for (const floor of VIP_FLOORS) {
       expect(generateFloor(42, floor), `floor ${floor}`).toEqual(generateFloor(42, floor));
       expect(generateFloor(2026, floor).floorNumber, `floor ${floor}`).toBe(floor);
     }
@@ -416,7 +480,7 @@ describe('the loot data version folds into every derived seed (GHI-03 M2)', () =
 describe('hasFloorContent', () => {
   it('is true for every authored floor and false for the unauthored ones', () => {
     for (const floor of PLAYABLE_FLOORS_V01) expect(hasFloorContent(floor), `floor ${floor}`).toBe(true);
-    for (const floor of [11, 50, 99, 50010]) expect(hasFloorContent(floor), `floor ${floor}`).toBe(false);
+    for (const floor of [11, 50, 99, 50011]) expect(hasFloorContent(floor), `floor ${floor}`).toBe(false);
   });
 
   it('does not treat the dev alias 100000 as authored content', () => {

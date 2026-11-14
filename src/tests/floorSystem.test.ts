@@ -215,9 +215,13 @@ describe('stairs stay inside the commercial tier (10000-10010)', () => {
     expect(tryChangeFloor(s, 1)).toEqual({ ok: false, reason: 'top' });
     expect(s.currentFloor).toBe(10010);
     // The gap above is real even though the next segment exists on paper:
-    // 10011 belongs to no segment, and 50000 has no authored content.
+    // 10011 belongs to no segment, and 50000 IS authored now — so the refusal
+    // is NOT "the target was never built". The stairs only ever join two floors
+    // of one segment, which is why the freight lift, never the stairs, crosses
+    // the void.
     expect(segmentOf(10011)).toBeUndefined();
-    expect(hasFloorContent(50000)).toBe(false);
+    expect(hasFloorContent(50000)).toBe(true);
+    expect(PLAYABLE_FLOORS_V01).toContain(50000);
   });
 
   it('refuses to descend from 10000 into the unexplored 1011..9999 gap', () => {
@@ -264,6 +268,83 @@ describe('stairs stay inside the commercial tier (10000-10010)', () => {
     s.currentFloor = 10010;
     expect(stairTraversalFor(s, 1)).toBeNull();
     s.currentFloor = 10000;
+    expect(stairTraversalFor(s, -1)).toBeNull();
+  });
+});
+
+// Segment 5 (50000-50010, 富人特权区) is the fifth authored stretch and the
+// second-to-last: carpet, signage, private security, and the thing they keep
+// upstairs. The same segment rule applies — stairs join adjacent floors inside
+// it, the lift at its ends is the only way across the gap — and unlike the two
+// segments below it this one HAS a guardian: 50010 carries the segment keeper
+// (encounters.ts FLOOR_WEIGHT_PROFILE, encounterTableCoverage's BOSS_FLOORS),
+// because this tier's gatekeeper is not staff, it is livestock.
+describe('stairs stay inside the VIP tier (50000-50010)', () => {
+  it('allows the first step inside the segment (50000 -> 50001)', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 50000;
+    expect(tryChangeFloor(s, 1)).toEqual({ ok: true, from: 50000, to: 50001 });
+    expect(s.currentFloor).toBe(50001);
+  });
+
+  it('refuses to climb from 50010 into the unexplored 50011..99999 gap', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 50010;
+    expect(tryChangeFloor(s, 1)).toEqual({ ok: false, reason: 'top' });
+    expect(s.currentFloor).toBe(50010);
+    // The gap above is real, and this time the next segment's first floor has
+    // no authored content either: 100000 resolves through DEV_FLOOR_ALIAS for
+    // the dev entry, but hasFloorContent says no — the lift refuses the ride
+    // before generateFloor could throw.
+    expect(segmentOf(50011)).toBeUndefined();
+    expect(hasFloorContent(100000)).toBe(false);
+  });
+
+  it('refuses to descend from 50000 into the unexplored 10011..49999 gap', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 50000;
+    expect(tryChangeFloor(s, -1)).toEqual({ ok: false, reason: 'bottom' });
+    expect(s.currentFloor).toBe(50000);
+    // 10010 below is authored and playable — the trap is the same one the
+    // lower tiers set: the rule is never "the target is in the list".
+    expect(PLAYABLE_FLOORS_V01).toContain(10010);
+    expect(hasFloorContent(10010)).toBe(true);
+  });
+
+  it('walks the whole VIP tier up to 50010 and back to 50000', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 50000;
+    for (let f = 50000; f < 50010; f++) expect(tryChangeFloor(s, 1).ok).toBe(true);
+    expect(s.currentFloor).toBe(50010);
+    for (let f = 50010; f > 50000; f--) expect(tryChangeFloor(s, -1).ok).toBe(true);
+    expect(s.currentFloor).toBe(50000);
+  });
+
+  it('gives 50000 an up exit but no down exit, and 50010 the reverse', () => {
+    expect(hasUpExit(50000)).toBe(true);
+    expect(hasDownExit(50000)).toBe(false);
+    expect(hasUpExit(50010)).toBe(false);
+    expect(hasDownExit(50010)).toBe(true);
+  });
+
+  it('puts the freight lift at the segment ends: down at 50000, up at 50010', () => {
+    expect(liftDirection(50000)).toBe('down');
+    expect(liftDirection(50010)).toBe('up');
+  });
+
+  it('gates the lift out of 50010 on the pass the segment above requires', () => {
+    // The lift out of a segment top carries the NEXT segment's pass: out of
+    // 50010 that is the 统治核心's core_key, not the vip_card that entered
+    // segment 5.
+    expect(liftRequirement(50010)).toBe('core_key');
+    expect(liftRequirement(10010)).toBe('vip_card');
+  });
+
+  it('lays no stair traversal across the segment boundaries', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 50010;
+    expect(stairTraversalFor(s, 1)).toBeNull();
+    s.currentFloor = 50000;
     expect(stairTraversalFor(s, -1)).toBeNull();
   });
 });

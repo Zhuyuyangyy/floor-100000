@@ -56,6 +56,14 @@ export interface EncounterResult {
   //    了明面上的商铺街），这是「商业区」的本体。这一段同样没有守段者——
   //    把着往 50000 层货梯的是许可证，不是怪物，所以整段不放 boss。loot
   //    继续降权（7→4），cache 维持高位支撑上行。
+  //  - 50000-50010（阶层 5 富人特权区）是生物兵器正式登场：富人不只知道，
+  //    他们买单。ambush 从段首（94）就高于中产区的天花板（10010 层的 92），
+  //    一路涨到段顶 50010 的货梯闸（104）——五段里最高的一档，因为这一层
+  //    游荡的不是保安，是养在楼上的东西。trader 权重略降（11→8，富人区不
+  //    卖东西给穷人）但远远不为 0：纸条说「花钱能买到通行」，近路和交易
+  //    都还在，只是更贵。loot 是五段里最低的（4→2），cache 维持高位支撑
+  //    上行。段顶 50010 放守段者（boss 108 是当层最高权重，压过 ambush
+  //    104），照 5 层和 110 的写法：这一阶层有守门者，见面概率最大。
   // ---------------------------------------------------------------------------
 const FLOOR_WEIGHT_PROFILE: Record<number, Partial<Record<EncounterKind, number>>> = {
   1: { loot: 60, note: 14, trader: 12, cache: 10, ambush: 4 },
@@ -119,6 +127,22 @@ const FLOOR_WEIGHT_PROFILE: Record<number, Partial<Record<EncounterKind, number>
   10008: { loot: 4, note: 1, trader: 13, cache: 19, ambush: 90 },
   10009: { loot: 4, note: 1, trader: 13, cache: 19, ambush: 91 },
   10010: { loot: 4, note: 1, trader: 13, cache: 20, ambush: 92 },
+  // 阶层 5：富人特权区（50000-50010）。生物兵器正式登场——ambush 从段首就
+  // 高于中产区的天花板（92），一路涨到段顶 50010 的货梯闸（104），是五段
+  // 里最高的一档；trader 略降（富人区不卖东西给穷人）但不为 0；loot 是五
+  // 段里最低的（4→2），cache 维持高位支撑上行。整段只有段顶 50010 有守段
+  // 者：boss 108 是当层最高权重（压过 ambush 104），照 5 层和 110 的写法。
+  50000: { loot: 4, note: 2, trader: 11, cache: 18, ambush: 94 },
+  50001: { loot: 4, note: 2, trader: 11, cache: 18, ambush: 95 },
+  50002: { loot: 3, note: 2, trader: 10, cache: 19, ambush: 96 },
+  50003: { loot: 3, note: 2, trader: 10, cache: 19, ambush: 97 },
+  50004: { loot: 3, note: 1, trader: 10, cache: 19, ambush: 98 },
+  50005: { loot: 3, note: 1, trader: 9, cache: 20, ambush: 99 },
+  50006: { loot: 2, note: 1, trader: 9, cache: 20, ambush: 100 },
+  50007: { loot: 2, note: 1, trader: 9, cache: 20, ambush: 101 },
+  50008: { loot: 2, note: 1, trader: 8, cache: 21, ambush: 102 },
+  50009: { loot: 2, note: 1, trader: 8, cache: 21, ambush: 103 },
+  50010: { loot: 2, note: 1, trader: 8, cache: 22, ambush: 104, boss: 108 },
 };
 
 // 固定枚举顺序，保证 ENCOUNTER_TABLE 的行顺序与加权 roll 的遍历顺序确定。
@@ -219,6 +243,22 @@ const FLOOR_LOOT_POOLS: Record<number, ItemId[]> = {
   10008: ['fuse', 'filter', 'battery', 'wire', 'medkit', 'scrap_metal'],
   10009: ['battery', 'wire', 'fuse', 'filter', 'medkit', 'scrap_metal'],
   10010: ['battery', 'wire', 'fuse', 'filter', 'medkit', 'scrap_metal'],
+  // 阶层 5：富人特权区的遭遇产出是五段里最「稀有」的一档——医疗包、滤芯、
+  // 保险丝、电池、电线，没有废金属：富人区不拆实验设备，它拆的是合同。
+  // medkit 的位次整体比中产区更靠前（遭遇与 ambush 缴获摸到急救包的概率
+  // 更高），但仍然没有面包——食物由楼层容器保底。池子从六件缩到五件，
+  // 每件的期望掉落率随之上升，这是「更高级」的机械含义。
+  50000: ['medkit', 'filter', 'fuse', 'battery', 'wire'],
+  50001: ['medkit', 'filter', 'fuse', 'battery', 'wire'],
+  50002: ['filter', 'medkit', 'fuse', 'battery', 'wire'],
+  50003: ['filter', 'medkit', 'fuse', 'battery', 'wire'],
+  50004: ['fuse', 'medkit', 'filter', 'battery', 'wire'],
+  50005: ['fuse', 'medkit', 'filter', 'battery', 'wire'],
+  50006: ['battery', 'medkit', 'fuse', 'filter', 'wire'],
+  50007: ['battery', 'medkit', 'fuse', 'filter', 'wire'],
+  50008: ['wire', 'medkit', 'battery', 'fuse', 'filter'],
+  50009: ['wire', 'medkit', 'battery', 'fuse', 'filter'],
+  50010: ['wire', 'medkit', 'battery', 'fuse', 'filter'],
 };
 
 function lootPoolForFloor(floor: number): ItemId[] {

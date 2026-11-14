@@ -1,4 +1,4 @@
-import Phaser from 'phaser';
+import type Phaser from 'phaser';
 import { ROOM_WIDTH } from '../core/constants';
 
 // Per-floor corridor art (docs/05_ART_GUIDE.md §3).
@@ -45,7 +45,7 @@ export interface CorridorContext {
 // palette role or a named mix of two, so a crate, a pipe and the wall behind it
 // all belong to the same value structure.
 import { PALETTE } from './palette.ts';
-import { ENV_WALL_DORM_KEY, ENV_WALL_INDUSTRY_KEY, ENV_WALL_KEY } from './artpack';
+import { ENV_FILES, ENV_WALL_DORM_KEY, ENV_WALL_INDUSTRY_KEY, ENV_WALL_KEY } from './artpack';
 import { LIGHT_DEPTH } from './lighting';
 import { segmentOf } from '../core/segments';
 import { startFxLoop } from './fx';
@@ -425,6 +425,31 @@ export const SEGMENT_TINT: Record<number, { color: number; alpha: number }> = {
   3: { color: PALETTE.clothHigh, alpha: 0.16 }, // industry: cold, chemical
 };
 
+// Tier 4 (中产与商业区, floors 10000-10010) and tier 5 (富人特权区, 50000-50010)
+// wall keys. The prompts are written (floor-100000-ai-ci/10-中产与商业区 and
+// 11-富人特权区); the PNGs are AG-07's to deliver, so the branch is written
+// now and answers with the new key only once the art is actually mapped.
+//
+// Why the indirection instead of returning the key directly: a texture key
+// BootScene never loaded renders as Phaser's green __MISSING placeholder — the
+// failure textureKeys.test.ts was written to catch. Borrowing the slum wall is
+// strictly better than a green box, and it is what the tiers above 1010 have
+// always done.
+//
+// AG-07 handoff, one line each in artpack.ts's ENV_FILES (plain strings, NOT
+// imports from here — artpack is imported BY this file, so importing back would
+// be a module cycle):
+//
+//   'env-wall-commercial': 'wall-commercial.png',
+//   'env-wall-vip':        'wall-vip.png',
+//
+// BootScene loads every ENV_FILES entry, so once the mapping exists the file is
+// loaded and this branch starts returning the new key with no further change.
+// furniture.test.ts already asserts every ENV_FILES entry has a real file on
+// disk, so a mapped-but-missing PNG fails the suite instead of shipping green.
+export const ENV_WALL_COMMERCIAL_KEY = 'env-wall-commercial';
+export const ENV_WALL_VIP_KEY = 'env-wall-vip';
+
 /**
  * Which wall a floor stands in front of. Tiers 2 and 3 have their own art; the
  * slum keeps the original, and anything above 1010 falls back to it until its
@@ -435,10 +460,51 @@ export function wallKeyFor(floor: number): string {
   const tier = segmentOf(floor)?.id;
   if (tier === 2) return ENV_WALL_DORM_KEY;
   if (tier === 3) return ENV_WALL_INDUSTRY_KEY;
+  if (tier === 4) return wallKeyOrOldest(ENV_WALL_COMMERCIAL_KEY);
+  if (tier === 5) return wallKeyOrOldest(ENV_WALL_VIP_KEY);
   return ENV_WALL_KEY;
+}
+
+/** A tier 4/5 wall key once its art is mapped in ENV_FILES, the slum wall until then. */
+function wallKeyOrOldest(key: string): string {
+  return Object.prototype.hasOwnProperty.call(ENV_FILES, key) ? key : ENV_WALL_KEY;
 }
 
 /** The wall tint for a floor, or null when the floor draws its own base. */
 export function corridorTint(floor: number): { color: number; alpha: number } | null {
   return CORRIDOR_TINT[floor] ?? SEGMENT_TINT[segmentOf(floor)?.id ?? 0] ?? null;
+}
+
+// ── the cross-section's neighbour selection ────────────────────────────────
+// GameScene.drawFloor 挑邻居楼层的规则，抽成纯函数：相机纵截面里画谁，是渲染
+// 语义的一部分（站在 100 层时下方画 101/102、上方 99/98 是无内容空洞不画），
+// 值得单独钉住。GameScene.ts:618-632 的循环与这里逐条对应；本模块不 import
+// scene，所以这条规则可以在 Node 里直接测。
+export interface StackNeighbour {
+  floor: number;
+  /** 1 = 紧邻的一层，2 = 隔一层 */
+  distance: number;
+  /** true = 画在玩家上方（更低的楼层号） */
+  isAbove: boolean;
+}
+
+/**
+ * 纵截面要画的邻居楼层：上下各最多 `above`/`below` 层，跳过无模板楼层
+ * （段与段之间的空洞），不越过可玩边界。
+ */
+export function stackNeighbours(
+  floor: number,
+  bounds: { lowest: number; highest: number; above: number; below: number },
+  hasContent: (floor: number) => boolean,
+): StackNeighbour[] {
+  const out: StackNeighbour[] = [];
+  for (let d = 1; d <= bounds.above; d++) {
+    const f = floor - d;
+    if (f >= bounds.lowest && hasContent(f)) out.push({ floor: f, distance: d, isAbove: true });
+  }
+  for (let d = 1; d <= bounds.below; d++) {
+    const f = floor + d;
+    if (f <= bounds.highest && hasContent(f)) out.push({ floor: f, distance: d, isAbove: false });
+  }
+  return out;
 }

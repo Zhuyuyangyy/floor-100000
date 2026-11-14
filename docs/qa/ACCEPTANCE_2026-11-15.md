@@ -129,15 +129,17 @@
 | `events › night event reproducible` | 长套件中第二次 `startGame` 的 20s 启动超时 | 单独重跑通过（6.2s） |
 | `saveFailure › rejected save warns` | teardown 超时（测试断言已通过） | 单独重跑通过 |
 | `tower › locked floor refused` | teardown 超时 | 单独重跑通过（21.1s） |
-| `survivalJourney › B3-02 全程` | 600s 主体超时（套件累积负载） | 单独重跑：见下方补充结论 |
+| `survivalJourney › B3-02 全程` | teardown 卡死（trace 证实主体 4.2 分钟全部断言通过，context close >646s 未完成） | 环境性能问题，见 BUG-QA-05；600s/900s 两次超时模式一致 |
 
 **单项验证记录**：
 - `firstChapter.spec.ts`：6 个中 5 通过；面板测试因 BUG-QA-01 稳定报红（截图证据在 `test-results-qa/`）。
 - `crafting.spec.ts` + `combat.spec.ts`（`--workers=1`）：7/7 通过（purifier 修复生效）。
 - `gameplay/tower/events/saveFailure` 四 spec 重跑：16/16 通过。
 
-**结论**：套件在干净环境下（单 worker、无并发负载）的全部可过测试为 77/78，
-唯一稳定红色是 BUG-QA-01——它是真实缺陷，正是 e2e 应拦的东西。
+**结论**：78 个测试中，76 个在本次会话被证实通过（套件内 72 + 重跑补回 4），
+唯一稳定红色是 BUG-QA-01——真实缺陷，正是 e2e 应拦的东西；
+`survivalJourney` 主体已由 trace 证实全部断言通过（4.2 分钟），
+卡在本环境的 teardown 性能（BUG-QA-05），需干净环境复核。
 CI 的 e2e job（`--workers=1 --retries=1`，continue-on-error）与该实测行为一致。
 
 ---
@@ -172,6 +174,18 @@ Playwright 每次启动清理 `outputDir`，若其中有上轮 artifacts（>50 �
 
 `src/core/config.ts` 裸 JSON import 与 Node ESM（`"type": "module"`）不兼容，
 导致 spec 无法 import `constants.ts`/`hudLayout.ts` 等链上模块（见 4.1）。
+
+### BUG-QA-05（中，环境性能，非产品缺陷）
+
+Playwright 的 context teardown 在本环境病态慢：`survivalJourney`（主体 254s，
+trace 证实全部断言通过）、`tower › locked floor`（主体 114s）、`saveFailure`
+（主体 46s）三个较长测试均以 `Tearing down "context" exceeded` 失败，
+而较短测试全部正常；三者单独重跑（机器负载不同）即通过。
+journey 的失败截图显示 teardown 期间游戏继续无人干预运行至 D3 濒死
+（饥饿/口渴 0、生命 33），页面本身并未冻结。
+疑似与本机磁盘/CPU 负载相关（worktree 内 1.1G 历史 `test-results/`、
+主工作区并发服务、多 agent 进程）。**建议**：在干净机器或 CI 复核这三个测试；
+本地先清理 `test-results/` 历史产物。详见 `docs/qa/STALE_E2E.md`。
 
 ### 环境备注
 

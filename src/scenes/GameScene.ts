@@ -253,6 +253,23 @@ type DirKeys = {
 // up/down exits, lootable containers & ground items, a 12-slot inventory, and
 // consumable use. GameState (session) is the source of truth; this scene only
 // renders and feeds input back through pure logic functions.
+// The two bed rows of a dorm floor, as floor-space x positions.
+//
+// Floor 1's front row is pitched at 96 and clear of the three things already
+// standing on that floor: the cabinet (160), the workbench (480) and the
+// player's own bed (1120). The back row sits half a pitch offset from the front
+// one, which is what stops the two rows reading as one long row.
+const DORM_FRONT_BEDS: readonly number[] = [236, 332, 428, 588, 684, 780, 876, 972];
+const DORM_BACK_BEDS: readonly number[] = [268, 372, 640, 744, 848];
+
+// Floor 2 is the neighbours' dorm and gets the same treatment: the back row is
+// identical, and the front row is one bed wider at the left end. The cabinet
+// that keeps floor 1's first bed at 236 does not exist here, so the only thing
+// to clear on the left is the up stair (40) — hence 140. The right end stops
+// where floor 1's does, because the shelf (1120) and the down stair (1240) sit
+// there instead of the player's bed.
+const NEIGHBOUR_FRONT_BEDS: readonly number[] = [140, ...DORM_FRONT_BEDS];
+
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
   /** The crowbar in the survivor's hand. Follows the attack pose's fist. */
@@ -604,7 +621,14 @@ export class GameScene extends Phaser.Scene {
       this.drawBed();
       this.drawWorkbench();
     }
-    if (floor === NPC_FLOOR) this.drawNpcs();
+    if (floor === NPC_FLOOR) {
+      this.drawNpcs();
+      // The neighbours' dorm gets the same two rows as the player's own floor.
+      // It was the only floor with people in it and no furniture for them:
+      // two NPCs standing in an empty corridor. The beds go in after the NPCs
+      // so the walk sheets (ACTOR_DEPTH) keep drawing over the mattress.
+      this.drawDormBeds(NEIGHBOUR_FRONT_BEDS, DORM_BACK_BEDS);
+    }
     // OVERHAUL: the floor's question marks go up last, above the room.
     this.buildEncounterSpots();
 
@@ -1679,7 +1703,7 @@ export class GameScene extends Phaser.Scene {
 
     // The other beds, with their sleeping roommates. Before this the room was
     // furniture the player uses and nothing that makes it a shared space.
-    this.drawDormBeds();
+    this.drawDormBeds(DORM_FRONT_BEDS, DORM_BACK_BEDS);
 
     // OVERHAUL Art Pass 2: ceiling shadow, baseboard seam, floor gradient and
     // reflections under the lights — the four cues that make a flat side view
@@ -2300,7 +2324,7 @@ export class GameScene extends Phaser.Scene {
   // a lying pose (the walk sheets are 64x96 standing side views) and rotating one
   // would resample it. A torso over lower legs, a fold, a lit edge and a head
   // read as "someone sleeping" at this size, which is the whole job.
-  private drawDormBeds(): void {
+  private drawDormBeds(front: readonly number[], back: readonly number[]): void {
     const floorY = FLOOR_HEIGHT - 60; // the front row's floor line
     const backY = floorY - 26; // the back row stands further from the camera
     const g = this.add.graphics().setDepth(4);
@@ -2316,17 +2340,13 @@ export class GameScene extends Phaser.Scene {
       [PALETTE.cloth, PALETTE.clothDeep],
     ];
 
-    // Back row first, so the front row overlaps it. Half a pitch offset from the
-    // front row, which is what stops the two rows reading as one long row.
-    const back = [268, 372, 640, 744, 848];
+    // Back row first, so the front row overlaps it.
     back.forEach((x, i) => {
       const [blanket, fold] = cloths[i % cloths.length];
       this.drawBed3D(backG, x, backY, { blanket, fold, scale: 0.72, sleeper: true });
     });
 
-    // Front row: clear of the cabinet (160), the workbench (480) and the player's
-    // own bed (1120). Pitch 96 so the row is crowded - beds nearly touching.
-    const front = [236, 332, 428, 588, 684, 780, 876, 972];
+    // Pitch 96, so the row is crowded - beds nearly touching.
     front.forEach((x, i) => {
       const [blanket, fold] = cloths[i % cloths.length];
       this.drawBed3D(g, x, floorY, { blanket, fold, scale: 1, sleeper: true });
@@ -2336,12 +2356,18 @@ export class GameScene extends Phaser.Scene {
       // placed against the bed's own top (floorY-58 for a sleeper), not against a
       // fixed offset from the floor: a taller bed pushed the label into the
       // sleeper's hair.
+      // Depth 3: above the corridor's wall dressing (1-2), below the front row's
+      // own beds (4). On floor 1 nothing sits at 3, so this changes nothing
+      // there; on floor 2 the conduits and signage would otherwise print
+      // straight through these labels.
       const label = this.add
         .text(x + 41, floorY - 64, '室友', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(TEXT.dim) })
-        .setOrigin(0.5);
+        .setOrigin(0.5)
+        .setDepth(3);
       const z = this.add
         .text(x + 72, floorY - 52, 'Z z', { fontFamily: FONT_FAMILY, fontSize: '16px', color: hex(TEXT.dim) })
-        .setOrigin(0.5);
+        .setOrigin(0.5)
+        .setDepth(3);
       this.floorObjects.push(label, z);
       this.dormSleepers.push({ z, baseY: z.y, phase: i * 1.7 });
     });
@@ -2350,7 +2376,8 @@ export class GameScene extends Phaser.Scene {
     back.forEach((x, i) => {
       const z = this.add
         .text(x + 36, backY - 38, 'Z z', { fontFamily: FONT_FAMILY, fontSize: '14px', color: hex(TEXT.disabledDeep) })
-        .setOrigin(0.5);
+        .setOrigin(0.5)
+        .setDepth(3);
       this.floorObjects.push(z);
       this.dormSleepers.push({ z, baseY: z.y, phase: 3.4 + i * 1.3 });
     });
@@ -3244,7 +3271,13 @@ export class GameScene extends Phaser.Scene {
       // Same contact shadow as the player, so an NPC stands on the floor rather
       // than hovering a few pixels above it.
       const shadow = addContactShadow(this, npc.x, PLAYER_FEET_Y + 2, 26, 2, 0.5);
-      const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5);
+      // ACTOR_DEPTH, not the default 0: the front row of dorm beds stands at
+      // depth 4 and this label sits at FLOOR_HEIGHT-68, which is inside the
+      // bed's front face - at depth 0 the mattress printed over the name.
+      const nameLabel = this.add
+        .text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) })
+        .setOrigin(0.5)
+        .setDepth(ACTOR_DEPTH);
       this.floorObjects.push(...shadow, sprite, nameLabel);
     }
   }

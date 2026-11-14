@@ -22,7 +22,14 @@ const PANEL_FILL_ALPHA = 1;
 // The pieces come from the riveted metal panel in the art pack (see
 // tools/build-artpack.mjs). Its corner brackets are ~28px across, so that is the
 // slice; the edge strips are 8px of flat bar between them.
-const PANEL_SLICE = 28;
+//
+// Exported so a caller that resizes a panel after it was built (the dialogue
+// panel grows for a long AI opening line) can re-place the parts without
+// re-creating them — buildPanel returns [fill x PANEL_FILL_BANDS, frame x
+// PANEL_FRAME_PIECES] in that order, corners first then the four edges.
+export const PANEL_SLICE = 28;
+export const PANEL_FILL_BANDS = 5;
+export const PANEL_FRAME_PIECES = 8;
 
 export type PanelAccent = 'green' | 'yellow';
 
@@ -148,7 +155,7 @@ export function buildPanel(
   // brightness from a raised header tone down to the base surface breaks the
   // slab into a gradient you can feel without a smooth blur (which would break
   // the pixel look), and it costs four extra rectangles.
-  const FILL_BANDS = 5;
+  const FILL_BANDS = PANEL_FILL_BANDS;
   const fill: Phaser.GameObjects.Rectangle[] = [];
   for (let i = 0; i < FILL_BANDS; i++) {
     const t0 = i / FILL_BANDS;

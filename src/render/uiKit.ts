@@ -175,7 +175,13 @@ export function drawStatBar(
  * A panel's header strip: a raised band with the title on it and a hairline
  * under it. Every panel gets one, which is what gives the interface a
  * consistent top edge instead of nine differently-shaped boxes.
+ *
+ * The height is exported because a panel that resizes after it was built (the
+ * dialogue panel grows for a long AI opening line) has to re-place the strip,
+ * and the number cannot be re-derived from the objects it returns.
  */
+export const PANEL_HEADER_H = 20;
+
 export function buildPanelHeader(
   scene: Phaser.Scene,
   left: number,
@@ -187,7 +193,7 @@ export function buildPanelHeader(
   titleX?: number,
 ): UiObject[] {
   const out: UiObject[] = [];
-  const h = 20;
+  const h = PANEL_HEADER_H;
   // The strip itself.
   out.push(scene.add.rectangle(left, top, w, h, UI.surfaceRaised).setOrigin(0, 0).setScrollFactor(0).setAlpha(0.96).setDepth(depth));
   // A 2px accent edge on the left, so the header has a leading mark.

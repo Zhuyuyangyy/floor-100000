@@ -4,6 +4,26 @@ import { expect, test, type Page } from '@playwright/test';
 // the current-floor highlight, the no-teleport rule, and the dev-only fixtures
 // (?devfloor=, ?devwin=). Reads the dev-only __PHASER_TOWER__ handle so the
 // assertions are about real nav state, not pixels.
+//
+// The tower's shape is data, not a literal: the sector count, the row pitch and
+// the summit all come from the same modules the map itself renders from, so a
+// tower that grows again does not silently invalidate this spec.
+
+import { SECTOR_COUNT, TOTAL_FLOORS, sectorOf, sectorRange } from '../src/core/tower';
+import { SECTOR_COLS, overviewHeight } from '../src/systems/TowerNav';
+import { PLAYABLE_SEGMENTS } from '../src/core/segments';
+
+const SUMMIT = TOTAL_FLOORS; // the top of the tower
+const START_FLOOR = PLAYABLE_SEGMENTS[0].from; // where every run begins
+const LAST_SECTOR = SECTOR_COUNT - 1; // the summit's sector
+// The retired dev dorm scene, still bootable behind ?devfloor=. Its floor is the
+// tower's own summit (constants.ts DEV_TEST_FLOORS[0]) — read from the tower
+// module rather than from constants, whose config.ts JSON import Node's ESM
+// loader rejects outside Vite (this package is "type": "module").
+const DEV_FLOOR = TOTAL_FLOORS;
+// A fixture floor near the top, derived rather than written: the second test
+// needs a sector far from the one the player starts in.
+const HIGH_FLOOR = TOTAL_FLOORS - 5000;
 
 interface State {
   currentFloor: number;
@@ -171,7 +191,9 @@ test('M opens the tower overview centred on the sector the player is in', async 
   const view = await readView(page);
   expect(view.top).toBeLessThanOrEqual(0);
   expect(view.top + view.height).toBeGreaterThanOrEqual(view.content);
-  expect(view.content).toBeLessThanOrEqual(360); // 100 rows inside the canvas
+  // One row per sector at the overview pitch: the content height is the map
+  // model's own number, so it cannot rot when the sectors change.
+  expect(view.content).toBe(overviewHeight());
   await page.screenshot({ path: 'e2e/screenshots/20-tower-overview.png' });
 
   expect(await hasVisibleText(page, '塔楼总览')).toBe(true);
@@ -180,8 +202,8 @@ test('M opens the tower overview centred on the sector the player is in', async 
   // and the summit they are climbing toward. The summit used to be unmarked — at
   // 3px a row the last sector is indistinguishable from the nine above it, and it
   // is not even in the every-tenth label set.
-  expect(await hasVisibleText(page, '起点 第1层')).toBe(true);
-  expect(await hasVisibleText(page, '终点 第100000层')).toBe(true);
+  expect(await hasVisibleText(page, `起点 第${START_FLOOR}层`)).toBe(true);
+  expect(await hasVisibleText(page, `终点 第${SUMMIT}层`)).toBe(true);
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
 
@@ -189,12 +211,12 @@ test('M opens the tower overview centred on the sector the player is in', async 
 // it, not just when they start in sector 0.
 test('the whole tower is visible from any starting sector', async ({ page }) => {
   await startGame(page, 42);
-  await parkAt(page, 95000, [95000]);
+  await parkAt(page, HIGH_FLOOR, [HIGH_FLOOR]);
   await page.keyboard.press('M');
   await waitForScene(page, 'TowerOverview');
 
   const nav = await readNav(page);
-  expect(nav.sector).toBe(94);
+  expect(nav.sector).toBe(sectorOf(HIGH_FLOOR));
   const view = await readView(page);
   expect(view.top).toBeLessThanOrEqual(0);
   expect(view.top + view.height).toBeGreaterThanOrEqual(view.content);
@@ -216,7 +238,8 @@ test('the overview drills down to a sector and a floor, and ESC walks back up', 
   expect(nav.level).toBe('sector');
   expect(nav.sector).toBe(0);
   expect(nav.cursor).toBe(1);
-  expect(await hasVisibleText(page, '1–1000 层')).toBe(true);
+  const firstSector = sectorRange(0);
+  expect(await hasVisibleText(page, `${firstSector.from}–${firstSector.to} 层`)).toBe(true);
   // The frontier the cells are coloured from: 1..3 unlocked, so cell 3 is the
   // current floor and 1..2 read as explored.
   expect((await readAccess(page)).highestUnlocked).toBe(3);
@@ -272,9 +295,9 @@ test('the keyboard cursor moves across the sector grid', async ({ page }) => {
   await tap(page, 'ArrowRight');
   expect((await readNav(page)).cursor).toBe(2);
   await tap(page, 'ArrowDown');
-  expect((await readNav(page)).cursor).toBe(22); // one full row of 20
+  expect((await readNav(page)).cursor).toBe(2 + SECTOR_COLS); // one full grid row down
   await tap(page, 'ArrowLeft');
-  expect((await readNav(page)).cursor).toBe(21);
+  expect((await readNav(page)).cursor).toBe(1 + SECTOR_COLS);
   await tap(page, 'ArrowUp');
   expect((await readNav(page)).cursor).toBe(1);
 });
@@ -312,14 +335,14 @@ test('selecting a floor is not entering it: a locked floor is refused', async ({
   await tap(page, 'Escape'); // -> sector
   await tap(page, 'Escape'); // -> overview
   expect((await readNav(page)).cursor).toBe(0); // sector 0 is where we were
-  await tapUntil(page, 'ArrowDown', 99); // clamped at the last sector
-  expect((await readNav(page)).cursor).toBe(99);
-  await tap(page, 'Enter'); // -> sector 99 (floors 99001..100000)
-  await tapUntil(page, 'ArrowRight', 99020); // last column of the first row
-  await tapUntil(page, 'ArrowDown', 100000); // clamped at the summit
-  expect((await readNav(page)).cursor).toBe(100000);
+  await tapUntil(page, 'ArrowDown', LAST_SECTOR); // clamped at the last sector
+  expect((await readNav(page)).cursor).toBe(LAST_SECTOR);
+  await tap(page, 'Enter'); // -> the last sector (floors 99001..100000)
+  await tapUntil(page, 'ArrowRight', sectorRange(LAST_SECTOR).from + SECTOR_COLS - 1); // last column of the first row
+  await tapUntil(page, 'ArrowDown', SUMMIT); // clamped at the summit
+  expect((await readNav(page)).cursor).toBe(SUMMIT);
   await tap(page, 'Enter');
-  expect((await readNav(page)).floor).toBe(100000);
+  expect((await readNav(page)).floor).toBe(SUMMIT);
   await tap(page, 'Enter');
   await page.waitForTimeout(200);
   expect((await readState(page)).currentFloor).toBe(1); // never teleported to the summit
@@ -457,8 +480,8 @@ test('?devwin=1 still runs the retired day-8 victory fixture', async ({ page }) 
   await page.screenshot({ path: 'e2e/screenshots/06-win.png' });
 });
 
-test('?devfloor=100000 starts the retired dev dorm scene and nothing else', async ({ page }) => {
-  await page.goto('/?seed=42&devfloor=100000');
+test(`?devfloor=${DEV_FLOOR} starts the retired dev dorm scene and nothing else`, async ({ page }) => {
+  await page.goto(`/?seed=42&devfloor=${DEV_FLOOR}`);
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter');
   // A new run lands on the character pick first.
@@ -478,14 +501,14 @@ test('?devfloor=100000 starts the retired dev dorm scene and nothing else', asyn
     if (started) break;
   }
   await waitForScene(page, 'Game');
-  expect((await readState(page)).currentFloor).toBe(100000);
+  expect((await readState(page)).currentFloor).toBe(DEV_FLOOR);
 
   // A normal run never lands there.
   await startGame(page, 42);
-  expect((await readState(page)).currentFloor).toBe(1);
+  expect((await readState(page)).currentFloor).toBe(START_FLOOR);
 
   // A malformed devfloor is ignored rather than guessed at.
-  await page.goto('/?seed=42&devfloor=1');
+  await page.goto(`/?seed=42&devfloor=${START_FLOOR}`);
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter');
   // A new run lands on the character pick first.
@@ -505,7 +528,7 @@ test('?devfloor=100000 starts the retired dev dorm scene and nothing else', asyn
     if (started) break;
   }
   await waitForScene(page, 'Game');
-  expect((await readState(page)).currentFloor).toBe(1);
+  expect((await readState(page)).currentFloor).toBe(START_FLOOR);
 });
 
 test('the pause menu reaches the tower map', async ({ page }) => {

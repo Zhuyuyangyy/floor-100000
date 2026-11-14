@@ -1,8 +1,15 @@
 import { expect, test, type Page } from '@playwright/test';
+import { PLAYABLE_SEGMENTS } from '../src/core/segments';
 
 // B3-03: actions cost game time, so a day is a budget. Before this, one full
 // sweep of five floors cost 4.5 game hours and the player idled through the
 // other 9.75. These tests assert the clock actually moves when you act.
+
+const FIRST_SEGMENT = PLAYABLE_SEGMENTS[0];
+// A climb of five floors, counted from the segment's own bottom rather than
+// written as "floor 5": the route length is the design choice, the start is the
+// tower's.
+const CLIMB_TARGET = Math.min(FIRST_SEGMENT.from + 4, FIRST_SEGMENT.to);
 
 interface State {
   day: number;
@@ -122,7 +129,7 @@ test('the action cost is visible to the player', async ({ page }) => {
   expect(shown, 'the flash should name the time cost').toContain('分钟');
 });
 
-test('a climb from floor 1 to floor 5 costs a real slice of the day', async ({ page }) => {
+test(`a climb from floor ${FIRST_SEGMENT.from} to floor ${CLIMB_TARGET} costs a real slice of the day`, async ({ page }) => {
   test.setTimeout(300_000);
   await startGame(page, 42);
   const before = await readState(page);
@@ -134,12 +141,12 @@ test('a climb from floor 1 to floor 5 costs a real slice of the day', async ({ p
   // descent. Climb for real — the walk is most of the cost, and that is the
   // honest number.
   await searchFloorOneCabinet(page);
-  for (let floor = 2; floor <= 5; floor++) await climbOneFloor(page, floor);
+  for (let floor = FIRST_SEGMENT.from + 1; floor <= CLIMB_TARGET; floor++) await climbOneFloor(page, floor);
 
   const after = await readState(page);
-  expect(after.currentFloor).toBe(5);
+  expect(after.currentFloor).toBe(CLIMB_TARGET);
   const cost = after.gameMinuteOfDay - before.gameMinuteOfDay;
-  console.log(`[climb] floor 1 -> 5 with one search: ${Math.round(cost)} game minutes`);
+  console.log(`[climb] floor ${FIRST_SEGMENT.from} -> ${CLIMB_TARGET} with one search: ${Math.round(cost)} game minutes`);
   // Walking 4 stairwells plus one search must already be a meaningful slice of
   // the 14 waking hours, and must not silently bill a whole day.
   // Vertical shafts shorten the corridor route while still charging a real

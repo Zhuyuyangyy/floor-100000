@@ -4,6 +4,13 @@ import { expect, test, type Page } from '@playwright/test';
 // lights the night, and the purifier converts dirty water. State is read (and,
 // for setup, mutated) via the dev-only window.__PHASER_SESSION__ handle.
 
+// The workbench lists every recipe and then the purify entry (GameScene
+// craftEntries). The pass chain grew RECIPES from three to eight, which moved
+// purify from the 4th row to the 9th — a pinned press count then crafted a
+// pass recipe instead and the test failed on someone else's data. Navigation
+// is by row label, and the press budget is the recipe count plus slack.
+import { RECIPES } from '../src/data/recipes';
+
 interface State {
   status: string;
   currentFloor: number;
@@ -69,7 +76,7 @@ async function nightAlpha(page: Page): Promise<number> {
 // Press ArrowDown until the arrow marker lands on the option starting with
 // `prefix` (self-correcting against a dropped synthetic keypress).
 async function navTo(page: import('@playwright/test').Page, prefix: string): Promise<void> {
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < RECIPES.length + 2; i++) {
     const onTarget = await page.evaluate((p) => {
       const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ name?: string; type: string; text?: string; visible: boolean; y: number; texture?: { key?: string } }> } } | null } } }).__PHASER_GAME__;
       const list = g?.scene.getScene('Game')?.children.list ?? [];
@@ -183,15 +190,12 @@ test('the purifier converts dirty water to clean water', async ({ page }) => {
   });
   const cleanBefore = await count(page, 'clean_water');
 
-  // Open workbench; the purify action is the 4th entry (after 3 recipes).
-  // Separate the presses: a synthetic keypress can be dropped, and landing on a
-  // recipe instead of purify would make this test assert the wrong thing.
+  // Open workbench; the purify action sits after every recipe. Navigate by the
+  // row's label rather than a press count: the recipe list is data, and a count
+  // pinned to it rots the moment a recipe is added.
   await page.keyboard.press('C');
   await page.waitForTimeout(150);
-  for (let i = 0; i < 3; i++) {
-    await page.keyboard.press('ArrowDown');
-    await page.waitForTimeout(120);
-  }
+  await navTo(page, '净化');
   await page.keyboard.press('Enter');
   // The flash lives for 1.6s, so read it before the state assertions — several
   // round trips later it is gone.

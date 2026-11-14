@@ -3,6 +3,15 @@ import { expect, test, type Page } from '@playwright/test';
 // P0-02 interaction test: real keyboard movement, a real E floor switch, and a
 // no-duplicate-sprite check across scene restarts. Reads GameState through the
 // dev-only window.__PHASER_SESSION__ handle.
+//
+// The floors are the tower's own: the run begins at the first segment's bottom
+// and the E switch lands one above it, so a tower that moves its start moves
+// this spec with it.
+
+import { PLAYABLE_SEGMENTS } from '../src/core/segments';
+
+const START_FLOOR = PLAYABLE_SEGMENTS[0].from;
+const UP_FLOOR = START_FLOOR + 1;
 
 async function readState(page: Page): Promise<{ currentFloor: number; x: number }> {
   return page.evaluate(() => {
@@ -67,7 +76,7 @@ test('player walks, switches floor via E, and never duplicates', async ({ page }
   }, undefined, { timeout: 10_000 });
 
   const start = await readState(page);
-  expect(start.currentFloor).toBe(1);
+  expect(start.currentFloor).toBe(START_FLOOR);
 
   // Walk right.
   await page.keyboard.down('ArrowRight');
@@ -93,24 +102,24 @@ test('player walks, switches floor via E, and never duplicates', async ({ page }
   expect((await readCameraAndPlayerLight(page)).scrollX).toBe(0);
 
   await page.keyboard.press('E');
-  await page.waitForFunction(() => {
+  await page.waitForFunction((floor) => {
     const s = window.__PHASER_SESSION__?.getState();
     const g = window.__PHASER_GAME__ as unknown as { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; y?: number; texture?: { key: string } }> } } | null } };
     const player = g.scene.getScene('Game')?.children.list.find((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-'));
-    return !!s && s.currentFloor === 1 && typeof player?.y === 'number' && player.y < 160;
-  }, undefined, { timeout: 1000 });
-  expect((await readState(page)).currentFloor).toBe(1); // commits only on landing
-  await page.waitForFunction(() => {
+    return !!s && s.currentFloor === floor && typeof player?.y === 'number' && player.y < 160;
+  }, START_FLOOR, { timeout: 1000 });
+  expect((await readState(page)).currentFloor).toBe(START_FLOOR); // commits only on landing
+  await page.waitForFunction((floor) => {
     const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => { currentFloor: number } | null } }).__PHASER_SESSION__?.getState();
     const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; texture?: { key: string } }> } } | null } } }).__PHASER_GAME__;
     const list = g?.scene.getScene('Game')?.children.list ?? [];
     const hasPlayer = list.some((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-'));
-    return !!s && s.currentFloor === 2 && hasPlayer;
-  }, undefined, { timeout: 10_000 });
+    return !!s && s.currentFloor === floor && hasPlayer;
+  }, UP_FLOOR, { timeout: 10_000 });
 
   const afterSwitch = await readState(page);
-  expect(afterSwitch.currentFloor).toBe(2);
-  expect(afterSwitch.x).toBe(40); // landed at floor 2's left stair shaft
+  expect(afterSwitch.currentFloor).toBe(UP_FLOOR);
+  expect(afterSwitch.x).toBe(40); // landed at the up floor's left stair shaft
   const landedView = await readCameraAndPlayerLight(page);
   expect(landedView.scrollX).toBe(0);
   expect(landedView.lightX).toBe(40);

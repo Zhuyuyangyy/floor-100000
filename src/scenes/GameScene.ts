@@ -88,16 +88,18 @@ import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
-import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
+import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, PANEL_FILL_BANDS, PANEL_FRAME_PIECES, PANEL_SLICE, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import {
   FONT_FAMILY,
   HUD_FOOT_H,
+  PANEL_HEADER_H,
   STAT_COLORS,
   TYPE,
   UI,
   buildListRow,
   buildPanelHeader,
   buildPanelWell,
+  drawLine,
   drawStatBar,
 } from '../render/uiKit';
 import { ENV_FLOOR_KEY, portraitKey } from '../render/artpack';
@@ -108,8 +110,9 @@ import {
   DIALOG_PANEL_W,
   DIALOG_PORTRAIT_SIZE,
   DIALOG_PORTRAIT_TOP,
-  DIALOG_ROW_PITCH,
+  DIALOG_ROW_COUNT,
   DIALOG_ROW_H,
+  DIALOG_ROW_PITCH,
   DIALOG_ROWS_TOP,
   DIALOG_TEXT_LEFT,
   DIALOG_TEXT_W,
@@ -117,6 +120,7 @@ import {
   DIALOG_WELL_LEFT,
   DIALOG_WELL_TOP,
   DIALOG_WELL_W,
+  dialogueGeometry,
 } from '../render/dialogueLayout';
 import {
   ATTACK_FRAME_START,
@@ -210,6 +214,37 @@ const SLEEPING_FLOORS = new Set([101, 104, 109]);
 
 /** Container name size, shared by the text and its backing plate. */
 const CONTAINER_LABEL_FONT = 22;
+/**
+ * How far the container name drops from the prop's base (FLOOR_HEIGHT - 68).
+ *
+ * The old anchor was `propTop - 8`, which measured as a plate at y 53..83: it
+ * hugged the full-width structural band at 52..78 (so the name read as part of
+ * the wall, not part of the crate) and its bottom edge dipped ~4px onto the
+ * prop's own art. 36 puts the plate at y 81..111 — on the prop's face, clear of
+ * the band — and lands it on exactly the band the stair labels already use
+ * (FLOOR_HEIGHT - 104 = 96), so every nameplate on the floor shares one line.
+ */
+const CONTAINER_LABEL_DROP = 36;
+/**
+ * The player-proximity fade, in px before INTERACT_DISTANCE.
+ *
+ * The label band crosses the player's head and shoulders (figure spans
+ * y 64..160), and the player stands AT the container's x, so no position keeps
+ * the plate off the figure — measured overlap at the old spot: 19px vertically
+ * across the plate's full width. The name yields instead of moving: it fades
+ * out over the last 24px of approach and back in on the way out, which is also
+ * when the foot bar starts reading "按 E 打开 储物柜" — the name is on screen
+ * exactly when it is actionable, and never under the player's chin.
+ * Distance-proportional rather than a hard cut so walking past does not pop.
+ */
+const CONTAINER_LABEL_FADE_PX = 24;
+/**
+ * One fade listener per scene, replaced on every floor build. Registering per
+ * build without removing the previous one stacks listeners that all drive the
+ * NEW floor's labels from stale closures; clearFloor() destroys the objects but
+ * nothing would remove the handler. A WeakMap so a scene restart cannot leak.
+ */
+const CONTAINER_LABEL_FADERS = new WeakMap<Phaser.Scene, () => void>();
 
 const LIFT_X = 1165;
 const LIFT_REACH = 30;
@@ -440,6 +475,18 @@ export class GameScene extends Phaser.Scene {
   private dialogueOptions: Phaser.GameObjects.Text[] = [];
   private dialogueOptionIcons: Phaser.GameObjects.Image[] = [];
   private dialogueMarker!: Phaser.GameObjects.Image;
+  // Re-layout handles for the adaptive panel. The well, the four rows, the
+  // footer and the panel's own skin are all built once at the BASE geometry and
+  // then re-placed per message by refreshDialogue (dialogueGeometry) — never
+  // rebuilt, because destroying and re-adding them per keystroke is what made
+  // the dialogue flicker before the geometry was extracted.
+  /** buildPanel's return: [fill x PANEL_FILL_BANDS, frame x PANEL_FRAME_PIECES]. */
+  private dialoguePanelParts: PanelObject[] = [];
+  /** buildPanelHeader's return: [strip, accent rule, title text, hairline graphics]. */
+  private dialogueHeaderParts: PanelObject[] = [];
+  private dialogueWellFill!: Phaser.GameObjects.Rectangle;
+  private dialogueWellEdge!: Phaser.GameObjects.Graphics;
+  private dialogueFooter!: Phaser.GameObjects.Text;
 
   private pauseOpen = false;
   private pauseObjects: PanelObject[] = [];
@@ -2148,9 +2195,6 @@ export class GameScene extends Phaser.Scene {
       // INTERACT_DISTANCE.
       this.floorObjects.push(...addContactShadow(this, c.x, y, 44, 2, 0.45));
       const box = this.add.image(c.x, y - 4, key ?? '').setOrigin(0.5, 1);
-      // The props are ~80px tall now rather than 16-32, so the label has to sit
-      // above the prop instead of at a fixed offset from the floor line — at the
-      // old spot it would be printed straight across the middle of the crate.
       // A backing plate behind the name. The wall art is a busy grid of pinned
       // notices and service pipes, and 22px text straight on top of it reads as
       // one more rectangle on the wall rather than as a name — worst on the floors
@@ -2160,7 +2204,13 @@ export class GameScene extends Phaser.Scene {
       // scene is insertion order, and moveBelow() did not survive (the plate drew
       // over its own text). The width is a rough guess — one em per glyph — and is
       // corrected to the measured text width immediately after.
-      const labelY = y - 4 - box.displayHeight - 8;
+      // Position: a fixed drop from the prop's base (CONTAINER_LABEL_DROP), not a
+      // fixed offset from the floor line and not an offset from the prop's top.
+      // The floor-line anchor printed the name across the middle of the crate;
+      // the prop-top anchor floated it at y 53..83, hugging the structural band
+      // above the props (see the constant's note). The base anchor puts every
+      // name on its prop's face and on the stair labels' band.
+      const labelY = y - 4 - CONTAINER_LABEL_DROP;
       // Sized from the text, not from label.width: the pixel font is still loading
       // when the floor is built, so Text.width comes back as a placeholder and the
       // plate ends up narrower than its own label (the text then spills past the
@@ -2190,6 +2240,24 @@ export class GameScene extends Phaser.Scene {
       this.floorObjects.push(box, plate, label);
       this.setContainerEmptyVisual(c.id, c.items.length === 0);
     }
+    // The proximity fade, registered once per floor build and replaced each
+    // time (see CONTAINER_LABEL_FADERS). Runs on the scene's UPDATE event so it
+    // reads the player's position after this frame's movement, and the WeakMap
+    // guarantees exactly one live listener however many floors the run visits.
+    const fadeLabels = (): void => {
+      const px = getGame().player.x;
+      for (const c of this.floorView.containers) {
+        const obj = this.containerObjs.get(c.id);
+        if (!obj) continue;
+        const a = Phaser.Math.Clamp((Math.abs(px - c.x) - INTERACT_DISTANCE) / CONTAINER_LABEL_FADE_PX, 0, 1);
+        obj.label.setAlpha(a);
+        obj.plate.setAlpha(a * 0.94);
+      }
+    };
+    const previousFader = CONTAINER_LABEL_FADERS.get(this);
+    if (previousFader) this.events.off(Phaser.Scenes.Events.UPDATE, previousFader);
+    CONTAINER_LABEL_FADERS.set(this, fadeLabels);
+    this.events.on(Phaser.Scenes.Events.UPDATE, fadeLabels);
   }
 
   private setContainerEmptyVisual(id: string, empty: boolean): void {
@@ -3005,13 +3073,19 @@ export class GameScene extends Phaser.Scene {
     const top = cy - panelH / 2;
 
     const depth = PANEL_DEPTH.game.dialogue;
-    this.dialogueObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
+    // The skin is captured, not just pushed: refreshDialogue re-places these
+    // parts when a long AI opening line grows the panel (dialogueGeometry).
+    this.dialoguePanelParts = buildPanel(this, cx, cy, panelW, panelH, 'green', depth);
+    this.dialogueObjects.push(...this.dialoguePanelParts);
     // OVERHAUL UI: the same header strip every other panel uses, with the NPC's
     // name on it, and the message in an inset well so speech reads as speech
     // rather than as more body text.
     // Empty header title on purpose: the NPC's name is the header, and drawing a
     // static '对话' underneath it printed the two on top of each other.
-    this.dialogueObjects.push(...buildPanelHeader(this, left, top, panelW, '', UI.good, depth + 5));
+    // The strip is captured like the skin: the panel grows around it, so the
+    // strip has to move with the panel's top edge or it detaches from the frame.
+    this.dialogueHeaderParts = buildPanelHeader(this, left, top, panelW, '', UI.good, depth + 5);
+    this.dialogueObjects.push(...this.dialogueHeaderParts);
     // Create with placeholder content so each text's canvas/frame exists up front
     // (setText on a never-rendered empty text throws in Phaser 4).
     this.dialogueTitle = this.add
@@ -3032,11 +3106,12 @@ export class GameScene extends Phaser.Scene {
       .setDepth(depth + 6);
     this.dialogueObjects.push(this.dialoguePortraitFrame, this.dialoguePortrait);
     // The speech well starts a full DIALOG_TEXT_GAP right of the face and ends
-    // DIALOG_TEXT_RIGHT_PAD left of the panel edge, and is tall enough for the
-    // two wrapped lines the longest authored line needs.
-    this.dialogueObjects.push(
-      ...buildPanelWell(this, left + DIALOG_WELL_LEFT, top + DIALOG_WELL_TOP, DIALOG_WELL_W, DIALOG_WELL_H, depth + 5),
-    );
+    // DIALOG_TEXT_RIGHT_PAD left of the panel edge. Built at the base two-line
+    // height; refreshDialogue resizes it per message from dialogueGeometry().
+    const wellParts = buildPanelWell(this, left + DIALOG_WELL_LEFT, top + DIALOG_WELL_TOP, DIALOG_WELL_W, DIALOG_WELL_H, depth + 5);
+    this.dialogueWellFill = wellParts[0] as Phaser.GameObjects.Rectangle;
+    this.dialogueWellEdge = wellParts[1] as Phaser.GameObjects.Graphics;
+    this.dialogueObjects.push(...wellParts);
     // dialogueTitle MUST be in the list: closeDialogue() hides everything in it,
     // and a name left out of the list stays on screen after the panel closes.
     this.dialogueObjects.push(this.dialogueTitle);
@@ -3059,7 +3134,7 @@ export class GameScene extends Phaser.Scene {
     this.dialogueObjects.push(this.dialogueMessage);
 
     this.dialogueBands = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < DIALOG_ROW_COUNT; i++) {
       const rowY = top + DIALOG_ROWS_TOP + i * DIALOG_ROW_PITCH;
       // A selection band per row, the same language as every other list: a wash
       // plus a 2px accent rule. Toggled in refreshDialogue.
@@ -3080,6 +3155,7 @@ export class GameScene extends Phaser.Scene {
       .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5)
       .setDepth(depth + 7);
+    this.dialogueFooter = footer;
     this.dialogueObjects.push(footer, this.dialogueMarker);
 
     applyPanelDepth(this.dialogueObjects, PANEL_DEPTH.game.dialogue);
@@ -3228,6 +3304,77 @@ export class GameScene extends Phaser.Scene {
     // the prefix is the only translation needed.
     this.dialoguePortrait.setTexture(portraitKey(`npc_${d.npc}` as CharacterKey));
     this.dialogueMessage.setText(d.message || '……');
+
+    // ── adaptive layout ────────────────────────────────────────────────────
+    // The well's height, the rows under it and the panel around both are
+    // computed from the message's wrapped line count (dialogueGeometry), so an
+    // AI opening line of up to 60 characters — five lines at this width — grows
+    // the panel instead of printing over the option rows. Re-place only: the
+    // objects were built once in buildDialoguePanel at the base geometry, and
+    // destroying them per keystroke is what made the dialogue flicker.
+    const geo = dialogueGeometry(d.message || '……', TYPE.body);
+    const { width, height } = this.viewSize();
+    const cx = width / 2;
+    const left = cx - DIALOG_PANEL_W / 2;
+    const top = height / 2 - geo.panelH / 2;
+    // The header strip rides the panel's top edge: strip, accent rule, (empty)
+    // title and hairline, in buildPanelHeader's return order. The hairline is a
+    // Graphics, so it is cleared and re-drawn rather than moved.
+    const [hStrip, hAccent, hTitle, hLine] = this.dialogueHeaderParts as [
+      Phaser.GameObjects.Rectangle,
+      Phaser.GameObjects.Rectangle,
+      Phaser.GameObjects.Text,
+      Phaser.GameObjects.Graphics,
+    ];
+    hStrip.setPosition(left, top).setSize(DIALOG_PANEL_W, PANEL_HEADER_H);
+    hAccent.setPosition(left, top);
+    hTitle.setPosition(left + 10, top + PANEL_HEADER_H / 2);
+    hLine.clear();
+    drawLine(hLine, left + 2, top + PANEL_HEADER_H - 1, DIALOG_PANEL_W - 2, UI.good, 0.7);
+    // The skin: five stepped fill bands then eight frame pieces (corners first,
+    // then top/bottom/left/right edges), in buildPanel's return order.
+    const bandH = geo.panelH / PANEL_FILL_BANDS;
+    this.dialoguePanelParts.slice(0, PANEL_FILL_BANDS).forEach((part, i) => {
+      const band = part as Phaser.GameObjects.Rectangle;
+      band.setPosition(cx, top + bandH * (i + 0.5));
+      band.setSize(DIALOG_PANEL_W, bandH + 1);
+    });
+    const frame = this.dialoguePanelParts.slice(PANEL_FILL_BANDS, PANEL_FILL_BANDS + PANEL_FRAME_PIECES) as Phaser.GameObjects.Image[];
+    const [fTL, fTR, fBL, fBR, fTop, fBottom, fLeft, fRight] = frame;
+    const right = left + DIALOG_PANEL_W;
+    const bottom = top + geo.panelH;
+    fTL.setPosition(left, top);
+    fTR.setPosition(right - PANEL_SLICE, top);
+    fBL.setPosition(left, bottom - PANEL_SLICE);
+    fBR.setPosition(right - PANEL_SLICE, bottom - PANEL_SLICE);
+    fTop.setPosition(left + PANEL_SLICE, top).setDisplaySize(DIALOG_PANEL_W - PANEL_SLICE * 2, PANEL_SLICE);
+    fBottom.setPosition(left + PANEL_SLICE, bottom - PANEL_SLICE).setDisplaySize(DIALOG_PANEL_W - PANEL_SLICE * 2, PANEL_SLICE);
+    fLeft.setPosition(left, top + PANEL_SLICE).setDisplaySize(PANEL_SLICE, geo.panelH - PANEL_SLICE * 2);
+    fRight.setPosition(right - PANEL_SLICE, top + PANEL_SLICE).setDisplaySize(PANEL_SLICE, geo.panelH - PANEL_SLICE * 2);
+    // The header title and the bust ride the panel's top edge.
+    this.dialogueTitle.setPosition(left + 10, top + 10);
+    this.dialoguePortraitFrame.setPosition(left + DIALOG_PADDING, top + DIALOG_PORTRAIT_TOP);
+    this.dialoguePortrait.setPosition(left + DIALOG_PADDING + DIALOG_PORTRAIT_SIZE / 2, top + DIALOG_PORTRAIT_TOP + DIALOG_PORTRAIT_SIZE / 2);
+    // The well grows; its stroke is redrawn around the new box.
+    const wellLeft = left + DIALOG_WELL_LEFT;
+    const wellTop = top + DIALOG_WELL_TOP;
+    this.dialogueWellFill.setPosition(wellLeft, wellTop).setSize(DIALOG_WELL_W, geo.wellH);
+    this.dialogueWellEdge.clear();
+    this.dialogueWellEdge.lineStyle(1, UI.line, 0.5);
+    this.dialogueWellEdge.strokeRect(Math.round(wellLeft) + 0.5, Math.round(wellTop) + 0.5, DIALOG_WELL_W - 1, geo.wellH - 1);
+    // The message stays centred in the (possibly taller) well.
+    this.dialogueMessage.setPosition(left + DIALOG_TEXT_LEFT, wellTop + geo.wellH / 2);
+    // The four rows and the footer shift with the geometry.
+    for (let i = 0; i < this.dialogueBands.length; i++) {
+      const rowY = top + geo.rowsTop + i * DIALOG_ROW_PITCH;
+      const b = this.dialogueBands[i];
+      b.band.setPosition(left + DIALOG_PADDING, rowY);
+      b.rule.setPosition(left + DIALOG_PADDING, rowY);
+      this.dialogueOptionIcons[i].setPosition(left + 30, rowY + DIALOG_ROW_H / 2);
+      this.dialogueOptions[i].setPosition(left + 46, rowY + DIALOG_ROW_H / 2);
+    }
+    this.dialogueFooter.setPosition(cx, bottom - 12);
+
     const options = this.dialogueOptionsView();
     if (d.selected >= options.length) d.selected = options.length - 1;
     for (let i = 0; i < this.dialogueOptions.length; i++) {

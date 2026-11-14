@@ -35,15 +35,26 @@ export const DIALOG_WELL_PAD = 8;
 
 /** Speech well, measured from the panel top. */
 export const DIALOG_WELL_TOP = 30;
-// Two body lines plus the well's own padding. Two is what the longest authored
-// line needs at DIALOG_TEXT_W (see dialogueLayout.test.ts); the well is sized for
-// that, not for one line, because a one-line-tall well cut the second line off.
+// The BASE well height: two body lines plus the well's own padding. Two is what
+// the longest authored line needs at DIALOG_TEXT_W (see dialogueLayout.test.ts);
+// the well is sized for that, not for one line, because a one-line-tall well cut
+// the second line off. dialogueWellHeight() grows past this for longer messages
+// — the AI opening line is capped at 60 characters (ai/rulesExecutor
+// MAX_UTTERANCE), which wraps to five lines at this width, and a fixed two-line
+// well let that text run straight over the option rows.
 export const DIALOG_WELL_H = 72;
 
 /** Option rows, measured from the panel top: 4 rows of 26 on a 30px pitch. */
 export const DIALOG_ROWS_TOP = 132;
 export const DIALOG_ROW_PITCH = 30;
 export const DIALOG_ROW_H = 26;
+/** How many option rows the panel draws. */
+export const DIALOG_ROW_COUNT = 4;
+
+/** Well bottom edge → first option row. Absorbs a one-line wrap estimate error. */
+export const DIALOG_WELL_ROW_GAP = 8;
+/** Last row → panel bottom edge: the footer line's reserved band. */
+export const DIALOG_FOOTER_H = 40;
 
 // ── derived column ───────────────────────────────────────────────────────────
 /** Well left edge, from the panel left: padding + face + gap. */
@@ -91,6 +102,50 @@ export function wrapText(text: string, maxWidth: number, fontSize: number): stri
   }
   if (line !== '') lines.push(line);
   return lines;
+}
+
+/**
+ * How tall the speech well must be to hold `message` after wrapping.
+ *
+ * The well used to be a fixed DIALOG_WELL_H sized for two lines, which the
+ * authored greetings fit — but the AI opening line is capped at 60 characters
+ * (ai/rulesExecutor MAX_UTTERANCE) and 60 Han glyphs at 24px is 1440px, five
+ * lines in the 308px column. The text is vertically centred in the well, so a
+ * five-line message in a two-line well spilled ~40px past the well's bottom
+ * edge and printed straight over the first option row. Sizing the well from the
+ * wrapped line count is what keeps the speech inside its own box.
+ */
+export function dialogueWellHeight(message: string, fontSize: number): number {
+  const lines = wrapText(message, DIALOG_TEXT_W, fontSize).length;
+  return Math.max(DIALOG_WELL_H, lines * estimateLineHeight(fontSize) + DIALOG_WELL_PAD * 2);
+}
+
+export interface DialogueGeometry {
+  /** Speech well height for this message. */
+  wellH: number;
+  /** Option-row top, pushed down when the well grew. */
+  rowsTop: number;
+  /** Panel height, grown when the rows were pushed. */
+  panelH: number;
+}
+
+/**
+ * The dialogue panel's vertical geometry for one message.
+ *
+ * Everything derives from the well, and every step is a max() against the base
+ * layout so a short message keeps the panel's authored shape: a one-line
+ * greeting still opens at 460x300 with the rows at DIALOG_ROWS_TOP, and only a
+ * message that actually needs the room grows the well, then the rows below it,
+ * then the panel around both. Worst case (60 Han characters at 24px) is five
+ * lines: well 151, rows 189, panel 345 — still 275px clear of the HUD foot bar
+ * on the 720px canvas.
+ */
+export function dialogueGeometry(message: string, fontSize: number): DialogueGeometry {
+  const wellH = dialogueWellHeight(message, fontSize);
+  const rowsTop = Math.max(DIALOG_ROWS_TOP, DIALOG_WELL_TOP + wellH + DIALOG_WELL_ROW_GAP);
+  const rowsBottom = rowsTop + DIALOG_ROW_PITCH * (DIALOG_ROW_COUNT - 1) + DIALOG_ROW_H;
+  const panelH = Math.max(DIALOG_PANEL_H, rowsBottom + DIALOG_FOOTER_H);
+  return { wellH, rowsTop, panelH };
 }
 
 function isWideChar(ch: string): boolean {

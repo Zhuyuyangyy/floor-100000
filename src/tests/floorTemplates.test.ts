@@ -6,6 +6,7 @@ import {
   FLOOR_TEMPLATES,
   generateFloor,
   getFloorTemplate,
+  hasFloorContent,
   groundItemKey,
   LOOT_DATA_VERSION,
 } from '../data/floorTemplates';
@@ -233,5 +234,19 @@ describe('the loot data version folds into every derived seed (GHI-03 M2)', () =
   it('is stable for the same inputs', () => {
     expect(containerLootSeed(42, 3, 'crate_metal')).toBe(containerLootSeed(42, 3, 'crate_metal'));
     expect(containerLootSeed(42, 3, 'crate_metal')).not.toBe(containerLootSeed(42, 3, 'crate_wood'));
+  });
+});
+
+describe('hasFloorContent', () => {
+  it('is true for every authored floor and false for the unauthored ones', () => {
+    for (const floor of PLAYABLE_FLOORS_V01) expect(hasFloorContent(floor), `floor ${floor}`).toBe(true);
+    for (const floor of [11, 50, 99, 50010]) expect(hasFloorContent(floor), `floor ${floor}`).toBe(false);
+  });
+
+  it('does not treat the dev alias 100000 as authored content', () => {
+    // 100000 reuses floor 1's template as a dev shortcut. The lift asks this before
+    // moving anyone, so letting the alias through would teleport the player to a
+    // floor with no layout of its own.
+    expect(hasFloorContent(100000)).toBe(false);
   });
 });

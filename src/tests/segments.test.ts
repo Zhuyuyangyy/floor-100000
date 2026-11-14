@@ -161,9 +161,11 @@ describe('liftOutcome', () => {
   it('matches the authored floors, so floors 1-10 cannot be refused', () => {
     for (let f = 1; f <= 10; f++) expect(hasFloorContent(f)).toBe(true);
     expect(hasFloorContent(11)).toBe(false);
-    // 100000 still resolves through DEV_FLOOR_ALIAS to floor 1's table, so the
-    // summit reads as "connected" — unreachable today, and the alias is the
-    // dev-only route that keeps the old fixtures bootable.
-    expect(hasFloorContent(100000)).toBe(true);
+    // 100000 resolves through DEV_FLOOR_ALIAS to floor 1's table, but it is not
+    // authored content and must NOT read as connected: the lift asks this before
+    // moving anyone, and a true here would drop the player onto floor 1's layout
+    // while the HUD says 100000. generateFloor still honours the alias, so the dev
+    // entry keeps working; only the "can I build this for real" question says no.
+    expect(hasFloorContent(100000)).toBe(false);
   });
 });

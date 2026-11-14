@@ -429,7 +429,12 @@ export function getFloorTemplate(floorNumber: number): FloorTemplate | undefined
 // lift in particular: its target is a segment's first floor, and none of the
 // segments above 10 are authored yet.
 export function hasFloorContent(floorNumber: number): boolean {
-  return templateFor(floorNumber) !== undefined;
+  // Deliberately bypasses DEV_FLOOR_ALIAS. Floor 100000 borrowing floor 1's
+  // template is a developer entry point, not authored content: if the alias were
+  // honoured here, the freight lift would judge 统治核心 "connected" and drop the
+  // player onto floor 1's layout while the HUD says 100000. generateFloor keeps
+  // the alias so the dev entry still works.
+  return FLOOR_TEMPLATES[floorNumber] !== undefined;
 }
 
 export function generateFloor(worldSeed: number, floorNumber: number): GeneratedFloor {

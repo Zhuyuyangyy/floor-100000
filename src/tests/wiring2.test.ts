@@ -28,6 +28,9 @@ import {
 import { purifyWater, hasUpgrade } from '../systems/CraftingSystem';
 import { bumpFlag, flagCount } from '../systems/WorldFlags';
 import { deserialize, serialize } from '../systems/SaveSystem';
+import { lootContainer } from '../systems/LootSystem';
+import { FLOOR_TEMPLATES, getFloorTemplate } from '../data/floorTemplates';
+import { PLAYABLE_FLOORS_V01 } from '../core/constants';
 import { NPCS, getNpc } from '../data/npcs';
 import type { NpcDef, NpcId } from '../data/npcs';
 import { availableOffers, claimGift, giftOffer, receiveGift, reputationOf } from '../ai/npcEconomy';
@@ -501,5 +504,69 @@ describe('净水器读数：×N 就是袋里的脏水数，且一次炼光', () 
     expect(r.converted).toBe(3);
     expect(countItem(s.player.inventory, 'dirty_water')).toBe(0);
     expect(countItem(s.player.inventory, 'clean_water')).toBe(cleanBefore + 3);
+  });
+});
+
+// ── 接点 6：终局入口（GameScene onInteract 容器分支 / finaleEntryFor） ────────
+//
+// 100000 层（统治核心）的三个容器是终局演出入口（docs/plans/FINALE_UX.md §2，
+// EndgameScene 归 AG-21）。场景侧只做二段式判官：终局层 + 容器已开过 +
+// id 有映射 → scene.start('Endgame', { from })。本节钉住判官读的数据契约：
+// 模板三容器的 id/落点、终端台的 guaranteed 补给（第一次 E 必须仍是搜刮）、
+// 以及「开过」这个判据由 LootSystem 自己维护。
+describe('终局入口接线：100000 层三容器的二段式契约', () => {
+  const FINALE_FLOOR = 100000;
+
+  it('100000 层在可玩楼层表内，且恰好三个容器、id 与契约一致', () => {
+    expect(PLAYABLE_FLOORS_V01).toContain(FINALE_FLOOR);
+    const template = getFloorTemplate(FINALE_FLOOR);
+    expect(template).toBeDefined();
+    expect(template!.containers.map((c) => c.id).sort()).toEqual(['counter', 'fuse_box', 'security_safe']);
+    // 落点（最近容器判定按 x 距离，落点钉住防摆位漂移）。
+    expect(template!.containers.find((c) => c.id === 'counter')!.x).toBe(320);
+    expect(template!.containers.find((c) => c.id === 'fuse_box')!.x).toBe(640);
+    expect(template!.containers.find((c) => c.id === 'security_safe')!.x).toBe(960);
+    // 没有地面物资：这一层的交互只有三容器。
+    expect(template!.ground).toEqual([]);
+  });
+
+  it('终端台锁着 guaranteed 水食——第一次 E 必须是搜刮（二段式的第一段）', () => {
+    const counter = FLOOR_TEMPLATES[FINALE_FLOOR].containers.find((c) => c.id === 'counter')!;
+    const guaranteed = counter.loot.filter((l) => l.guaranteed);
+    expect(guaranteed.map((l) => l.itemId).sort()).toEqual(['clean_water', 'ration_pack']);
+    for (const g of guaranteed) {
+      expect(g.min).toBe(1);
+      expect(g.max).toBe(1);
+      expect(g.probability).toBe(1);
+    }
+  });
+
+  it('「开过」判据由 lootContainer 维护：开过 → openedContainers 记名（第二段的前提）', () => {
+    const s = createNewGame(2026);
+    s.currentFloor = FINALE_FLOOR;
+    // 开之前：没有记录——判官放行搜刮。
+    expect(s.visitedFloors[FINALE_FLOOR]?.openedContainers.includes('counter') ?? false).toBe(false);
+    const r = lootContainer(s, FINALE_FLOOR, 'counter');
+    expect(r.full).toBe(false);
+    // guaranteed 水食真的进了包（第一次 E 的生存价值）。
+    expect(countItem(s.player.inventory, 'clean_water')).toBeGreaterThanOrEqual(1);
+    expect(countItem(s.player.inventory, 'ration_pack')).toBeGreaterThanOrEqual(1);
+    // 开之后：记录在案——判官据此进演出。
+    expect(s.visitedFloors[FINALE_FLOOR].openedContainers).toContain('counter');
+    // 另外两个容器不受影响（各开各的）。
+    expect(s.visitedFloors[FINALE_FLOOR].openedContainers).not.toContain('fuse_box');
+  });
+
+  it('id → 入口映射只认这三个（counter→terminal / security_safe→archive / fuse_box→fuse）', () => {
+    // 场景 finaleEntryFor 的映射表在 GameScene（私有方法，不起 Phaser 调不到），
+    // 这里钉它读的数据侧：三个 id 与契约表一一对应，且模板里没有第四个别名。
+    const ids = FLOOR_TEMPLATES[FINALE_FLOOR].containers.map((c) => c.id);
+    expect(new Set(ids)).toEqual(new Set(['counter', 'security_safe', 'fuse_box']));
+    // 其它层不存在同名映射的隐患由 currentFloor === 100000 的门挡掉——钉住
+    // FINALE_FLOOR 是唯一带这三个容器同时在场的楼层。
+    const floorsWithAll = Object.values(FLOOR_TEMPLATES)
+      .filter((t) => ['counter', 'security_safe', 'fuse_box'].every((id) => t.containers.some((c) => c.id === id)))
+      .map((t) => t.floorNumber);
+    expect(floorsWithAll).toEqual([FINALE_FLOOR]);
   });
 });

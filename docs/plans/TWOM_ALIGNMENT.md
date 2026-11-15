@@ -303,6 +303,18 @@ label 用 `entry.text`、value 用 `第${day}天 ${formatClock(minute)}`
 `DIARY_KIND_LABELS`。`diaryOf()` 倒序返回，行按数组顺序渲染即是新的在
 上。ROW_H=26，一条一行；日记文案已按 ≤30 字控制，24px 字下不溢出。
 
+## 十二、AG-31 实现说明（2026-11-16，行为树组件骨架）
+
+**本节内容在 AG-31 重做提交时丢失**（它先前的 13de4e2/2c2a04b 里那一节，在
+干净的 2b3efee 里没有；三个历史 hash 均已核查）。据实记此占位，不冒充内容。
+
+实际交付以它的分支与文档为准：
+- `src/ai/behaviour.ts`（新建，纯函数、零 Phaser import、MAX_TREE_DEPTH=32）
+- `docs/plans/BEHAVIOUR.md`（新建，含 WANDERER_PATROL_TREE 真实用例与
+  "为什么现在不做完整行为树"的论证）
+- `src/tests/behaviour.test.ts`（新建）
+- 分支 `agent/2026-11-16/ag-31-behaviour` @ `2b3efee`
+
 
 ## 十三、AG-29 实现说明（2026-11-16 追加，物品与经济工程师）
 

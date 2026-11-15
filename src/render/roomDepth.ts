@@ -1,6 +1,6 @@
 import type Phaser from 'phaser';
 
-import { addGlow, bakeStaticLayer, LIGHT_DEPTH } from './lighting';
+import { addGlow, LIGHT_DEPTH } from './lighting';
 import { startFxLoop } from './fx';
 import { PALETTE } from './palette.ts';
 
@@ -74,30 +74,11 @@ export interface RoomDepthOpts {
 // relative order of same-depth rectangles — the only order the renderer sees —
 // is exactly what it was. Across depths nothing changes, because depth is the
 // primary sort key.
-//
-// ── AG-22: the batch is now BAKED ─────────────────────────────────────────
-// AG-09 stopped at Graphics and measured why that was not enough: Phaser 4's
-// GraphicsWebGLRenderer has no dirty cache — it walks `src.commandBuffer` every
-// frame (GraphicsWebGLRenderer.js:84) — so the merged Graphics still replayed
-// ~3300 fillRects per frame across the cross-section's five floors, and the
-// steady-state frame time did not move. `out()` now hands each depth's Graphics
-// to bakeStaticLayer (render/lighting.ts), which replays it ONCE into a
-// framebuffer; the floor draws one quad per depth per frame from then on.
-// The batcher tracks each depth's painted bounding box while drawing, so the
-// texture is exactly the size of its content and nothing larger.
-//
-// The RenderTexture takes the place of the Graphics in the returned array — same
-// depth, same position in the order, same alpha semantics — so every caller
-// (buildRoomDepth, buildForeground, buildSurfaceDetail, buildCeilingLights'
-// housing, addContactShadow, buildWallDressing, buildFloorClutter,
-// buildAerialHaze, buildLeakEffect's standing water) is unchanged.
 
 /** One Graphics per depth, collecting this floor's static rectangles. */
 class RectBatcher {
   private readonly scene: Phaser.Scene;
   private readonly layers = new Map<number, Phaser.GameObjects.Graphics>();
-  /** each depth's painted bounding box, in the Graphics' own coordinates */
-  private readonly bounds = new Map<number, { minX: number; minY: number; maxX: number; maxY: number }>();
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -112,26 +93,11 @@ class RectBatcher {
     return g;
   }
 
-  /** Grow a depth's painted bounding box to include a rectangle. */
-  private extend(x0: number, y0: number, x1: number, y1: number, depth: number): void {
-    let b = this.bounds.get(depth);
-    if (!b) {
-      b = { minX: x0, minY: y0, maxX: x1, maxY: y1 };
-      this.bounds.set(depth, b);
-      return;
-    }
-    b.minX = Math.min(b.minX, x0);
-    b.minY = Math.min(b.minY, y0);
-    b.maxX = Math.max(b.maxX, x1);
-    b.maxY = Math.max(b.maxY, y1);
-  }
-
   /** Top-left anchored, which is how every rectangle in this file is drawn. */
   add(x: number, y: number, w: number, h: number, color: number, alpha: number, depth: number): void {
     const g = this.layer(depth);
     g.fillStyle(color, alpha);
     g.fillRect(x, y, w, h);
-    this.extend(x, y, x + w, y + h, depth);
   }
 
   /** Centre-anchored, for the few rectangles drawn around a centre point. */
@@ -153,51 +119,11 @@ class RectBatcher {
     g.fillStyle(color, alpha);
     g.fillRect(0, 0, w, h);
     g.restore();
-    // The rotated corners are the painted extent — Phaser's Ellipse/rect maths
-    // aside, this is the plain rotation of the four corners around the origin.
-    const rad = (angleDeg * Math.PI) / 180;
-    const c = Math.cos(rad);
-    const s = Math.sin(rad);
-    for (const [cx, cy] of [
-      [0, 0],
-      [w, 0],
-      [w, h],
-      [0, h],
-    ] as Array<[number, number]>) {
-      this.extend(x + cx * c - cy * s, y + cx * s + cy * c, x + cx * c - cy * s, y + cx * s + cy * c, depth);
-    }
   }
 
-  /** A filled ellipse centred on (x, y) — Phaser's fillEllipse semantics. */
-  addEllipse(x: number, y: number, w: number, h: number, color: number, alpha: number, depth: number): void {
-    const g = this.layer(depth);
-    g.fillStyle(color, alpha);
-    g.fillEllipse(x, y, w, h);
-    this.extend(x - w / 2, y - h / 2, x + w / 2, y + h / 2, depth);
-  }
-
-  /**
-   * The batched layers, baked, in the order their first rectangle appeared.
-   * Each depth's scratch Graphics is replayed into its own RenderTexture and
-   * destroyed — see bakeStaticLayer for why the texture is per-instance rather
-   * than keyed (the live floor and its neighbours share a frame, so a shared
-   * key would overwrite) and what that buys.
-   */
+  /** The batched Graphics, in the order their first rectangle appeared. */
   out(): Phaser.GameObjects.GameObject[] {
-    const out: Phaser.GameObjects.GameObject[] = [];
-    for (const [depth, g] of this.layers) {
-      const b = this.bounds.get(depth);
-      if (!b) continue;
-      out.push(
-        bakeStaticLayer(this.scene, g, depth, {
-          x: b.minX,
-          y: b.minY,
-          w: b.maxX - b.minX,
-          h: b.maxY - b.minY,
-        }),
-      );
-    }
-    return out;
+    return [...this.layers.values()];
   }
 }
 
@@ -432,13 +358,6 @@ export function buildCeilingLights(scene: Phaser.Scene, opts: CeilingLightOpts):
   // because drawNeighbourFloor dims a neighbour's lightHot tubes by swapping
   // their fill (an instanceof Rectangle check), and a Graphics cannot answer
   // it. Two rectangles per strip is a fair price for keeping that branch.
-  //
-  // AG-22: the batch comes back baked (one RenderTexture at depth 3 covering
-  // every strip's housing and hangers — the bounds are the band they paint).
-  // That makes the housing an Image, and drawNeighbourFloor's dimObject tints
-  // everything with a setTint — so bakeStaticLayer shadows setTint on it: a
-  // Graphics had no Tint component and the neighbour's strips were never
-  // tinted, only the layer alpha and the tube swap carried the distance.
   const batch = new RectBatcher(scene);
   const spacing = 224;
   for (let i = 0; x_ok(i); i++) {
@@ -701,20 +620,17 @@ export function buildLeakEffect(scene: Phaser.Scene, opts: LeakOpts): Phaser.Gam
   const out: Phaser.GameObjects.GameObject[] = [];
   // Standing water: flattened ellipses on the floor, lit at the top edge so they
   // read as wet rather than as holes.
-  //
-  // AG-22: through the batcher now — the puddles never move, and an ellipse is
-  // the most expensive thing a Graphics can replay (a 32-point triangulated
-  // path per frame, times seven puddles, for as long as the event runs). The
-  // drips below stay Rectangles because they are tweened.
-  const batch = new RectBatcher(scene);
   for (let i = 0; i < 7; i++) {
     const x = 60 + hh(seed + i * 7.7) * (width - 120);
     const w = 34 + hh(seed + i * 3.1) * 70;
     const h = 5 + hh(seed + i * 5.3) * 4;
-    batch.addEllipse(x, floorY + 2, w, h, PALETTE.clothDeep, 0.55, 3);
-    batch.addEllipse(x, floorY, w * 0.82, h * 0.45, PALETTE.clothHigh, 0.22, 3);
+    const g = scene.add.graphics().setDepth(3);
+    g.fillStyle(PALETTE.clothDeep, 0.55);
+    g.fillEllipse(x, floorY + 2, w, h);
+    g.fillStyle(PALETTE.clothHigh, 0.22);
+    g.fillEllipse(x, floorY, w * 0.82, h * 0.45);
+    out.push(g);
   }
-  out.push(...batch.out());
   // Ceiling drips: a short vertical line from above, on a slow cycle so the
   // floor looks like it is still coming down.
   for (let i = 0; i < 5; i++) {

@@ -143,80 +143,6 @@ export function addGlow(
   return scene.add.image(x, y, glowKey(size)).setBlendMode(BLEND_ADD).setAlpha(alpha).setDepth(depth);
 }
 
-// ── baking the static layers (AG-22) ────────────────────────────────────────
-// AG-09 merged a floor's ~1800 static Rectangles into ~60 Graphics and measured
-// what that bought: object count 3.6-4.6x down, floor rebuild 1.4-2.4x faster,
-// and steady-state frame time UNCHANGED. The reason is in Phaser 4's
-// GraphicsWebGLRenderer: it walks `src.commandBuffer` every frame with no dirty
-// check (GraphicsWebGLRenderer.js:84, `var commands = src.commandBuffer`), so a
-// merged Graphics still costs one matrix multiply per fillRect per frame — and
-// a cross-section floor owns five floors' worth of them.
-//
-// This helper closes that gap: the finished Graphics is replayed ONCE, at build
-// time, into a framebuffer, and the floor then draws one quad per frame.
-//
-// Why a RenderTexture and not a keyed texture (`generateTexture` + Image): a
-// keyed texture lives in the global TextureManager, so the floor that bakes
-// second overwrites the first — and the live floor and its stack neighbours are
-// drawn in the SAME frame, so a shared key would make them show each other's
-// content. That is the互覆 AG-09 flagged as the reason it stopped short. A
-// RenderTexture owns its framebuffer (RenderTexture extends Image, so it goes
-// into containers and takes depth/alpha exactly like the Graphics it replaces),
-// one instance per drawn floor, and RenderTexture.preDestroy destroys its
-// DynamicTexture — so the floor's own object list is the lifetime manager and
-// there is no key to collide, nothing to evict, and no cross-floor reuse that
-// could go stale. The cost is that every floor change re-bakes; measured in
-// docs/plans/RENDER.md §10, it is a fraction of the rebuild it joins.
-//
-// Fidelity: the FILL path of a DynamicTexture runs the very same FillRect render
-// node a Graphics fillRect runs (DynamicTextureHandler.js:143), with the same
-// premultiplied-alpha blend into a transparent-black framebuffer; source-over
-// is associative, so the composited result is the same image up to one extra
-// 8-bit rounding per intermediate blend. The framebuffer texture is NEAREST
-// (DrawingContext.js:284 — LINEAR only when config.antialias, and this project
-// runs pixelArt), matching the wall and floor images it now sits beside.
-//
-// `bounds` is the drawn content's bounding box in the Graphics' own
-// coordinates; the texture is no larger than what was actually painted.
-
-/** A rectangle in a Graphics' local coordinates. */
-export interface BakeBounds {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-export function bakeStaticLayer(
-  scene: Phaser.Scene,
-  g: Phaser.GameObjects.Graphics,
-  depth: number,
-  bounds: BakeBounds,
-): Phaser.GameObjects.RenderTexture {
-  const w = Math.max(1, bounds.w);
-  const h = Math.max(1, bounds.h);
-  const rt = scene.add.renderTexture(bounds.x, bounds.y, w, h).setOrigin(0, 0).setDepth(depth);
-  // Draw the Graphics into the texture offset by the bounds' top-left, so the
-  // painted pixels land at the same world coordinates the Image now covers.
-  // (Image types `texture` as CanvasTexture|Texture; a RenderTexture's is a
-  // DynamicTexture, which is what carries draw/render.)
-  const dt = rt.texture as unknown as Phaser.Textures.DynamicTexture;
-  dt.draw(g, -bounds.x, -bounds.y);
-  dt.render();
-  g.destroy();
-  // A baked layer is never dimmed. GameScene.drawNeighbourFloor's dimObject
-  // tints "everything that has a setTint" — the corridor props, the light tubes,
-  // the glows — and deliberately NOT the static scenery: a Graphics mixes in no
-  // Tint component (Graphics.js's Mixin list has none), so the wall dressing,
-  // the haze and the depth bands have never been tinted that way; the layer
-  // alpha and the detail fade carry the distance instead. A RenderTexture is an
-  // Image and does have setTint, so without this the neighbour floors would
-  // newly tint their scenery. Shadow it on the instance to keep the old
-  // semantics exactly. (renderPerf.test.ts pins this.)
-  (rt as unknown as { setTint: unknown }).setTint = (): Phaser.GameObjects.RenderTexture => rt;
-  return rt;
-}
-
 export interface LightLayer {
   update(time: number, delta?: number): void;
   destroy(): void;
@@ -301,12 +227,6 @@ export function buildLightLayer(
   // Rectangle submit the same flat quad to the same batch, so the image is
   // identical — see the RectBatcher note in render/roomDepth.ts, which is where
   // the other ~1100 rectangles per floor went.
-  //
-  // AG-22: and now not even a Graphics. Two full-width washes that never move
-  // were two fillRects replayed every frame forever; bakeStaticLayer replays
-  // them once at build time (see the helper's note on why a RenderTexture and
-  // not a keyed texture). The bounds are the two bands' union, which is the
-  // whole wash area.
   const clearY = height * AMBIENT_CLEAR_TOP;
   const floorTop = height * 0.62;
   const ambient = scene.add.graphics().setDepth(0);
@@ -314,14 +234,10 @@ export function buildLightLayer(
   ambient.fillRect(0, clearY, width, floorTop - clearY);
   ambient.fillStyle(amb.color, amb.floorAlpha);
   ambient.fillRect(0, floorTop, width, height - floorTop);
-  owned.push(bakeStaticLayer(scene, ambient, 0, { x: 0, y: clearY, w: width, h: height - clearY }));
+  owned.push(ambient);
 
   // Stepped vignette bands, batched for the same reason. Same colours, same
   // alphas, same positions — one object instead of sixteen.
-  //
-  // AG-22: baked for the same reason as the ambient wash. The vignette covers
-  // the frame edges, so its bounds are the whole canvas — the texture is the
-  // size of the wash it replaces and nothing else on the floor is that cheap.
   const vignette = scene.add.graphics().setDepth(8);
   for (let i = 0; i < VIGNETTE_BANDS.length; i++) {
     const a = VIGNETTE_BANDS[i];
@@ -335,7 +251,7 @@ export function buildLightLayer(
     mk(inset + VIGNETTE_BAND_H / 2, height / 2, VIGNETTE_BAND_H, height);
     mk(width - inset - VIGNETTE_BAND_H / 2, height / 2, VIGNETTE_BAND_H, height);
   }
-  owned.push(bakeStaticLayer(scene, vignette, 8, { x: 0, y: 0, w: width, h: height }));
+  owned.push(vignette);
 
   // Each pool breathes on its own offset, so the light is alive — a lit room in
   // an abandoned tower is never perfectly steady.

@@ -48,6 +48,21 @@ export function slotAt(slots: ScheduleSlot[], minuteOfDay: number): { index: num
   return { index: slots.length - 1, minute: m };
 }
 
+/**
+ * 某个闲逛桶的确定性偏移量（-1..1，乘 IDLE_BAND 得像素偏移）。
+ * 纯函数：同 (runSeed, npcId, day, 时段, 桶) → 同偏移。
+ */
+function idleOffset(runSeed: number, npcId: string, day: number, slotIndex: number, bucket: number): number {
+  const rng = makeRng(deriveSeed(runSeed, npcId, day, slotIndex, bucket, 'idle'));
+  return rng.nextFloat() * 2 - 1;
+}
+
+/** smoothstep：桶内进度 0..1 → 平滑 0..1（端点一阶导为 0，过渡不突兀）。 */
+function smoothstep(t: number): number {
+  const c = Math.min(1, Math.max(0, t));
+  return c * c * (3 - 2 * c);
+}
+
 export interface NpcAutonomyView {
   npcId: string;
   /** 当前 x（像素，已钳制在楼层安全范围内） */
@@ -86,9 +101,15 @@ export function npcAutonomyAt(
     x = prev.x + (slot.x - prev.x) * walked;
   } else {
     // 已到达锚点：按 (seed, npc, day, 时段, 时间桶) 做确定性闲逛。
+    // AG-13 插值：在相邻两个桶的偏移之间按 smoothstep 连续过渡，
+    // 消除 15 分钟桶切换时的位置跳变。偏移量始终落在 [-1, 1]
+    // （两端点都是，smoothstep 权重在 [0,1]），所以闲逛半径不变，
+    // 同时任意时刻的位置仍是 (npcId, day, minute, runSeed) 的纯函数。
     const bucket = Math.floor(elapsed / IDLE_BUCKET_MINUTES);
-    const rng = makeRng(deriveSeed(ctx.runSeed, npcId, ctx.day, index, bucket, 'idle'));
-    x = slot.x + (rng.nextFloat() * 2 - 1) * IDLE_BAND;
+    const t = (elapsed - bucket * IDLE_BUCKET_MINUTES) / IDLE_BUCKET_MINUTES;
+    const from = idleOffset(ctx.runSeed, npcId, ctx.day, index, bucket);
+    const to = idleOffset(ctx.runSeed, npcId, ctx.day, index, bucket + 1);
+    x = slot.x + (from + (to - from) * smoothstep(t)) * IDLE_BAND;
   }
 
   const goal = ctx.scarcity ? `寻找${getItem(ctx.scarcity).displayName}` : slot.goal;

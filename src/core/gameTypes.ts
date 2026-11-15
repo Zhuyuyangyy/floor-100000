@@ -72,6 +72,12 @@ export interface Ailment {
   sinceMinute: number;
 }
 
+// TWOM 对齐契约第一节：疾病中间态的三档。由 ailments 的 worst severity 派生
+// （SEVERITY_BITING=25 起属性消耗加速 = sick，SEVERITY_CRITICAL=100 起自己掉血
+// = critical），不是第二套病程——两套各自演化必然漂移。派生逻辑与
+// sicknessDay 的写在 systems/SurvivalSystem.ts 的 tickSicknessTier。
+export type SicknessTier = 'healthy' | 'sick' | 'critical';
+
 export interface ItemEffect {
   stat: StatKey;
   amount: number;
@@ -112,6 +118,33 @@ export interface PlayerState {
   // before the environment system stay loadable — a missing one is re-created on
   // the next tick. See systems/EnvironmentSystem.ts.
   bodyTemp?: number;
+  // ── TWOM 对齐契约第一节（docs/plans/TWOM_ALIGNMENT.md，AG-25）──────────
+  // 第四/五/六条生存维度。三条都是可选字段，理由与 growth 完全相同
+  // （gameTypes.ts 底部 GameState.growth 的注释）：createNewGame 在
+  // core/gameState.ts（不属 AG-25），必填字段会让它编译不过；存档兼容走
+  // 「缺字段补默认」——每个读者先过 SurvivalSystem/MoraleSystem 的访问器
+  // （bodyHeatOf/moraleOf/sicknessOf），老存档因此不崩，也不需要为此升
+  // schemaVersion。
+  //
+  // bodyHeat 与上面 bodyTemp 的关系：EnvironmentSystem（2026-11-07 的体温
+  // 系统）以 bodyTemp 为工作字段，契约把同一个stat定名为 bodyHeat。两者不
+  // 合并成一个是因为 EnvironmentSystem/GameScene 不属 AG-25——SurvivalSystem
+  // 在每个 tick 后把 bodyTemp 镜像进 bodyHeat（见 SurvivalSystem.advanceGame
+  // Minutes 的 bodyHeatMirror），新代码只读 bodyHeat。
+  /** 体温 0..100（契约名）。cold 按游戏小时消耗，热源附近恢复，0 = 失温失败。 */
+  bodyHeat?: number;
+  /**
+   * 心情点数池（TWOM 的 Depression 模型）：可为负的点数，不是 0-100 槽。
+   * 按 game-balance.json 的 morale 块衰减回基线；物品/创伤/归来按概率改它。
+   * 见 systems/MoraleSystem.ts。
+   */
+  morale?: number;
+  /** 每日复归的基线（DepressionChangeOnDayBegin 每日推动它）。 */
+  moraleBaseline?: number;
+  /** 疾病中间态三档：healthy < sick < critical。hp 归零前多一档"病了但还能动"。 */
+  sickness?: SicknessTier;
+  /** 染上疾病的那一天（day），用于「病了 N 天」。 */
+  sicknessDay?: number;
   // Active ailments. Optional for the same reason: a save written before the
   // sickness system loads with none, which is the correct reading.
   ailments?: Ailment[];

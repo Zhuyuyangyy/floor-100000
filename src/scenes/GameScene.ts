@@ -172,7 +172,7 @@ import {
 import { getItem } from '../data/items';
 import { CONTAINER_LABEL_DROP, HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
 import { RECIPES, getRecipe, isPassUpgrade, type UpgradeId } from '../data/recipes';
-import { NPCS, NPC_FLOOR, getNpc, type BarterOffer, type NpcDef, type NpcId } from '../data/npcs';
+import { NPCS, NPC_FLOOR, getNpc, npcsOnFloor, type BarterOffer, type NpcDef, type NpcId } from '../data/npcs';
 import { QUEST_FLAG, QUESTS } from '../data/quests';
 import { clearFlag, hasFlag, setFlag } from '../systems/WorldFlags';
 import { availableOffers, executeBarter, reputationOf } from '../ai/npcEconomy';
@@ -854,7 +854,13 @@ export class GameScene extends Phaser.Scene {
     // above it, so the camera must not be allowed to scroll up into the void —
     // a global bound let it, and the bottom floor showed 200px of empty black
     // over the dorm. Same at the top of the tower looking down.
-    const topBound = floor <= PLAYABLE_FLOORS_V01[0] ? -FLOOR_BAND : -FLOOR_HEIGHT * (STACK_ABOVE + 1);
+    //
+    // The bottom floor's ceiling is the HUD, not the floor band: the wall art is
+    // 128 tall (y 8..136) and the plate is 102, so stopping at -FLOOR_BAND(-64)
+    // still clipped the wall's top 34px. Stopping at -contextBottom puts the
+    // wall's first row exactly under the plate. Floors with neighbours above keep
+    // the old bound — they are scrolled for the cross-section, not for the HUD.
+    const topBound = floor <= PLAYABLE_FLOORS_V01[0] ? -Math.max(FLOOR_BAND, HUD_LAYOUT.contextBottom) : -FLOOR_HEIGHT * (STACK_ABOVE + 1);
     const bottomBound =
       floor >= PLAYABLE_FLOORS_V01[PLAYABLE_FLOORS_V01.length - 1]
         ? FLOOR_HEIGHT + FLOOR_BAND
@@ -3723,7 +3729,7 @@ export class GameScene extends Phaser.Scene {
   // 带是 depth 100 的 0.94 alpha 面，低于它会被吞），距离比例渐隐
   // （贴近角色时不挡脸，信息交给底栏的「按 E 对话」）。
   private drawNpcs(): void {
-    for (const npc of NPCS) {
+    for (const npc of npcsOnFloor(NPC_FLOOR)) {
       const who = npc.id === 'alin' ? 'npc_alin' : 'npc_xiaozhou';
       const sprite = this.add
         .sprite(npc.x, PLAYER_FEET_Y, walkSheetKey(who))
@@ -3773,7 +3779,7 @@ export class GameScene extends Phaser.Scene {
    */
   private syncNpcs(state: GameState): void {
     if (state.currentFloor !== NPC_FLOOR) return;
-    for (const npc of NPCS) {
+    for (const npc of npcsOnFloor(NPC_FLOOR)) {
       const rec = this.npcObjs.get(npc.id);
       if (!rec) continue;
       const view = this.npcView(state, npc);
@@ -3792,7 +3798,7 @@ export class GameScene extends Phaser.Scene {
 
   private nearestNpc(state: GameState): NpcDef | null {
     if (state.currentFloor !== NPC_FLOOR) return null;
-    for (const npc of NPCS) {
+    for (const npc of npcsOnFloor(NPC_FLOOR)) {
       // AG-11: 用自主视图的 x，不是 npc.x 静态坐标——居民会走，能对话的
       // 必须是眼里看见的那个位置。
       if (Math.abs(this.npcView(state, npc).x - state.player.x) <= INTERACT_DISTANCE) return npc;

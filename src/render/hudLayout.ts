@@ -4,21 +4,28 @@ import { DESIGN_WIDTH } from '../core/design';
 // Coordinates are design-canvas pixels. Scale.FIT scales this single layout
 // across host window sizes; these lanes never move with the world camera.
 // Geometry of the 2026-11-14 HUD skin (see render/hudSkin.ts). Three rows on one
-// 132px plate: instruments, the day's objective, the environment readout.
+// plate: instruments, the day's objective, the environment readout.
+//
+// The plate was 132 tall and the wall band starts at y=8 inside a 200px floor:
+// at zoom 0.5 with the camera pinned to -64, 60 of the wall's 128 rows sat above
+// the plate and 34 more sat behind it — 46.9% of every wall in the game was
+// either clipped by the screen edge or painted over. The three rows are
+// tightened to 102 here, and GameScene's bottom-floor camera bound moves to the
+// plate's own bottom, so the art's first row lands exactly under the HUD.
 export const HUD_LAYOUT = {
-  topHeight: 64,
-  contextBottom: 132,
+  topHeight: 50,
+  contextBottom: 102,
   statX: 292,
   statPitch: 192,
   statWidth: 172,
-  goalY: 76,
-  environmentY: 104,
+  goalY: 52,
+  environmentY: 80,
   feedbackY: 556,
   bagY: 624,
   // Row 1 anchors: icons sit 2px above their label's cap height.
-  row1Y: 12,
-  barY: 42,
-  barH: 10,
+  row1Y: 6,
+  barY: 28,
+  barH: 8,
   barSegments: 10,
   // Where the money group starts; the stat block has to end before this.
   moneyX: 1080,

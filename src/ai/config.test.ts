@@ -9,6 +9,24 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+// 开发机的 .env.local 会被 Vitest 读进来写进 process.env，而 .env.local 是
+// *.local（不入库）的东西——它配了 VITE_NPC_MODEL 是「本机想看 AI」，不是
+// 「生产默认」。所以断言「没有配置」之前先真正清空，测试才在 CI 与本机都成立。
+const AI_ENV_KEYS = ['VITE_NPC_MODEL', 'VITE_OLLAMA_URL', 'VITE_NPC_TIMEOUT_MS'];
+
+function withNoAiEnv<T>(run: () => T): T {
+  const saved = AI_ENV_KEYS.map((k) => [k, process.env[k]] as const);
+  for (const k of AI_ENV_KEYS) delete process.env[k];
+  try {
+    return run();
+  } finally {
+    for (const [k, v] of saved) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
 describe('aiNpcConfig：默认关闭', () => {
   it('无模型配置时 enabled=false', () => {
     vi.stubEnv('VITE_NPC_MODEL', '');
@@ -16,7 +34,7 @@ describe('aiNpcConfig：默认关闭', () => {
   });
 
   it('未 stub 时同样关闭（生产默认）', () => {
-    const cfg = aiNpcConfig();
+    const cfg = withNoAiEnv(() => aiNpcConfig());
     expect(cfg.model).toBe('');
     expect(cfg.enabled).toBe(false);
   });

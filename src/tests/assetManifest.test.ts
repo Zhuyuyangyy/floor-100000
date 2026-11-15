@@ -59,6 +59,13 @@ function runManifest(): Manifest {
       timeout: 60_000,
     });
     return JSON.parse(readFileSync(out, 'utf8')) as Manifest;
+  } catch (err) {
+    // The CLI exits 1 when its own scan is unclean (unclassified file, palette
+    // gate, missing ref). Without this, the whole suite dies as "Command failed"
+    // and the actual reason — printed on the tool's stdout — is lost.
+    const { stdout, stderr } = err as { stdout?: string | Buffer; stderr?: string | Buffer };
+    const tail = `${stdout ?? ''}${stderr ?? ''}`.trim().split('\n').slice(-12).join('\n');
+    throw new Error(`tools/assets-manifest.mjs exited non-zero. Tail of its output:\n${tail}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

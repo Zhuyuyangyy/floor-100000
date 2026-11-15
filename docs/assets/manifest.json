@@ -1,12 +1,12 @@
 {
   "palette": 16,
   "summary": {
-    "files": 131,
+    "files": 130,
     "png": 114,
     "locked": 25,
     "open": 84,
     "staged": 7,
-    "aux": 15,
+    "aux": 14,
     "unclassified": 0,
     "gateFailures": 0,
     "missingRefs": 0
@@ -1234,16 +1234,10 @@
       "note": "字体许可"
     },
     {
-      "path": "fonts/ark-pixel-latin.woff2",
+      "path": "fonts/noto-sans-sc-subset.otf",
       "refs": [],
       "class": "aux",
-      "note": "像素字体"
-    },
-    {
-      "path": "fonts/ark-pixel-zh_hans.woff2",
-      "refs": [],
-      "class": "aux",
-      "note": "像素字体"
+      "note": "字体（Noto Sans SC 子集，SIL OFL）"
     },
     {
       "path": "fx/fire/brazier/brazier.json",

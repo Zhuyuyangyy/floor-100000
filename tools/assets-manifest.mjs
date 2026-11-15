@@ -168,8 +168,7 @@ const STAGED = {
   'artpack/char-wanderer-sheet.png': '二十帧行动表（v3 重提取版量化）；运行时应落位 src/assets/characters/wanderer.png',
 };
 const AUX = [
-  'fonts/ark-pixel-latin.woff2',
-  'fonts/ark-pixel-zh_hans.woff2',
+  'fonts/noto-sans-sc-subset.otf',
   'fonts/OFL.txt',
   'fx/fire/brazier/contact.png',
   'fx/fire/candle/contact.png',
@@ -205,7 +204,7 @@ function classify(path) {
   if (path in STAGED) return { class: 'staged', note: STAGED[path] };
   if (LOCKED.includes(path)) return { class: 'locked', note: '16 色门禁适用' };
   if (DECO.includes(path)) return { class: 'open', note: '墙面特写，255–335px 1:1 显示，不量化' };
-  if (AUX.includes(path)) return { class: 'aux', note: path.endsWith('.woff2') ? '像素字体' : path.endsWith('OFL.txt') ? '字体许可' : '特效接触表（审阅用）' };
+  if (AUX.includes(path)) return { class: 'aux', note: path.endsWith('.otf') || path.endsWith('.woff2') ? '字体（Noto Sans SC 子集，SIL OFL）' : path.endsWith('OFL.txt') ? '字体许可' : '特效接触表（审阅用）' };
   if (REFS[path]) {
     return {
       class: 'open',

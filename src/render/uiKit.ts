@@ -62,15 +62,15 @@ export const TYPE = {
 // single label mixed two widths, two baselines and two weights. It also had no
 // pixel grid in common with the 2D art.
 //
-// Ark Pixel 10px monospaced is loaded by two language-split @font-face rules in
-// index.html; the two families form a stack so the browser resolves missing
-// glyphs through the chain. Keeping the stack here means one edit re-types the
-// whole game.
+// Noto Sans SC (SIL OFL) subset to the game's 1614 characters, bundled as
+// public/assets/fonts/noto-sans-sc-subset.otf and declared as 'GameSans' in
+// index.html. The stack falls back to the system Noto/YaHei if the file fails
+// to load. Keeping the stack here means one edit re-types the whole game.
 export const FONT_FAMILY =
-  "'ArkPixel Latin', 'ArkPixel ZH', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif";
+  "'GameSans', 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', sans-serif";
 
 /** Both faces must be ready before Phaser creates its first Text. */
-export const FONT_FACES = ['ArkPixel Latin', 'ArkPixel ZH'] as const;
+export const FONT_FACES = ['GameSans'] as const;
 
 // Sizes stay as plain literals at the call site (`'24px'`, not a helper).
 //

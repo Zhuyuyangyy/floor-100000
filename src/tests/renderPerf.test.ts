@@ -2,10 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CORRIDOR_TINT,
-  ENV_WALL_COMMERCIAL_KEY,
-  ENV_WALL_VIP_KEY,
   drawCorridorRoom,
   stackNeighbours,
+  floorKeyFor,
   wallKeyFor,
   type CorridorContext,
 } from '../render/corridors';
@@ -594,36 +593,39 @@ describe('同 seed 两次进入同一层，对象集合一致', () => {
 // ── 墙分支：阶层 4/5 ───────────────────────────────────────────────────────
 
 describe('wallKeyFor 阶层分支', () => {
-  it('阶层 1/2/3 各自用对的墙', () => {
-    expect(wallKeyFor(5)).toBe('env-wall'); // 贫民区
-    expect(wallKeyFor(105)).toBe('env-wall-dorm'); // 工人宿舍区
-    expect(wallKeyFor(1005)).toBe('env-wall-industry'); // 工业与交易区
+  it('六个阶层各自用对的墙，键名带阶层与变体', () => {
+    expect(wallKeyFor(5)).toMatch(/^env-wall-slum-[abc]$/);
+    expect(wallKeyFor(105)).toMatch(/^env-wall-dorm-[abc]$/);
+    expect(wallKeyFor(1005)).toMatch(/^env-wall-industry-[abc]$/);
+    expect(wallKeyFor(10005)).toMatch(/^env-wall-commercial-[abc]$/);
+    expect(wallKeyFor(50005)).toMatch(/^env-wall-vip-[abc]$/);
+    expect(wallKeyFor(100000)).toMatch(/^env-wall-core-[abc]$/);
   });
 
-  it('阶层 4/5 有分支常量，未交图时回落贫民墙', () => {
-    expect(ENV_WALL_COMMERCIAL_KEY).toBe('env-wall-commercial');
-    expect(ENV_WALL_VIP_KEY).toBe('env-wall-vip');
-    // AG-07 还没交图：ENV_FILES 里没有映射，回落是最旧的墙而不是绿框。
-    expect(wallKeyFor(10005)).toBe('env-wall');
-    expect(wallKeyFor(50005)).toBe('env-wall');
+  // The owner's ask was "every floor can have its own wall". 55 textures is not
+  // that; three variants per tier cycling on floor % 3 is — two neighbouring
+  // floors never share one.
+  it('同阶层连续三层拿到三种不同变体', () => {
+    expect(new Set([1, 2, 3].map(wallKeyFor)).size).toBe(3);
+    expect(new Set([100, 101, 102].map(wallKeyFor)).size).toBe(3);
+    expect(new Set([10000, 10001, 10002].map(wallKeyFor)).size).toBe(3);
   });
 
-  it('图一旦映射进 ENV_FILES，阶层 4/5 立即换新墙（AG-07 接线契约）', () => {
-    const files = ENV_FILES as Record<string, string>;
-    const hadCommercial = 'env-wall-commercial' in files;
-    const hadVip = 'env-wall-vip' in files;
-    files['env-wall-commercial'] = 'wall-commercial.png';
-    files['env-wall-vip'] = 'wall-vip.png';
-    try {
-      expect(wallKeyFor(10005)).toBe(ENV_WALL_COMMERCIAL_KEY);
-      expect(wallKeyFor(50005)).toBe(ENV_WALL_VIP_KEY);
-      // 其它阶层不受影响。
-      expect(wallKeyFor(5)).toBe('env-wall');
-      expect(wallKeyFor(1005)).toBe('env-wall-industry');
-    } finally {
-      if (!hadCommercial) delete files['env-wall-commercial'];
-      if (!hadVip) delete files['env-wall-vip'];
+  it('每个变体键都真的在 ENV_FILES 里，不会渲染成绿框', () => {
+    for (const floor of [1, 2, 3, 105, 106, 107, 1005, 10005, 50005, 100000]) {
+      const key = wallKeyFor(floor);
+      expect(ENV_FILES[key], `${floor} -> ${key}`).toBeTruthy();
     }
+  });
+
+  it('地板同样按阶层分，缺档回落旧地板', () => {
+    expect(floorKeyFor(5)).toBe('env-floor-slum');
+    expect(floorKeyFor(105)).toBe('env-floor-dorm');
+    expect(floorKeyFor(1005)).toBe('env-floor-industry');
+    expect(floorKeyFor(10005)).toBe('env-floor-commercial');
+    expect(floorKeyFor(50005)).toBe('env-floor-vip');
+    expect(floorKeyFor(100000)).toBe('env-floor-core');
+    expect(ENV_FILES[floorKeyFor(1)]).toBeTruthy();
   });
 
   it('已映射但文件缺失会被 furniture 测试拦住（接线契约的兜底）', () => {

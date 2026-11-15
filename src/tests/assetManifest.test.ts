@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { CHARACTER_FILES, ENV_FILES, FURNITURE_FILES, ITEM_ICON_FILES, PORTRAIT_FILES } from '../render/artpack';
+import { CHARACTER_FILES, DECO_FILES, ENV_FILES, FURNITURE_FILES, ITEM_ICON_FILES, PORTRAIT_FILES } from '../render/artpack';
 import { FX } from '../render/fx';
 
 // The asset manifest is the project's answer to "what is actually in
@@ -90,6 +90,7 @@ function expectedRefs(): Map<string, string[]> {
     [CHARACTER_FILES, 'artpack'],
     [PORTRAIT_FILES, 'ui/portraits'],
     [ENV_FILES, 'env'],
+    [DECO_FILES, 'deco'],
   ];
   for (const [entries, dir] of tables) {
     for (const file of Object.values(entries)) add(`${dir}/${file}`, 'src/render/artpack.ts');

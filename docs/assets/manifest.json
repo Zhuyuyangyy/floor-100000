@@ -1,9 +1,9 @@
 {
   "palette": 16,
   "summary": {
-    "files": 130,
-    "png": 114,
-    "locked": 25,
+    "files": 154,
+    "png": 138,
+    "locked": 49,
     "open": 84,
     "staged": 7,
     "aux": 14,
@@ -989,7 +989,12 @@
     },
     {
       "path": "deco/deco-1.png",
-      "refs": [],
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "DECO_FILES[deco-1]"
+        }
+      ],
       "width": 255,
       "height": 324,
       "channels": 4,
@@ -1004,7 +1009,12 @@
     },
     {
       "path": "deco/deco-2.png",
-      "refs": [],
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "DECO_FILES[deco-2]"
+        }
+      ],
       "width": 305,
       "height": 375,
       "channels": 4,
@@ -1019,7 +1029,12 @@
     },
     {
       "path": "deco/deco-3.png",
-      "refs": [],
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "DECO_FILES[deco-3]"
+        }
+      ],
       "width": 294,
       "height": 295,
       "channels": 4,
@@ -1034,7 +1049,12 @@
     },
     {
       "path": "deco/deco-4.png",
-      "refs": [],
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "DECO_FILES[deco-4]"
+        }
+      ],
       "width": 281,
       "height": 346,
       "channels": 4,
@@ -1049,7 +1069,12 @@
     },
     {
       "path": "deco/deco-5.png",
-      "refs": [],
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "DECO_FILES[deco-5]"
+        }
+      ],
       "width": 295,
       "height": 390,
       "channels": 4,
@@ -1064,7 +1089,12 @@
     },
     {
       "path": "deco/deco-6.png",
-      "refs": [],
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "DECO_FILES[deco-6]"
+        }
+      ],
       "width": 335,
       "height": 220,
       "channels": 4,
@@ -1079,7 +1109,12 @@
     },
     {
       "path": "deco/deco-7.png",
-      "refs": [],
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "DECO_FILES[deco-7]"
+        }
+      ],
       "width": 307,
       "height": 167,
       "channels": 4,
@@ -1094,7 +1129,12 @@
     },
     {
       "path": "deco/deco-8.png",
-      "refs": [],
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "DECO_FILES[deco-8]"
+        }
+      ],
       "width": 300,
       "height": 305,
       "channels": 4,
@@ -1126,6 +1166,126 @@
       "bytes": 76898,
       "class": "open",
       "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "env/floors/floor-commercial.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-floor-commercial]"
+        }
+      ],
+      "width": 1280,
+      "height": 64,
+      "channels": 3,
+      "opaqueColours": 4,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 756,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/floors/floor-core.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-floor-core]"
+        }
+      ],
+      "width": 1280,
+      "height": 64,
+      "channels": 3,
+      "opaqueColours": 5,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 716,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/floors/floor-dorm.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-floor-dorm]"
+        }
+      ],
+      "width": 1280,
+      "height": 64,
+      "channels": 3,
+      "opaqueColours": 3,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 814,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/floors/floor-industry.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-floor-industry]"
+        }
+      ],
+      "width": 1280,
+      "height": 64,
+      "channels": 3,
+      "opaqueColours": 5,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 748,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/floors/floor-slum.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-floor-slum]"
+        }
+      ],
+      "width": 1280,
+      "height": 64,
+      "channels": 3,
+      "opaqueColours": 4,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 710,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/floors/floor-vip.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-floor-vip]"
+        }
+      ],
+      "width": 1280,
+      "height": 64,
+      "channels": 3,
+      "opaqueColours": 4,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 814,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
     },
     {
       "path": "env/tile-door.png",
@@ -1226,6 +1386,366 @@
       "bytes": 4922,
       "class": "locked",
       "note": "16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-commercial-a.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-commercial-a]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 7,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 7190,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-commercial-b.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-commercial-b]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 9,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 8996,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-commercial-c.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-commercial-c]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 9,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 11055,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-core-a.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-core-a]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 12,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 16967,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-core-b.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-core-b]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 11,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 16138,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-core-c.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-core-c]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 10,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 19404,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-dorm-a.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-dorm-a]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 11,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 9582,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-dorm-b.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-dorm-b]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 10,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 12985,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-dorm-c.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-dorm-c]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 10,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 14135,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-industry-a.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-industry-a]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 10,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 16404,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-industry-b.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-industry-b]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 11,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 19677,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-industry-c.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-industry-c]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 10,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 17751,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-slum-a.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-slum-a]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 11,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 12007,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-slum-b.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-slum-b]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 10,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 14829,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-slum-c.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-slum-c]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 10,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 18207,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-vip-a.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-vip-a]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 10,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 11703,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-vip-b.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-vip-b]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 10,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 15695,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/walls/wall-vip-c.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-wall-vip-c]"
+        }
+      ],
+      "width": 1280,
+      "height": 128,
+      "channels": 3,
+      "opaqueColours": 10,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 15844,
+      "class": "locked",
+      "note": "阶层墙/地板，16 色门禁适用"
     },
     {
       "path": "fonts/OFL.txt",

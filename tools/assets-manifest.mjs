@@ -51,7 +51,13 @@ function parseArtpackTables() {
   const blockRe = /export const (\w+): Record<[^>]+> = \{([\s\S]*?)\n\};/g;
   for (const [, name, body] of src.matchAll(blockRe)) {
     const entries = {};
-    for (const m of body.matchAll(/\[?(\w+)\]?:\s*'([^']+)'/g)) entries[m[1]] = m[2];
+    // Three key shapes now: `[COMPUTED_KEY]`, `plain_name`, and a quoted
+    // `'env-wall-slum-a'` (the six-tier sets use hyphens, which \w+ never
+    // matches). Missing the third shape silently drops 24 files from the ref
+    // table, and the manifest test then compares 102 entries against 126.
+    for (const m of body.matchAll(/(?:\[(\w+)\]|'([^']+)'|(\w+)):\s*'([^']+)'/g)) {
+      entries[m[1] ?? m[2] ?? m[3]] = m[4];
+    }
     if (Object.keys(entries).length) tables[name] = entries;
   }
   return tables;
@@ -79,6 +85,8 @@ const ARTPACK_DIRS = {
   CHARACTER_FILES: 'artpack',
   PORTRAIT_FILES: 'ui/portraits',
   ENV_FILES: 'env',
+  // The eight wall fixtures live in their own folder (1:1 close-up art).
+  DECO_FILES: 'deco',
 };
 
 /** path-relative-to-public/ -> [{ module, detail }] */
@@ -204,6 +212,11 @@ function classify(path) {
   if (path in STAGED) return { class: 'staged', note: STAGED[path] };
   if (LOCKED.includes(path)) return { class: 'locked', note: '16 色门禁适用' };
   if (DECO.includes(path)) return { class: 'open', note: '墙面特写，255–335px 1:1 显示，不量化' };
+  // 2026-11-15 包：六阶层 x 三变体墙 18 张 + 六阶层地板 6 张。
+  // 交付时已按项目 16 色吸附（墙 7-12 色、地板 3-5 色），严格门禁适用。
+  if (path.startsWith('env/walls/') || path.startsWith('env/floors/')) {
+    return { class: 'locked', note: '阶层墙/地板，16 色门禁适用' };
+  }
   if (AUX.includes(path)) return { class: 'aux', note: path.endsWith('.otf') || path.endsWith('.woff2') ? '字体（Noto Sans SC 子集，SIL OFL）' : path.endsWith('OFL.txt') ? '字体许可' : '特效接触表（审阅用）' };
   if (REFS[path]) {
     return {

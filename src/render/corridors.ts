@@ -45,7 +45,7 @@ export interface CorridorContext {
 // palette role or a named mix of two, so a crate, a pipe and the wall behind it
 // all belong to the same value structure.
 import { PALETTE } from './palette.ts';
-import { ENV_FILES, ENV_WALL_DORM_KEY, ENV_WALL_INDUSTRY_KEY, ENV_WALL_KEY } from './artpack';
+import { ENV_FILES, ENV_FLOOR_KEY, ENV_WALL_KEY } from './artpack';
 import { LIGHT_DEPTH } from './lighting';
 import { segmentOf } from '../core/segments';
 import { startFxLoop } from './fx';
@@ -456,18 +456,41 @@ export const ENV_WALL_VIP_KEY = 'env-wall-vip';
  * art exists — a tier that borrows the wrong wall is worse than one that borrows
  * the oldest.
  */
-export function wallKeyFor(floor: number): string {
-  const tier = segmentOf(floor)?.id;
-  if (tier === 2) return ENV_WALL_DORM_KEY;
-  if (tier === 3) return ENV_WALL_INDUSTRY_KEY;
-  if (tier === 4) return wallKeyOrOldest(ENV_WALL_COMMERCIAL_KEY);
-  if (tier === 5) return wallKeyOrOldest(ENV_WALL_VIP_KEY);
-  return ENV_WALL_KEY;
+// ── per-floor art selection ────────────────────────────────────────────────
+// Six tiers, three variants each (see artpack.WALL_VARIANT_FILES). The variant
+// index is `floor % 3`, so 1..10 walks slum a/b/c/a/b/c..., 100..110 walks
+// dorm a/b/c..., and two neighbouring floors never share a wall. That is the
+// cheapest way to make every floor look different: 18 files, not 55.
+const TIER_SLUG: Record<number, string> = {
+  1: 'slum',
+  2: 'dorm',
+  3: 'industry',
+  4: 'commercial',
+  5: 'vip',
+  6: 'core',
+};
+const WALL_VARIANTS = ['a', 'b', 'c'] as const;
+
+function tierSlugFor(floor: number): string {
+  return TIER_SLUG[segmentOf(floor)?.id ?? 1] ?? 'slum';
 }
 
-/** A tier 4/5 wall key once its art is mapped in ENV_FILES, the slum wall until then. */
-function wallKeyOrOldest(key: string): string {
-  return Object.prototype.hasOwnProperty.call(ENV_FILES, key) ? key : ENV_WALL_KEY;
+/**
+ * Which wall a floor stands in front of. Falls back to the original slum wall
+ * when the tier's art is not mapped — a texture key BootScene never loaded
+ * renders as Phaser's green __MISSING box, which is worse than borrowing.
+ */
+export function wallKeyFor(floor: number): string {
+  const slug = tierSlugFor(floor);
+  const variant = WALL_VARIANTS[Math.abs(Math.trunc(floor)) % WALL_VARIANTS.length];
+  const key = `env-wall-${slug}-${variant}`;
+  return ENV_FILES[key] ? key : ENV_WALL_KEY;
+}
+
+/** The floor band for a tier. Same fallback rule as the wall. */
+export function floorKeyFor(floor: number): string {
+  const key = `env-floor-${tierSlugFor(floor)}`;
+  return ENV_FILES[key] ? key : ENV_FLOOR_KEY;
 }
 
 /** The wall tint for a floor, or null when the floor draws its own base. */

@@ -99,6 +99,20 @@ export const TILE_WINDOW_KEY = 'tile_window';
 // this codebase could generate. Gameplay stays pixel art.
 export const TITLE_BG_KEY = 'title-dorm';
 
+// 18 wall bands + 6 floor bands from the 2026-11-15 pack: six tiers x three
+// variants.
+//
+// One texture per floor would be 55 files and nobody would ever see the
+// difference (a player spends minutes in a tier, not hours). Instead the variant
+// is picked by `floor % 3`, so two neighbouring floors never share a wall — that
+// is what "every floor looks different" actually needs.
+//
+// Tiers: slum 1-10, dorm 100-110, industry 1000-1010, commercial 10000-10010,
+// vip 50000-50010, core 100000. Variants: a normal, b worn, c accident.
+//
+// Written inline rather than as a spread table on purpose: tools/assets-manifest
+// .mjs parses this block literal-by-literal, and a `...TABLE` line is invisible
+// to it — the gate would then report 24 files as unreferenced.
 export const ENV_FILES: Record<string, string> = {
   [ENV_WALL_KEY]: 'wall.png',
   [ENV_WALL_DORM_KEY]: 'wall-dorm.png',
@@ -106,6 +120,34 @@ export const ENV_FILES: Record<string, string> = {
   [ENV_FLOOR_KEY]: 'floor.png',
   [TILE_DOOR_KEY]: 'tile-door.png',
   [TILE_WINDOW_KEY]: 'tile-window.png',
+
+  'env-wall-slum-a': 'walls/wall-slum-a.png',
+  'env-wall-slum-b': 'walls/wall-slum-b.png',
+  'env-wall-slum-c': 'walls/wall-slum-c.png',
+  'env-wall-dorm-a': 'walls/wall-dorm-a.png',
+  'env-wall-dorm-b': 'walls/wall-dorm-b.png',
+  'env-wall-dorm-c': 'walls/wall-dorm-c.png',
+  'env-wall-industry-a': 'walls/wall-industry-a.png',
+  'env-wall-industry-b': 'walls/wall-industry-b.png',
+  'env-wall-industry-c': 'walls/wall-industry-c.png',
+  'env-wall-commercial-a': 'walls/wall-commercial-a.png',
+  'env-wall-commercial-b': 'walls/wall-commercial-b.png',
+  'env-wall-commercial-c': 'walls/wall-commercial-c.png',
+  'env-wall-vip-a': 'walls/wall-vip-a.png',
+  'env-wall-vip-b': 'walls/wall-vip-b.png',
+  'env-wall-vip-c': 'walls/wall-vip-c.png',
+  'env-wall-core-a': 'walls/wall-core-a.png',
+  'env-wall-core-b': 'walls/wall-core-b.png',
+  'env-wall-core-c': 'walls/wall-core-c.png',
+
+  // One floor band per tier; a missing tier degrades to the slum floor rather
+  // than a green box (see corridors.floorKeyFor).
+  'env-floor-slum': 'floors/floor-slum.png',
+  'env-floor-dorm': 'floors/floor-dorm.png',
+  'env-floor-industry': 'floors/floor-industry.png',
+  'env-floor-commercial': 'floors/floor-commercial.png',
+  'env-floor-vip': 'floors/floor-vip.png',
+  'env-floor-core': 'floors/floor-core.png',
 };
 
 // The eight wall fixtures, shipped at their native 255-335px and shown at that

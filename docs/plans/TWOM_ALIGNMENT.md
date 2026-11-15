@@ -103,6 +103,7 @@ type NpcAtom =
 实体模板三型：`BEHAVIOUR_TREE` / `TRIGGER` / `FLAG`。**只做设计与新文件**，
 不改现有 NPC；文档写清"现在规模不需要完整行为树，但组件要能挂"。
 
+
 ## 九、AG-26 实现说明（Flag/Trigger，2026-11-16）
 
 契约第六节的接口**未动**，原样落在属主文件 `src/systems/WorldFlags.ts`：
@@ -145,6 +146,7 @@ re-export `evaluateTriggers`，场景只需 import 这一个模块）。共 22 �
 4. `dailyGoal` HUD（:3383）保留 `isDailyGoalDone` 实时判定；旗只服务
    「第一次完成每日目标」类一次性反应。`progress.ts:82` 读存量
    `dailyGoal.done` 的 deprecated 迁移归 progress 属主，本单只加了注释。
+
 
 ## 十、AG-28 实现说明（2026-11-16，NPC 三原子落地）
 
@@ -226,7 +228,8 @@ npc.spec 静态锚点"（GameScene.ts:4896-4901 注释：阿林站在 241 而数
   4. 流浪者的帧级游荡/扑击（stepWandererRoam / wandererAI 状态机）需要 dt
      与帧间状态，未原子化——`wandererAtomsFor` 只覆盖"登场点"纯计划。
 
-## AG-27 实现说明（2026-11-16，日记系统）
+
+## 十一、AG-27 实现说明（2026-11-16，日记系统）
 
 第五节类型按契约原样落在 `src/systems/DiarySystem.ts`（`DiaryKind` 11 种、
 `DiaryEntry` 五字段），未动 schema。旧 `DiaryEvent` API 全部保留，

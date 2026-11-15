@@ -173,7 +173,14 @@ AG-03 报告的 BUG-QA-01「塔楼总览起/终点标签出画布右缘 14px+」
 - **补派 AG-17（集成 e2e 验证）**：独占 `e2e/**`，在集成分支上跑全量 e2e，逐一定性前几轮的失败（塔楼标签缺陷已被 AG-08 修掉，需确认转绿）。
 - **总控清理**：`ag-02-navigation/test-results` 345MB Playwright trace 产物（0 个源码文件，删前 ls 确认）已清。
 
-当前并行：AG-11 / AG-12 / AG-13 / AG-14 / AG-16 / AG-17 共 6 个。
+当前并行：AG-11 / AG-12 / AG-16 / AG-17 共 4 个（AG-13、AG-14、AG-15 已合入）。
+
+## 第二轮进展（2026-11-15 10:20）——3 个已合入
+- **AG-15 已合入** `a77bf7d`：config.ts JSON import 四环境兼容 + e2e 端口隔离 5199。
+- **AG-14 已合入** `441b64c`：当日行情（priceJitter 0.85–1.15，只抖 buy 侧要价——收购价是全经济锚，商品标价 GameScene 直读，乘性抖动必漂）、商人 buy 侧三锚定价（要价恒高于收购价+1，结构性无套利）、三门产业投资（collapse/loss 双 chance 确定性摇，investedGold/ventures 复用 growth 既有字段）。AG-05 硬边界逐条复验未动。
+- **AG-13 已合入** `beb487d`：五位发布者（recruiter@110 / blackmarket@1010 / lab_clerk@10010 / banquet_staff@50000 / core_terminal@100000 未激活）、gift 闭环（走 InventorySystem addItem/removeItem）、跨层寻仇（2%/日×最多2次，300 游戏日内期望 4.76 次）、闲逛插值（1 游戏分钟粒度）。
+- **AG-13 报的关键缺口已转 AG-11**：`GameScene.drawNpcs/nearestNpc/:948` 全量遍历 ALL_NPCS，不按楼层过滤——五位发布者会变成第 2 层的幽灵。AG-13 已给筛子 `npcActorsOnFloor(state.currentFloor)`（楼层集合 + 世界标志派生）。
+- 集成：68 文件 / **1128 测试全绿**（基线 1080，+48）。
 
 ## 总控错误记录（2026-11-15 10:00）
 集成日志里写的三个"未接消费方"符号名（bagFullCount / shelterLightDim / waterPurifierRuns）**是我写的概念 shorthand，没有核对真实符号**。AG-11 全库 grep 证实这三个不存在，实际存量是：

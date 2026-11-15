@@ -172,6 +172,7 @@ import {
 import { getItem } from '../data/items';
 import { CONTAINER_LABEL_DROP, HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
 import { RECIPES, getRecipe, isPassUpgrade, type UpgradeId } from '../data/recipes';
+import { WALL_DECO } from '../data/wallDeco';
 import { NPCS, NPC_FLOOR, getNpc, npcsOnFloor, type BarterOffer, type NpcDef, type NpcId } from '../data/npcs';
 import { QUEST_FLAG, QUESTS } from '../data/quests';
 import { clearFlag, hasFlag, setFlag } from '../systems/WorldFlags';
@@ -322,7 +323,7 @@ const SHELTER_ROWS: Array<{ action: ShelterAction; label: string; value: string 
   { action: 'repair', label: '修理', value: '木材×2 + 胶带×1' },
   { action: 'care', label: '照顾邻居', value: '口粮×1 · 压力 -12' },
 ];
-type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 's' | 'f' | 'q' | 'up' | 'down';
+type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 's' | 'f' | 'q' | 'l' | 'up' | 'down';
 type DirKeys = {
   up: Phaser.Input.Keyboard.Key;
   down: Phaser.Input.Keyboard.Key;
@@ -494,6 +495,7 @@ export class GameScene extends Phaser.Scene {
   private keyF!: Phaser.Input.Keyboard.Key;
   /** AG-11: Q opens the quest panel (QuestPanelScene, owned by AG-12). */
   private keyQ!: Phaser.Input.Keyboard.Key;
+  private keyL!: Phaser.Input.Keyboard.Key;
   /** The quests:changed subscription survives a Game restart; the panel scene does not restart. */
   private questsEventBound = false;
 
@@ -516,6 +518,10 @@ export class GameScene extends Phaser.Scene {
    * refreshDialogue re-places these alongside the bands.
    */
   private dialogueRowHits: Phaser.GameObjects.Rectangle[] = [];
+  /** the wall-fixture close-up (key L): built per open, like the shelter panel */
+  private decoOpen = false;
+  private decoIndex = 0;
+  private decoObjects: PanelObject[] = [];
   private dialogueTitle!: Phaser.GameObjects.Text;
   private dialoguePortrait!: Phaser.GameObjects.Image;
   private dialoguePortraitFrame!: Phaser.GameObjects.Rectangle;
@@ -563,7 +569,7 @@ export class GameScene extends Phaser.Scene {
   // drain, so every menu action has to be accepted at most once per frame —
   // otherwise one ArrowDown moves the pause selection two entries and the
   // player lands on 重新开始 when they asked for 塔楼地图.
-  private lastInputFrame: Record<GameKey, number> = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, q: -1, up: -1, down: -1 };
+  private lastInputFrame: Record<GameKey, number> = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, q: -1, l: -1, up: -1, down: -1 };
 
   constructor() {
     super({ key: 'Game' });
@@ -577,7 +583,7 @@ export class GameScene extends Phaser.Scene {
     this.lastActiveEvent = null;
     // The frame counter is monotonic across the session, so a stale slot would
     // never match anyway — reset to keep the per-create state honest.
-    this.lastInputFrame = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, q: -1, up: -1, down: -1 };
+    this.lastInputFrame = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, q: -1, l: -1, up: -1, down: -1 };
     // Field initialisers do not re-run, so the HUD's cached visibility has to be
     // re-derived against the fresh bag of a restarted run.
     this.bagFullShown = false;
@@ -4259,6 +4265,7 @@ export class GameScene extends Phaser.Scene {
     this.keyS = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyF = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
     this.keyQ = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
+    this.keyL = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.L);
 
     this.keyE.on('down', () => this.guard('e', this.onInteract), this);
     this.keyEsc.on('down', () => this.guard('esc', this.onEsc), this);
@@ -4275,6 +4282,17 @@ export class GameScene extends Phaser.Scene {
     // AG-11: Q opens the quest panel. The panel scene belongs to AG-12; until it
     // is registered this degrades to a flash instead of a console warning.
     this.keyQ.on('down', () => this.guard('q', this.onToggleQuests), this);
+    this.keyL.on('down', () => this.guard('l', this.toggleDeco), this);
+    // ← → are polled (isDown) for walking, so they have no keydown handler of
+    // their own; the archive wants a discrete press, and movement is already
+    // frozen while any panel is up. Guarding on decoOpen keeps them invisible to
+    // every other screen.
+    this.cursors.left.on('down', () => {
+      if (this.decoOpen) this.pageDeco(-1);
+    });
+    this.cursors.right.on('down', () => {
+      if (this.decoOpen) this.pageDeco(1);
+    });
     this.cursors.up.on('down', () => this.guard('up', this.onNavUp), this);
     this.cursors.down.on('down', () => this.guard('down', this.onNavDown), this);
 
@@ -4370,6 +4388,9 @@ export class GameScene extends Phaser.Scene {
     this.keyS?.removeAllListeners();
     this.keyF?.removeAllListeners();
     this.keyQ?.removeAllListeners();
+    this.keyL?.removeAllListeners();
+    this.cursors?.left?.removeAllListeners();
+    this.cursors?.right?.removeAllListeners();
     this.cursors?.up.removeAllListeners();
     this.cursors?.down.removeAllListeners();
   }
@@ -4403,7 +4424,7 @@ export class GameScene extends Phaser.Scene {
 
   private anyPanelOpen(): boolean {
     return (
-      this.encounterOpen || this.shelterOpen || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen
+      this.encounterOpen || this.shelterOpen || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.decoOpen
     );
   }
 
@@ -4466,6 +4487,7 @@ export class GameScene extends Phaser.Scene {
       !this.dialogueOpen &&
       !this.pauseOpen &&
       !this.shelterOpen &&
+      !this.decoOpen &&
       this.clearStrayPanels()
     ) {
       this.flash('面板已清理');
@@ -4493,6 +4515,10 @@ export class GameScene extends Phaser.Scene {
       this.closeShelter();
       return;
     }
+    if (this.decoOpen) {
+      this.closeDeco();
+      return;
+    }
     if (this.inventoryOpen) this.toggleInventory();
     else if (this.craftingOpen) this.toggleCrafting();
     else if (this.dialogueOpen) this.dialogueBack();
@@ -4500,6 +4526,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onNavUp(): void {
+    if (this.decoOpen) {
+      this.pageDeco(-1);
+      return;
+    }
     if (this.shelterOpen && !getGame().shelterPlan?.resolved) {
       this.shelterSelected = Math.max(0, this.shelterSelected - 1);
       this.buildShelterPanel();
@@ -4533,6 +4563,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onNavDown(): void {
+    if (this.decoOpen) {
+      this.pageDeco(1);
+      return;
+    }
     if (this.shelterOpen && !getGame().shelterPlan?.resolved) {
       this.shelterSelected = Math.min(SHELTER_ROWS.length - 1, this.shelterSelected + 1);
       this.buildShelterPanel();
@@ -4875,6 +4909,123 @@ export class GameScene extends Phaser.Scene {
     applyPanelDepth(this.shelterObjects, PANEL_DEPTH.game.dialogue);
     lockToScreen(this.shelterObjects);
     this.assertPanelContent('shelter', this.shelterObjects);
+  }
+
+  // ── wall-fixture close-up (key L) ───────────────────────────────────────
+  // The eight fixtures from the 2026-11-14 wall sheet. They cannot be wall
+  // dressing — 255-335px against a 16-26px band — and at that ratio a riveted
+  // notice board becomes four grey pixels. Native size is the only size at which
+  // the rivets, the pitting and the chalk strokes survive, so they are shown 1:1
+  // in a panel the player pages through.
+  //
+  // Rebuilt per open rather than toggled, the same way the shelter panel works:
+  // the fixture changes size with every page, so there is nothing worth keeping.
+  private buildDecoPanel(): void {
+    for (const o of this.decoObjects) o.destroy();
+    this.decoObjects = [];
+    const { width, height } = this.viewSize();
+    const panelW = 760;
+    const panelH = 470;
+    const cx = width / 2;
+    const cy = height / 2;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
+    const depth = PANEL_DEPTH.game.dialogue;
+    const deco = WALL_DECO[this.decoIndex];
+
+    this.decoObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
+    this.decoObjects.push(...buildPanelHeader(this, left, top, panelW, '墙面档案', UI.good, depth + 5));
+
+    // The fixture sits in its own inset well, centred, never upscaled.
+    const wellX = left + 24;
+    const wellY = top + 58;
+    const wellW = 320;
+    const wellH = 352;
+    this.decoObjects.push(...buildPanelWell(this, wellX, wellY, wellW, wellH, depth + 5));
+    const img = this.add.image(wellX + wellW / 2, wellY + wellH / 2, deco.key).setDepth(depth + 6);
+    const src = this.textures.get(deco.key).getSourceImage() as { width: number; height: number };
+    const fit = Math.min((wellW - 28) / src.width, (wellH - 28) / src.height, 1);
+    img.setDisplaySize(Math.round(src.width * fit), Math.round(src.height * fit));
+    this.decoObjects.push(img);
+
+    const textX = wellX + wellW + 26;
+    const textW = left + panelW - 24 - textX;
+    const name = this.add
+      .text(textX, top + 64, deco.name, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
+      .setDepth(depth + 6);
+    const where = this.add
+      .text(textX, top + 100, deco.floors, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+      .setDepth(depth + 6);
+    // useAdvancedWrap is load-bearing for the fifth time in this codebase: the
+    // copy is Chinese with no spaces, and the basic wrapper would ignore textW.
+    const body = this.add
+      .text(textX, top + 132, deco.text, {
+        fontFamily: FONT_FAMILY,
+        fontSize: `${TYPE.body}px`,
+        color: hex(TEXT.secondary),
+        lineSpacing: 8,
+        wordWrap: { width: textW, useAdvancedWrap: true },
+      })
+      .setDepth(depth + 6);
+    const page = this.add
+      .text(left + panelW - 24, top + panelH - 44, `${this.decoIndex + 1} / ${WALL_DECO.length}`, {
+        fontFamily: FONT_FAMILY,
+        fontSize: `${TYPE.caption}px`,
+        color: hex(TEXT.dim),
+      })
+      .setOrigin(1, 0)
+      .setDepth(depth + 6);
+    const hint = this.add
+      .text(left + 24, top + panelH - 44, '← → 翻页 · L / ESC 关闭', {
+        fontFamily: FONT_FAMILY,
+        fontSize: `${TYPE.caption}px`,
+        color: hex(PALETTE.clothHigh),
+      })
+      .setDepth(depth + 6);
+    // Two click targets for the pager, under the copy column so they never cover
+    // the fixture itself.
+    const navY = top + panelH - 52;
+    this.decoObjects.push(
+      this.panelHit(textX, navY, 96, 28, depth + 8, { onClick: () => this.pageDeco(-1) }),
+      this.panelHit(textX + 104, navY, 96, 28, depth + 8, { onClick: () => this.pageDeco(1) }),
+    );
+    const prev = this.add
+      .text(textX + 48, navY + 14, '◀ 上一件', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+      .setOrigin(0.5)
+      .setDepth(depth + 9);
+    const next = this.add
+      .text(textX + 152, navY + 14, '下一件 ▶', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+      .setOrigin(0.5)
+      .setDepth(depth + 9);
+    this.decoObjects.push(name, where, body, page, hint, prev, next);
+
+    // Same two calls every other panel makes. Missing them is what put the
+    // shelter panel's words on the floor above.
+    applyPanelDepth(this.decoObjects, depth);
+    lockToScreen(this.decoObjects);
+    this.assertPanelContent('deco', this.decoObjects);
+  }
+
+  private toggleDeco(): void {
+    if (this.decoOpen) {
+      this.closeDeco();
+      return;
+    }
+    if (this.anyPanelOpen()) return;
+    this.decoOpen = true;
+    this.decoIndex = 0;
+    this.buildDecoPanel();
+  }
+
+  private closeDeco(): void {
+    this.decoOpen = false;
+    for (const o of this.decoObjects) o.setVisible(false);
+  }
+
+  private pageDeco(delta: number): void {
+    this.decoIndex = (this.decoIndex + delta + WALL_DECO.length) % WALL_DECO.length;
+    this.buildDecoPanel();
   }
 
   private activateShelterChoice(): void {

@@ -187,9 +187,24 @@ const AUX = [
   'fx/water/ripples/contact.png',
 ];
 
+// The eight wall fixtures, shown 1:1 in the close-up archive (key L). Native size
+// is the whole point: the panel exists so the rivets, pitting and chalk strokes
+// survive, and 16-colour snapping would flatten exactly those. Not gated.
+const DECO = [
+  'deco/deco-1.png',
+  'deco/deco-2.png',
+  'deco/deco-3.png',
+  'deco/deco-4.png',
+  'deco/deco-5.png',
+  'deco/deco-6.png',
+  'deco/deco-7.png',
+  'deco/deco-8.png',
+];
+
 function classify(path) {
   if (path in STAGED) return { class: 'staged', note: STAGED[path] };
   if (LOCKED.includes(path)) return { class: 'locked', note: '16 色门禁适用' };
+  if (DECO.includes(path)) return { class: 'open', note: '墙面特写，255–335px 1:1 显示，不量化' };
   if (AUX.includes(path)) return { class: 'aux', note: path.endsWith('.woff2') ? '像素字体' : path.endsWith('OFL.txt') ? '字体许可' : '特效接触表（审阅用）' };
   if (REFS[path]) {
     return {

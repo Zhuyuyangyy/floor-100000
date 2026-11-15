@@ -108,6 +108,21 @@ export const ENV_FILES: Record<string, string> = {
   [TILE_WINDOW_KEY]: 'tile-window.png',
 };
 
+// The eight wall fixtures, shipped at their native 255-335px and shown at that
+// size in the close-up archive (see data/wallDeco.ts for why they are not wall
+// dressing). Separate folder from artpack/ because these are the only textures
+// in the game that are drawn larger than 1:1 on screen.
+export const DECO_FILES: Record<string, string> = {
+  'deco-1': 'deco-1.png',
+  'deco-2': 'deco-2.png',
+  'deco-3': 'deco-3.png',
+  'deco-4': 'deco-4.png',
+  'deco-5': 'deco-5.png',
+  'deco-6': 'deco-6.png',
+  'deco-7': 'deco-7.png',
+  'deco-8': 'deco-8.png',
+};
+
 // Which file holds each furniture texture. The seven procedural drawers in
 // pixelArt.ts used to own these; they are gone now, so this is the only list.
 //

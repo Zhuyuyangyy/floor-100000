@@ -17,6 +17,14 @@ import { isPassUpgrade } from '../data/recipes';
 // 同 seed 同一天必然 roll 出同一个目标（可复现，见 dailyGoals.test.ts）。
 
 // 直接复用 Lead 在 gameTypes.ts 预置的字段结构，避免两处定义漂移。
+//
+// deprecated：state.dailyGoal / goal.done 是存量字段（AG-26，
+// docs/plans/TWOM_ALIGNMENT.md §6）。完成态已收敛为旗 goal:met
+// （triggers.ts，由 isDailyGoalDone 求值）；「奖励只发一次」走
+// once:goal-paid:<day>。存量字段与存量行为保持不变——旧存档、既有
+// 测试、progress.ts 的读点全部照旧；新逻辑查旗，不要再新增读点。
+// 两者分工：goal:met 答「达标了吗」（里程碑，置了不清），isDailyGoalDone
+// 答「此刻达标了吗」（实时，玩家可能喝完达标用的水）。HUD 的 ✓ 要后者。
 export type DailyGoalKind = NonNullable<GameState['dailyGoal']>['kind'];
 export type DailyGoal = NonNullable<GameState['dailyGoal']>;
 
@@ -86,6 +94,10 @@ function openedContainersTotal(state: GameState): number {
 // 纯判定：不读 dailyGoal.done、不写任何状态。done 的语义是「完成且已结算」
 // （见 grantDailyGoalReward），与「现在是否达标」是两个问题——玩家可能在结算
 // 后喝掉达标用的净水，判定函数不应因此改口。
+//
+// deprecated 路径提示：等价的里程碑旗是 goal:met（triggers.ts 用本函数
+// 求值，一次置位不清）。本函数保留为实时判定——HUD 的 ✓ 与结算守卫都要
+// 「此刻是否达标」，旗答不了这个问题（旗只答「曾经达标吗」）。
 export function isDailyGoalDone(state: GameState): boolean {
   const goal = state.dailyGoal;
   if (!goal) return false;
@@ -112,6 +124,10 @@ export function isDailyGoalDone(state: GameState): boolean {
 // 有地方放了，两个语义分开：done 只回答「结算过了吗」，是否达标由
 // isDailyGoalDone 实时判定（玩家可能在结算后喝掉达标用的净水，那时 done 仍为
 // true 但已达标为 false，两者本就不该绑死）。
+//
+// deprecated：goal.done 的写入（goal.done = true）是存量行为，为旧存档与
+// progress.ts 的读点保留；新逻辑请查 once:goal-paid:<day>（结算过吗）与
+// goal:met（达标过吗，triggers.ts），不要再读 done。
 export function grantDailyGoalReward(state: GameState): boolean {
   const goal = state.dailyGoal;
   if (!goal) return false;

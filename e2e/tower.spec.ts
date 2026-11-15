@@ -16,10 +16,14 @@ import { PLAYABLE_SEGMENTS } from '../src/core/segments';
 const SUMMIT = TOTAL_FLOORS; // the top of the tower
 const START_FLOOR = PLAYABLE_SEGMENTS[0].from; // where every run begins
 const LAST_SECTOR = SECTOR_COUNT - 1; // the summit's sector
-// The retired dev dorm scene, still bootable behind ?devfloor=. Its floor is the
-// tower's own summit (constants.ts DEV_TEST_FLOORS[0]) — read from the tower
-// module rather than from constants, whose config.ts JSON import Node's ESM
-// loader rejects outside Vite (this package is "type": "module").
+// ?devfloor= drops the run straight onto a fixture floor. This fixture used to
+// boot the retired dev dorm scene; the summit is now authored endgame content
+// (the sixth playable segment starts there), so what the flag still proves is
+// the routing: the fixture lands on the asked-for floor, a normal run never
+// lands there by itself, and a malformed value is ignored rather than guessed.
+// The floor is the tower's own summit (constants.ts DEV_TEST_FLOORS[0]) — read
+// from the tower module rather than from constants, whose config.ts JSON import
+// Node's ESM loader rejects outside Vite (this package is "type": "module").
 const DEV_FLOOR = TOTAL_FLOORS;
 // A fixture floor near the top, derived rather than written: the second test
 // needs a sector far from the one the player starts in.
@@ -480,7 +484,7 @@ test('?devwin=1 still runs the retired day-8 victory fixture', async ({ page }) 
   await page.screenshot({ path: 'e2e/screenshots/06-win.png' });
 });
 
-test(`?devfloor=${DEV_FLOOR} starts the retired dev dorm scene and nothing else`, async ({ page }) => {
+test(`?devfloor=${DEV_FLOOR} boots at the asked-for floor; a normal run and a malformed value never land there`, async ({ page }) => {
   await page.goto(`/?seed=42&devfloor=${DEV_FLOOR}`);
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter');

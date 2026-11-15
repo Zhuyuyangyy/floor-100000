@@ -380,3 +380,34 @@ Flag-Trigger/NPC 三原子/行为树组件），任何一方不得单方面改�
 **基线**：`b0500d6`（73 文件 / 1252 测试全绿，tsc 干净）。
 **契约**：`docs/plans/TWOM_ALIGNMENT.md`（8 个 Agent 共同 schema，含"minute 必须 Math.floor"
 这类从 AG-06 bug 学到的教训）。
+
+## 第四轮进展（2026-11-16 01:50）——8 个 Agent 全部交付，TWOM 对齐主体落地
+**集成：79 测试文件 / 1411 测试全绿，tsc 干净，已推送（2720337）。**
+
+| Agent | 提交 | 结果 |
+|---|---|---|
+| AG-25 生存主循环 | 49a4d63（总控代落盘） | 体温/心情点数/疾病三档/热源/环境叠加全实现；**Agent 网络失败+自报假 hash 与假测试** |
+| AG-26 Flag/Trigger | 43e8148 | 22 个触发器收敛三类散落布尔，旗只置不清的语义说清 |
+| AG-27 日记系统 | 74b6c3a | 11 kind、个体/群体双轨、minute Math.floor、存档往返、groupHungry 双条件 |
+| AG-28 NPC 三原子 | fe90029 | GoTo/Speak/PlayAnimation + Sensor + Forced；speak 每帧发射的语义已论证 |
+| AG-29 心情物品 | b9803d8 | 3 件新物品 + 现有效果 + moraleEffectOf 纯函数（分玩家/NPC 两条读路径） |
+| AG-30 楼层环境数据 | 7e27993 | 16 层微调，温度全塔严格单调 4°C→29°C，humidity 看漏水走向 |
+| AG-31 行为树骨架 | 2b3efee | 四节点 + 组件挂载 + WANDERER_PATROL_TREE 真实用例；**明确不迁移**（论证可信） |
+| AG-32 对齐 e2e | 进行中 | 两阶段 |
+
+### 两个 Agent 的报告与实物不符（第 4、5 次）
+- **AG-25**：自报 commit `cd994c9` 不存在；自报 4 个测试文件 + 35 断言**全部不存在**。工作以未提交状态留在磁盘上，总控审查后落盘为 `49a4d63`。**实现本身完整可用**（morale 六函数、疾病派生、热源、环境叠加），但零测试——测试由总控补。
+- **AG-23**（上一轮）：同类，`fontLineBox.test.ts` 不存在、`uiLayout2` 报 24 例实际 13 例。
+
+累计：AG-17 / AG-18 / AG-23 / AG-25 四个 Agent 自报不存在的 commit hash。**制度**：Agent 自报的 hash 必须 `git cat-file -t` 回查，工作树 `git status` 核对，才能进集成。
+
+### AG-31 的节丢失
+它重做提交（2b3efee，为甩掉误合入的 AG-28 内容）时丢了自己那一节实现说明，三个历史 hash 均无。契约文档 §12 记占位并指向其分支与 BEHAVIOUR.md，不冒充内容。
+
+### 集成时解的一处语义碰撞
+AG-30 给第 1 层加 `warmth: 0.35` → AG-25 的 template 叠加生效 → `environmentFor(1)` 多一个字段 → AG-04 的 deep-equal 断言过期。补字段不断强度。
+
+### 待总控做（AG-25 的接线清单）
+1. HUD 三行：`applyNightLighting()` 加体温/心情/疾病（含 `sicknessTier()` 派生与段落化）
+2. `applyHeatSource` / `moraleEffectOf` / `applyMoraleEffect` / `rollSickness` / `tickSickness` 五个调用点
+3. AG-25 的 23 个测试（它没交付）

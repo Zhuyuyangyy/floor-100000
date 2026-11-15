@@ -228,10 +228,26 @@ describe('环境参数接通（契约第二节：environmentFor 解析顺序）'
     expect(environmentFor(3).cold).toBe(2.4); // 补丁已撤，阶梯复位
   });
 
-  it('warmthOf falls back to the JSON default ladder', () => {
-    expect(warmthOf(1)).toBe(SURVIVAL_BALANCE.floorWarmth[1]); // dorm: candles + bed
-    expect(warmthOf(3)).toBe(0); // storage: no heat source at all
-    expect(warmthOf(100)).toBe(0); // upper segments unlisted = 0
+  it('warmthOf: the floor template wins, the JSON ladder is only the fallback', () => {
+    // 契约第二节：FLOOR_TEMPLATES[floor].environment.warmth（AG-30 的逐层数据）
+    // 优先于 SURVIVAL_BALANCE.floorWarmth（AG-25 的默认梯）。第 1 层两个源都有
+    // 值——template 0.35（床+三支蜡烛）盖住梯的 0.5，这正是契约要的"逐层微调
+    // 优先"。
+    expect(environmentFor(1).warmth).toBe(0.35);
+    expect(warmthOf(1)).toBe(0.35);
+    // 没有 template 条目的层才落到 JSON 梯：3 层储物层无热源 = 0，
+    // 100 层以上未列出 = 0。
+    expect(environmentFor(3).warmth).toBeUndefined();
+    expect(warmthOf(3)).toBe(0);
+    expect(warmthOf(100)).toBe(0);
+    // 兜底梯本身仍在：给一个没有 template 的层打补丁，验证它真的会被读到。
+    const patched = { ...FLOOR_TEMPLATES };
+    delete patched[1];
+    const before = FLOOR_TEMPLATES[1];
+    FLOOR_TEMPLATES[1] = undefined as unknown as typeof before;
+    expect(warmthOf(1)).toBe(SURVIVAL_BALANCE.floorWarmth[1]);
+    FLOOR_TEMPLATES[1] = before;
+    expect(Object.keys(patched).length).toBeGreaterThan(0);
   });
 });
 
@@ -497,8 +513,10 @@ describe('睡眠夜间结算（TWOM：ProcessSleep 与其它 Tick 并列）', ()
     setBodyHeat(dorm, 30);
     const r = sleep(dorm);
     expect(r.ok).toBe(true);
-    // sleepBodyHeatPerHour × warmth(0.5) × 10 小时 = +20
-    expect(bodyHeatOf(dorm)).toBeCloseTo(50, 5);
+    // 期望值从 warmthOf(1) 现算，不写死：warmth 的权威来源是楼层 template
+    // （契约第二节），它的值归 AG-30 调；写死 0.5 会在下次调 warmth 时假红。
+    // sleepBodyHeatPerHour × warmth × 睡眠小时数 = 回温量。
+    expect(bodyHeatOf(dorm)).toBeCloseTo(30 + SURVIVAL_BALANCE.sickness.sleepBodyHeatPerHour * warmthOf(1) * 10, 5);
 
     const cold = on(3); // warmth 0——这层没有热源，睡了也冷
     cold.gameMinuteOfDay = 1200;

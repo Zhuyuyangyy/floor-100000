@@ -61,7 +61,15 @@ import {
   bodyTempOf,
   warmthAt,
 } from '../systems/EnvironmentSystem';
+import { sicknessOf } from '../systems/SurvivalSystem';
 import { ailmentLabel, inflict } from '../systems/SicknessSystem';
+import {
+  backFromScavenge,
+  cheerFromItem,
+  moraleBandOf,
+  moraleLabel,
+  witnessTrauma,
+} from '../systems/MoraleSystem';
 import { recentDiary } from '../systems/DiarySystem';
 import { availableShelterActions, finishNight, resolveShelterAction } from '../systems/ShelterSystem';
 import { recordDepth, runScore } from '../systems/progress';
@@ -218,6 +226,11 @@ const CRAFT_ROWS = RECIPES.length;
 // AG-20：终局层（统治核心）。这一层的三个容器是终局演出入口
 // （docs/plans/FINALE_UX.md §2 契约，EndgameScene 归 AG-21）。
 const FINALE_FLOOR = 100000;
+// TWOM 对齐 §1：疾病三档的 HUD 用语。healthy 不进读数——没病不需要占位。
+const SICKNESS_TIER_LABEL: Record<string, string> = {
+  sick: '患病',
+  critical: '病危',
+};
 // AG-20: 产业累计收益的账本标记。存在 state.flags（WorldFlags 的平地）而不是
 // 场景字段里：存档因此携带整个账本，读档后面板的「累计」读数不断档。结算本身
 // 由系统层的水位标记 economy:settled-day 把关，场景只把观察到的收益累加到这里。
@@ -400,6 +413,9 @@ export class GameScene extends Phaser.Scene {
   private wasBlackout = false;
   private blackoutAt = 0;
   private wandererHitAt = Number.NEGATIVE_INFINITY;
+  // TWOM 对齐 §2：这一趟出门拿到多少件。回宿舍时按它结算士气（满载而归 vs
+  // 空手而归）。只在开箱与战斗掉落处累加，落地 1F 时清零。
+  private lootThisTrip = 0;
   // OVERHAUL: the wanderer's stalk/lunge state machine. Lives beside the sprite
   // because the scene owns the movement it drives.
   private wandererAI?: WandererAI;
@@ -2003,7 +2019,7 @@ export class GameScene extends Phaser.Scene {
         const itemId = pool[rng.nextInt(0, pool.length - 1)];
         const qty = itemId === 'clean_water' || itemId === 'bread' ? rng.nextInt(1, 2) : 1;
         const r = addItem(state.player.inventory, itemId, qty);
-        if (r.overflow === 0) taken.push({ itemId, quantity: qty });
+        if (r.overflow === 0) { taken.push({ itemId, quantity: qty }); this.lootThisTrip += qty; }
       }
       const names = taken.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、');
       combat.log.push(isBoss ? `守门人倒下了。你搜出：${names || '（背包已满）'}` : `你击败了 ${combat.monster.name}。战利品：${names || '（背包已满）'}`);
@@ -3473,11 +3489,19 @@ export class GameScene extends Phaser.Scene {
     this.environmentText.setText(`${TEMP_LABEL} ${Math.round(temp)} ${mood}`);
     this.environmentText.setColor(temp <= COLD_THRESHOLD || ill !== '' ? hex(TEXT.warn) : hex(TEXT.secondary));
 
-    // Region, with the ailment folded in when there is one — it is a property of
-    // the player, not the floor, so it rides on the region chip rather than
-    // getting a fifth slot.
-    this.envRegionText.setText(`区域 ${ill ? `${ill} · ` : ''}${env.label}`);
-    this.envRegionText.setColor(ill !== '' ? hex(TEXT.warn) : hex(TEXT.secondary));
+    // Region, with the player's own state folded in when there is any — an
+    // ailment, a sickness tier and a sagging morale are properties of the
+    // survivor, not of the floor, so they ride on the region chip rather than
+    // getting a fifth slot. TWOM 对齐 §1/§2：疾病三档与心情点数终于有读数。
+    // 只在该报警时报——士气高涨不必占这一行，低落必须占。
+    const tier = sicknessOf(state);
+    const sagging = moraleBandOf(state) === 'low';
+    const flags: string[] = [];
+    if (ill !== '') flags.push(ill);
+    if (tier !== 'healthy') flags.push(SICKNESS_TIER_LABEL[tier]);
+    if (sagging) flags.push(moraleLabel(state));
+    this.envRegionText.setText(`区域 ${flags.length ? `${flags.join(' · ')} · ` : ''}${env.label}`);
+    this.envRegionText.setColor(ill !== '' || tier !== 'healthy' || sagging ? hex(TEXT.warn) : hex(TEXT.secondary));
 
     this.envHumidText.setText(env.humidity >= 0.5 ? '潮湿' : '干燥');
     this.envNightText.setText(env.hostile && night ? '夜间危险' : night ? '夜间' : '安全');
@@ -5110,7 +5134,12 @@ export class GameScene extends Phaser.Scene {
         // The item's stat gain, and what it cleared: a medkit that closes a
         // wound says so, because that is the reason it was reached for.
         const cured = result.cured?.length ? ` · 治好${result.cured.map((c) => AILMENT_LABEL[c]).join('、')}` : '';
-        this.flash(`使用 ${getItem(stack.itemId).displayName} · ${STAT_LABEL[result.stat!]} +${Math.round(result.amount!)}${cured}`);
+        // TWOM 对齐 §4：提振心情的物品在这里真正推动点数池。cheerFromItem 是
+        // morale 池的唯一写入口（MoraleSystem 属主）——AG-29 的 moraleEffectOf
+        // 是并行实现且摇序派生式不同，不接线，避免双掷双写。
+        const cheer = cheerFromItem(getGame(), getItem(stack.itemId), stack.itemId);
+        const cheerText = cheer.applied ? ` · 心情 +${cheer.delta}` : '';
+        this.flash(`使用 ${getItem(stack.itemId).displayName} · ${STAT_LABEL[result.stat!]} +${Math.round(result.amount!)}${cured}${cheerText}`);
       } else {
         this.flash(result.reason ?? '无法使用');
       }
@@ -5649,6 +5678,7 @@ export class GameScene extends Phaser.Scene {
       // THE MOMENT OF GETTING IT. A container opened and its contents appeared in
       // the bag with nothing on screen saying so; the burst is that beat.
       playFx(this, 'collect-burst', state.player.x + 10, PLAYER_FEET_Y - 50, LIGHT_DEPTH);
+      this.lootThisTrip += result.took.reduce((n, t) => n + t.quantity, 0);
       this.flash(`获得 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${ACTION_COSTS.searchContainer} 分钟）`);
       this.chargeTime(ACTION_COSTS.searchContainer);
     }
@@ -5839,6 +5869,12 @@ export class GameScene extends Phaser.Scene {
     // Leaving a dwell event's floor is still the escape; the event must not
     // follow the player across the stairwell.
     if (state.worldEvents.activeEvent?.source === 'dwell') state.worldEvents.activeEvent = null;
+    // TWOM 对齐 §2：满载而归 vs 空手而归——回宿舍时按这一趟的收获结算士气。
+    // 1F 是家，往下走是出门、往上是回家，所以只看方向不看具体层号。
+    if (climb.direction < 0 && state.currentFloor === STARTING_FLOOR) {
+      backFromScavenge(state, this.lootThisTrip);
+      this.lootThisTrip = 0;
+    }
     saveToStorage(state);
     this.flash(`到达第 ${state.currentFloor} 层 · 已从楼梯落地`);
   }
@@ -6345,6 +6381,9 @@ export class GameScene extends Phaser.Scene {
       state.player.hp = Math.max(0, state.player.hp - damage);
       this.recordWandererMemory('attack', `巡游体在第${state.currentFloor}层攻击了玩家，造成${damage}点伤害。`);
       inflict(state, 'wound', ai.state === 'lunge' ? 55 : 30, absoluteMinute(state));
+      // TWOM 对齐 §2：目睹/遭受袭击掷创伤概率——这是 morale 五机制里的
+      // KosovoMoraleTraumaProbability。纯函数内部掷，同 seed 同状态同结果。
+      witnessTrauma(state);
       this.refreshStats();
       this.playActionAnim(hurtAnimKey('player'), 400);
       playSfx('hurt');

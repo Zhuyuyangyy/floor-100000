@@ -402,7 +402,7 @@ export class TowerOverviewScene extends Phaser.Scene {
 
     // The skin is captured, not just pushed: refreshDetail re-places it when the
     // floor's content list wraps past one line (the panel grows around it).
-    this.detailPanelParts = buildPanel(this, cx, cy, w, h, 'yellow', PANEL_DEPTH.tower.detail);
+    this.detailPanelParts = buildPanel(this, cx, cy, w, h, 'tower', PANEL_DEPTH.tower.detail);
     this.detailObjects.push(...this.detailPanelParts);
     this.detailTitle = this.add
       .text(cx, top + 22, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_TITLE}px`, color: hex(PALETTE.lightHigh) })

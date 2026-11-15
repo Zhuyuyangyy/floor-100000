@@ -51,6 +51,14 @@ export class BootScene extends Phaser.Scene {
         this.load.image(`ui-frame-${accent}-${part}`, `assets/ui/frame-${accent}-${part}.png`);
       }
     }
+    // The 2026-11-15 frames: the pack ships each one as a single 96x96 image, so
+    // these live in a subdirectory with the eight slices already cut (see
+    // tools notes: 96x96 scaled 3.5x puts its 8px border exactly on PANEL_SLICE).
+    for (const theme of ['dialogue', 'item', 'tower'] as const) {
+      for (const part of ['tl', 'tr', 'bl', 'br', 'top', 'bottom', 'left', 'right'] as const) {
+        this.load.image(`ui-frame-${theme}-${part}`, `assets/ui/frame-${theme}/frame-${theme}-${part}.png`);
+      }
+    }
 
     for (const [id, file] of Object.entries(ITEM_ICON_FILES)) {
       this.load.image(id, `assets/artpack/${file}`);

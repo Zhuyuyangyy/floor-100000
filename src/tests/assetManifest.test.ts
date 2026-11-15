@@ -113,9 +113,20 @@ function expectedRefs(): Map<string, string[]> {
     [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]),
   );
   expect(accents).toEqual(['green', 'yellow']);
-  expect(parts.length).toBe(8);
+  // Two frame loops now (the originals, then the 2026-11-15 set in its own
+  // subdirectory), so `parts` is 16 entries — the same 8 names twice. Slice the
+  // first loop's names and pair them with both key lists.
+  expect(parts.length % 8).toBe(0);
+  const partsOnce = parts.slice(0, 8);
   for (const accent of accents) {
-    for (const part of parts) add(`ui/frame-${accent}-${part}.png`, 'src/scenes/BootScene.ts');
+    for (const part of partsOnce) add(`ui/frame-${accent}-${part}.png`, 'src/scenes/BootScene.ts');
+  }
+  const themes = [...boot.matchAll(/for \(const theme of \[([^\]]+)\]/g)].flatMap((m) =>
+    [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]),
+  );
+  expect(themes).toEqual(['dialogue', 'item', 'tower']);
+  for (const theme of themes) {
+    for (const part of partsOnce) add(`ui/frame-${theme}/frame-${theme}-${part}.png`, 'src/scenes/BootScene.ts');
   }
   return refs;
 }

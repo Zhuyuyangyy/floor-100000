@@ -3159,7 +3159,7 @@ export class GameScene extends Phaser.Scene {
     this.panelBox = { x: left, y: top, w: panelW, h: panelH };
     const depth = PANEL_DEPTH.game.inventory;
 
-    this.invObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
+    this.invObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'item', depth));
     this.invObjects.push(...buildPanelHeader(this, left, top, panelW, '背包', UI.good, depth + 5));
     this.invObjects.push(
       this.add
@@ -3849,7 +3849,7 @@ export class GameScene extends Phaser.Scene {
     const depth = PANEL_DEPTH.game.dialogue;
     // The skin is captured, not just pushed: refreshDialogue re-places these
     // parts when a long AI opening line grows the panel (dialogueGeometry).
-    this.dialoguePanelParts = buildPanel(this, cx, cy, panelW, panelH, 'green', depth);
+    this.dialoguePanelParts = buildPanel(this, cx, cy, panelW, panelH, 'dialogue', depth);
     this.dialogueObjects.push(...this.dialoguePanelParts);
     // OVERHAUL UI: the same header strip every other panel uses, with the NPC's
     // name on it, and the message in an inset well so speech reads as speech

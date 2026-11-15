@@ -1,9 +1,9 @@
 {
   "palette": 16,
   "summary": {
-    "files": 166,
-    "png": 150,
-    "locked": 61,
+    "files": 190,
+    "png": 174,
+    "locked": 85,
     "open": 84,
     "staged": 7,
     "aux": 14,
@@ -2634,6 +2634,166 @@
       "note": "既有未量化资产（面积平均降尺/绘制产物）"
     },
     {
+      "path": "ui/frame-dialogue/frame-dialogue-bl.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-dialogue-bl"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 3,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 187,
+      "semiAlphaPx": 0,
+      "bytes": 162,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-dialogue/frame-dialogue-bottom.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-dialogue-bottom"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 3,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 167,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-dialogue/frame-dialogue-br.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-dialogue-br"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 3,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 187,
+      "semiAlphaPx": 0,
+      "bytes": 165,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-dialogue/frame-dialogue-left.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-dialogue-left"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 2,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 308,
+      "semiAlphaPx": 0,
+      "bytes": 140,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-dialogue/frame-dialogue-right.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-dialogue-right"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 2,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 308,
+      "semiAlphaPx": 0,
+      "bytes": 147,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-dialogue/frame-dialogue-tl.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-dialogue-tl"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 4,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 187,
+      "semiAlphaPx": 0,
+      "bytes": 152,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-dialogue/frame-dialogue-top.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-dialogue-top"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 4,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 160,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-dialogue/frame-dialogue-tr.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-dialogue-tr"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 4,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 187,
+      "semiAlphaPx": 0,
+      "bytes": 164,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
       "path": "ui/frame-green-bl.png",
       "refs": [
         {
@@ -2792,6 +2952,326 @@
       "bytes": 2390,
       "class": "open",
       "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "ui/frame-item/frame-item-bl.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-item-bl"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 0,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 784,
+      "semiAlphaPx": 0,
+      "bytes": 83,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-item/frame-item-bottom.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-item-bottom"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 1,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 308,
+      "semiAlphaPx": 0,
+      "bytes": 115,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-item/frame-item-br.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-item-br"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 0,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 784,
+      "semiAlphaPx": 0,
+      "bytes": 83,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-item/frame-item-left.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-item-left"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 1,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 308,
+      "semiAlphaPx": 0,
+      "bytes": 130,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-item/frame-item-right.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-item-right"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 1,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 308,
+      "semiAlphaPx": 0,
+      "bytes": 139,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-item/frame-item-tl.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-item-tl"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 0,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 784,
+      "semiAlphaPx": 0,
+      "bytes": 83,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-item/frame-item-top.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-item-top"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 1,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 308,
+      "semiAlphaPx": 0,
+      "bytes": 118,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-item/frame-item-tr.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-item-tr"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 0,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 784,
+      "semiAlphaPx": 0,
+      "bytes": 83,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-tower/frame-tower-bl.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-tower-bl"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 2,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 495,
+      "semiAlphaPx": 0,
+      "bytes": 133,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-tower/frame-tower-bottom.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-tower-bottom"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 2,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 308,
+      "semiAlphaPx": 0,
+      "bytes": 123,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-tower/frame-tower-br.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-tower-br"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 3,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 336,
+      "semiAlphaPx": 0,
+      "bytes": 159,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-tower/frame-tower-left.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-tower-left"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 1,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 308,
+      "semiAlphaPx": 0,
+      "bytes": 129,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-tower/frame-tower-right.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-tower-right"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 1,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 308,
+      "semiAlphaPx": 0,
+      "bytes": 136,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-tower/frame-tower-tl.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-tower-tl"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 3,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 495,
+      "semiAlphaPx": 0,
+      "bytes": 144,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-tower/frame-tower-top.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-tower-top"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 2,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 308,
+      "semiAlphaPx": 0,
+      "bytes": 131,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
+    },
+    {
+      "path": "ui/frame-tower/frame-tower-tr.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "ui-frame-tower-tr"
+        }
+      ],
+      "width": 28,
+      "height": 28,
+      "channels": 4,
+      "opaqueColours": 3,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 495,
+      "semiAlphaPx": 0,
+      "bytes": 144,
+      "class": "locked",
+      "note": "2026-11-15 三套面板框（八片），16 色门禁适用"
     },
     {
       "path": "ui/frame-yellow-bl.png",

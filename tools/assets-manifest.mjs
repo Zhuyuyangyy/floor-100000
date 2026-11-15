@@ -112,6 +112,13 @@ function buildRefs() {
       add(`ui/frame-${accent}-${part}.png`, 'src/scenes/BootScene.ts', `ui-frame-${accent}-${part}`);
     }
   }
+  // The three 2026-11-15 frames load from their own subdirectory (each ships as
+  // one 96x96 image, sliced at build time — see BootScene).
+  for (const theme of ['dialogue', 'item', 'tower']) {
+    for (const part of ['tl', 'tr', 'bl', 'br', 'top', 'bottom', 'left', 'right']) {
+      add(`ui/frame-${theme}/frame-${theme}-${part}.png`, 'src/scenes/BootScene.ts', `ui-frame-${theme}-${part}`);
+    }
+  }
   add('artpack/banner-win.png', 'src/scenes/BootScene.ts', 'ART_BANNER_WIN_KEY');
   add('artpack/banner-lose.png', 'src/scenes/BootScene.ts', 'ART_BANNER_LOSE_KEY');
   add('title/dorm-corridor-2x.png', 'src/scenes/BootScene.ts', 'TITLE_BG_KEY');
@@ -214,6 +221,9 @@ function classify(path) {
   if (DECO.includes(path)) return { class: 'open', note: '墙面特写，255–335px 1:1 显示，不量化' };
   // 2026-11-15 包：六阶层 x 三变体墙 18 张 + 六阶层地板 6 张。
   // 交付时已按项目 16 色吸附（墙 7-12 色、地板 3-5 色），严格门禁适用。
+  if (path.startsWith('ui/frame-dialogue/') || path.startsWith('ui/frame-item/') || path.startsWith('ui/frame-tower/')) {
+    return { class: 'locked', note: '2026-11-15 三套面板框（八片），16 色门禁适用' };
+  }
   if (path.startsWith('env/fixtures/')) {
     return { class: 'locked', note: '墙装贴图，26px 宽，16 色门禁适用' };
   }

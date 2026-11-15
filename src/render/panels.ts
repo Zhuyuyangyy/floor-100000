@@ -31,7 +31,12 @@ export const PANEL_SLICE = 28;
 export const PANEL_FILL_BANDS = 5;
 export const PANEL_FRAME_PIECES = 8;
 
-export type PanelAccent = 'green' | 'yellow';
+// green  = 安全青（背包 / 帮助）
+// yellow = 灯光橙（制作 / 暂停）
+// dialogue / item / tower = the 2026-11-15 set: brass-on-walnut for speech,
+// brushed steel for item detail, cast iron for the tower map. Each is the same
+// eight-piece contract as the originals, just a different material.
+export type PanelAccent = 'green' | 'yellow' | 'dialogue' | 'item' | 'tower';
 
 // The two objects buildPanel() owns, so a caller's uniform depth pass can leave
 // them where they are. A WeakSet rather than a flag on the object: PanelObject is

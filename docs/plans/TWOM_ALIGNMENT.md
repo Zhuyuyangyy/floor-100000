@@ -102,3 +102,53 @@ type NpcAtom =
 
 实体模板三型：`BEHAVIOUR_TREE` / `TRIGGER` / `FLAG`。**只做设计与新文件**，
 不改现有 NPC；文档写清"现在规模不需要完整行为树，但组件要能挂"。
+
+### AG-31 实现说明（2026-11-16）
+
+设计论证全文见 `docs/plans/BEHAVIOUR.md`，此处只记 schema 事实：
+
+```ts
+/** 实体模板三型：行为树可挂任意实体，不是 NPC 专属。trigger/flag 只存引用，
+ *  逻辑与状态在 AG-26 的 WorldFlags。 */
+export type EntityComponent =
+  | { type: 'behaviourTree'; tree: BehaviourNode }
+  | { type: 'trigger'; triggerId: string }
+  | { type: 'flag'; flagKey: string };
+
+/** 最小节点集：四种控制流节点。TWOM 625 个 BTTask* 类 = 四种节点 + 数据，
+ *  不复制任务类。 */
+export type BehaviourNode =
+  | { kind: 'sequence'; children: BehaviourNode[] }
+  | { kind: 'selector'; children: BehaviourNode[] }
+  | { kind: 'condition'; test: (ctx: BehaviourContext) => boolean }
+  | { kind: 'action'; action: BehaviourAction };
+
+/** Action payload 即第七节的 NpcAtom；动态目标（playerX 等）用
+ *  `(ctx) => NpcAtom` 闭包解析，不改 NpcAtom schema。 */
+export type BehaviourAction = NpcAtom | ((ctx: BehaviourContext) => NpcAtom);
+
+/** 树能看到的一切：旗标走 AG-26，感知走 AG-28，随机走调用方 deriveSeed。 */
+export interface BehaviourContext {
+  hasFlag: (key: string) => boolean;
+  sense: BehaviourSense; // night/selfX/playerX/playerDistance/aggroRange/patrolX
+}
+
+export function evaluateTree(node: BehaviourNode, ctx: BehaviourContext): NpcAtom[];
+export const MAX_TREE_DEPTH = 32; // 防 mutation 成环；超深按失败处理
+```
+
+- 求值是纯函数：同 `(node, ctx)` → 同输出，不写状态、禁 `Math.random`。
+- `NpcAtom` 在本文件内按第七节形状**镜像定义**（AG-28 的 `src/ai/npcAtoms.ts`
+  是权威定义；按集成策略不跨分支 import、不创建该文件，两边形状由总控在
+  集成时统一验证，集成后本分支改为 import 并删除镜像）。
+- **挂载决策：独立表**（`ENTITY_COMPONENTS: Record<string, EntityComponent[]>`，
+  待总控派单新建），不给 `NpcDef` 加 `components` 字段——理由与备选 diff 见
+  BEHAVIOUR.md §4。
+- 与第七节的接口：`evaluateTree` 产出与 `npcAtomsFor` 同构（`NpcAtom[]`），
+  场景按实体有无 behaviourTree 组件二选一；Forced 打断不在树里，仍在消费侧。
+  感知同源不同形：`sense()` 绑定 `NpcDef` 居民，`ctx.sense` 面向任意实体
+  （流浪者无 `NpcDef`），由调用方从 `isNight` / `sense()` / `wandererAggroRange`
+  / `deriveSeed` 派生，语义逐名同源（见 BEHAVIOUR.md §5）。
+- 用例树 `WANDERER_PATROL_TREE`（流浪者夜间巡逻）已单测，但**未接线**——
+  现有 NPC 不迁移，`stepWandererRoam` 继续服役（AG-28 在 `wandererAtomsFor`
+  的注释里对帧级状态机作出了同款判断）。

@@ -314,3 +314,19 @@ AG-17 会话已不在团队内无法续，**改派 AG-18 接手**：提交该修
 ## 一次总控操作险情（已恢复，第二次）
 AG-21 的提交在 detached HEAD 上，我 `git checkout` 已存在的同名分支（指向基线）把它甩成孤儿，用 `reset --hard 8023acf` 恢复并复验（tsc 干净、34/34）。
 **制度**：worktree 报 detached HEAD 时，先用 `branch -f`/`reset --hard` 钉到分支，再动别的 git 操作。
+
+## 第三轮进展（2026-11-15 22:35）——AG-24 健康检查落地，5199 已恢复
+**AG-24 补交 `e13a3b1` 并合入**：`e2e/verifyServerIdentity.ts`（新，挂 playwright.config.ts globalSetup）。
+- 指纹比对用 **sourcemap 的 sourcesContent**（服务器实际编译的原文）而非转换输出——这正是 AG-24 上次误判的反向应用：TS 转换会丢注释块，sourcesContent 才是硬证据。
+- 探针选 `GameScene.ts`（每个功能分支都改它，最易在 worktree 间不同）。
+- 端口无应答 → 放行（Playwright 自起，正确性由构造保证）；**指纹不符 → 退出码 1，零测试开跑**。
+- 三场景实测：① 空端口放行 smoke 3.7s 过；② 起 ag-12 的服务占 5199 → **被拦**（md5 100498b3 vs e429031b，零测试运行）；③ 本 worktree 残留服务 → 指纹相符放行复用。
+- `reuseExistingServer` 行为未动（复用没错，错的是复用到别人的代码；强制自起会把 5 个 agent 的跑串行化）。
+
+**AG-24 全部完成**（2 commit：e17a197 全量 e2e + e13a3b1 健康检查）。它报告的「NPC 坐标腐烂 5 个」经核实**零行可修**——`661d00d` 已把 AG-18 的配方合进集成分支（npc.spec.ts 读 npcObjs 实时坐标 + 每轮重读重试），实测 npc.spec 4/4 过。
+
+**5199 已恢复**：主工作区 dev server 重起（`--strictPort`），http 200。
+
+**集成：72 文件 / 1235 测试全绿，tsc 干净。**
+
+当前在跑：AG-22（性能二轮）、AG-23（UI 二轮，正在修 6 个字体回归）。

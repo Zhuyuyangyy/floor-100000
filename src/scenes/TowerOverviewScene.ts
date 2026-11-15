@@ -30,7 +30,9 @@ import {
 } from '../systems/TowerNav';
 import { SECTOR_COUNT, SECTOR_SIZE, TIERS, describeFloor, describeSector, sectorOf, sectorRange, type TierId } from '../core/tower';
 import { PLAYABLE_FLOORS_V01 } from '../core/constants';
-import { getFloorTemplate } from '../data/floorTemplates';
+import { getFloorTemplate, hasFloorContent } from '../data/floorTemplates';
+import { getItem } from '../data/items';
+import { summarizeFloor } from '../core/worldgen';
 import { describeFloorContents } from '../systems/LootSystem';
 import { encounterSpots } from '../systems/encounterSpots';
 import { saveToStorage } from '../systems/SaveSystem';
@@ -38,7 +40,7 @@ import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, PANEL_DEPTH, PANEL_FILL_BANDS, PANEL_FRAME_PIECES, PANEL_SLICE, type PanelObject } from '../render/panels';
 import { PALETTE, ROLE, TEXT, hex } from '../render/palette.ts';
 import { TOWER_FOOT_TOP, TOWER_STRIP_W, TOWER_STRIP_X, TOWER_TAG_X, DETAIL_CONTENT_ACTION_GAP, DETAIL_CONTENT_W, DETAIL_FOOT_PAD, DETAIL_PANEL_H, DETAIL_PANEL_W, DETAIL_ROWS_TOP, DETAIL_ROW_COUNT, DETAIL_ROW_PITCH, DETAIL_ROW_X } from '../render/hudLayout';
-import { estimateLineHeight, estimateTextWidth, wrapText } from '../render/dialogueLayout';
+import { estimateLineHeight, estimateTextWidth } from '../render/dialogueLayout';
 import type { GameState } from '../core/gameTypes';
 
 // TowerOverviewScene — the three-level map (docs/B2_TOWER_ARCHITECTURE.md):
@@ -164,6 +166,31 @@ function tierColor(tier: TierId): number {
   return TIER_COLOR[tier];
 }
 
+/**
+ * What an UNEXPLORED floor would look like if it were explored — worldgen's
+ * deterministic answer for (runSeed, floor).
+ *
+ * The detail card used to show LootSystem's "内容：未生成" placeholder for
+ * these floors, which told the player nothing: 99946 of the tower's 100000
+ * floors have no authored template, and the map's whole job is letting a trip
+ * be planned rather than guessed. summarizeFloor answers with the tier's
+ * supply grade, the threat label, the seeded container count and the tier's
+ * material pool — the same numbers generateFloorContent rolls the moment the
+ * player actually walks in, so the card's promise and the floor's reality
+ * cannot drift apart.
+ *
+ * The 「未探索·预估：」 prefix (and the caller's warn colour) is what keeps the
+ * two data sources distinguishable: authored floors read 「内容：…」 — the
+ * resolved world, taken stacks removed — while these read as the prediction
+ * they are. The 所属阶层 stays on row 0 for both paths: it is a structural
+ * quantity of tower.ts, identical in both sources by construction.
+ */
+function describeUnexploredFloor(state: GameState, floor: number): string {
+  const summary = summarizeFloor(state.runSeed, floor);
+  const loot = summary.lootPool.map((id) => getItem(id).displayName);
+  return `未探索·预估：${summary.tier.name} · 容器 ${summary.containerCount} 个 · 物资 ${summary.supplyGrade} 档 · 威胁「${summary.threatLabel}」 · 或可找到 ${loot.join('·')}`;
+}
+
 export class TowerOverviewScene extends Phaser.Scene {
   private nav!: TowerNavState;
   private access!: ReturnType<typeof accessOf>;
@@ -175,7 +202,6 @@ export class TowerOverviewScene extends Phaser.Scene {
 
   private hudText!: Phaser.GameObjects.Text;
   private stateText!: Phaser.GameObjects.Text;
-  private infoText!: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
   private legendGfx!: Phaser.GameObjects.Graphics;
   private legendText!: Phaser.GameObjects.Text;
@@ -296,13 +322,18 @@ export class TowerOverviewScene extends Phaser.Scene {
       // 88x12px). The top-centre slot is the one free band: the tier readout
       // above it ends at 41, so 50..77 clears it, the title, the sector labels
       // and both endpoint tags.
+      //
+      // AG-12: the zoom readout is no longer its own top-right chip. The right
+      // margin belongs to the tower's own annotations — the 起点/终点 tags are
+      // world-space, and at any zoom above 1x they scroll through the whole
+      // margin (at 2x the summit tag reaches screen y 26..78), so ANY fixed
+      // chip placed there eventually prints through them. The reading moved
+      // into this chip instead: "当前 X 层 · 已打通至 Y 层 · 缩放 Zx" — one
+      // state line, one lane, zero overlap with the strip, the title, the
+      // sector labels (x ≤ 96) and both endpoint tags (x ≥ 1090) at every
+      // zoom and scroll. Measured before/after in docs/plans/UI.md.
       .text(DESIGN_WIDTH / 2, 50, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 2 } })
       .setOrigin(0.5, 0)
-      .setScrollFactor(0)
-      .setDepth(100);
-    this.infoText = this.add
-      .text(DESIGN_WIDTH - 12, 12, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_AUX}px`, color: hex(TEXT.highlight), backgroundColor: '#0b0f12cc', padding: { x: 6, y: 4 }, align: 'right' })
-      .setOrigin(1, 0)
       .setScrollFactor(0)
       .setDepth(100);
     this.hintText = this.add
@@ -664,8 +695,10 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.hudText.setText(title);
 
     const zoomLabel = this.nav.zoom === ZOOM_MIN ? '1x' : `${this.nav.zoom.toFixed(1)}x`;
-    this.stateText.setText(`当前 ${this.state.currentFloor} 层 · 已打通至 ${this.access.highestUnlocked} 层`);
-    this.infoText.setText(`缩放 ${zoomLabel}`);
+    // One state chip carries the floor, the frontier and the zoom (AG-12): the
+    // zoom reading used to be its own top-right chip, which the world-space
+    // 终点 tag scrolled through at every zoom above 1x. See buildHud.
+    this.stateText.setText(`当前 ${this.state.currentFloor} 层 · 已打通至 ${this.access.highestUnlocked} 层 · 缩放 ${zoomLabel}`);
 
     // Bottom-centre readout. In the sector view it is the sector's composition;
     // on the overview it is whatever the pointer is over, which is what makes a
@@ -754,7 +787,16 @@ export class TowerOverviewScene extends Phaser.Scene {
     if (!show || floor === null) return;
 
     const record = describeFloor(floor);
-    const template = getFloorTemplate(floor);
+    // Authored or not — that is the switch between the card's two data
+    // sources, and it is hasFloorContent, NOT visitedFloors: an authored floor
+    // the player has not walked into yet still has real, seeded contents (the
+    // loot view resolves them), while a floor with no template has nothing
+    // resolved at all until worldgen rolls it. (Floor 100000 borrows floor 1's
+    // template through the dev alias for entry purposes only; it is not
+    // authored, so it takes the estimate path like every other unexplored
+    // floor — see floorTemplates' hasFloorContent.)
+    const authored = hasFloorContent(floor);
+    const template = authored ? getFloorTemplate(floor) : undefined;
     const explored = this.state.visitedFloors[floor] !== undefined;
     // A zero level has no dots to draw, so say so rather than leaving the label
     // dangling with nothing after it.
@@ -765,16 +807,30 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.detailRows[2].setText(`状态：${explored ? '已探索' : '未探索'}${floor === this.state.currentFloor ? ' · 当前所在' : ''}`);
     const enterable = tryEnterSelected(this.nav, this.access);
     this.detailRows[3].setText(enterable.ok ? '通行：已打通' : '通行：未打通');
-    // What is actually on the floor. The audit found the player had no reason to
-    // explore anything in particular — the map named a floor but never said what
-    // was there, so every trip was a guess. Naming the containers and the loot
-    // they hold turns "go and look" into "go and get the filter".
+    // What is on the floor, from one of two sources:
     //
-    // The wording lives in LootSystem.describeFloorContents rather than here: it
-    // must read the resolved world (seed rolls applied, taken stacks removed). This
-    // scene used to read the loot table instead, so it advertised 布料 in floor 1's
-    // cabinet on every seed and kept listing contents already emptied.
-    const contents = describeFloorContents(this.state, floor);
+    //  - authored floors keep LootSystem.describeFloorContents: it reads the
+    //    RESOLVED world (seed rolls applied, taken stacks removed), which is
+    //    the only honest answer for a floor whose contents already exist. This
+    //    scene used to read the loot table instead, so it advertised 布料 in
+    //    floor 1's cabinet on every seed and kept listing contents already
+    //    emptied.
+    //  - unexplored floors (99946 of the tower) used to fall through to
+    //    LootSystem's "内容：未生成" placeholder, which told the player
+    //    nothing — and the map's whole job is planning a trip. They now read
+    //    worldgen.summarizeFloor: "this is what the floor would look like if
+    //    you explored it", the same numbers generateFloorContent rolls on
+    //    arrival. The two sources are distinguishable on the card by their
+    //    prefix (内容： vs 未探索·预估：) and by the estimate row's warn
+    //    colour, so a prediction never reads as a resolved fact.
+    let contents: string;
+    if (authored) {
+      contents = describeFloorContents(this.state, floor);
+      this.detailRows[4].setColor(hex(TEXT.primary));
+    } else {
+      contents = describeUnexploredFloor(this.state, floor);
+      this.detailRows[4].setColor(hex(TEXT.warn));
+    }
     this.detailRows[4].setText(contents);
     this.detailAction.setText(enterable.ok ? '按 Enter 进入' : '需先通过实际通路抵达').setColor(enterable.ok ? hex(PALETTE.clothHigh) : hex(TEXT.warn));
 
@@ -783,10 +839,19 @@ export class TowerOverviewScene extends Phaser.Scene {
     // grows around it: the action line follows the content's bottom, the skin
     // wraps both, and the whole card keeps its centre on screen. Re-place only —
     // the objects were built once in buildDetailPanel at the base geometry.
+    //
+    // The height is the Text's OWN measured height, not wrapText's line count.
+    // The estimator is a few percent under the rasteriser, and on the worldgen
+    // estimate (a 7-item tier-1 pool wraps to five real lines where wrapText
+    // predicts four) that one line printed the action row 6px through the
+    // content's last line — the same defect class AG-08 fixed for the authored
+    // worst case, arriving through the new data source. Text.height is updated
+    // synchronously by setText, so the wrap it actually performed is the number
+    // used here; wrapText stays in the tests as the arithmetic guard.
     const lineH = estimateLineHeight(TYPE_BODY);
-    const contentLines = wrapText(contents, DETAIL_CONTENT_W, TYPE_BODY).length;
     const contentTop = DETAIL_ROWS_TOP + DETAIL_ROW_PITCH * (DETAIL_ROW_COUNT - 1);
-    const actionTop = contentTop + contentLines * lineH + DETAIL_CONTENT_ACTION_GAP;
+    const contentH = this.detailRows[4].height;
+    const actionTop = contentTop + contentH + DETAIL_CONTENT_ACTION_GAP;
     const panelH = Math.max(DETAIL_PANEL_H, actionTop + lineH + DETAIL_FOOT_PAD);
 
     const cx = DESIGN_WIDTH / 2;

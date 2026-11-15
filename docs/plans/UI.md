@@ -103,3 +103,138 @@
    （`VITE_NPC_MODEL`）未开，降级脑只产两句以内的 authored 台词。
 6. **探针残留**：`e2e/_ag08_probe.spec.ts`、`_ag08.config.ts`、`.ag08tmp/` 为临时测量工具，
    提交前删除；测量 JSON/截图在 gitignore 的 `e2e/screenshots/` 下可留作证据。
+
+---
+
+# AG-12：任务面板（QuestPanelScene）与塔楼详情卡第二数据源（2026-11-15）
+
+## 任务面板 QuestPanelScene
+
+- 场景 key `'QuestPanel'`，在 `main.ts` 用 `game.scene.add('QuestPanel', QuestPanelScene)`
+  注册（autoStart false，不动 `core/gameConfig` 的启动清单——那是共享启动契约）。
+- 布局 940x480 绿色面板（`buildPanel` + `buildPanelHeader` + `buildListRow`，全是既有
+  UI 契约，未重造）：左栏任务列表（标题 + 「阶层N · 状态」），右栏详情（标题 /
+  阶层·状态 / 摘要 / 分支 + 阻塞原因）。几何常量导出在
+  `src/scenes/QuestPanelScene.ts` 顶部；`src/tests/questPanel.test.ts` 镜像同值做
+  算术断言——该模块 import Phaser，Node 下不可加载（同 `render/panels.ts` 顶部注释
+  的原因），这是 `uiLayout.test.ts` 对塔楼场景 TYPE_* 表的同一约定。
+- 键位：↑/↓ 选择（列表里选任务、分支视图里选分支）；Enter 在列表里打开分支、在
+  分支里确认选择；Esc 在分支里返回列表、在列表里关闭。每帧去抖（GHI-03 m9，同
+  TowerOverviewScene 的 accept()）。
+- 分支置灰：`evaluateBranch().available === false` 时分支行取 `TEXT.disabled`，
+  阻塞原因（`blockers`，中文）以 `ROLE.danger` 跟在行下；已选分支（读
+  `QUEST_FLAG.branch`）追加「（已选）」并保持 `TEXT.highlight`。Enter 打在阻塞
+  分支上会把 blockers 拼成一行瞬态消息，拒绝不再是无声的 no-op。
+- dev 句柄 `__PHASER_QUESTS__`（`getEvaluations` / `getSelection` / `getMessage`），
+  Playwright 与 AG-11 的 e2e 可断言真实求值结果而不是像素。
+
+## event 契约：quests:changed（AG-11 接线依据）
+
+| 项 | 值 |
+| --- | --- |
+| 事件名 | `quests:changed` |
+| 发送方 | `QuestPanelScene.commitBranch()` |
+| 接收方 | **Game 场景的 EventEmitter**：`this.scene.get('Game').events` |
+| 载荷 | `{ questId: string; branchId: string }` |
+| 时机 | 玩家在分支视图对一条 `available` 分支按 Enter 确认时（done 任务、已选分支、阻塞分支都不发） |
+
+语义与集成层职责：
+
+- 面板自己不写 GameState（`data/quests.ts` 顶部分工）：事件是「请求落地这条分支的
+  后果」。AG-11 的 handler 用 `getQuest(questId)` 找到分支，把 `branch.consequences`
+  落成 `setFlag / clearFlag / addItem / removeItem / homeUpgrades.push /
+  records.bestScore`，并按需写 `QUEST_FLAG.accepted / done / branch`（STORY.md §7
+  的接口契约）。
+- 发在 Game 场景的 emitter 上而不是面板自己的：scene events 挂在 Scene 对象上，
+  与运行状态无关——overlay（launch）下 Game 在跑，handoff（start）下 Game 停着，
+  两种打开方式 listener 都能收到。
+- 面板 emit 之后立刻重读 `evaluateAllQuests(state)` 刷新：同步落地的 handler 已经
+  改了 state，面板无需重开就反映后果（已选标记、状态翻转）。
+- GameScene 若自带任务 HUD：同一次事件就是刷新信号，不需要第二个事件。
+
+面板关闭（三种打开方式都认，`close()` 按 Game 的运行状态分支）：
+
+- overlay（`scene.launch('QuestPanel')`，Game 仍 active）→ `scene.stop()`；
+- launch + `scene.pause('Game')` → `resume('Game')` 后 `stop()`；
+- handoff（`scene.start('QuestPanel')`，同塔楼总览的打开方式）→ `scene.start('Game')`
+  （Game.create() 对同一份模块级 GameState 重跑，变更自然被读到）。
+
+## 塔楼楼层详情卡的第二种数据源
+
+`TowerOverviewScene.refreshDetail` 的内容行（第 5 行）按 `hasFloorContent(floor)`
+切换数据源——判据是「有没有手写模板」，不是 visitedFloors：未走访的已创作楼层依然
+有真实内容（已解析视图），没有模板的楼层在世界生成前什么都没有。
+
+- 已创作楼层：保持 `LootSystem.describeFloorContents`（已解析世界，取走的栈会消失），
+  行色 `TEXT.primary`。
+- 未探索楼层（100000 层里的 99946 层，含 100000——dev 别名 `DEV_FLOOR_ALIAS` 不算
+  已创作，见 `floorTemplates.hasFloorContent` 的注释）：改读
+  `worldgen.summarizeFloor(state.runSeed, floor)`，渲染
+  「未探索·预估：{阶层} · 容器 N 个 · 物资 N 档 · 威胁「标签」 · 或可找到 …」，
+  行色 `TEXT.warn`。两种数据源在 UI 上的区分 = 前缀（内容： vs 未探索·预估：）+
+  行色；阶层行走第 1 行（两种数据源同值——tower.ts 的结构量，无种子）。
+  预估与实际生成同源：`summarizeFloor` 与 `generateFloorContent` 共用
+  `planUnexploredFloor`，卡片承诺的数字就是玩家进门时 roll 出来的数字。
+- 实测（Playwright getBounds，seed 42，键盘下钻到楼层详情）：
+  - floor 5（已创作）：「餐台：压缩口粮·脏水　补给架：面包·医疗包　地面：面包」；
+  - floor 11（未探索，阶层 1）：「未探索·预估：底层贫民区 · 容器 2 个 · 物资 1 档 ·
+    威胁「中」 · 或可找到 布料·胶带·废金属·木材·电池·电线·撬棍」（7 件物资池 =
+    最坏预估行）。
+- 连带修掉一个实测缺陷：自适应卡高原来按 `wrapText` 行数推导，估算器比光栅器窄几个
+  百分点，阶层 1 的 7 件物资池预估行**实际包 5 行、预估 4 行**，动作行压内容行
+  6px——正是 AG-08 修过的同一类缺陷经新数据源复发。改为按 `Text.height`
+  （setText 同步更新，就是实际包出来的行高）推导；实测修后动作行距内容行 13px。
+  `wrapText` 保留在测试里做算术守卫（含 +1 行的估算漂移余量）。
+
+## 塔楼总览右上角重叠（AG-08 遗留项 1，本轮解决）
+
+缩放读数从右上角独立 chip 移入顶部中央状态 chip：
+`当前 X 层 · 已打通至 Y 层 · 缩放 Zx`。
+
+**为什么动读数而不是终点标签的 y**：右留边（`TOWER_ENDPOINT_MARGIN`）是塔楼自己的
+标注区——起点/终点标签是世界坐标，缩放 >1x 时会在整个留边里滚动（2x 时终点标签的
+屏幕 y 可达 26..78，离开画布顶部前始终压得住任何固定 chip 的位置），把 chip 在
+留边里下移只是把重叠从 1x 搬到 2x。顶部中央是 AG-08 已验证的唯一空带：tierText
+12..41 之上、状态 chip 50..77，与标题（x ≤ 360）、区段标签列（x ≤ 96）、两个端点
+标签（x ≥ 1090）在任何缩放/滚动下都不相交。读数并进状态 chip 不新增对象，也不新增
+重叠面。
+
+实测（Playwright getBounds，设计画布 1280x720，默认打开态 1x）：
+
+| | 缩放读数 | 终点标签 | 重叠 |
+| --- | --- | --- | --- |
+| 修前 | 独立 chip @(1179,12) 89x31 | @(1090,31) 169x25 | **80x12px** |
+| 修后 | 并入状态 chip @(442,50) 397x27 | @(1090,31) 169x25（未动） | **0**（全屏可见文本两两求交 0 处；1.5x / 2.5x 同样 0 处） |
+
+（AG-08 记录为 88x12，同一样态；差异在 chip 宽度取值——本次按 getBounds 实测 89px
+宽、与终点标签交宽 80px。修后状态 chip 右缘 839，距终点标签左缘 1090 还有 251px。）
+
+## 改动文件（AG-12）
+
+- `src/scenes/TowerOverviewScene.ts`：内容行双数据源（worldgen 预估 + 「未探索·预估」
+  标记 + warn 行色）、标题按 authored 判据取模板名（100000 不再借第 1 层宿舍名）、
+  自适应卡高改按 `Text.height`、缩放读数并入状态 chip（删除 infoText）。
+- `src/scenes/QuestPanelScene.ts`（新）：任务面板（列表/分支两态、分支置灰与阻塞
+  原因、已选标记、`quests:changed` 事件、三种打开方式的关闭逻辑、`__PHASER_QUESTS__`
+  dev 句柄）。
+- `src/main.ts`：`game.scene.add('QuestPanel', QuestPanelScene)`。
+- `src/tests/questPanel.test.ts`（新，17 个测试）：面板布局算术断言（任务名/分支名/
+  阻塞原因不溢出、详情流不压脚注带）、`evaluateAllQuests` 在 6 个代表 state 上的
+  输出稳定性（状态向量钉死 + 分支可得性/阻塞原因抽样）、塔楼预估行的包裹与卡高。
+- `docs/plans/UI.md`：本节。
+
+## 未处理干净 / 已知限制（AG-12）
+
+1. **分支的后果落地依赖 AG-11**：面板只发 `quests:changed`，不写 GameState。在
+   GameScene 接线之前，确认分支后面板上会显示「已记录：…」但状态不会真变
+   （纯 viewer 语义，见上）。
+2. **任务目标（objectives）未上面板**：本轮按任务书范围做「标题/阶层/状态/分支 +
+   阻塞原因」，objective 的完成度（`QUEST_FLAG.objective`）留待集成层定义 HUD 时
+   一起做。
+3. **面板只接受键盘**：未做指针行点击（任务书指定键位；Phaser 4 下本项目 e2e 也
+   全是键盘驱动，鼠标路径无既有先例）。
+4. **buildPanelHeader 的 30px 标题在 20px header 条里上下各溢出 ~5px**：既有 UI kit
+   行为（行商/战斗等所有面板同样），实测任务面板 header 标题顶缘在面板顶缘上方
+   5px，非本轮引入，未动（uiKit.ts 在禁区清单里）。
+5. **缩放 >1x 时塔楼条水平方向不出血**：相机 scrollX 恒 0，2x 下只露世界 x
+   320..960（既有行为，TowerNav 的滚动钳制只建模了纵向；非本轮范围）。

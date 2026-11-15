@@ -3,6 +3,7 @@ import { createGameConfig } from './core/gameConfig';
 import { getGame, hasGame } from './core/session';
 import { unlockAudio } from './render/audio';
 import { FONT_FACES } from './render/uiKit';
+import { QuestPanelScene } from './scenes/QuestPanelScene';
 
 /**
  * Phaser creates a Text's canvas once and measures it against whatever font is
@@ -30,6 +31,15 @@ async function boot(): Promise<void> {
   await waitForFonts();
 
   const game = new Phaser.Game(createGameConfig('game'));
+
+  // The quest panel is registered here rather than in core/gameConfig's scene
+  // list: that config is the shared boot contract, and the panel is a run-time
+  // overlay (GameScene starts it over the live game the same way it starts
+  // TowerOverview). add() with autoStart false parks it in the SceneManager
+  // dormant, so scene.start('QuestPanel') / scene.get('QuestPanel') resolve
+  // from anywhere without touching the core config. Key and event contract:
+  // docs/plans/UI.md「任务面板与 quests:changed」.
+  game.scene.add('QuestPanel', QuestPanelScene);
 
   // Browsers gate audio behind a user gesture; unlock on the first one.
   const unlock = (): void => unlockAudio();

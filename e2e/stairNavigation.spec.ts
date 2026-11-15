@@ -97,8 +97,24 @@ async function walkToUpExit(page: Page): Promise<void> {
 }
 
 async function walkToLift(page: Page): Promise<void> {
-  // 电梯在 x=1165（reach 30）；走到 1150 必中，且不沾下楼口（1240-44=1196）。
-  await walkUntil(page, 'ArrowRight', 1150, true);
+  // 电梯 x=1165（LIFT_REACH=30，命中窗 1135..1195；下楼口从 1196 起）。
+  // 修前是"按住右键直到 x>1150"，依赖松键及时：卡帧时 waitForFunction
+  // 的 rAF 轮询与 keyboard.up 之间的延迟能把角色带过窗口，落进下楼口
+  // 区（x≥1196），脚注变成"按 E 下楼"——full-suite trace 实测 110 层
+  // 一路走到 1240（screencast 末帧角色贴右下楼梯口）。改为提前到 1140
+  // 松键（距下楼口 56px 容错），再小步点按修正，每步后读真实 x。
+  // 产品断言不变：脚注仍必须点名货运电梯，E 仍必须真实换层。
+  await walkUntil(page, 'ArrowRight', 1140, true);
+  for (let i = 0; i < 24; i++) {
+    const x = (await readState(page)).x;
+    if (x >= 1145 && x <= 1190) return;
+    const key = x < 1145 ? 'ArrowRight' : 'ArrowLeft';
+    await page.keyboard.down(key);
+    await page.waitForTimeout(40);
+    await page.keyboard.up(key);
+    await page.waitForTimeout(30);
+  }
+  throw new Error(`could not stand in the lift window (x=${(await readState(page)).x})`);
 }
 
 async function walkToDownExit(page: Page): Promise<void> {
@@ -240,7 +256,7 @@ test('上行攀爬全程角色完整可见（1→2，塔底）', async ({ page }
 
 // 顶层 50010→50009 下行：塔顶的站立 bounds 只留一条 FLOOR_BAND，修前 scrollY
 // 钉在 -456，角色双脚在落地前越过视口底边 96px。到 50010 是一整趟货运电梯
-// 之旅（五段各爬十层 + 四次换乘），全部用真实输入完成。
+// 之旅（塔已六段，本测试走前五段：各爬十层 + 四次换乘），全部用真实输入完成。
 test('下行攀爬全程角色完整可见（50010→50009，塔顶）', async ({ page }) => {
   test.setTimeout(300_000);
   const pageErrors: string[] = [];

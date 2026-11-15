@@ -44,7 +44,7 @@ import {
   TOWER_TAG_FONT,
   TOWER_TAG_X,
 } from '../render/hudLayout';
-import { TYPE } from '../render/uiKit';
+import { TYPE, fontLineBox } from '../render/uiKit';
 
 // AG-08 UI/UX: layout guards for every surface the team's checkup measured.
 //
@@ -151,11 +151,19 @@ describe('tower overview lanes', () => {
   });
 
   it('keeps the footer band inside the canvas', () => {
-    // The hint is TOWER_HINT_FONT type with 6px of padding — 33px measured. The
-    // band used to open 22px above the bottom, so the last 11px of every
-    // level's hint fell off the canvas.
-    expect(TOWER_FOOT_TOP).toBeGreaterThanOrEqual(estimateLineHeight(TOWER_HINT_FONT) + 6);
-    expect(DESIGN_HEIGHT - TOWER_FOOT_TOP + estimateLineHeight(TOWER_HINT_FONT) + 6).toBeLessThanOrEqual(DESIGN_HEIGHT);
+    // The hint is TOWER_HINT_FONT type with 6px of padding. The band used to
+    // open 22px above the bottom, so the last 11px of every level's hint fell
+    // off the canvas.
+    //
+    // AG-23: the row height is GameSans's, not estimateLineHeight's. The old
+    // pixel face drew a ~1.0em box and this guard passed on a 1.1em estimate;
+    // Noto Sans SC draws a 32px box at 26px (39 with padding), and 36 put the
+    // hint's bottom at 722 — 2px off the canvas, measured at all three
+    // viewports. fontLineBox() is the measured factor; the band must clear the
+    // real row, not the estimate.
+    const rowH = fontLineBox(TOWER_HINT_FONT) + 6;
+    expect(TOWER_FOOT_TOP).toBeGreaterThanOrEqual(rowH);
+    expect(DESIGN_HEIGHT - TOWER_FOOT_TOP + rowH).toBeLessThanOrEqual(DESIGN_HEIGHT);
   });
 
   it('measures a Han legend label at one em — the old 0.5 factor put the swatches 150px off', () => {

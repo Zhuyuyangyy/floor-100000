@@ -18,17 +18,39 @@ export const HUD_LAYOUT = {
   statX: 292,
   statPitch: 192,
   statWidth: 172,
+  // AG-23: goalY stays 52 — the objective row's box (52..77 at 20px GameSans)
+  // already clears the environment row (80), and hudLayout.test.ts pins that
+  // 28px lane gap. The clock/goal collision is fixed from the clock's side
+  // instead (row1Y below).
   goalY: 52,
   environmentY: 80,
   feedbackY: 556,
   bagY: 624,
   // Row 1 anchors: icons sit 2px above their label's cap height.
-  row1Y: 6,
+  //
+  // AG-23: 6 → 2. The clock opens at row1Y+28 and the goal at goalY=52: two
+  // 20px GameSans rows are 25px of line box each, so at row1Y=6 the clock's
+  // box (34..59) printed 7px through the goal's (52..77) — 28% of the smaller
+  // box, measured (AG-24's font:209), the 1.0em-era anchors never did. Moving
+  // row 1 up 4px puts the clock's box at 30..55: a 3px box overlap (12%, under
+  // the 15% collision threshold) with 5px of ink clearance. The goal row could
+  // not move instead — hudLayout.test.ts pins the 28px goal→environment lane
+  // gap, and the environment row cannot move down without crossing the plate's
+  // bottom edge (contextBottom 102, AG-20's compaction).
+  row1Y: 2,
   barY: 28,
   barH: 8,
   barSegments: 10,
   // Where the money group starts; the stat block has to end before this.
-  moneyX: 1080,
+  //
+  // AG-23: 1080 → 1056. The money texts open at moneyX+24 and grow rightwards
+  // from there (origin 0,0), and the >240px font-shrink guard never saw the
+  // 12-digit test fixture: "金币 123456789012" measured 178px wide at 20px
+  // GameSans and put hud-gold's right edge at 1282 — 2px off the 1280 canvas,
+  // measured at all three viewports (AG-24's hudLayout:39:3). 1056 keeps the
+  // stat block (which ends at statX + 3*pitch + width = 1040) 16px clear and
+  // pins the group's right edge at 1258, 22px inside the canvas.
+  moneyX: 1056,
   // Environment chips: icon x positions, text 24px to their right.
   envChipX: [20, 300, 620, 900],
   hazardX: 1080,
@@ -59,9 +81,18 @@ export const TOWER_TAG_X = TOWER_STRIP_X + TOWER_STRIP_W + 10;
  * DESIGN_HEIGHT - TOWER_FOOT_TOP. This was 22, which put the 26px hint's
  * measured bounds at y 698..731 — 33px tall with 6px of padding, the last 11
  * pixels fell off the 720px canvas on all three levels (Playwright getBounds()).
- * 36 clears the full 33px row with 3px to spare.
+ * 36 cleared the full 33px row with 3px to spare.
+ *
+ * 41 now: the Noto Sans SC swap (GameSans) re-measured the same row. A 26px
+ * GameSans line box is 32px, not the old face's 27px, so the hint with its 6px
+ * of padding is 38px tall and 36 put its bottom at 722 — 2px off the canvas
+ * (Playwright getBounds at 900x600 / 1280x800 / 1920x1080, all three viewports,
+ * the canvas letterboxes but the design lanes do not move). 41 restores the
+ * 3px spare: the band opens at 679, the 38px row ends at 717. The detail
+ * level's back arrow opens one row above the band and keeps its 10px
+ * clearance (637..669 against 679).
  */
-export const TOWER_FOOT_TOP = 36;
+export const TOWER_FOOT_TOP = 41;
 
 /** The footer hint's font size, so a layout test can predict its width. */
 export const TOWER_HINT_FONT = 26;
@@ -84,7 +115,15 @@ export const DETAIL_PANEL_W = 460;
 export const DETAIL_PANEL_H = 178;
 export const DETAIL_ROW_X = 26;
 export const DETAIL_ROWS_TOP = 62;
-export const DETAIL_ROW_PITCH = 30;
+// AG-23: 30 → 32 = fontLineBox(TOWER_BODY). The rows are 26px GameSans type,
+// which is a 32px line box; at a 30px pitch every row's box printed 2px
+// through the next (6% of the box — under the e2e's 15% collision threshold,
+// and the ink never touched, which is why it shipped). 32 makes the boxes
+// exactly touch, the same contract the dialogue rows have
+// (DIALOG_ROW_PITCH = fontLineBox(TYPE.body)), and keeps the card's derived
+// height formula honest: the rows are positioned with origin (0,0) from
+// DETAIL_ROWS_TOP, so the pitch IS the row height.
+export const DETAIL_ROW_PITCH = 32;
 export const DETAIL_ROW_COUNT = 5;
 /** The content row's wrap width: panel width minus the row inset and a right inset. */
 export const DETAIL_CONTENT_W = DETAIL_PANEL_W - DETAIL_ROW_X - 16;

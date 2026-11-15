@@ -72,6 +72,32 @@ export const FONT_FAMILY =
 /** Both faces must be ready before Phaser creates its first Text. */
 export const FONT_FACES = ['GameSans'] as const;
 
+/**
+ * How tall a GameSans line BOX is, in em — measured, not assumed.
+ *
+ * Phaser sizes a Text from the font's line metrics, and Noto Sans SC runs a
+ * tall box: Playwright getBounds on live Texts measured 30px → 37px, 26 → 32,
+ * 24 → 30, 22 → 27, 20 → 25, 18 → 22, 16 → 20, 14 → 17, 13 → 16, 12 → 15.
+ * The pixel face this UI was authored against ran ~1.0em, so every lane
+ * measured against it is now a few px tighter than the font draws: the panel
+ * header, the tower footer and the list rows were all authored to the old box.
+ *
+ * floor(size * 1.25) reproduces every measured point exactly (the real ratio
+ * sits at 1.21-1.25em and Phaser rounds the font metrics down at these sizes).
+ * The INK is much shorter than the box (a Han glyph fills ~0.86em), which is
+ * why a lane can be a few px shorter than the box without anything visible
+ * colliding — but a lane that must contain the box (a header strip, a footer
+ * band) has to be sized against this factor. uiLayout.test.ts and
+ * uiLayout2.test.ts assert the lanes against fontLineBox() so the numbers
+ * cannot drift from the font again.
+ */
+export const GAMESANS_LINE_FACTOR = 1.25;
+
+/** The line box GameSans draws for `fontSize` — the number a lane must hold. */
+export function fontLineBox(fontSize: number): number {
+  return Math.floor(fontSize * GAMESANS_LINE_FACTOR);
+}
+
 // Sizes stay as plain literals at the call site (`'24px'`, not a helper).
 //
 // They were written as `'24pxpx'` in 30 places — not valid CSS, so Phaser
@@ -179,8 +205,26 @@ export function drawStatBar(
  * The height is exported because a panel that resizes after it was built (the
  * dialogue panel grows for a long AI opening line) has to re-place the strip,
  * and the number cannot be re-derived from the objects it returns.
+ *
+ * 30, NOT 20 — and the title is TYPE.body, NOT TYPE.title. The strip used to be
+ * 20 tall with a 30px title on it, which AG-08 recorded as "~5px over each
+ * side, existing UI kit behaviour". That measurement was taken on the old pixel
+ * face, whose line box was ~1.0em. GameSans (Noto Sans SC) runs ~1.23em
+ * (measured: 30px → 37px, 24px → 30px, 20px → 25px), so the same pairing
+ * measured 37px of title in a 20px strip — 8.5px over each side, the ink
+ * printing through the panel's top frame and the first body row (Playwright
+ * getBounds, inventory 233.5..270.5 vs strip 242..262).
+ *
+ * The strip cannot simply grow to hold a 30px title either: every scene starts
+ * its body at panel-top + 30 (inventory grid, craft rows, trader rows, combat
+ * bar, dialogue portrait/well), and a strip past 30 would paint over it. So the
+ * strip takes the largest height that still clears +30 exactly, and the title
+ * drops to the body size: 24px type is a 30px line box, which fills the 30px
+ * strip with the ink (~21px) centred at 4.5px of air. uiLayout2.test.ts pins
+ * the strip against 1.25em of the title size so the pair cannot drift apart
+ * again.
  */
-export const PANEL_HEADER_H = 20;
+export const PANEL_HEADER_H = 30;
 
 export function buildPanelHeader(
   scene: Phaser.Scene,
@@ -201,7 +245,7 @@ export function buildPanelHeader(
   // The title.
   out.push(
     scene.add
-      .text(titleX ?? left + 10, top + h / 2, title, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
+      .text(titleX ?? left + 10, top + h / 2, title, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
       .setOrigin(0, 0.5)
       .setScrollFactor(0)
       .setDepth(depth + 1),

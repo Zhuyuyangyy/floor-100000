@@ -4,10 +4,22 @@ import { expect, test, type Page } from '@playwright/test';
 // 第一节；需求来源 docs/reference/TWOM_MECHANICS.md §3——缺的三样最影响
 // "活着"的质感：TickTemperature / ProcessSickness / TickHeaters）。
 //
-// **本 spec 整体处于 test.skip() 待启用状态。取消条件：AG-25 合入
-// `integrate/sprint-01` 后，删除每个 test 里的 `test.skip(...)` 行并实跑；
-// 若实跑发现机制没按契约实现（字段缺失、语义不符），定性为产品缺陷写进
-// 报告，不许为了绿改这里的期望值。**
+// **AG-32 于 2026-11-16 启用：AG-25 已合入 integrate/sprint-01（d89a332），
+// 三个 test.skip(...) 行已删。夹具按合入后的实现做了三处校正（不碰期望值）：
+//   1. 失温终局用产品的 setBodyHeat（同时写契约字段 bodyHeat 与工作字段
+//      bodyTemp——只写 bodyHeat 会被下一 tick 的镜像盖回），且站到无热源的
+//      储物层（宿舍蜡烛会在同一 tick 把 0 暖回来，契约的「0 = 失败」只在
+//      冷得过帐的地方成立），hp 压低到 1 让按游戏小时计的失温掉血在秒级
+//      可见（存量 survival.spec 的死亡测试同法）。
+//   2. SicknessSystem.inflict 的真实签名是 (state, id, severity,
+//      absoluteMinute)，severity 取 30（≥ SEVERITY_BITING 25，一染上即
+//      「病了」档；exposure 配置的初始 20 会落在 healthy）。
+//   3. absoluteMinute 从 SurvivalSystem 导入，不手算。
+//   4. critical 档的夹具：severity 拉满的同时把病因按住（setBodyHeat 5 =
+//      失温，cold 的病因）。tickSickness 跑在 tickSicknessTier 之前，病因
+//      一撤它同一个 tick 就按 recoverPerHour 把 severity 拉回 100 以下，
+//      三档永远读不到 critical——AG-25 的因果闭环，不是缺陷。
+// 实跑结果与失败定性见 AG-32 提交信息。**
 //
 // 契约定死的形状（§1）：
 //   bodyHeat: number        体温 0..100。cold 按游戏小时消耗，热源附近恢复。
@@ -96,7 +108,6 @@ test('bodyHeat: the cold consumes it by the game hour, heat sources restore it, 
   test.setTimeout(120_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  test.skip(true, 'AG-25 未合入：契约 §1 的 bodyHeat 字段尚不存在。取消条件 = AG-25 合入 integrate/sprint-01 后删除本行并实跑。');
 
   await startGame(page, 42);
 
@@ -142,9 +153,21 @@ test('bodyHeat: the cold consumes it by the game hour, heat sources restore it, 
   );
 
   // 0 = 失温失败：把体温打到 0，必须走向失败终局（与饥渴归零同族）。
-  await page.evaluate(() => {
+  // 夹具（按合入后实现校正，见头注）：setBodyHeat 同时写两个字段；站位换到
+  // 无热源的储物层——宿舍三支蜡烛会在同一个 tick 把 0 暖回正值，契约的
+  // 「0 = 失败」只在冷得过帐的地方成立（WARMTH_SOURCES 全塔只有 1/5 层）。
+  // hp 压到 1：失温按 6 点/游戏小时掉血（+EnvironmentSystem 的 2 点），
+  // 满血要走十几个游戏小时，压低起点终局才在 waitForScene 的窗口内。
+  await page.evaluate(async () => {
     const s = window.__PHASER_SESSION__?.getState();
-    (s?.player as SurvivalDims | undefined)!.bodyHeat = 0;
+    if (!s) throw new Error('no session');
+    const survPath = '/src/systems/SurvivalSystem.ts';
+    const m = (await import(survPath)) as {
+      setBodyHeat: (state: unknown, value: number) => number;
+    };
+    s.currentFloor = 3; // 储物层：无热源，net < 0，0 钉得住
+    s.player.hp = 1;
+    m.setBodyHeat(s, 0);
   });
   await waitForScene(page, 'End');
   const ended = await page.evaluate(() => window.__PHASER_SESSION__?.getState()?.status);
@@ -159,7 +182,6 @@ test('morale: a points pool with decay, a daily baseline, and probabilistic item
   test.setTimeout(120_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  test.skip(true, 'AG-25 未合入：契约 §1 的 morale/moraleBaseline 字段尚不存在。取消条件 = AG-25 合入 integrate/sprint-01 后删除本行并实跑（概率生效部分等 AG-29 的心情物品合入后覆盖）。');
 
   await startGame(page, 42);
 
@@ -202,7 +224,6 @@ test('sickness: healthy < sick < critical sits between alive and dead, with the 
   test.setTimeout(120_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  test.skip(true, 'AG-25 未合入：契约 §1 的 sickness/sicknessDay 字段尚不存在。取消条件 = AG-25 合入 integrate/sprint-01 后删除本行并实跑。');
 
   await startGame(page, 42);
 
@@ -210,14 +231,19 @@ test('sickness: healthy < sick < critical sits between alive and dead, with the 
   const fresh = await readDims(page);
   expect(fresh.sickness).toBe('healthy');
 
-  // 染病： ailments 已经存在（SicknessSystem， wound/cold/fever），契约要求
-  // 病症把 sickness 推到中间态而不是直接掉 hp。
+  // 染病：ailments 已经存在（SicknessSystem， wound/cold/fever），契约要求
+  // 病症把 sickness 推到中间态而不是直接掉 hp。inflict 的真实签名是
+  // (state, id, severity, absoluteMinute)——见头注校正 2/3。
   await page.evaluate(async () => {
-    const path = '/src/systems/SicknessSystem.ts';
-    const m = (await import(path)) as { inflict: (s: unknown, id: string) => unknown };
+    const sickPath = '/src/systems/SicknessSystem.ts';
+    const survPath = '/src/systems/SurvivalSystem.ts';
+    const sick = (await import(sickPath)) as {
+      inflict: (state: unknown, id: string, severity: number, absoluteMinute: number) => void;
+    };
+    const surv = (await import(survPath)) as { absoluteMinute: (state: unknown) => number };
     const s = window.__PHASER_SESSION__?.getState();
     if (!s) throw new Error('no session');
-    m.inflict(s, 'cold');
+    sick.inflict(s, 'cold', 30, surv.absoluteMinute(s));
   });
 
   const sick = await page.waitForFunction(
@@ -237,10 +263,20 @@ test('sickness: healthy < sick < critical sits between alive and dead, with the 
 
   // critical 档：hp 归零前多一档"病了但还能动"——severity 拉满应先看到
   // critical，且此刻状态仍是 playing（不是直接 End）。
-  await page.evaluate(() => {
+  // 夹具（见头注校正 4）：severity 拉满的同时把病因按住——cold 的病因是
+  // 失温（bodyTemp ≤ FREEZING_THRESHOLD 10）。tickSickness 跑在
+  // tickSicknessTier 之前，病因一撤它同一个 tick 就按 recoverPerHour 把
+  // severity 拉回 100 以下，三档永远读不到 critical；这是 AG-25 的因果
+  // 闭环（条件撤掉自己好转），不是缺陷——所以让病因成立，severity 才钉在
+  // 100，critical 档才可观测。体温 5 点仍 > 0，不走失温终局。
+  await page.evaluate(async () => {
     const s = window.__PHASER_SESSION__?.getState();
+    if (!s) throw new Error('no session');
+    const survPath = '/src/systems/SurvivalSystem.ts';
+    const surv = (await import(survPath)) as { setBodyHeat: (state: unknown, value: number) => number };
     const ailments = (s?.player as { ailments?: Array<{ id: string; severity: number; sinceMinute: number }> }).ailments;
     if (ailments) for (const a of ailments) a.severity = 100;
+    surv.setBodyHeat(s, 5);
   });
   const critical = await page.waitForFunction(
     () => {

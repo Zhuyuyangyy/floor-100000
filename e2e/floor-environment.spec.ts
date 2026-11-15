@@ -6,11 +6,14 @@ import { expect, test, type Page } from '@playwright/test';
 // docs/reference/TWOM_MECHANICS.md §3「把 5 层楼的差异从换色调升级到环境
 // 参数：温度/湿度/危险/可取暖」）。
 //
-// **本 spec 整体处于 test.skip() 待启用状态。取消条件：AG-25（environmentFor
-// 的 warmth 字段与解析顺序）与 AG-30（floorTemplates 的 environment 微调
-// 数据）都合入 `integrate/sprint-01` 后，删除每个 test 里的 `test.skip(...)`
-// 行并实跑；若实跑发现机制没按契约实现，定性为产品缺陷写进报告，不许为了绿
-// 改这里的期望值。**
+// **AG-32 于 2026-11-16 启用：AG-25（environmentFor 的 template 合并步与
+// warmth 字段）与 AG-30（floorTemplates 的 14 层微调数据）都已合入
+// integrate/sprint-01（d89a332），三个 test.skip(...) 行已删。夹具按合入后
+// 的实现做了校正（不碰期望值）：测试 2 的逐值深比原按 B3 时代的
+// temperature/wet 字段名写，合入后真实字段是 label/cold/humidity/danger/
+// hostile/warmth——改名后 else 分支从「undefined === undefined 的恒真」
+// 变成真的在比阶梯读数。warmth 断言一律走 environmentFor(floor).warmth
+// （AG-30 的 1F template 值 0.35 盖住 JSON 默认梯 0.5），不写死 0.5。**
 //
 // 契约定死的形状：
 //   §2 FloorEnvironment 新增 `warmth?: number`（0..1，这一层自身热源能补回
@@ -62,10 +65,12 @@ async function startGame(page: Page, seed: number): Promise<void> {
   await waitForScene(page, 'Game');
 }
 
-/** 契约 §2 的 warmth 字段（当前分支尚不存在，故内联声明）。 */
+/** 契约 §2 的 FloorEnvironment 形状（合入后的真实字段名，见头注）。 */
 interface FloorEnvironmentLike {
-  temperature: number;
-  wet: boolean;
+  label: string;
+  cold: number;
+  humidity: number;
+  danger: number;
   hostile: boolean;
   warmth?: number;
 }
@@ -76,7 +81,6 @@ test('warmth: heat-source floors declare a 0..1 recovery share, others stay unde
   test.setTimeout(90_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  test.skip(true, 'AG-25/AG-30 未合入：契约 §2 的 warmth 字段与逐层数据尚不存在。取消条件 = 两者合入 integrate/sprint-01 后删除本行并实跑。');
 
   await startGame(page, 42);
 
@@ -111,7 +115,6 @@ test('environmentFor merges the floor template first (template fields win), then
   test.setTimeout(90_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  test.skip(true, 'AG-25/AG-30 未合入：契约 §2 的 template 合并步与 §3 的微调数据尚不存在。取消条件 = 两者合入 integrate/sprint-01 后删除本行并实跑。');
 
   await startGame(page, 42);
 
@@ -153,8 +156,11 @@ test('environmentFor merges the floor template first (template fields win), then
       // 契约：template 的字段优先于 constants 的同层覆盖。
       expect(row.resolved.warmth, `floor ${row.floor}: template warmth must win`).toBe(row.templateWarmth);
     } else if (row.ladder) {
-      // 未写 warmth 的层走阶梯/存量值——不凭空造数。
-      expect(row.resolved.temperature).toBe(row.ladder.temperature);
+      // 未写微调的层走阶梯/存量值——不凭空造数（真实字段名，见头注）。
+      expect(row.resolved.label, `floor ${row.floor}: ladder label must survive`).toBe(row.ladder.label);
+      expect(row.resolved.cold, `floor ${row.floor}: ladder cold must survive`).toBe(row.ladder.cold);
+      expect(row.resolved.humidity, `floor ${row.floor}: ladder humidity must survive`).toBe(row.ladder.humidity);
+      expect(row.resolved.danger, `floor ${row.floor}: ladder danger must survive`).toBe(row.ladder.danger);
       if (row.resolved.warmth !== undefined) {
         expect(row.resolved.warmth).toBe(row.ladder.warmth);
       }
@@ -170,7 +176,6 @@ test('the per-floor environment reaches the running game, not just the data tabl
   test.setTimeout(120_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  test.skip(true, 'AG-25/AG-30 未合入。取消条件 = 两者合入 integrate/sprint-01 后删除本行并实跑（HUD 环境标签的实际文案以合入后的实现为准校正）。');
 
   await startGame(page, 42);
 

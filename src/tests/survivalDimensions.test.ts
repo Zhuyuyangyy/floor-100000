@@ -10,6 +10,7 @@ import {
   warmthOf,
 } from '../core/constants';
 import { getItem } from '../data/items';
+import { diaryOf } from '../systems/DiarySystem';
 import { deserialize, serialize, validateGameState } from '../systems/SaveSystem';
 import { BODY_TEMP_MAX, warmthAt } from '../systems/EnvironmentSystem';
 import { hasAilment, inflict, severityOf } from '../systems/SicknessSystem';
@@ -212,9 +213,10 @@ describe('环境参数接通（契约第二节：environmentFor 解析顺序）'
   });
 
   it('merges FloorTemplate.environment over the ladder, template first', () => {
-    // AG-30 的数据还没落地（floorTemplates.ts 没有 environment 字段），用打补丁的
-    // 方式验证合并语义；AG-30 落地后这里读到的就是真数据。
+    // AG-30 的数据已落地（floorTemplates.ts 有 14 层微调）；这里再钉一遍合并
+    // 语义本身——3F 没有微调，打一个补丁上去：template 优先、未写字段继承。
     const carrier = FLOOR_TEMPLATES[3] as unknown as { environment?: Record<string, number> };
+    const original = carrier.environment;
     carrier.environment = { cold: 9.9, warmth: 0.4 };
     try {
       const env = environmentFor(3);
@@ -223,31 +225,28 @@ describe('环境参数接通（契约第二节：environmentFor 解析顺序）'
       expect(env.label).toBe('储物层');
       expect(warmthOf(3)).toBe(0.4); // warmth 走同一条合并
     } finally {
-      delete carrier.environment;
+      carrier.environment = original; // 撤补丁（3F 本就没有微调）
     }
-    expect(environmentFor(3).cold).toBe(2.4); // 补丁已撤，阶梯复位
+    expect(environmentFor(3).cold).toBe(2.4); // 阶梯复位
   });
 
-  it('warmthOf: the floor template wins, the JSON ladder is only the fallback', () => {
+  it('warmthOf takes the template tweak first, then the JSON default ladder', () => {
     // 契约第二节：FLOOR_TEMPLATES[floor].environment.warmth（AG-30 的逐层数据）
-    // 优先于 SURVIVAL_BALANCE.floorWarmth（AG-25 的默认梯）。第 1 层两个源都有
-    // 值——template 0.35（床+三支蜡烛）盖住梯的 0.5，这正是契约要的"逐层微调
-    // 优先"。
+    // 优先于 SURVIVAL_BALANCE.floorWarmth（AG-25 的默认梯）。
+    // AG-30 已给 1F 填了 warmth 0.35（床+三支蜡烛），它盖住梯的 0.5。
     expect(environmentFor(1).warmth).toBe(0.35);
     expect(warmthOf(1)).toBe(0.35);
-    // 没有 template 条目的层才落到 JSON 梯：3 层储物层无热源 = 0，
-    // 100 层以上未列出 = 0。
-    expect(environmentFor(3).warmth).toBeUndefined();
-    expect(warmthOf(3)).toBe(0);
-    expect(warmthOf(100)).toBe(0);
-    // 兜底梯本身仍在：给一个没有 template 的层打补丁，验证它真的会被读到。
-    const patched = { ...FLOOR_TEMPLATES };
-    delete patched[1];
+    // 2F 没有 template 微调：回落 JSON 默认梯（邻居宿舍的蜡烛）——"兜底梯
+    // 真的活着"的正面证据，和下面打补丁的反面证据互补。
+    expect(environmentFor(2).warmth).toBeUndefined();
+    expect(warmthOf(2)).toBe(SURVIVAL_BALANCE.floorWarmth[2]);
+    expect(warmthOf(3)).toBe(0); // storage: no heat source at all
+    expect(warmthOf(100)).toBe(0); // upper segments unlisted = 0
+    // 反面证据：把 1F 的 template 微调删掉，warmthOf 必须落到默认梯上。
     const before = FLOOR_TEMPLATES[1];
     FLOOR_TEMPLATES[1] = undefined as unknown as typeof before;
     expect(warmthOf(1)).toBe(SURVIVAL_BALANCE.floorWarmth[1]);
     FLOOR_TEMPLATES[1] = before;
-    expect(Object.keys(patched).length).toBeGreaterThan(0);
   });
 });
 
@@ -507,18 +506,27 @@ describe('morale：点数池 + 衰减 + 概率生效（TWOM §2 五机制）', (
 });
 
 describe('睡眠夜间结算（TWOM：ProcessSleep 与其它 Tick 并列）', () => {
-  it('the bed warms by the floor warmth: dorm yes, storage floor no', () => {
+  it('the bed warms by the floor warmth: template tweak, JSON default, and none', () => {
+    // 1F：AG-30 的 template 微调 warmth 0.35 优先于 JSON 默认 0.5。
     const dorm = on(1);
     dorm.gameMinuteOfDay = 1200;
     setBodyHeat(dorm, 30);
     const r = sleep(dorm);
     expect(r.ok).toBe(true);
     // 期望值从 warmthOf(1) 现算，不写死：warmth 的权威来源是楼层 template
-    // （契约第二节），它的值归 AG-30 调；写死 0.5 会在下次调 warmth 时假红。
+    // （契约第二节），它的值归 AG-30 调；写死具体数会在下次调 warmth 时假红。
     // sleepBodyHeatPerHour × warmth × 睡眠小时数 = 回温量。
     expect(bodyHeatOf(dorm)).toBeCloseTo(30 + SURVIVAL_BALANCE.sickness.sleepBodyHeatPerHour * warmthOf(1) * 10, 5);
 
-    const cold = on(3); // warmth 0——这层没有热源，睡了也冷
+    // 2F：没有 template 微调，回落 JSON 默认梯 0.3 → 4 × 0.3 × 10 = +12
+    const neighbor = on(2);
+    neighbor.gameMinuteOfDay = 1200;
+    setBodyHeat(neighbor, 30);
+    sleep(neighbor);
+    expect(bodyHeatOf(neighbor)).toBeCloseTo(42, 5);
+
+    // 3F：warmth 0——这层没有热源，睡了也冷
+    const cold = on(3);
     cold.gameMinuteOfDay = 1200;
     setBodyHeat(cold, 30);
     sleep(cold);
@@ -585,6 +593,25 @@ describe('老存档加载（缺字段补默认，不升 schemaVersion）', () =>
     expect(back.state.player.moraleBaseline).toBe(-5);
     expect(back.state.player.sickness).toBe('sick');
     expect(back.state.player.sicknessDay).toBe(1);
+  });
+
+  it('declares diaryEntries on GameState (AG-27 的契约位，纯类型改动)', () => {
+    // AG-27 的 DiarySystem 之前只能用 DiaryHost 本地扩展绕过；字段现在正式
+    // 声明在 GameState 上，读写在 diaryOf/recordDiary，缺省懒创建空数组。
+    const s = createNewGame(1);
+    expect(s.diaryEntries).toBeUndefined(); // 新档也没有——由 diaryOf 懒创建
+    s.diaryEntries = [{ kind: 'dwellerHungry', day: 1, minute: 360, text: '你饿了', actorId: null }];
+    const back = deserialize(serialize(s));
+    expect(back.ok).toBe(true);
+    if (back.ok) expect(back.state.diaryEntries).toEqual(s.diaryEntries);
+  });
+
+  it('a legacy save without diaryEntries loads and the diary reads empty', () => {
+    const r = deserialize(serialize(legacySave() as unknown as GameState));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.state.diaryEntries).toBeUndefined();
+    expect(diaryOf(r.state)).toEqual([]); // 缺字段补默认：老存档就是空日记
   });
 });
 

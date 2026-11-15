@@ -280,6 +280,30 @@ const MATERIAL_POOLS: Record<number, readonly ItemId[]> = {
   6: ['medkit', 'filter', 'fuse', 'battery', 'wire', 'crowbar'],
 };
 
+// 阶内分层（AG-43，docs/plans/LOOT.md）：MATERIAL_POOLS 按阶层取池，答的是阶
+// 「间」的梯度——11 层和 99 层抽的是同一个池子，阶内是平的。本函数把阶「内」的
+// 梯度补上：楼层越过所属阶层的中点后，池子并入上一阶层的池子（贫民区上半段开始
+// 出滤芯，宿舍区上半段开始出保险丝，工业区上半段开始出医疗包，富人区深处重新
+// 出撬棍），与 supplyLevel「阶层内线性增长、到段顶恰好涨到下一阶层基面」是同
+// 一条读数的阶梯近似。 tier 4 的上一阶层池是它的子集（富人区不拆实验设备，池
+// 里没有新件），所以中产区上半段保持不变——这是数据事实，不是疏漏。
+// 只改池子内容、不加 RNG 抽取： WORLDGEN_DATA_VERSION 被 worldgen.test.ts 钉在
+// 1，本分支不改他人的测试，故不 bump（LOOT.md §5 记录在案）。
+function materialPoolFor(floor: number): readonly ItemId[] {
+  const tier = tierOf(floor);
+  const base = MATERIAL_POOLS[tier.id];
+  const next = tier.id < TIERS.length ? TIERS[tier.id] : undefined;
+  if (!next) return base;
+  const size = tier.maxFloor - tier.minFloor + 1;
+  const share = (floor - tier.minFloor) / size;
+  if (share < 0.5) return base;
+  const merged: ItemId[] = [...base];
+  for (const id of MATERIAL_POOLS[next.id]) {
+    if (!merged.includes(id)) merged.push(id);
+  }
+  return merged;
+}
+
 // 保底物资的品类随阶层切换，读的是手写段已经立好的规矩：阶层 4 起水管没断
 // （10000-10010 只有机房与实验室两层还流脏水），阶层 3 起口粮替代面包。
 const CLEAN_WATER_FROM_TIER = 4;
@@ -369,7 +393,7 @@ export function summarizeFloor(worldSeed: number, floor: number): FloorSummary {
     const plan = planUnexploredFloor(worldSeed, floor);
     containerCount = plan.count;
     containerIds = [...plan.ids];
-    lootPool = [...MATERIAL_POOLS[tier.id]];
+    lootPool = [...materialPoolFor(floor)];
   }
 
   const grade = threatGrade(floor);
@@ -411,7 +435,7 @@ function synthesizeUnexploredFloor(worldSeed: number, floor: number): GeneratedF
 
   const water: ItemId = tier.id >= CLEAN_WATER_FROM_TIER ? 'clean_water' : 'dirty_water';
   const food: ItemId = tier.id >= RATION_FROM_TIER ? 'ration_pack' : 'bread';
-  const pool = MATERIAL_POOLS[tier.id];
+  const pool = materialPoolFor(floor);
 
   const containers: GeneratedContainer[] = plan.ids.map((id, i) => {
     const items: InventoryStack[] = [];

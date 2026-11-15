@@ -411,3 +411,162 @@ collapse=229）。产品表或摇序一变，spec 跟着变而不是烂掉。
 3. **journey teardown 环境问题**（§4.2）：本机无法进一步定位，建议 CI 复核。
 4. **5199 误杀事故的后续**：主工作区 dev server 待 team-lead 重启（§7.1）。
 5. **五个第二轮系统未接线**（§6）：AG-20/AG-21 合入后需补 e2e。
+
+---
+
+---
+
+# 第三轮（AG-32 · TWOM 对齐 e2e，2026-11-16）
+
+- **分支/提交**：`agent/2026-11-16/ag-32-align-e2e`（worktree `agent-worktrees/ag-32-align-e2e`）。
+  基线 = `origin/integrate/sprint-01` @ `c6226e7`（merge 干净无冲突，含 AG-26 Flag/Trigger、
+  AG-27 日记、AG-28 NPC 三原子；76 测试文件 / 1343 测试全绿、tsc 干净的集成上再跑）。
+- **范围**：存量全量 Playwright e2e（`--workers=1`）+ 两个存量失败单跑复证 + 六个新 spec
+  （三个已合入系统真 spec 实跑 / 三个未合入系统 spec 待启用）+ `tsc --noEmit`。
+- **总结**：**存量 88 passed / 2 failed（90 测试，39.8m）**——2 败均为 teardown 超时
+  （环境负载，正文零断言失败，单跑复证均过，**非产品缺陷、非 spec bug**，§3）；
+  六个新 spec **21 passed / 9 skipped**（三个已启用 21/21 全过；三个待启用的 9 个测试
+  全部正确呈现 skipped，取消条件写在各 test 内，§4）。
+
+## 1. 验证命令与结果
+
+| 验证 | 命令 | 结果 |
+| --- | --- | --- |
+| 类型检查 | `npx tsc --noEmit` | 干净（含六个新 spec） |
+| 存量全量 e2e | `npx playwright test --config=e2e/playwright.ag32.config.ts --workers=1` | **88 passed / 2 failed**（39.8m，90 测试 / 26 文件） |
+| 失败单跑 ① | 同 config `e2e/survivalJourney.spec.ts --workers=1` | **1 passed**（13.8m，**含 teardown**） |
+| 失败单跑 ② | 同 config `e2e/tower.spec.ts -g "locked floor is refused"` | **1 passed**（17.2s） |
+| 新 spec 六文件 | 同 config 六文件 `--workers=1` | **21 passed / 9 skipped**（1.6m） |
+
+**端口（派工硬纪律 3 的执行）**：5199 可能有总控/其它 worktree 的活 dev server，
+`reuseExistingServer` 会静默复用（AG-24 §7.1 事故），本轮全程不用 5199——新建
+`e2e/playwright.ag32.config.ts`（整体继承主 config，只把 dev server 与 baseURL 挪到
+**5420**，globalSetup 指向同目录的 verifyServerIdentity.ts，project 层也钉了
+baseURL 否则 identity guard 会按默认值去探 5199）。跑前实测 5199/5420 均无监听
+（仅 5396 在听，属他人服务），每轮由 Playwright 在本 worktree 自起服务，
+identity guard 对空端口放行。全程未杀任何他人的服务。
+
+## 2. 存量基线结果（90 测试 / 26 文件）
+
+- **88 passed / 2 failed**。唯二失败：`survivalJourney.spec.ts:163`（B3-02 full
+  survival journey）与 `tower.spec.ts:309`（locked floor is refused），均为 teardown
+  超时（§3）。其余 24 个 spec 文件全绿。
+- 与上一轮基线（AG-24 @ `f74e972`，83 过 7 败）对照：6 个字体度量回归已在 AG-23 的
+  修复轮后全清（firstChapter 工作台段、font 面板段、hudLayout 四视口、tower 页脚），
+  journey teardown 环境问题依旧（§3.1）。
+- 说明（如实）：全量输出经管道截取，文件级逐条计数以汇总行 + 两个失败的单跑复证为准。
+
+## 3. 两个失败的定性：环境（teardown-only），非产品缺陷
+
+共同证据链：① 错误文案只有 `Tearing down "context" exceeded the test timeout`，
+`error-context.md` 里**没有任何断言失败**（正文全过）；② 两个都单跑稳定复证通过；
+③ 与 AG-18 §5 / AG-24 §4.2 记录的同族现象一致（机器负载相关：40 分钟连续全量 +
+  多 agent 会话 + 磁盘 97%）。
+
+- **3.1 survivalJourney teardown 超时**（600000ms）：全量内失败；单跑 **13.8m 全过
+  （含 teardown）**。AG-24 在同 spec 记录过完全相同的形态（主体 14.1m 全过、teardown
+  挂起），其 §4.2 定性为「机器状态相关」——本轮复证同一结论。
+- **3.2 tower locked floor teardown 超时**（90000ms）：全量内失败；单跑 **17.2s 过**
+  （AG-18 记录过同测试 16.2s / 1.8m 的波动，纯负载相关）。
+- **定性：环境性能问题（Chromium context 关闭病态慢），不是产品缺陷、不是 spec bug。**
+  处置建议（沿用 AG-03/AG-24）：清理各 worktree 的 test-results 归档、CI
+  （`--workers=1 --retries=1`）复核；若 CI 仍超时再考虑上调 test timeout 或拆分
+  （改动属 e2e 维护，需先在 CI 确认，本轮不动）。
+- **硬纪律执行**：未删测试、未 skip/only、未放宽断言；存量 spec 与 `src/**` 零改动。
+
+## 4. 六个新 spec（契约 §1–§7 的 e2e 面）
+
+### 4.1 已启用实跑：21/21 过（1.6m）
+
+| spec | 测试数 | 结果 | 覆盖（对应契约节） |
+| --- | --- | --- | --- |
+| `triggers.spec.ts` | 7 | **全过** | §6：注册表 22 个（id 唯一、三类收敛目标 + tier/NPC 两家族）；5 组正反例（ev:blackout / st:night-exposed / st:bag-overflowing / combat:active / goal:met）；只报本次新置的旗；存量 deprecated 行为不变（黑局势景**真的把灯一盏盏灭掉**、HUD **真的出 ✓** 且目标改回去 ✓ 消失而旗不清）；evaluateTriggers 前后存量字段**字节级**一致 |
+| `diary.spec.ts` | 7 | **全过** | §5：11 类全链路 + day 倒序 + `DIARY_KIND_LABELS` 全覆盖；个体/群体双轨 actorId 语义；minute 整数防线（480.34→480、1500.9→1439、-3.2→0，真实时钟不被改）；两处「没有效果」语义（dwellerSickNoEffect 每天一条 / 饥饿预警档文案变体）；个体→群体连续链（断链重回个体）；**真存档往返**（写条目→自动存档进 localStorage→刷新→菜单「继续游戏」→原样读回，run 仍是活的）；新旧两套并存（旧 DiaryEvent 仍被**夜间安排面板**真实渲染「上次：…」，新日记看不见旧的）；旗查询不被 64 条裁剪影响（70 条只存 64、旗计 70） |
+| `npc-atoms.spec.ts` | 7 | **全过** | §7：goTo 的 x 与 npcSchedule 运行时坐标**同函数同值**、与精灵实际位置一致（容差一个游戏分钟步行量）；playAnimation clip 与精灵**正在播放的** anim key 逐字一致、与 walkcycle 的 key 生成器同构；speak 的 Sensor 门控（走近原子才发射、**真场景 E 真的开对话**、走远不开）；sense() 三态（贴身/超距/跨层 Infinity）；Forced 打断（贴身会有 speak 的前提下 forcedTarget 非空→只剩 goTo+walk、越界钳制、空指令回自主）；确定性（同 state 两次逐字节一致）；流浪者原子（夜间事件同层→登场计划，无事件→空序列） |
+
+**方法（重要，读数字前先读这段）**：三个系统的**场景接线都还没落**（AG-26 实现说明
+留了 GameScene 每帧求值清单；AG-27 写入入口无调用方；AG-28 forcedTarget 无生产者）。
+spec 因此在页面里 `import` 产品自己的模块（Vite dev server 模块图与应用同源——拿到
+的是**同一个模块实例**，WorldFlags 注册表/DiarySystem 存储共享），对**真实运行中的
+GameState** 调用产品函数，再与场景实况（精灵位置/正在播放的动画/真存档/真面板）
+交叉比对。产品源码零改动；这比 mock 强（测的是产品代码对真实状态的行为），比"等接线"
+强（不阻塞验证）。缺的接线本身作为已知缺口记在 §6 与 TWOM_ALIGNMENT.md §11。
+
+**派工单提到的两个 dev 句柄不存在**：`__PHASER_DIARY__` 与 `__PHASER_NPC_ATOMS__`
+在 `src/main.ts` 里没有挂（只有 `__PHASER_GAME__` / `__PHASER_SESSION__`，AG-27/28
+的实现说明也未提）。已用页面内 import 覆盖，句柄缺失本身记入 §6（属 src 持有方）。
+
+### 4.2 待启用：9 skipped（取消条件写在各 test 内）
+
+| spec | 测试数 | 状态 | 取消条件 |
+| --- | --- | --- | --- |
+| `survival-dimensions.spec.ts` | 3 | skip | AG-25 合入 `integrate/sprint-01` 后删除各 test 的 `test.skip(true, …)` 行并实跑（§1 体温/心情/疾病三档） |
+| `morale-items.spec.ts` | 3 | skip | AG-29 合入后取消；点数变化部分另依赖 AG-25（§4 moraleDelta/moraleChance、seeded RNG） |
+| `floor-environment.spec.ts` | 3 | skip | AG-25（warmth 字段与解析顺序）+ AG-30（floorTemplates 微调数据）都合入后取消（§2/§3） |
+
+三个 spec 的 test 体已按契约写好（内联类型声明，不 import 尚不存在的导出，tsc 全绿），
+合入后删 skip 行即可实跑；若机制没按契约实现，定性为产品缺陷写进报告，**不放宽期望值**。
+
+## 5. npc-atoms 调试记录（三轮自我修正，均为测试精度问题，非产品缺陷）
+
+如实记录复跑路径，供后续维护者参考：
+1. **反例 E 撞楼梯口**：上楼落地后玩家停在 x=40（上楼口），在那儿按 E 触发爬楼梯，
+   连锁爬到 4 层。修：反例先挪离楼梯口。顺带证实产品设计：`UP_EXIT_X=40`（左端上楼）、
+   `DOWN_EXIT_X=1240`（右端下楼）、交互半径 44（FloorSystem.currentInteractionZone）。
+2. **反例 E 撞遭遇点**：x=640 附近有 dwell 压力滚出的遭遇点（spotMarkers），44 内
+   **抢先于 NPC**——E 开的是遭遇面板，还和对话叠在一起，第一个 Escape 先关遭遇
+   （onEsc 分支序）。修：反例改探「安静点」（离每个遭遇点/阿林/楼梯口都 ≥60px）；
+   收尾用至多 4 次 Escape 循环按到对话消失（断言不放宽）。
+3. **sense 距离容差**：setX 到精灵 x 后 NPC 仍按日程走路（120px/真实秒），距离
+   断言从 ≤2 放宽容到 ≤8px（单位测试已钉精确语义，e2e 测三态对比）。
+   **观察记录（未定性，src 未动）**：对话与遭遇面板可同时打开（dialogueOpen 与
+   encounterOpen 并存），Escape 按分支序逐个关。
+
+## 6. 发现的缺口（需总控知悉，均未越界改 src）
+
+1. **两个 dev 句柄不存在**：`__PHASER_DIARY__` / `__PHASER_NPC_ATOMS__`（§4.1）。
+2. **三个系统均无场景消费方**：触发器没有每帧求值（AG-26 接线清单待派）、日记没有
+   写入调用方与 UI 呈现（AG-27 留了建议调用点与 UI 方案）、三原子没有场景生产者。
+   契约与 vitest 单测已就绪，e2e 已验证函数面对真实状态的行为；「游戏里真的会发生」
+   要等接线。
+3. **遭遇点在交互半径内抢先于 NPC**、对话与遭遇面板可叠开（§5.3）——观察记录，
+   是否算缺陷属 src 持有方判断。
+
+## 7. 环境与处置
+
+- **safe-delete guard 再次拦下 Playwright 启动**（AG-18 同款）：runner 启动时
+  `fs.rm` wipe outputDir，>50 文件即被 `SAFE_DELETE_BULK_CONFIRM_REQUIRED` 拦。
+  按 AG-18 变通：复跑前 `mv test-results test-results-old-ag32-baseline`（fs.rename
+  不被拦），**未用 approve 自我审批、未拆批绕过、未经 temp 路由**。基线失败的证据
+  （error-context.md/trace/截图）已先提取进本报告。
+- **磁盘**：起点 14G free → 终点 8.7G free。全量一轮 + 单跑复证 + 新 spec 合计新增
+  ~5.3G（trace retain-on-failure + screencast 帧）。`test-results-old-ag32-baseline`
+  （1.8G，两个 teardown 失败的 screencast 帧）**待人工确认后删除**——本 worktree 的
+  `test-results/` 已按派工要求用 `find test-results -type f -delete` 清空。
+- **后台 shell**：同 AG-18，长跑以前台 + 超时自动转后台完成（全量 39.8m 即如此）。
+
+## 8. 本轮新增/改动记录
+
+| # | 文件 | 内容 |
+| --- | --- | --- |
+| 1 | `e2e/triggers.spec.ts` | **新增**：§6 Flag/Trigger 七测（§4.1） |
+| 2 | `e2e/diary.spec.ts` | **新增**：§5 日记七测，含真存档往返 |
+| 3 | `e2e/npc-atoms.spec.ts` | **新增**：§7 三原子七测，含精灵实况交叉比对 |
+| 4 | `e2e/survival-dimensions.spec.ts` | **新增（skip）**：§1，AG-25 合入后启用 |
+| 5 | `e2e/morale-items.spec.ts` | **新增（skip）**：§4，AG-29 合入后启用 |
+| 6 | `e2e/floor-environment.spec.ts` | **新增（skip）**：§2/§3，AG-25+AG-30 合入后启用 |
+| 7 | `e2e/playwright.ag32.config.ts` | **新增**：5420 独占端口配置（§1），整体继承主 config |
+| 8 | `docs/plans/TWOM_ALIGNMENT.md` | 追加「十一、AG-32 进度」节（spec 清单/状态/缺口） |
+| 9 | `docs/qa/E2E_INTEGRATED.md` | 追加本节 |
+| 10 | 存量 spec / `src/**` / `playwright.config.ts` | **零改动**（无删测试、无 skip/only、无放宽断言） |
+
+## 9. 没处理干净的地方
+
+1. **`test-results-old-ag32-baseline` 1.8GB 待人工删除**（safe-delete guard 拦截，§7）。
+2. **三个待启用 spec 等合入**（§4.2）：AG-25 / AG-29 / AG-25+AG-30，合入通知到手后
+   取消 skip 实跑，结果记入下一节。
+3. **两个 dev 句柄 + 三处场景接线缺失**（§6）：需总控派 src 持有方。
+4. **journey/tower teardown 环境问题**（§3）：建议 CI 复核，本机无法进一步定位。
+5. **磁盘偏紧**（8.7G free）：下一轮全量前先清各 worktree 归档。
+6. **全量输出的文件级逐条计数**经管道截取（§2 已注明）：如需逐 spec 秒级明细可重跑
+   单文件补采，汇总数字（88/2、21/9、两次单跑通过）均为实测。

@@ -299,3 +299,45 @@ label 用 `entry.text`、value 用 `第${day}天 ${formatClock(minute)}`
 （formatClock 在 SurvivalSystem 导出），kind 中文名取
 `DIARY_KIND_LABELS`。`diaryOf()` 倒序返回，行按数组顺序渲染即是新的在
 上。ROW_H=26，一条一行；日记文案已按 ≤30 字控制，24px 字下不溢出。
+
+## 十一、AG-32 进度（对齐 e2e，2026-11-16）
+
+AG-32（对齐验证工程师）给 TWOM 对齐这一轮的新机制写 Playwright e2e。
+工作区 `agent-worktrees/ag-32-align-e2e`，分支 `agent/2026-11-16/ag-32-align-e2e`，
+基线 = `origin/integrate/sprint-01`（含 AG-26/27/28 三个系统）。
+
+### spec 清单与状态
+
+| spec | 覆盖 | 状态 |
+| --- | --- | --- |
+| `e2e/triggers.spec.ts` | §6 Flag/Trigger：注册表 22 个、5 组正反例（ev:blackout / st:night-exposed / st:bag-overflowing / combat:active / goal:met）、只报新旗、存量 deprecated 行为不变（黑局势景真灭灯、HUD 真出 ✓）、evaluateTriggers 只写 flags | **已启用实跑** |
+| `e2e/diary.spec.ts` | §5 日记 11 类：个体/群体双轨、minute 整数防线、两处「没有效果」语义、个体→群体连续链、真存档往返（autosave→刷新→继续游戏）、新旧两套并存（宿舍面板真渲染旧条目）、旗不被 64 条裁剪影响 | **已启用实跑** |
+| `e2e/npc-atoms.spec.ts` | §7 三原子：goTo/playAnimation 与场景精灵实况交叉比对、clip 与 walkcycle 同构、speak 的 Sensor 门控（真 E 开对话）、sense() 三态、Forced 打断、确定性、流浪者原子 | **已启用实跑** |
+| `e2e/survival-dimensions.spec.ts` | §1 体温/心情/疾病三档 | **待启用**（AG-25 合入后取消 skip） |
+| `e2e/morale-items.spec.ts` | §4 心情物品（moraleDelta/moraleChance、seeded RNG） | **待启用**（AG-29 合入后取消 skip；点数变化另依赖 AG-25） |
+| `e2e/floor-environment.spec.ts` | §2/§3 楼层环境（warmth 字段、environmentFor 解析顺序、template 合并） | **待启用**（AG-25 + AG-30 合入后取消 skip） |
+
+三个待启用 spec 的每个 test 里都有 `test.skip(true, '…取消条件…')`，
+取消条件写明「对应 Agent 合入 integrate/sprint-01 后删除本行并实跑」。
+合入后若机制没按契约实现，定性为产品缺陷写进报告，不放宽期望值。
+
+### e2e 方法上的一件事（给后续 Agent）
+
+三个系统的**场景接线都还没落**（AG-26 的实现说明留了 GameScene 每帧
+求值的接线清单；AG-27 的写入入口没有调用方；AG-28 的 forcedTarget 没有
+生产者）。e2e 因此用「页面内 import 产品自己的模块、对真实运行中的
+GameState 调用」的方式测：Vite dev server 的模块图与应用同源，import 到
+的是同一个模块实例（WorldFlags 注册表、 DiarySystem 存储都是共享的），
+产品源码零改动。这比 mock 强（测的是产品代码对真实状态的行为），比
+"等接线"强（不阻塞验证）；缺的接线本身作为已知缺口记录在
+`docs/qa/E2E_INTEGRATED.md` 的 AG-32 节。
+
+### AG-32 发现的缺口（需总控知悉）
+
+1. **派工单提到的两个 dev 句柄不存在**：`__PHASER_DIARY__` 与
+   `__PHASER_NPC_ATOMS__` 在 `src/main.ts` 里没有挂（只有
+   `__PHASER_GAME__` / `__PHASER_SESSION__`）。e2e 已用页面内 import
+   覆盖，但如果后续想要稳定的句柄面，需要在 main.ts 补挂（属 src 持有方）。
+2. **三个系统均无场景消费方**（见上）：日记没有 UI 呈现、触发器没有
+   每帧求值、三原子没有场景生产者。契约与单测（vitest）都已就绪，
+   e2e 已验证函数面对真实状态的行为；"游戏里真的会发生"要等接线。

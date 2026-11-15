@@ -288,3 +288,12 @@ AG-17 会话已不在团队内无法续，**改派 AG-18 接手**：提交该修
 
 **基线**：`origin/integrate/sprint-01` @ `f74e972`（70 文件 / 1176 全绿，tsc 干净，字体已换 Noto Sans SC）。
 **派工纪律**：每个工单只派一次；派发后用任务清单核对；文件独占严格（GameScene 只给 AG-20，EndgameScene+main.ts 只给 AG-21）。
+
+## 派工纪律补充（2026-11-15 22:05）——端口与服务器归属
+**事故**：AG-24 为排除"僵尸服务"误杀了主工作区的活 dev server（5199/PID 18492）。根因是它用"服务器返回的注释 ≠ 任何磁盘文件"做判定，而 vite/esbuild 的 TS 转换**本来就会丢弃部分注释块**，该证据链从方法上无效。AG-24 用 inline sourcemap 的 sourcesContent 逐字节 md5 重新核实后主动更正，确认那台服务是活的、serving 主工作区实时代码。
+
+**制度（下一轮所有跑 e2e / 起服务的 Agent 必须遵守）**：
+1. **判定服务器归属只用 sourcemap 法**：请求模块时带 sourcemap，解码 `sourcesContent` 与磁盘文件逐字节 md5 比对。**禁止用注释/文本相似度判定**（TS 转换会丢注释）。
+2. **不起 5199 之外不打招呼杀进程**：杀任何 dev server 前先在团队里问一句；主工作区的服务器归总控。
+3. **`playwright.config.ts` 加健康检查**（AG-24 落地）：webServer 起来后比对 serve 的代码与本 worktree 是否一致，对不上就 fail 并说明"复用了别人的服务器"。`strictPort` 只保证端口独占，不保证 serve 的是你的代码。
+4. **总控操作纪律**：worktree 报 detached HEAD 时，**先用 `branch -f` 或 `reset --hard` 把提交钉到分支，再动别的 git 操作**——AG-21 那次差点把 1760 行提交甩成孤儿。

@@ -2,6 +2,10 @@
 // Single source of truth is GameState; all mutations go through explicit
 // logic functions. Phaser only renders/syncs from this.
 
+// Type-only import: erased at compile time, so the core -> systems edge costs
+// no runtime cycle (gameTypes exports types only, it has no runtime bindings).
+import type { DiaryEntry } from '../systems/DiarySystem';
+
 export type ItemId =
   | 'clean_water'
   | 'dirty_water'
@@ -302,6 +306,15 @@ export interface GameState {
   worldEvents: { history: string[]; activeEvent: ActiveEvent | null; dwell?: DwellState };
   /** Recent facts the player has lived through. Optional for legacy saves. */
   diary?: DiaryEvent[];
+  /**
+   * 结构化日记（TWOM 对齐契约 §5）。AG-27 属主 src/systems/DiarySystem.ts
+   * （DiaryEntry / DiaryKind / recordDiary / diaryOf 都在那里）；本字段只是
+   * GameState 上的声明位，读写在 diaryOf/recordDiary，缺省按 [] 懒创建——
+   * 老存档没有它就是空数组，不需要为此升 schemaVersion。
+   * 与上面的 diary 分工：diary 是旧 DiaryEvent[]（SaveSystem 用 8 种旧 kind
+   * 白名单严格校验），diaryEntries 是新的 11 种 DiaryKind，两套并存。
+   */
+  diaryEntries?: DiaryEntry[];
   /** The one shelter decision currently being resolved, if any. */
   shelterPlan?: ShelterPlan;
   // OVERHAUL (docs/OVERHAUL_M1.md): the day's rolled objective. Optional so

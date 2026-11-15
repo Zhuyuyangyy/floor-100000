@@ -158,16 +158,14 @@ const SEGMENT_ENVIRONMENT: Record<number, FloorEnvironment> = {
   100000: { label: '统治核心', cold: 3.4, humidity: 0.35, danger: 1, hostile: true },
 };
 
-// AG-30 的逐层环境微调（契约第三节：FloorTemplate.environment）。字段还没落到
-// src/data/floorTemplates.ts（AG-30 属主，不该由 AG-25 代改它的数据文件），所以
-// 用结构转换读；AG-30 落地后这个转换仍然编译——可选字段出现只会让读取变成恒等。
-type EnvironmentCarrier = { environment?: Partial<FloorEnvironment> };
-
 // 契约第二节定死的解析顺序：FLOOR_ENVIRONMENT[floor]（叠 template 微调）→
 // SEGMENT_ENVIRONMENT[段起点] → 阶梯向下回落 → 宿舍兜底。
 // 微调叠在「完整解析结果」之上，而不是只与 FLOOR_ENVIRONMENT[floor] 合并：
 // 6-10 层这种「有 template 微调但没有逐层条目」的楼层，若只与逐层条目合并会
 // 只剩微调字段、连 label 都丢掉。
+//
+// AG-30 的 FloorTemplate.environment（契约第三节）已带真实数据落地（14 层
+// 微调，含 1F 的 warmth 0.35），这里直接读字段，不再需要结构转换。
 function resolveEnvironment(floor: number): FloorEnvironment {
   if (FLOOR_ENVIRONMENT[floor]) return FLOOR_ENVIRONMENT[floor];
   const seg = segmentOf(floor);
@@ -183,7 +181,7 @@ export function environmentFor(floor: number): FloorEnvironment {
   // unlisted floor must never be answered with a neighbour's numbers, which is
   // what made floor 1000 a 1.6-degree 食堂.
   const base = resolveEnvironment(floor);
-  const tweak = (FLOOR_TEMPLATES[floor] as EnvironmentCarrier | undefined)?.environment;
+  const tweak = FLOOR_TEMPLATES[floor]?.environment;
   if (!tweak) return base;
   const merged: FloorEnvironment = { ...base };
   for (const [key, value] of Object.entries(tweak)) {

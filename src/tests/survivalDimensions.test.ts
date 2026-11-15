@@ -10,6 +10,7 @@ import {
   warmthOf,
 } from '../core/constants';
 import { getItem } from '../data/items';
+import { diaryOf } from '../systems/DiarySystem';
 import { deserialize, serialize, validateGameState } from '../systems/SaveSystem';
 import { BODY_TEMP_MAX, warmthAt } from '../systems/EnvironmentSystem';
 import { hasAilment, inflict, severityOf } from '../systems/SicknessSystem';
@@ -212,9 +213,10 @@ describe('环境参数接通（契约第二节：environmentFor 解析顺序）'
   });
 
   it('merges FloorTemplate.environment over the ladder, template first', () => {
-    // AG-30 的数据还没落地（floorTemplates.ts 没有 environment 字段），用打补丁的
-    // 方式验证合并语义；AG-30 落地后这里读到的就是真数据。
+    // AG-30 的数据已落地（floorTemplates.ts 有 14 层微调）；这里再钉一遍合并
+    // 语义本身——3F 没有微调，打一个补丁上去：template 优先、未写字段继承。
     const carrier = FLOOR_TEMPLATES[3] as unknown as { environment?: Record<string, number> };
+    const original = carrier.environment;
     carrier.environment = { cold: 9.9, warmth: 0.4 };
     try {
       const env = environmentFor(3);
@@ -223,13 +225,17 @@ describe('环境参数接通（契约第二节：environmentFor 解析顺序）'
       expect(env.label).toBe('储物层');
       expect(warmthOf(3)).toBe(0.4); // warmth 走同一条合并
     } finally {
-      delete carrier.environment;
+      carrier.environment = original; // 撤补丁（3F 本就没有微调）
     }
-    expect(environmentFor(3).cold).toBe(2.4); // 补丁已撤，阶梯复位
+    expect(environmentFor(3).cold).toBe(2.4); // 阶梯复位
   });
 
-  it('warmthOf falls back to the JSON default ladder', () => {
-    expect(warmthOf(1)).toBe(SURVIVAL_BALANCE.floorWarmth[1]); // dorm: candles + bed
+  it('warmthOf takes the template tweak first, then the JSON default ladder', () => {
+    // AG-30 已给 1F 填了 environment: { warmth: 0.35 }（集成分支的真实数据）——
+    // template 微调优先于 JSON 默认梯，这正是契约第二节的解析顺序。
+    expect(warmthOf(1)).toBe(0.35);
+    // 2F 没有 template 微调：回落 JSON 默认梯（邻居宿舍的蜡烛）。
+    expect(warmthOf(2)).toBe(SURVIVAL_BALANCE.floorWarmth[2]);
     expect(warmthOf(3)).toBe(0); // storage: no heat source at all
     expect(warmthOf(100)).toBe(0); // upper segments unlisted = 0
   });
@@ -491,16 +497,25 @@ describe('morale：点数池 + 衰减 + 概率生效（TWOM §2 五机制）', (
 });
 
 describe('睡眠夜间结算（TWOM：ProcessSleep 与其它 Tick 并列）', () => {
-  it('the bed warms by the floor warmth: dorm yes, storage floor no', () => {
+  it('the bed warms by the floor warmth: template tweak, JSON default, and none', () => {
+    // 1F：AG-30 的 template 微调 warmth 0.35 优先于 JSON 默认 0.5。
     const dorm = on(1);
     dorm.gameMinuteOfDay = 1200;
     setBodyHeat(dorm, 30);
     const r = sleep(dorm);
     expect(r.ok).toBe(true);
-    // sleepBodyHeatPerHour × warmth(0.5) × 10 小时 = +20
-    expect(bodyHeatOf(dorm)).toBeCloseTo(50, 5);
+    // sleepBodyHeatPerHour × 0.35 × 10 小时 = +14
+    expect(bodyHeatOf(dorm)).toBeCloseTo(44, 5);
 
-    const cold = on(3); // warmth 0——这层没有热源，睡了也冷
+    // 2F：没有 template 微调，回落 JSON 默认梯 0.3 → 4 × 0.3 × 10 = +12
+    const neighbor = on(2);
+    neighbor.gameMinuteOfDay = 1200;
+    setBodyHeat(neighbor, 30);
+    sleep(neighbor);
+    expect(bodyHeatOf(neighbor)).toBeCloseTo(42, 5);
+
+    // 3F：warmth 0——这层没有热源，睡了也冷
+    const cold = on(3);
     cold.gameMinuteOfDay = 1200;
     setBodyHeat(cold, 30);
     sleep(cold);
@@ -567,6 +582,25 @@ describe('老存档加载（缺字段补默认，不升 schemaVersion）', () =>
     expect(back.state.player.moraleBaseline).toBe(-5);
     expect(back.state.player.sickness).toBe('sick');
     expect(back.state.player.sicknessDay).toBe(1);
+  });
+
+  it('declares diaryEntries on GameState (AG-27 的契约位，纯类型改动)', () => {
+    // AG-27 的 DiarySystem 之前只能用 DiaryHost 本地扩展绕过；字段现在正式
+    // 声明在 GameState 上，读写在 diaryOf/recordDiary，缺省懒创建空数组。
+    const s = createNewGame(1);
+    expect(s.diaryEntries).toBeUndefined(); // 新档也没有——由 diaryOf 懒创建
+    s.diaryEntries = [{ kind: 'dwellerHungry', day: 1, minute: 360, text: '你饿了', actorId: null }];
+    const back = deserialize(serialize(s));
+    expect(back.ok).toBe(true);
+    if (back.ok) expect(back.state.diaryEntries).toEqual(s.diaryEntries);
+  });
+
+  it('a legacy save without diaryEntries loads and the diary reads empty', () => {
+    const r = deserialize(serialize(legacySave() as unknown as GameState));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.state.diaryEntries).toBeUndefined();
+    expect(diaryOf(r.state)).toEqual([]); // 缺字段补默认：老存档就是空日记
   });
 });
 

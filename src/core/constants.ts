@@ -135,6 +135,13 @@ const SEGMENT_ENVIRONMENT: Record<number, FloorEnvironment> = {
   // 在这一段正式登场，富人不只知道，他们买单——夜间在走廊里游荡的不是
   // 保安，是养在楼上的东西（docs/18_TIER_PROGRESSION.md §3）。
   50000: { label: '富人特权区', cold: 3.0, humidity: 0.4, danger: 0.98, hostile: true },
+  // 统治核心（100000，单层终局）。全塔最高的一段，暖气停得最早（cold 3.4
+  // > 3.0），也是最干燥的一段（humidity 0.35 < 0.4）——渗水的管道和中央
+  // 空调都在下面，核心里只有服务器室的循环风。danger 1.0 封顶：整套安保
+  // 体系把着这里（encounters.ts 的 100000 行，ambush 权重全塔最高），而等
+  // 着玩家的不是怪物，是终端与四个选择（quests.ts Q6）。数值与 worldgen.ts
+  // 的 ENVIRONMENT_ANCHORS 末档（90000 外推）逐字一致，两条读数在塔顶会师。
+  100000: { label: '统治核心', cold: 3.4, humidity: 0.35, danger: 1, hostile: true },
 };
 
 export function environmentFor(floor: number): FloorEnvironment {

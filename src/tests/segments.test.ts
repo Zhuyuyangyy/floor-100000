@@ -149,13 +149,14 @@ describe('liftOutcome', () => {
     expect(liftOutcome({ player: { homeUpgrades: ['vip_card'] } }, 10, () => true)).toBe('need-pass');
   });
 
-  it('refuses a pass-holder when the target segment has no floors yet', () => {
-    // 1000-1010, 10000-10010 and 50000-50010 are authored now, so the rides
-    // from 110, 1010 and 10010 complete; the segment above 50010 (the 统治
-    // 核心 at 100000) is not, so the same refusal happens at 50010.
+  it('rides the last lift once the summit is authored', () => {
+    // 1000-1010、10000-10010 和 50000-50010 创作后，110/1010/10010 的电梯
+    // 都通了；终局创作（AG-16）后 50010 也通了——持 core_key 从富人区直抵
+    // 统治核心，这是全塔最后一段货梯。
     expect(hasFloorContent(1000)).toBe(true);
     expect(hasFloorContent(10000)).toBe(true);
     expect(hasFloorContent(50000)).toBe(true);
+    expect(hasFloorContent(100000)).toBe(true);
     const sticker = { player: { homeUpgrades: ['pass_sticker'] as string[] } };
     const permit = { player: { homeUpgrades: ['permit'] as string[] } };
     const vip = { player: { homeUpgrades: ['vip_card'] as string[] } };
@@ -163,7 +164,11 @@ describe('liftOutcome', () => {
     expect(liftOutcome(sticker, 110, hasFloorContent)).toBe('ok');
     expect(liftOutcome(permit, 1010, hasFloorContent)).toBe('ok');
     expect(liftOutcome(vip, 10010, hasFloorContent)).toBe('ok');
-    expect(liftOutcome(everything, 50010, hasFloorContent)).toBe('not-connected');
+    expect(liftOutcome(everything, 50010, hasFloorContent)).toBe('ok');
+    // 终点存在不等于门开着：没有 core_key 照样被拦在 50010。
+    expect(liftOutcome(vip, 50010, hasFloorContent)).toBe('need-pass');
+    // 停运拒绝没有随终局创作消失——目标层没有内容时，凭证在手也走不了。
+    expect(liftOutcome(everything, 50010, () => false)).toBe('not-connected');
   });
 
   it('only rides when the pass is held and the floor can be built', () => {
@@ -175,7 +180,7 @@ describe('liftOutcome', () => {
     expect(liftOutcome(badge, 10, hasFloorContent)).toBe('ok');
   });
 
-  it('matches the authored floors: all five authored segments and neither gap', () => {
+  it('matches the authored floors: all six authored segments and neither gap', () => {
     for (let f = 1; f <= 10; f++) expect(hasFloorContent(f)).toBe(true);
     for (let f = 100; f <= 110; f++) expect(hasFloorContent(f)).toBe(true);
     for (let f = 1000; f <= 1010; f++) expect(hasFloorContent(f)).toBe(true);
@@ -191,12 +196,12 @@ describe('liftOutcome', () => {
     expect(hasFloorContent(10011)).toBe(false);
     expect(hasFloorContent(49999)).toBe(false);
     expect(hasFloorContent(50011)).toBe(false);
-    // 100000 resolves through DEV_FLOOR_ALIAS to floor 1's table, but it is not
-    // authored content and must NOT read as connected: the lift asks this before
-    // moving anyone, and a true here would drop the player onto floor 1's layout
-    // while the HUD says 100000. generateFloor still honours the alias, so the dev
-    // entry keeps working; only the "can I build this for real" question says no.
-    expect(hasFloorContent(100000)).toBe(false);
+    expect(hasFloorContent(99999)).toBe(false);
+    // 100000 曾经只是 dev 别名指向的第 1 层表格，hasFloorContent 必须对它说假
+    // ——电梯在移动任何人之前问这句话，一个 true 会把玩家放到宿舍布局上而
+    // HUD 写着 100000。终局创作（AG-16）后别名删除、真模板就位，这里说真：
+    // 全塔六段都有内容，最后一段货梯从 50010 接通。
+    expect(hasFloorContent(100000)).toBe(true);
   });
 });
 

@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   containerItemKey,
   containerLootSeed,
-  DEV_FLOOR_ALIAS,
   FLOOR_TEMPLATES,
   generateFloor,
   getFloorTemplate,
@@ -12,32 +11,42 @@ import {
   LOOT_DATA_VERSION,
 } from '../data/floorTemplates';
 import { deriveSeed } from '../core/rng';
-import { DEV_TEST_FLOORS, PLAYABLE_FLOORS_V01 } from '../core/constants';
+import { DEV_TEST_FLOORS, FLOOR_WIDTH, PLAYABLE_FLOORS_V01 } from '../core/constants';
+import { PLAYABLE_SEGMENTS } from '../core/segments';
 
-// The retired v0.1 dorm scene stays bootable behind ?devfloor= without
-// duplicating its layout: it resolves to the floor-1 template under its old
-// address. Floor 100000 is still a valid logical floor and the future summit —
-// it just has no authored content until B4 generates it.
-describe('the dev-only floor alias', () => {
-  it('resolves the dev test floor to an authored template', () => {
+// ?devfloor= 直达的楼层曾经靠 DEV_FLOOR_ALIAS 借用第 1 层的模板——那只是开发
+// 入口，不是内容（hasFloorContent 因此刻意对它说过假）。终局创作后（AG-16），
+// 100000 有了自己的模板，别名失去存在理由并被删除：?devfloor=100000 现在直达
+// 统治核心本身，generateFloor 也不再把它解析成玩家宿舍。
+describe('the dev-only floor entry', () => {
+  it('resolves the dev test floor to its own authored template', () => {
     for (const floor of DEV_TEST_FLOORS) {
       expect(getFloorTemplate(floor), `dev floor ${floor} must render`).toBeDefined();
-      expect(DEV_FLOOR_ALIAS[floor]).toBeDefined();
+      expect(hasFloorContent(floor), `dev floor ${floor} must be authored`).toBe(true);
+      // 自己的模板：楼层号对得上，也不再是第 1 层宿舍的借用。
+      expect(getFloorTemplate(floor)!.floorNumber, `dev floor ${floor}`).toBe(floor);
+      expect(getFloorTemplate(floor)!.name, `dev floor ${floor}`).not.toBe('玩家宿舍');
     }
   });
 
   it('does not alias any playable floor', () => {
+    // 别名已删除：每一层可玩楼层的模板都地址在自己身上。
     for (const floor of PLAYABLE_FLOORS_V01) {
-      expect(DEV_FLOOR_ALIAS[floor]).toBeUndefined();
+      expect(FLOOR_TEMPLATES[floor].floorNumber, `floor ${floor}`).toBe(floor);
     }
   });
 
-  it('authors exactly one template per playable floor, and nothing else', () => {
+  it('authors exactly one template per playable segment floor, and nothing else', () => {
     // Count is not pinned: the assertion is that the authored table and the
-    // playable list name the same floors, so a floor can never be playable
-    // without content (or authored without being reachable).
+    // playable segments name the same floors, so a floor can never be playable
+    // without content (or authored without being reachable). The summit used to
+    // be the one exception — authored nowhere, reachable only through the dev
+    // alias; the finale (AG-16) closed that gap, so all six segments now match.
     const authored = Object.keys(FLOOR_TEMPLATES).map(Number).sort((a, b) => a - b);
-    expect(authored).toEqual([...PLAYABLE_FLOORS_V01].sort((a, b) => a - b));
+    const expected = PLAYABLE_SEGMENTS.flatMap((s) =>
+      Array.from({ length: s.to - s.from + 1 }, (_, i) => s.from + i),
+    ).sort((a, b) => a - b);
+    expect(authored).toEqual(expected);
   });
 
   it('generates the dev floor under its own number', () => {
@@ -327,7 +336,7 @@ describe('the commercial tier (10000-10010)', () => {
 // 水以净水为主，只有喂养层（50005）与楼上实验室（50008）是脏水。容器 id
 // 仍只能落在有贴图的家具上（没有新美术），问 containerTextureKey。
 describe('the VIP tier (50000-50010)', () => {
-  // 只圈阶层 5 自己：100000 是统治核心，还没有创作内容。
+  // 只圈阶层 5 自己：100000 是统治核心，另有终局 describe 钉它。
   const VIP_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 50000);
 
   it('is exactly the eleven floors of segment 5', () => {
@@ -377,6 +386,86 @@ describe('the VIP tier (50000-50010)', () => {
     for (const floor of VIP_FLOORS) {
       expect(generateFloor(42, floor), `floor ${floor}`).toEqual(generateFloor(42, floor));
       expect(generateFloor(2026, floor).floorNumber, `floor ${floor}`).toBe(floor);
+    }
+  });
+});
+
+// 阶层 6（100000，统治核心）是全塔最后一段，也是唯一一段只有一层：玩家到这里
+// 不是来打怪的，是来做选择的（quests.ts Q6 的四个结局）。三件容器就是终局的
+// 三幕——终端台（抉择发生地）、配电箱（shutdown 要关掉的东西）、档案柜
+// （停电表、配给表、处决名单，同一支笔写的三张表）。生存规矩和前五段完全
+// 相同：恰好 1 份 guaranteed 净水 + 1 份 guaranteed 口粮——worldgen 的
+// survival contract 按每层一瓶水给全塔记账，多一瓶就踩穿上限。容器 id 仍只能
+// 落在有贴图的家具上（没有新美术），问 containerTextureKey；容器数比前五段
+// 更少（2-3 件）——终局层少而重，一件事一个容器。
+describe('the ruling core (100000)', () => {
+  const FINALE_FLOORS = [100000];
+
+  it('is exactly the single floor of segment 6', () => {
+    expect(FINALE_FLOORS).toEqual([100000]);
+  });
+
+  it('has an authored template for the summit', () => {
+    for (const floor of FINALE_FLOORS) {
+      expect(hasFloorContent(floor), `floor ${floor} must be authored`).toBe(true);
+      expect(FLOOR_TEMPLATES[floor].floorNumber, `floor ${floor}`).toBe(floor);
+      expect(FLOOR_TEMPLATES[floor].name, `floor ${floor}`).toBe('统治核心');
+    }
+  });
+
+  it('guarantees exactly one drink and one meal on the summit', () => {
+    for (const floor of FINALE_FLOORS) {
+      const loot = FLOOR_TEMPLATES[floor].containers.flatMap((c) => c.loot);
+      const water = loot.filter(
+        (l) => l.guaranteed === true && (l.itemId === 'clean_water' || l.itemId === 'dirty_water'),
+      );
+      const food = loot.filter(
+        (l) => l.guaranteed === true && (l.itemId === 'ration_pack' || l.itemId === 'bread'),
+      );
+      expect(water.length, `floor ${floor} must guarantee exactly one drink`).toBe(1);
+      expect(food.length, `floor ${floor} has no guaranteed meal`).toBeGreaterThanOrEqual(1);
+      // 一条就够：概率性的第二瓶水会让「分层盈余」的上限被悄悄踩穿。
+      const anyWater = loot.filter((l) => l.itemId === 'clean_water' || l.itemId === 'dirty_water');
+      expect(anyWater.length, `floor ${floor} hands out more than one drink`).toBe(1);
+    }
+  });
+
+  it('uses only existing furniture art, 2-3 containers, and short labels', () => {
+    for (const floor of FINALE_FLOORS) {
+      const template = FLOOR_TEMPLATES[floor];
+      // 终局层容器少而重：三件，一件一幕。
+      expect(template.containers.length, `floor ${floor} container count`).toBeGreaterThanOrEqual(2);
+      expect(template.containers.length, `floor ${floor} container count`).toBeLessThanOrEqual(3);
+      const ids = new Set<string>();
+      const xs = new Set<number>();
+      for (const c of template.containers) {
+        expect(containerTextureKey(c.id), `floor ${floor}/${c.id} has no furniture texture`).not.toBeNull();
+        expect([...c.label].length, `floor ${floor}/${c.id} label "${c.label}"`).toBeLessThanOrEqual(3);
+        expect(c.x, `floor ${floor}/${c.id} x`).toBeGreaterThan(0);
+        expect(c.x, `floor ${floor}/${c.id} x`).toBeLessThan(FLOOR_WIDTH);
+        ids.add(c.id);
+        xs.add(c.x);
+      }
+      expect(ids.size, `floor ${floor} duplicate container id`).toBe(template.containers.length);
+      expect(xs.size, `floor ${floor} overlapping containers`).toBe(template.containers.length);
+      expect(template.description.length, `floor ${floor} description`).toBeGreaterThan(0);
+    }
+  });
+
+  it('reproduces the same summit from the same seed', () => {
+    for (const floor of FINALE_FLOORS) {
+      expect(generateFloor(42, floor), `floor ${floor}`).toEqual(generateFloor(42, floor));
+      expect(generateFloor(2026, floor).floorNumber, `floor ${floor}`).toBe(floor);
+    }
+  });
+
+  it('hands out water and food on every QA seed', () => {
+    for (const seed of [1, 42, 2026]) {
+      const items = generateFloor(seed, 100000).containers.flatMap((c) => c.items);
+      const water = items.filter((i) => i.itemId === 'clean_water' || i.itemId === 'dirty_water');
+      const food = items.filter((i) => i.itemId === 'ration_pack' || i.itemId === 'bread');
+      expect(water.length, `seed ${seed} summit hands out no water`).toBeGreaterThan(0);
+      expect(food.length, `seed ${seed} summit hands out no food`).toBeGreaterThan(0);
     }
   });
 });
@@ -483,10 +572,12 @@ describe('hasFloorContent', () => {
     for (const floor of [11, 50, 99, 50011]) expect(hasFloorContent(floor), `floor ${floor}`).toBe(false);
   });
 
-  it('does not treat the dev alias 100000 as authored content', () => {
-    // 100000 reuses floor 1's template as a dev shortcut. The lift asks this before
-    // moving anyone, so letting the alias through would teleport the player to a
-    // floor with no layout of its own.
-    expect(hasFloorContent(100000)).toBe(false);
+  it('treats the authored summit 100000 as content, not an alias', () => {
+    // 100000 曾经靠 DEV_FLOOR_ALIAS 借用第 1 层模板，hasFloorContent 刻意对它
+    // 说过假——电梯会因此把玩家放到宿舍布局上，而 HUD 写着 100000。终局创作后
+    // 别名已删除，这一层是真内容：电梯从 50010 接通（见 segments.test.ts 的
+    // liftOutcome），generateFloor 返回统治核心自己的布局。
+    expect(hasFloorContent(100000)).toBe(true);
+    expect(generateFloor(42, 100000).name).toBe('统治核心');
   });
 });

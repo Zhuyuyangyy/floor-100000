@@ -64,6 +64,15 @@ export interface EncounterResult {
   //    都还在，只是更贵。loot 是五段里最低的（4→2），cache 维持高位支撑
   //    上行。段顶 50010 放守段者（boss 108 是当层最高权重，压过 ambush
   //    104），照 5 层和 110 的写法：这一阶层有守门者，见面概率最大。
+  //  - 100000（阶层 6 统治核心，单层终局）：ambush 110 是全塔最高的一档，
+  //    压过 50010 守段者的 boss 108——把着终点的是整套安保体系，不是一只
+  //    看门狗。但这里没有 boss：boss 在 50010 已经打完了，终局等的是一个
+  //    终端和四个选择（quests.ts Q6「同一支笔」：shutdown / hand-over /
+  //    throne / walk-away），不是一场战斗；统治者是对话，不是遭遇。数值与
+  //    worldgen.ts 的 ENCOUNTER_ANCHORS 末行逐字一致——手写表与曲线在塔顶
+  //    会师。loot 2 是全塔最低（终局层不是来搜刮的），cache 22 维持高位
+  //    （核心的封存库是最后一站补给），trader 6 / note 1：纸条 T6-1/2/3 由
+  //    终端直接交付（Q6 目标），问号点里只留一丝传闻的余地。
   // ---------------------------------------------------------------------------
 const FLOOR_WEIGHT_PROFILE: Record<number, Partial<Record<EncounterKind, number>>> = {
   1: { loot: 60, note: 14, trader: 12, cache: 10, ambush: 4 },
@@ -143,6 +152,10 @@ const FLOOR_WEIGHT_PROFILE: Record<number, Partial<Record<EncounterKind, number>
   50008: { loot: 2, note: 1, trader: 8, cache: 21, ambush: 102 },
   50009: { loot: 2, note: 1, trader: 8, cache: 21, ambush: 103 },
   50010: { loot: 2, note: 1, trader: 8, cache: 22, ambush: 104, boss: 108 },
+  // 阶层 6：统治核心（100000）。ambush 110 全塔最高、无 boss（统治者是终端
+  // 不是怪物），数值与 worldgen.ts 的 ENCOUNTER_ANCHORS 末行一致。loot 2 是
+  // 全塔最低——这一层没有东西可搜，只有选择可做。
+  100000: { loot: 2, note: 1, trader: 6, cache: 22, ambush: 110 },
 };
 
 // 固定枚举顺序，保证 ENCOUNTER_TABLE 的行顺序与加权 roll 的遍历顺序确定。
@@ -259,6 +272,11 @@ const FLOOR_LOOT_POOLS: Record<number, ItemId[]> = {
   50008: ['wire', 'medkit', 'battery', 'fuse', 'filter'],
   50009: ['wire', 'medkit', 'battery', 'fuse', 'filter'],
   50010: ['wire', 'medkit', 'battery', 'fuse', 'filter'],
+  // 阶层 6：统治核心（100000）。全塔最后一档物资，也是唯一带回撬棍的一档
+  // ——把着终点的是整套安保体系（ambush 110 全塔最高），而它们是有装备的；
+  // 与 worldgen.ts 的 MATERIAL_POOLS[6] 逐件一致（六件，富人会拆的东西这里
+  // 都有）。仍然没有面包与水——那两样由楼层容器保底（100000 的终端台）。
+  100000: ['medkit', 'filter', 'fuse', 'battery', 'wire', 'crowbar'],
 };
 
 function lootPoolForFloor(floor: number): ItemId[] {

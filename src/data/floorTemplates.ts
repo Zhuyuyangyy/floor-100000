@@ -2259,6 +2259,60 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     ],
     ground: [],
   },
+  // ── 阶层 6：统治核心（100000，单层终局）────────────────────────────────────
+  // 全塔最后一段，也是唯一一段只有一层（segments.ts 第 6 段 100000-100000）。
+  // 玩家到这里不是来打怪的，是来做选择的（quests.ts Q6「同一支笔」的四个
+  // 结局）——容器因此只有三件，一件一幕：
+  //   终端台 核心终端所在，Q6 的抉择发生地，权限在这里交付；
+  //   配电箱 shutdown 要关掉的就是它——塔的电源总闸在这一层；
+  //   档案柜 停电表、配给表、处决名单，同一支笔写的三张表（纸条 T6-2）。
+  // 容器 id 仍复用既有贴图（counter/fuse_box/security_safe，没有新美术），
+  // 差异化全在文案与摆放。
+  //
+  // 生存规矩与前五段一致，且是最硬的一条：恰好 1 份 guaranteed 净水 + 1 份
+  // guaranteed 口粮，都摆在终端台上——统治核心从来不执行配给表，它只签文件
+  // （纸条 T6-2），所以核心自己的补给是满的。worldgen 的 survival contract
+  // 全塔扫描按每层一瓶水记账，多一瓶水（哪怕是概率掉落的）都会踩穿上限。
+  // 物资是六段里最「核心」的：配电箱里的 fuse/wire 正是 core_key 的配方
+  // 成本（recipes.ts：保险丝 1 + 电线 2 + 废金属 1）——终局层的箱子里还锁着
+  // 造你这把钥匙的材料。遭遇权重见 encounters.ts 的 100000 行：ambush 全塔
+  // 最高，但没有 boss——把着终点的是终端，不是怪物。
+  100000: {
+    floorNumber: 100000,
+    name: '统治核心',
+    description: '电梯井到底了。终端还通着电，三张表并排摆着：停电表、配给表、处决名单',
+    containers: [
+      {
+        id: 'counter',
+        label: '终端台',
+        x: 320,
+        loot: [
+          { itemId: 'clean_water', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'ration_pack', min: 1, max: 1, probability: 1, guaranteed: true },
+          { itemId: 'battery', min: 1, max: 2, probability: 0.45 },
+        ],
+      },
+      {
+        id: 'fuse_box',
+        label: '配电箱',
+        x: 640,
+        loot: [
+          { itemId: 'fuse', min: 1, max: 1, probability: 0.4 },
+          { itemId: 'wire', min: 1, max: 2, probability: 0.5 },
+        ],
+      },
+      {
+        id: 'security_safe',
+        label: '档案柜',
+        x: 960,
+        loot: [
+          { itemId: 'medkit', min: 1, max: 1, probability: 0.5 },
+          { itemId: 'filter', min: 1, max: 1, probability: 0.35 },
+        ],
+      },
+    ],
+    ground: [],
+  },
 };
 
 function resolveLoot(
@@ -2287,36 +2341,28 @@ function resolveLoot(
   return out;
 }
 
-// Dev-only: the retired v0.1 dorm scene, reachable through ?devfloor= so the
-// legacy fixtures can still boot it. Its layout now lives at floor 1 (the real
-// starting floor), so the alias reuses that table instead of duplicating it.
-// Floor 100000 stays a valid logical floor and the future summit — it simply
-// has no authored content until B4 generates it.
-export const DEV_FLOOR_ALIAS: Record<number, number> = { 100000: 1 };
-
-function templateFor(floorNumber: number): FloorTemplate | undefined {
-  return FLOOR_TEMPLATES[DEV_FLOOR_ALIAS[floorNumber] ?? floorNumber];
-}
-
+// 开发入口（?devfloor=，见 constants.ts 的 DEV_TEST_FLOORS）保留，但它直达的
+// 不再是借用来的第 1 层宿舍：100000 有了自己的终局模板（FLOOR_TEMPLATES 末
+// 行），DEV_FLOOR_ALIAS 因此删除。留着 { 100000: 1 } 会让 templateFor 把终局
+// 层解析回玩家宿舍，而电梯按 hasFloorContent 说「已接通」——玩家落在宿舍布局
+// 上，HUD 写着 100000，正是别名存在期 hasFloorContent 必须绕过它的那个事故。
+// 别名只在「终局层借第 1 层充数」的借用期有意义；终局创作后，它是 bug。
 export function getFloorTemplate(floorNumber: number): FloorTemplate | undefined {
-  return templateFor(floorNumber);
+  return FLOOR_TEMPLATES[floorNumber];
 }
 
 // Whether a floor can be built at all. generateFloor throws without a template,
 // so anything that moves the player to a floor must ask this first — the freight
-// lift in particular: its target is a segment's first floor, and none of the
-// segments above 10 are authored yet.
+// lift in particular: its target is a segment's first floor, and a segment whose
+// floors have no templates must read as not-connected even when the pass is in
+// hand. Floor 100000 answered false here while it was only a dev alias; the
+// authored finale (AG-16) is what turned it true, and with it the last lift.
 export function hasFloorContent(floorNumber: number): boolean {
-  // Deliberately bypasses DEV_FLOOR_ALIAS. Floor 100000 borrowing floor 1's
-  // template is a developer entry point, not authored content: if the alias were
-  // honoured here, the freight lift would judge 统治核心 "connected" and drop the
-  // player onto floor 1's layout while the HUD says 100000. generateFloor keeps
-  // the alias so the dev entry still works.
   return FLOOR_TEMPLATES[floorNumber] !== undefined;
 }
 
 export function generateFloor(worldSeed: number, floorNumber: number): GeneratedFloor {
-  const template = templateFor(floorNumber);
+  const template = getFloorTemplate(floorNumber);
   if (!template) {
     throw new Error(`no floor template for floor ${floorNumber}`);
   }

@@ -78,20 +78,21 @@
 - 「refuses a pass-holder when the target segment has no floors yet」改写为「rides the last lift once the summit is authored」：50010 持全凭证 → `'ok'`（任务书点名的断言）；保留两条不减压力的路——只有 vip_card 没有 core_key → `'need-pass'`；目标层无内容（stub）→ `'not-connected'`。
 - 「matches the authored floors」升级为 all six segments，`hasFloorContent(100000)` → true，并补 `99999` → false（50010 与 100000 之间的空洞）。
 
-## 8. 跨文件影响（不在本分支文件清单内，需要属主处理）
+## 8. 跨文件影响（已由 team-lead 授权后修完，commit `a930359`）
 
-本改动让 `hasFloorContent(100000)` 变真并删除 `DEV_FLOOR_ALIAS`，以下文件的断言按新语义失效。**本分支未动它们**（属主边界），逐条给出位置与新语义：
+本改动让 `hasFloorContent(100000)` 变真并删除 `DEV_FLOOR_ALIAS`，以下文件按新语义更新（经 team-lead 授权；只做语义翻转 + 注释更新，不断言、不放强度）：
 
-1. `config/game-balance.json` — `world.playableFloorsV01` 需要加入 `100000`（54 → 55 层）。这是**数据层必需**，不只是测试问题：`ENCOUNTER_TABLE` 只能为表内楼层建行，漏掉 100000 会让终局的问号点回落到 `DEEPEST_FLOOR`（50010）的配置——那一行带着 boss 108，终局会刷出已经打败过的守段者。加入后 `config.test.ts`（authored 段派生）与 `survivalBalance.test.ts`（每层一瓶水的额度与总量同向 +30）无需改动即可通过。
-2. `src/tests/worldgen.test.ts` — 四处：`:229` 与 `:252`（`summarizeFloor(100000).authored` false → true）；`:330`（`hasFloorContent(100000)` false → true）；`:332`（`generateFloorContent` 现在委托给真模板，与 `generateFloor(100000)` 同名同内容，`not.toBe` 应改为 `toBe`，`not.toBe('玩家宿舍')` 保留）。
-3. `src/tests/floorSystem.test.ts` — 两处：`:301`（false → true）；`:353-360`（`top = max(playable)` 变成 100000 后 `hasDownExit(top)` 为假——段 6 是单层段，楼下是电梯不是楼梯，断言需按「塔顶没有下行楼梯」改写）。
-4. `src/tests/encounterTableCoverage.test.ts` — `:101-103`（VIP 段 `toEqual([50000..50010])` 会因 100000 进入可玩表而多出一项，需把终局层排除或单开一段断言；100000 无 boss，`BOSS_FLOORS` 不变）。
-5. `src/tests/encounterSpots.test.ts` — `:51-54`（`top` 变成 100000，且终局无 boss，`ENCOUNTER_TABLE[top]` 不再含 boss）。
-6. `src/tests/renderPerf.test.ts` — `:539`（`bounds.highest` 50010 → 100000；100000 的上下邻居都在空洞里，`stackNeighbours` 断言不受影响）。
-7. `e2e/tower.spec.ts` — `?devfloor=100000` 的前提从「打开弃用的 v0.1 宿舍」变为「直达统治核心」；该测试只断言 `currentFloor`，预计仍可通过，但名字与意图已过期（e2e 不在 vitest 基线内）。
+1. `config/game-balance.json` — `world.playableFloorsV01` 加入 `100000`（54 → 55 层）。**数据层必需**：`ENCOUNTER_TABLE` 只给表内楼层建行，漏掉终局会让 100000 的问号点回落 `DEEPEST_FLOOR`（50010）的配置——那一行带 boss 108，终局会刷出已经打败过的守段者。
+2. `src/tests/config.test.ts` — 无需改动即通过（authored 段从 `hasFloorContent` 派生，55 层与六段精确对齐）。
+3. `src/tests/worldgen.test.ts` — `:229`/`:252`（authored false → true）；`:330`（false → true）；「合成分支绕过别名」测试改为「委托真模板」：`generateFloorContent(100000)` 与 `generateFloor(100000)` 深度相等，名字是「统治核心」而非「玩家宿舍」。
+4. `src/tests/floorSystem.test.ts` — `:301`（false → true）；`exit availability` 按单层段改写：塔顶 100000 既无上行也无下行楼梯（段 6 只有一层），下楼走货梯（`liftDirection(100000) === 'down'`）。
+5. `src/tests/encounterTableCoverage.test.ts` — VIP 段只圈 50000-50010（100000 是段 6）；新增终局行断言：ambush 110 全塔最高（按种类比压过守段者 boss 108）、无 boss、loot 2 全塔最低、数值与世界生成曲线末行逐字一致。
+6. `src/tests/encounterSpots.test.ts` — 塔顶 100000 无 boss 标记，最后一个 boss 层是 50010；1010/10010 无 boss 的边界原样保留。
+7. `src/tests/renderPerf.test.ts` — `bounds.highest` 50010 → 100000（100000 的邻居都在空洞里，`stackNeighbours` 断言不受影响）。
+8. `src/tests/floorTemplates.test.ts` — VIP_FLOORS 圈选排除 100000（config 加入后的连带，本分支自己的文件）。
+9. `src/tests/survivalBalance.test.ts` — **实测无需改动**：每层一瓶水的额度与总量同向 +30，21 个测试原样通过（含全塔扫荡的背包压力与水量结余断言）。
 
 ## 9. 没处理干净的地方
 
-- 上述第 8 节全部：本分支按属主边界没有动，需要 team-lead 分派或授权后更新；在这些更新落地前，全量 vitest 在集成分支上会因它们变红（本分支自己的两个测试文件全绿）。
-- `?devfloor=` 的 e2e 名义过期（第 8 节第 7 条）。
+- `e2e/tower.spec.ts` 的 `?devfloor=100000` 名义过期（原来测「打开弃用的 v0.1 宿舍」，现在直达统治核心）；该测试只断言 `currentFloor`，预计仍可通过，但名字与意图已过期（e2e 不在 vitest 基线内，属 AG-17 的 e2e 范围）。
 - Q6 的 `core_terminal` NPC 实体与终局演出不在本任务范围（STORY.md §7 分派给 NPC/场景侧）；本层只提供它发生的楼层。

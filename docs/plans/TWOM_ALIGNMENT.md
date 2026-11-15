@@ -302,3 +302,186 @@ label 用 `entry.text`、value 用 `第${day}天 ${formatClock(minute)}`
 （formatClock 在 SurvivalSystem 导出），kind 中文名取
 `DIARY_KIND_LABELS`。`diaryOf()` 倒序返回，行按数组顺序渲染即是新的在
 上。ROW_H=26，一条一行；日记文案已按 ≤30 字控制，24px 字下不溢出。
+
+
+## 十三、AG-29 实现说明（2026-11-16 追加，物品与经济工程师）
+
+契约第四节两个字段的落地方式与既有约定不同，说明如下——**schema 本身未动**，
+`moraleDelta?: number` / `moraleChance?: number` 逐字落在物品表上。
+
+### 落地方式（为什么不直接改 core）
+
+`Item` 接口与 `ItemId` 联合都在 `src/core/gameTypes.ts`（AG-25 属主）。两条
+TypeScript 限制决定了对策：
+
+1. **字段用模块增强**：`src/data/items.ts` 里 `declare module
+   '../core/gameTypes' { interface Item { moraleDelta?; moraleChance? } }`。
+   接口可跨模块合并，两个可选字段因此对全部 Item 生效，既有 15 件零改动
+   合法，存档零迁移。
+2. **新 id 不能进核心联合**：type alias 无法模块增强，且 `ITEMS` 的 15 件被
+   items.test.ts / survivalBalance / economyLoop 三方钉死（它们按 `ITEM_IDS`
+   裁决"每件物品都有来源、无死物品"）。新物品单独成表 `MORALE_ITEMS`
+   （`Record<MoraleItemId, Item>`），与原表在 `ALL_ITEMS` 合并；`getItem` 的
+   参数放宽为 `KnownItemId = ItemId | MoraleItemId`，`isItemId` 的运行时改查
+   合并表（**谓词签名不变**）——SaveSystem 的存档校验、NpcMemory、quests、
+   rulesExecutor 都走这道门，新物品必须过得了，否则"买了香烟存档被拒"。
+   边界处进入 core 类型化 API 时统一走 `asItemId()`（items.ts 里唯一的铸入
+   helper，散落 `as ItemId` 一律收在那里）；运行时所有消费侧按 id 字符串
+   查表，行为与既有物品完全一致。
+
+### 新物品表（4 件，全部走行商货架真实可买）
+
+获取路径只动了 `shop.ts` 的 `SHOP_STOCK`（按 band 上架）；收购价由
+`sellPrice` 既有逻辑（band 标价折半）自动获得，不新开表。每 band 库存行数
+≤5——行商面板排版预算（5 行库存 + 8 行材料正好落在面板高度内），
+moraleItems.test.ts 钉死。
+
+| id | 名称 | band / 价 | effect | moraleDelta | moraleChance | 依据与副作用 |
+|---|---|---|---|---|---|---|
+| `cigarette` | 香烟 | 3 / 10 金 | energy +5 | +6 | 1 | TWOM 最便宜可靠的一档；"点一根就完事"的确定性安慰。+5 精力对应 TWOM 主循环的 TickStimulants（刺激品 tick）。四件里唯一天然后果为零 |
+| `coffee` | 咖啡 | 4 / 18 金 | energy +20 | +6 | 0.8 | 全表最强刺激品，定价与一份口粮对齐（精力道具，非生存刚需）。chance 0.8 是 EffectMoraleProbabilities 在真实物品上的主要落点："冲坏了/凉了"的两成落空 |
+| `old_book` | 旧书 | 5 / 20 金 | energy +8 | +8 | 0.85 | 一成五"看不进去"的落空；看进去了比一顿饭强。本作无"放松"槽，翻书定神折算成最弱精力回复。一次性消耗（读一遍收一遍） |
+| `moonshine` | 私酒 | 5 / 25 金 | energy **-12** | +12 | 1 | 四件最强单次提振（TWOM 里酒是心情大按钮）。副作用是机械的即刻代价"喝完好困"——负效果在现有 schema 内表达，不新增字段；任务示例的"下个游戏日 hunger 消耗加快"见下方延伸建议 |
+
+既有 15 件只配了 4 件：净水 +2 / 面包 +2 / 口粮 +3 / 医疗包 +4（均 chance
+1）。依据：生存刚需 2~3 点、疗伤 4 点、精神向专物 6~12 点。**其余 11 件一律
+不配**——moraleDelta 的消费点是 useConsumable，工具/材料/脏水进不去，配了
+就是死数据（economyLoop 的"无死物品"同款哲学）。新物品一律不碰
+hunger/thirst：精神物不能成为水食替代品。
+
+### moraleEffectOf 的签名与语义
+
+`src/systems/moraleItems.ts`（AG-29 新建，纯函数，禁 Math.random）：
+
+```ts
+function moraleEffectOf(item: Item, seed: number, day: number): { delta: number; applied: boolean }
+```
+
+- `moraleDelta` 缺省或 0 → `{ 0, false }`；`moraleChance` 缺省视为 1，越界
+  夹取到 [0,1]（0 必不生效 / 1 必生效）。
+- 生效判定 = `makeRng(deriveSeed(seed, day, 'morale-cheer', item.id)).chance(moraleChance)`；
+  同 (seed, day, item) 必同结果，跨天真不同（可复现、可存档）。
+- 未生效时 `delta` 恒 0，调用方无条件 `morale += delta` 即可。
+
+### 建议 AG-25 的调用点
+
+`useConsumable()` 返回 ok 之后（`grantGrowthXp` 附近，InventorySystem.ts:143
+一带）：
+
+```ts
+const fx = moraleEffectOf(item, state.runSeed, state.day);
+if (fx.applied) state.morale += fx.delta; // 或经 AG-25 的 applyMoraleDelta
+```
+
+想让同一物品同一天多次使用各有一次独立判定，把 seed 换成
+`deriveSeed(runSeed, day, 'cheer', minute)` 复合值即可。另两处建议：
+
+1. **私酒类负 effect 物品的"已满则拒绝"门**：useConsumable 现在对
+   `before >= max` 一律拒绝，精力已满时喝不到私酒——心情道具不该被精力槽
+   挡住，建议 AG-25 对 `moraleDelta` 生效类物品放宽该门。
+2. **跨日副作用（任务示例的酒→次日 hunger 消耗加快）**：需要 SurvivalSystem
+   的饥饿速率读一个旗标（如 `setFlag(state, 'morale:hangover', 1)`），消费方
+   归 AG-25；本工单只用即刻精力代价落地，未写跨日逻辑。
+
+### 已知缺口（没处理干净的地方）
+
+1. **图标**：新物品没有 artpack 图标。`ITEM_ICON_FILES` 是
+   `Record<ItemId, string>`（render/ 属主，扩容会连锁 assetManifest /
+   itemIcons 两个测试与 BootScene 加载表）。运行时 GameScene 的
+   `icon.setTexture(itemIconKey(id))` 落到 Phaser 的 `__MISSING` 绿框 +
+   面板文字行，系统逻辑不受影响。正式图标需 AG-07/AG-09 补 artpack 后由
+   `ITEM_ICON_FILES` 收录，id 已预留。
+2. **制作路径**：recipes 的产出是 homeUpgrades（设施/凭证），不是物品；
+   工作台面板渲染归场景层（AG-11）。要"煮咖啡"需要场景侧接线，本工单只
+   保证商店路径真实可走（买/卖/使用三向测过）。
+3. **搜刮路径**：楼层战利品池归 AG-30。若要把香烟塞进搜刮表，建议概率
+   条目（`probability: 0.15~0.25`，非 guaranteed，不碰保底水位）。
+4. **收音机/音乐通道**：TWOM 的 `AvgDepressionChangeForCheerfulMusic` 是
+   设施级持续效果，归 AG-25 的 SurvivalSystem，未进消耗品表。
+5. **morale 消费本身**：PlayerState.morale 字段与使用点的接线归 AG-25
+   （契约第一节）；本工单交付的是数据 + 纯函数 + 测试，不写消费逻辑。
+
+
+## 十四、AG-30 实现说明（楼层环境数据，2026-11-16）
+
+本节只记录 AG-30（楼层处境数据工程师）按 §2/§3 填的数据与对 AG-25 的合并要求，
+不改上文任何契约。
+
+### 填了什么
+
+`src/data/floorTemplates.ts` 的 `FloorTemplate` 新增 `environment?`，类型为
+`FloorEnvironmentOverride = Partial<FloorEnvironment> & { warmth?: number }`。
+warmth 的交集是**前置声明**：§2 定死它进 `FloorEnvironment`，但本分支的
+constants.ts 快照里它还不存在；AG-25 落地后 `Partial<FloorEnvironment>` 自动
+覆盖这个交集，别名可原样收回，数据不动。type-only import，无运行时环。
+
+16 层有数据（`src/tests/floorEnvironment.test.ts` 钉住集合封闭）：
+
+| 层 | 字段 | 发生了什么 |
+|---|---|---|
+| 1 | warmth 0.35 | 三面墙蜡烛（WARMTH_SOURCES[1]）+ 床；全塔最弱热源，家是活得下去的地方 |
+| 5 | warmth 0.85 | 火盆（WARMTH_SOURCES[5]，power 14，热浪环画得出）；TWOM 5F「火盆（强）」 |
+| 9 | humidity 0.55 | 贫民区屋顶漏在这一层正上方，踩过 HUD 潮湿线 |
+| 10 | cold 1.35 / danger 0.55 | 段顶贴屋顶；楼梯断开无处可退（ambush 44 段内最高） |
+| 102 | humidity 0.6 | 长排水槽持续出水，工人宿舍区唯一湿处 |
+| 110 | danger 0.65 | 守段者岗亭（BOSS_FLOORS），段里唯一有人值守的层 |
+| 1002 | humidity 0.75 / danger 0.9 | 管道裂缝缠胶带；纸条 T3-3「管道里有声音」 |
+| 1010 | danger 0.9 | 军队防线最后一环；无守段者，只抬一档 |
+| 10005 | humidity 0.65 / cold 2.6 | 商业区唯一渗水层；管线井机器余热回落到工业区读数 |
+| 10008 | humidity 0.55 / danger 0.97 | 节点 4 真相层，笼架空着不是搬走了 |
+| 10010 | danger 0.97 | 私人武装最后一环；把着门的是许可证不是怪物 |
+| 50005 | humidity 0.65 / danger 0.99 | TWOM 5F「漏水中/高危险」的落点；喂生物兵器的水是脏的 |
+| 50007 | cold 3.4 | 冷藏库冷气外冒，和统治核心同读数 |
+| 50008 | humidity 0.55 / danger 0.99 | 10008 的上一手，成品搬去了核心 |
+| 50010 | danger 0.99 | 守段者段顶；封顶 1.0 留给终端 |
+| 100000 | humidity 0.3 | 服务器循环风，全塔最干；cold/danger 不碰（会师与封顶） |
+
+连贯规则（测试逐条钉住）：1-5 层只许写 warmth（层性格归 FLOOR_ENVIRONMENT）；
+段间 cold 严格单调（1.2/1.4/2.6/2.8/3.0/3.4）；段内 cold 偏差不许跨过相邻段
+基线；humidity > 0.5 的层集合封闭（3/4/9/102/1002/10005/10008/50005/50008）
+且每层都高于自己的段基线；warmth 只在 WARMTH_SOURCES 画得出火焰的层出现。
+
+### 需要 AG-25 在 environmentFor 里怎么合并
+
+1. **模板叠加必须落在解析的末端，不是只叠在第 1 步**。契约原文写「第 1 步先看
+   template 与 FLOOR_ENVIRONMENT 合并」，但 16 层里只有 1/5 两层有
+   FLOOR_ENVIRONMENT 条目；其余 14 层（9/10/102/110/1002/1010/10005/10008/
+   10010/50005/50007/50008/50010/100000）的底表是 SEGMENT_ENVIRONMENT，
+   只叠在第 1 步的话这些微调永远不生效。正确形状：
+
+   ```ts
+   export function environmentFor(floor: number): FloorEnvironment {
+     let base = FLOOR_ENVIRONMENT[floor];
+     if (!base) {
+       const seg = segmentOf(floor);
+       if (seg && SEGMENT_ENVIRONMENT[seg.from]) base = SEGMENT_ENVIRONMENT[seg.from];
+     }
+     if (!base) { /* 阶梯向下回落，原样 */ }
+     const tpl = FLOOR_TEMPLATES[floor]?.environment;
+     return tpl ? { ...base, ...tpl } : base;
+   }
+   ```
+
+2. `warmth` 随 spread 进入返回值（§2 已把它加进 FloorEnvironment，消费方按
+   0..1 比例读）。
+3. `constants.ts` import `FLOOR_TEMPLATES` 无循环：floorTemplates 对 constants
+   只有 type-only import（已写）。
+4. 合并后 `environmentFor` 会对 16 层返回与阶梯不同的值——`worldgen.test.ts`
+   的 `environmentProfile(f) toEqual environmentFor(f)` 只断言段首
+   100/1000/10000/50000，本数据不碰这四层，该测试不受影响；但 100000 层的
+   humidity 会与曲线差 0.05（0.3 vs 0.35），这是有意为之（服务器循环风），
+   与 floor 1 是既有例外同一个性质。
+5. `src/tests/floorEnvironment.test.ts` 已本地复刻上述合并（幂等），AG-25 落地
+   后它继续全绿，无需修改。
+
+### 遗留
+
+- **2 层没有 warmth**：TWOM 表里 2F 有蜡烛，但我们的 2 层只画电灯
+  （drawWorkerDorms 的 lamp()，无火焰）。等 AG-07 给 2 层画了火焰再由 AG-25
+  补 WARMTH_SOURCES[2]，本文件同步补 warmth。
+- **106 汤桶 / 10002·50002 保温台**：画得出暖具但不是契约 §2 列名的热源
+  （床/蜡烛/火把/火盆），未给 warmth；若要给，先让 EnvironmentSystem 的
+  warmthAt 认这些坐标。
+- danger 0.99 有三层（50005/50008/50010），与 encounters.ts 的 ambush 梯度
+  （99/102/104）方向一致但不是逐值对应——ambush 是遭遇表权重，danger 是环境
+  读数，两条线在合入后由 AG-25 决定是否对齐。

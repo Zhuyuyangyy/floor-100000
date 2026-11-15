@@ -166,3 +166,11 @@ AG-03 报告的 BUG-QA-01「塔楼总览起/终点标签出画布右缘 14px+」
 **接口契约（AG-11 ↔ AG-12）**：AG-12 建 `QuestPanelScene`（key `'QuestPanel'`）并负责 main.ts 注册，event 契约写进 `docs/plans/UI.md`；AG-11 只写键绑定 + `scene.launch`，场景不存在时优雅降级。
 
 **派工纪律（沿用第一轮教训）**：每个工单只派发一次；派发后用 TaskStop 清单核对；发现重复会话立即停，停前先让 Owner 确认。
+
+## 第二轮进展（2026-11-15 09:55）
+- **AG-15 已完成并合入**（`a77bf7d`）：config.ts 补 `with { type: 'json' }`，四环境实测通过（Node ESM / Vitest / Vite build / Playwright）；e2e 端口隔离到 5199（`--strictPort` 让冲突大声失败）；CI 复核结论"无需改动"（与 AG-03 一致）。集成 → 68 文件 / 1083 测试。
+- **补派 AG-16（终局 100000 层）**：独占 floorTemplates/encounters/constants 的 SEGMENT_ENVIRONMENT，把阶层 6 从"dev 别名"变成真内容。
+- **补派 AG-17（集成 e2e 验证）**：独占 `e2e/**`，在集成分支上跑全量 e2e，逐一定性前几轮的失败（塔楼标签缺陷已被 AG-08 修掉，需确认转绿）。
+- **总控清理**：`ag-02-navigation/test-results` 345MB Playwright trace 产物（0 个源码文件，删前 ls 确认）已清。
+
+当前并行：AG-11 / AG-12 / AG-13 / AG-14 / AG-16 / AG-17 共 6 个。

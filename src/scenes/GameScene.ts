@@ -8,6 +8,7 @@ import {
   BED_X,
   CRAFT_X,
   DOWN_EXIT_X,
+  environmentFor,
   FLOOR_VIEW_ZOOM,
   ENTRY_X,
   FLOOR_BAND,
@@ -58,7 +59,6 @@ import {
   BODY_TEMP_MAX,
   COLD_THRESHOLD,
   bodyTempOf,
-  environmentLabel,
   warmthAt,
 } from '../systems/EnvironmentSystem';
 import { ailmentLabel, inflict } from '../systems/SicknessSystem';
@@ -105,6 +105,8 @@ import {
   drawStatBar,
 } from '../render/uiKit';
 import { ENV_FLOOR_KEY, portraitKey } from '../render/artpack';
+import { framedButton, hitRect } from '../render/pointer';
+import { drawHazardStripe, drawHudIcon, drawHudPlate, type HudIconName } from '../render/hudSkin';
 import {
   estimateTextWidth,
   DIALOG_PADDING,
@@ -261,11 +263,11 @@ const WANDERER_FLEE_EXIT_MARGIN = 24;
 // Row pitch for the four HUD stat bars. 15px gives an 11px label plus a 7px bar
 // with breathing room; 13px was too cramped to read at a glance.
 
-const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: string; color: number }> = [
-  { key: 'hp', label: '生命', color: 0xe56d63 },
-  { key: 'hunger', label: '饥饿', color: 0xf4b66a },
-  { key: 'thirst', label: '口渴', color: 0x6aa8e5 },
-  { key: 'energy', label: '精力', color: 0x77c6a4 },
+const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: string; color: number; icon: HudIconName }> = [
+  { key: 'hp', label: '生命', color: 0xe56d63, icon: 'cross' },
+  { key: 'hunger', label: '饥饿', color: 0xf4b66a, icon: 'hunger' },
+  { key: 'thirst', label: '口渴', color: 0x6aa8e5, icon: 'thirst' },
+  { key: 'energy', label: '精力', color: 0x77c6a4, icon: 'energy' },
 ];
 
 // Body heat gets its own readout rather than a fifth bar: it is the one stat a
@@ -332,6 +334,23 @@ type DirKeys = {
 // up/down exits, lootable containers & ground items, a 12-slot inventory, and
 // consumable use. GameState (session) is the source of truth; this scene only
 // renders and feeds input back through pure logic functions.
+// The two bed rows of a dorm floor, as floor-space x positions.
+//
+// Floor 1's front row is pitched at 96 and clear of the three things already
+// standing on that floor: the cabinet (160), the workbench (480) and the
+// player's own bed (1120). The back row sits half a pitch offset from the front
+// one, which is what stops the two rows reading as one long row.
+const DORM_FRONT_BEDS: readonly number[] = [236, 332, 428, 588, 684, 780, 876, 972];
+const DORM_BACK_BEDS: readonly number[] = [268, 372, 640, 744, 848];
+
+// Floor 2 is the neighbours' dorm and gets the same treatment: the back row is
+// identical, and the front row is one bed wider at the left end. The cabinet
+// that keeps floor 1's first bed at 236 does not exist here, so the only thing
+// to clear on the left is the up stair (40) — hence 140. The right end stops
+// where floor 1's does, because the shelf (1120) and the down stair (1240) sit
+// there instead of the player's bed.
+const NEIGHBOUR_FRONT_BEDS: readonly number[] = [140, ...DORM_FRONT_BEDS];
+
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
   /** The crowbar in the survivor's hand. Follows the attack pose's fist. */
@@ -407,8 +426,14 @@ export class GameScene extends Phaser.Scene {
   private floorBadge?: Phaser.GameObjects.Text;
   private goldText?: Phaser.GameObjects.Text;
   private goalText?: Phaser.GameObjects.Text;
-  /** the floor's environment line, right of the daily objective */
+  // The environment row is four chips, one per reading, each with its own icon:
+  // 体温值 / 区域 / 潮湿 / 夜间危险. They used to be one string, which meant one
+  // icon's worth of meaning for four unrelated facts.
   private environmentText?: Phaser.GameObjects.Text;
+  private envRegionText?: Phaser.GameObjects.Text;
+  private envHumidText?: Phaser.GameObjects.Text;
+  private envNightText?: Phaser.GameObjects.Text;
+  private hudIcons?: Phaser.GameObjects.Graphics;
   private scoreText?: Phaser.GameObjects.Text;
   /** the low-HP edge warning: bands with their own base weights */
   private vignetteParts: Array<{ rect: Phaser.GameObjects.Rectangle; weight: number }> = [];
@@ -504,6 +529,17 @@ export class GameScene extends Phaser.Scene {
   private dialogueFooter!: Phaser.GameObjects.Text;
 
   private pauseOpen = false;
+  // Mouse state. `walkTarget` is the click-to-walk order the update loop steps
+  // toward; `panelBox` is the rectangle of the most recently built panel, so a
+  // click outside it can close the panel the way ESC does.
+  private walkTarget: { x: number; interact: boolean } | null = null;
+  // The dorm's sleeping roommates: the floating Z is animated from update(), so it
+  // lives here rather than in a tween that would outlive the floor it belongs to.
+  private dormSleepers: Array<{ z: Phaser.GameObjects.Text; baseY: number; phase: number }> = [];
+  private panelBox: { x: number; y: number; w: number; h: number } | null = null;
+  private hudButtons: Phaser.GameObjects.GameObject[] = [];
+  private readonly pointerHandler = (pointer: Phaser.Input.Pointer, currentlyOver?: unknown[]): void =>
+    this.onPointerDown(pointer, currentlyOver ?? []);
   private pauseObjects: PanelObject[] = [];
   private pauseOptionTexts: Phaser.GameObjects.Text[] = [];
   private pauseMarker!: Phaser.GameObjects.Image;
@@ -758,7 +794,14 @@ export class GameScene extends Phaser.Scene {
       this.drawBed();
       this.drawWorkbench();
     }
-    if (floor === NPC_FLOOR) this.drawNpcs();
+    if (floor === NPC_FLOOR) {
+      this.drawNpcs();
+      // The neighbours' dorm gets the same two rows as the player's own floor.
+      // It was the only floor with people in it and no furniture for them:
+      // two NPCs standing in an empty corridor. The beds go in after the NPCs
+      // so the walk sheets (ACTOR_DEPTH) keep drawing over the mattress.
+      this.drawDormBeds(NEIGHBOUR_FRONT_BEDS, DORM_BACK_BEDS);
+    }
     // OVERHAUL: the floor's question marks go up last, above the room.
     this.buildEncounterSpots();
 
@@ -875,6 +918,9 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.stopFollow();
     for (const o of this.floorObjects) o.destroy();
     this.floorObjects = [];
+    // The Zzz texts were floor objects; a stale reference here would animate a
+    // destroyed Text after the next floor change.
+    this.dormSleepers = [];
     // The crowbar went with the floor; drop the reference so drawFloor builds a
     // new one instead of trying to reuse a destroyed image.
     this.weapon = undefined;
@@ -1133,6 +1179,8 @@ export class GameScene extends Phaser.Scene {
     const panelH = 248;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
     const depth = PANEL_DEPTH.game.dialogue;
 
     this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
@@ -1159,6 +1207,20 @@ export class GameScene extends Phaser.Scene {
           label: getItem(e.itemId).displayName,
           value: `${e.price} 金 · 持 ${countItem(state.player.inventory, e.itemId)}`,
           selected,
+        }),
+      );
+      // Click a row to buy it. Deferred by one tick: this panel is rebuilt from
+      // scratch on every selection change, and destroying the object that is
+      // currently handling the pointer event is how you get a crash inside
+      // Phaser's input list.
+      this.encounterObjects.push(
+        this.panelHit( left + 8, y, panelW - 16, 28, depth + 8, {
+          onClick: () =>
+            this.time.delayedCall(0, () => {
+              this.shopSelected = i;
+              this.buildShopPanel();
+              this.onUse();
+            }),
         }),
       );
       if (!selected) return;
@@ -1341,6 +1403,8 @@ export class GameScene extends Phaser.Scene {
     const panelH = 232;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
     const depth = PANEL_DEPTH.game.dialogue;
     const isBoss = combat.kind === 'boss';
 
@@ -1396,6 +1460,16 @@ export class GameScene extends Phaser.Scene {
         this.encounterObjects.push(this.add.rectangle(left + 12, y, panelW - 24, 24, UI.accent).setOrigin(0, 0).setAlpha(0.14).setDepth(depth + 5));
         this.encounterObjects.push(this.add.rectangle(left + 12, y, 2, 24, UI.accent).setOrigin(0, 0).setDepth(depth + 6));
       }
+      this.encounterObjects.push(
+        this.panelHit( left + 12, y, panelW - 24, 24, depth + 8, {
+          onClick: () =>
+            this.time.delayedCall(0, () => {
+              this.combatSelected = i;
+              this.buildCombatPanel();
+              this.onUse();
+            }),
+        }),
+      );
       this.encounterObjects.push(
         this.add
           .text(left + 22, y + 12, label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary) })
@@ -1649,6 +1723,8 @@ export class GameScene extends Phaser.Scene {
     const panelH = 190;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
 
     const depth = PANEL_DEPTH.game.dialogue;
     this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
@@ -1679,6 +1755,17 @@ export class GameScene extends Phaser.Scene {
             this.add.rectangle(left + 12, y, 2, 26, UI.accent).setOrigin(0, 0).setDepth(depth + 6),
           );
         }
+        this.encounterObjects.push(
+          this.panelHit( left + 12, y, panelW - 24, 26, depth + 8, {
+            onClick: () =>
+              this.time.delayedCall(0, () => {
+                if (!this.encounter) return;
+                this.encounter.selected = i;
+                this.buildEncounterPanel(this.spotMarkers.get(this.encounter.spotId)?.isBoss ?? false);
+                this.onUse();
+              }),
+          }),
+        );
         this.encounterObjects.push(
           this.add
             .text(left + 24, y + 13, CHOICE_LABELS[choice], {
@@ -1737,22 +1824,49 @@ export class GameScene extends Phaser.Scene {
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
     const isBoss = enc.encounter.kind === 'boss';
-    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.dialogue));
+    // Every other panel in this scene ends in lockToScreen() or
+    // applyPanelDepth(); this one was rebuilt from scratch on every resolve and
+    // neither was ever called, so its four texts sat at scrollFactor 1 and
+    // depth 0 — world space, behind everything. Measured on floor 2 (camera
+    // scrollY -200): the panel drew empty in the middle of the screen while
+    // 「一张纸条」 and the note itself floated 220px below it, over the floor.
+    const depth = PANEL_DEPTH.game.dialogue;
+    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
     this.encounterObjects.push(
-      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: FONT_FAMILY, fontSize: '32px', color: isBoss ? hex(TEXT.warn) : hex(PALETTE.lightHigh) }).setOrigin(0.5),
+      this.add
+        .text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: FONT_FAMILY, fontSize: '32px', color: isBoss ? hex(TEXT.warn) : hex(PALETTE.lightHigh) })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(depth + 7),
     );
     this.encounterObjects.push(
-      this.add.text(left + 20, top + 44, result.message, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+      this.add
+        .text(left + 20, top + 44, result.message, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } })
+        .setOrigin(0, 0)
+        .setScrollFactor(0)
+        .setDepth(depth + 7),
     );
     const loot = result.items.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、');
     if (loot) {
       this.encounterObjects.push(
-        this.add.text(left + 20, top + 104, `获得：${loot}`, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+        this.add
+          .text(left + 20, top + 104, `获得：${loot}`, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } })
+          .setOrigin(0, 0)
+          .setScrollFactor(0)
+          .setDepth(depth + 7),
       );
     }
     this.encounterObjects.push(
-      this.add.text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.dim) }).setOrigin(0.5),
+      this.add
+        .text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.dim) })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(depth + 7),
     );
+    // Belt as well as braces: the panel is rebuilt on every resolve, so nothing
+    // else will ever run a lock pass over this list.
+    lockToScreen(this.encounterObjects);
+    this.assertPanelContent('encounter-outcome', this.encounterObjects);
     if (state.status === 'lost') {
       this.scene.start('End');
     }
@@ -1830,6 +1944,10 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.floorObjects.push(wall, floor, g);
+
+    // The other beds, with their sleeping roommates. Before this the room was
+    // furniture the player uses and nothing that makes it a shared space.
+    this.drawDormBeds(DORM_FRONT_BEDS, DORM_BACK_BEDS);
 
     // OVERHAUL Art Pass 2: ceiling shadow, baseboard seam, floor gradient and
     // reflections under the lights — the four cues that make a flat side view
@@ -2404,16 +2522,281 @@ export class GameScene extends Phaser.Scene {
     this.buildGround();
   }
 
+  // The dorm's other beds, each with a roommate asleep in it.
+  //
+  // Floor 1 is the player's dormitory, and it used to read as a store-room: one
+  // cabinet, one workbench, the player's own bed, and seeded debris everywhere
+  // else. A dorm is people asleep, so the room now has five more beds along the
+  // wall, each with a figure under a blanket.
+  //
+  // The figures are drawn rather than sprited on purpose: there is no lying pose
+  // in any character sheet (the walk sheets are 64x96 standing side views), and
+  // rotating one would resample it. A blanket, a head and a hairline read as
+  // "someone sleeping" at this size, which is the whole job.
+  // One bed, drawn in a shallow 3/4 view: a parallelogram for the mattress top,
+  // a front face below it, a headboard at the head end and a foot board at the
+  // foot. The top face is the whole point - a flat side view read as a drawing
+  // of a bed, and the sliver of visible sheet is what makes it read as an object
+  // standing in a room.
+  //
+  // `scale` < 1 is used for the back row: smaller and higher on the wall, which
+  // is the depth cue, and the caller tints it to push it further back.
+  private drawBed3D(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    floorY: number,
+    o: { blanket: number; fold: number; scale: number; sleeper: boolean },
+  ): void {
+    const s = o.scale;
+    const W = Math.round(80 * s); // bed length along the floor
+    const H = Math.round(18 * s); // frame height off the floor
+    const D = Math.round(18 * s); // how far back the mattress top sits
+    const HUMP = Math.round(11 * s); // how high the blanket rides over the body
+    const y0 = floorY - H; // the mattress' front edge
+    const y1 = y0 - D; // ...and its back edge
+    const quad = (pts: Array<[number, number]>, color: number): void => {
+      g.fillStyle(color, 1);
+      g.fillPoints(pts.map(([px, py]) => new Phaser.Math.Vector2(Math.round(px), Math.round(py))), true, true);
+    };
+
+    // Floor contact shadow, so the bed is standing on something.
+    g.fillStyle(PALETTE.ink, 0.4 * s);
+    g.fillRect(x - 4 * s, floorY - 2, W + 10 * s, 3);
+
+    // Mattress top: the sheet, as a parallelogram leaning back. The sheet shows
+    // at the head end and along the front edge - that band is what sells the
+    // third dimension.
+    quad(
+      [
+        [x, y0],
+        [x + W, y0],
+        [x + W + 5 * s, y1],
+        [x + 5 * s, y1],
+      ],
+      0x3a352e,
+    );
+    // Frame front face below the mattress, with a lit top edge where the sheet
+    // overhangs it.
+    quad(
+      [
+        [x, y0],
+        [x + W, y0],
+        [x + W, floorY],
+        [x, floorY],
+      ],
+      0x3a2c1c,
+    );
+    quad(
+      [
+        [x, y0],
+        [x + W, y0],
+        [x + W, y0 + 2 * s],
+        [x, y0 + 2 * s],
+      ],
+      0x4a3a28,
+    );
+    // Frame legs at both ends.
+    g.fillStyle(0x2a2018, 1);
+    g.fillRect(x + 3 * s, floorY - 2, 5 * s, 2);
+    g.fillRect(x + W - 8 * s, floorY - 2, 5 * s, 2);
+
+    if (o.sleeper) {
+      // Pillow at the head end.
+      quad(
+        [
+          [x + 5 * s, y1 + 1 * s],
+          [x + 22 * s, y1 + 1 * s],
+          [x + 24 * s, y0 - 1 * s],
+          [x + 7 * s, y0 - 1 * s],
+        ],
+        0x64646e,
+      );
+      // The blanket: one quad whose back edge rides HUMP above the mattress'
+      // back edge. That rise is the body under it - a blanket laid flat on the
+      // mattress read as a green placemat.
+      quad(
+        [
+          [x + 20 * s, y1 - HUMP],
+          [x + W + 5 * s, y1 - HUMP],
+          [x + W + 5 * s, y0 - 1 * s],
+          [x + 22 * s, y0 - 1 * s],
+        ],
+        o.blanket,
+      );
+      // Fold across the chest, and the lit top edge of the blanket.
+      quad(
+        [
+          [x + 20 * s, y1 - HUMP],
+          [x + W + 5 * s, y1 - HUMP],
+          [x + W + 5 * s, y1 - HUMP + 2 * s],
+          [x + 20 * s, y1 - HUMP + 2 * s],
+        ],
+        o.fold,
+      );
+      quad(
+        [
+          [x + 20 * s, y1 - HUMP],
+          [x + W + 5 * s, y1 - HUMP],
+          [x + W + 5 * s, y1 - HUMP + 1 * s],
+          [x + 20 * s, y1 - HUMP + 1 * s],
+        ],
+        PALETTE.clothHigh,
+      );
+      // A drape over the mattress' front edge, so the blanket has thickness.
+      quad(
+        [
+          [x + 22 * s, y0 - 1 * s],
+          [x + W + 5 * s, y0 - 1 * s],
+          [x + W + 5 * s, y0 + 3 * s],
+          [x + 22 * s, y0 + 3 * s],
+        ],
+        o.fold,
+      );
+      // Head: skin, hair across the top, the far side in shadow.
+      const hx = x + 13 * s;
+      const hy = y1 - HUMP - 5 * s;
+      g.fillStyle(PALETTE.skinLight, 1);
+      g.fillCircle(hx, hy, Math.max(3, Math.round(6 * s)));
+      g.fillStyle(PALETTE.ink, 1);
+      g.fillRect(hx - Math.round(6 * s), hy - Math.round(7 * s), Math.round(13 * s), Math.max(2, Math.round(4 * s)));
+      g.fillStyle(PALETTE.skinDeep, 1);
+      g.fillRect(hx + Math.round(1 * s), hy + Math.round(1 * s), Math.round(5 * s), Math.max(2, Math.round(3 * s)));
+    } else {
+      // An unused bed: the blanket folded back at the foot, mattress bare.
+      quad(
+        [
+          [x + 5 * s, y1 + 1 * s],
+          [x + W + 5 * s, y1 + 1 * s],
+          [x + W + 5 * s, y0 - 1 * s],
+          [x + 5 * s, y0 - 1 * s],
+        ],
+        o.blanket,
+      );
+    }
+
+    // Headboard standing off the mattress at the head end, and a foot board at
+    // the foot end. Both are boards rather than frames: the camera sees their
+    // edge, which is another depth cue.
+    quad(
+      [
+        [x - 5 * s, y1],
+        [x - 1 * s, y1 - 4 * s],
+        [x - 1 * s, floorY],
+        [x - 5 * s, floorY],
+      ],
+      0x6a4a2a,
+    );
+    quad(
+      [
+        [x - 3 * s, y1],
+        [x - 1 * s, y1 - 4 * s],
+        [x - 1 * s, floorY],
+        [x - 3 * s, floorY],
+      ],
+      0x8a6a3a,
+    );
+    quad(
+      [
+        [x + W + 5 * s, y1],
+        [x + W + 9 * s, y1 - 4 * s],
+        [x + W + 9 * s, floorY],
+        [x + W + 5 * s, floorY],
+      ],
+      0x6a4a2a,
+    );
+  }
+
+  // The dorm's other beds, and the roommates asleep in them.
+  //
+  // Floor 1 used to read as a store-room: one cabinet, one workbench, the
+  // player's own bed, and seeded debris everywhere else. A dorm is people asleep
+  // in a crowded room, so there are now two rows - a back row set higher and
+  // smaller for depth, and a front row on the floor line - with a figure under
+  // every blanket.
+  //
+  // The figures are drawn rather than sprited on purpose: no character sheet has
+  // a lying pose (the walk sheets are 64x96 standing side views) and rotating one
+  // would resample it. A torso over lower legs, a fold, a lit edge and a head
+  // read as "someone sleeping" at this size, which is the whole job.
+  private drawDormBeds(front: readonly number[], back: readonly number[]): void {
+    const floorY = FLOOR_HEIGHT - 60; // the front row's floor line
+    const backY = floorY - 26; // the back row stands further from the camera
+    const g = this.add.graphics().setDepth(4);
+    this.floorObjects.push(g);
+    const backG = this.add.graphics().setDepth(2);
+    this.floorObjects.push(backG);
+
+    const cloths: Array<[number, number]> = [
+      [PALETTE.cloth, PALETTE.clothDeep],
+      [PALETTE.clothDeep, PALETTE.cloth],
+      [PALETTE.cloth, PALETTE.clothDeep],
+      [PALETTE.clothDeep, PALETTE.cloth],
+      [PALETTE.cloth, PALETTE.clothDeep],
+    ];
+
+    // Back row first, so the front row overlaps it.
+    back.forEach((x, i) => {
+      const [blanket, fold] = cloths[i % cloths.length];
+      this.drawBed3D(backG, x, backY, { blanket, fold, scale: 0.72, sleeper: true });
+    });
+
+    // Pitch 96, so the row is crowded - beds nearly touching.
+    front.forEach((x, i) => {
+      const [blanket, fold] = cloths[i % cloths.length];
+      this.drawBed3D(g, x, floorY, { blanket, fold, scale: 1, sleeper: true });
+      this.floorObjects.push(...addContactShadow(this, x + 40, floorY + 2, 70, 2, 0.35));
+
+      // Label and Z sit above the headboard line and beside the head. Both are
+      // placed against the bed's own top (floorY-58 for a sleeper), not against a
+      // fixed offset from the floor: a taller bed pushed the label into the
+      // sleeper's hair.
+      // Depth 3: above the corridor's wall dressing (1-2), below the front row's
+      // own beds (4). On floor 1 nothing sits at 3, so this changes nothing
+      // there; on floor 2 the conduits and signage would otherwise print
+      // straight through these labels.
+      const label = this.add
+        .text(x + 41, floorY - 64, '室友', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(TEXT.dim) })
+        .setOrigin(0.5)
+        .setDepth(3);
+      const z = this.add
+        .text(x + 72, floorY - 52, 'Z z', { fontFamily: FONT_FAMILY, fontSize: '16px', color: hex(TEXT.dim) })
+        .setOrigin(0.5)
+        .setDepth(3);
+      this.floorObjects.push(label, z);
+      this.dormSleepers.push({ z, baseY: z.y, phase: i * 1.7 });
+    });
+
+    // The back row gets its labels too, dimmer, so the two rows do not compete.
+    back.forEach((x, i) => {
+      const z = this.add
+        .text(x + 36, backY - 38, 'Z z', { fontFamily: FONT_FAMILY, fontSize: '14px', color: hex(TEXT.disabledDeep) })
+        .setOrigin(0.5)
+        .setDepth(3);
+      this.floorObjects.push(z);
+      this.dormSleepers.push({ z, baseY: z.y, phase: 3.4 + i * 1.3 });
+    });
+  }
+
+  // The player's own bed, in the same 3/4 view as the roommates' so the row
+  // reads as one set of furniture rather than a sprite next to drawings.
   private drawBed(): void {
-    const y = FLOOR_HEIGHT - 64;
-    const bed = this.add.image(BED_X, y + 4, 'furn_bed').setOrigin(0.5, 1);
-    // AG-11: depth 0 → 105，与容器名签同线。旧位置整块落在 HUD 上下文带
-    // （y 64..124，depth 100，alpha 0.94）里，像素采样实测 max lum=33——
-    // 文字一个像素都没画出来（AG-08 UI.md 12b 记录的存量缺陷）。带在 100，
-    // 它的发丝线 chrome 在 101，所以标签取 105，压在带上面、仍在 HUD 自己的
-    // 反馈通道（300）下面。
-    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5).setDepth(105);
-    this.floorObjects.push(bed, bedLabel);
+    const floorY = FLOOR_HEIGHT - 60;
+    const g = this.add.graphics().setDepth(4);
+    this.floorObjects.push(g);
+    this.drawBed3D(g, BED_X - 41, floorY, {
+      blanket: PALETTE.clothDeep,
+      fold: PALETTE.cloth,
+      scale: 1,
+      sleeper: false,
+    });
+    this.floorObjects.push(...addContactShadow(this, BED_X, floorY + 2, 70, 2, 0.35));
+    // AG-11：depth 105 压在 HUD 上下文带（100）与其 chrome（101）之上。旧位置
+    // 不设 depth 时整块落在带里，像素实测 max lum=33，22px 标签一个像素都不显。
+    const bedLabel = this.add
+      .text(BED_X, floorY - 62, '床（睡觉）', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) })
+      .setOrigin(0.5)
+      .setDepth(105);
+    this.floorObjects.push(bedLabel);
   }
 
   // ── HUD & inventory UI ─────────────────────────────────────────────────
@@ -2428,6 +2811,14 @@ export class GameScene extends Phaser.Scene {
     this.lastGoalKey = '';
     this.environmentText?.destroy();
     this.environmentText = undefined;
+    this.envRegionText?.destroy();
+    this.envRegionText = undefined;
+    this.envHumidText?.destroy();
+    this.envHumidText = undefined;
+    this.envNightText?.destroy();
+    this.envNightText = undefined;
+    this.hudIcons?.destroy();
+    this.hudIcons = undefined;
     this.goalText?.destroy();
     this.goalText = undefined;
     this.scoreText?.destroy();
@@ -2439,45 +2830,73 @@ export class GameScene extends Phaser.Scene {
     this.goldText?.destroy();
     this.goldText = undefined;
 
-    // A fixed screen-space instrument strip, then two independent context rows.
-    // The world's existing palette stays intact; generous gutters separate
-    // survival, location and money so none of them borrow another field's space.
+    // The 2026-11-14 HUD skin: one riveted plate holding three rows —
+    // instruments, the day's objective, the environment readout. See
+    // render/hudSkin.ts for why this is drawn rather than dropped in as the
+    // concept PNGs.
     const hud = HUD_LAYOUT;
-    this.add.rectangle(0, 0, DESIGN_WIDTH, hud.topHeight, UI.surface).setOrigin(0).setAlpha(0.98).setScrollFactor(0).setDepth(100);
-    this.add.rectangle(0, hud.topHeight, DESIGN_WIDTH, hud.contextBottom - hud.topHeight, UI.surface).setOrigin(0).setAlpha(0.94).setScrollFactor(0).setDepth(100);
-    const chrome = this.add.graphics().setScrollFactor(0).setDepth(101);
-    chrome.lineStyle(1, UI.line, 0.85);
-    for (const x of [196, 1000]) chrome.lineBetween(x, 14, x, hud.topHeight - 14);
-    chrome.lineBetween(16, hud.topHeight - 1, DESIGN_WIDTH - 16, hud.topHeight - 1);
-    chrome.lineBetween(16, hud.contextBottom - 1, DESIGN_WIDTH - 16, hud.contextBottom - 1);
-    chrome.fillStyle(UI.accent, 1);
-    chrome.fillRect(0, 0, 4, hud.topHeight);
+    this.add.rectangle(0, 0, DESIGN_WIDTH, hud.contextBottom, UI.surface).setOrigin(0).setAlpha(0.98).setScrollFactor(0).setDepth(100);
+    const plate = this.add.graphics().setScrollFactor(0).setDepth(101);
+    drawHudPlate(plate, DESIGN_WIDTH, hud.contextBottom, 0x0b0f12, UI.line, PALETTE.stoneLight, PALETTE.light);
+    // Group dividers: floor block | stats | money.
+    plate.fillStyle(UI.line, 0.85);
+    plate.fillRect(268, 12, 1, hud.topHeight - 24);
+    plate.fillRect(hud.moneyX - 16, 12, 1, hud.topHeight - 24);
+    // Row separators.
+    plate.fillRect(16, hud.topHeight, DESIGN_WIDTH - 32, 1);
+    plate.fillRect(16, hud.environmentY - 10, DESIGN_WIDTH - 32, 1);
+    // The concept's hazard stripe under the right end of the environment row.
+    drawHazardStripe(plate, hud.hazardX, hud.environmentY - 6, 176, 12, PALETTE.lightDeep);
 
-    this.floorBadge = this.add.text(20, 6, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
+    // Static glyphs. Only the numbers and the two context rows move, so the
+    // icons are drawn once here and never touched again.
+    this.hudIcons = this.add.graphics().setScrollFactor(0).setDepth(103);
+    const icon = (name: HudIconName, x: number, y: number, color: number): void => {
+      drawHudIcon(this.hudIcons as Phaser.GameObjects.Graphics, name, x, y, 16, color);
+    };
+    icon('tower', 20, hud.row1Y, PALETTE.lightHigh);
+    icon('calendar', 20, hud.row1Y + 28, TEXT.secondary);
+    icon('coins', hud.moneyX, hud.row1Y, PALETTE.light);
+    icon('star', hud.moneyX, hud.row1Y + 28, TEXT.highlight);
+    icon('clipboard', 20, hud.goalY - 4, PALETTE.lightHigh);
+    hud.envChipX.forEach((cx, i) => {
+      const names: HudIconName[] = ['thermo', 'wind', 'drop', 'moon'];
+      icon(names[i], cx, hud.environmentY - 4, i === 0 ? PALETTE.light : TEXT.secondary);
+    });
+    STAT_BARS.forEach((stat, i) => icon(stat.icon, hud.statX + i * hud.statPitch, hud.row1Y, STAT_COLORS[stat.key]));
+
+    this.floorBadge = this.add.text(46, hud.row1Y - 2, '', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.lightHigh) })
       .setName('hud-floor').setScrollFactor(0).setDepth(103);
-    this.clockText = this.add.text(20, 38, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+    this.clockText = this.add.text(42, hud.row1Y + 28, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
       .setName('hud-clock').setScrollFactor(0).setDepth(103);
     this.refreshClock();
 
     this.barsGfx = this.add.graphics().setName('hud-stat-bars').setScrollFactor(0).setDepth(103);
     STAT_BARS.forEach((stat, i) => {
       const x = hud.statX + i * hud.statPitch;
-      this.statLabels.push(this.add.text(x, 10, stat.label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+      this.statLabels.push(this.add.text(x + 24, hud.row1Y, stat.label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
         .setName(`hud-stat-${stat.key}`).setScrollFactor(0).setDepth(103));
-      this.statValues.push(this.add.text(x + hud.statWidth, 10, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+      this.statValues.push(this.add.text(x + hud.statWidth, hud.row1Y, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
         .setOrigin(1, 0).setName(`hud-value-${stat.key}`).setScrollFactor(0).setDepth(103));
     });
     this.refreshStats();
 
-    this.goldText = this.add.text(DESIGN_WIDTH - 20, 6, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
-      .setOrigin(1, 0).setName('hud-gold').setScrollFactor(0).setDepth(103);
-    this.scoreText = this.add.text(DESIGN_WIDTH - 20, 34, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
-      .setOrigin(1, 0).setName('hud-score').setScrollFactor(0).setDepth(103);
+    this.goldText = this.add.text(hud.moneyX + 24, hud.row1Y, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
+      .setOrigin(0, 0).setName('hud-gold').setScrollFactor(0).setDepth(103);
+    this.scoreText = this.add.text(hud.moneyX + 24, hud.row1Y + 28, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
+      .setOrigin(0, 0).setName('hud-score').setScrollFactor(0).setDepth(103);
 
-    this.goalText = this.add.text(20, hud.goalY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
+    this.goalText = this.add.text(44, hud.goalY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
       .setName('hud-goal').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
-    this.environmentText = this.add.text(20, hud.environmentY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
-      .setName('hud-environment').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    // Four environment chips. Each owns one reading, so a player scanning for
+    // "is it night" does not have to parse a sentence.
+    const chip = (x: number, name: string, color: string): Phaser.GameObjects.Text =>
+      this.add.text(x + 24, hud.environmentY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color })
+        .setName(name).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    this.environmentText = chip(hud.envChipX[0], 'hud-environment', hex(TEXT.secondary));
+    this.envRegionText = chip(hud.envChipX[1], 'hud-region', hex(TEXT.secondary));
+    this.envHumidText = chip(hud.envChipX[2], 'hud-humid', hex(TEXT.secondary));
+    this.envNightText = chip(hud.envChipX[3], 'hud-night', hex(TEXT.secondary));
 
     // Feedback has a dedicated lower lane. It remains above modal panels but
     // can never collide with the daily objective or the permanent environment.
@@ -2533,6 +2952,55 @@ export class GameScene extends Phaser.Scene {
     }
     this.lastStats = '';
     this.refreshGoalHud();
+    this.buildHudButtons();
+  }
+
+  // Four clickable buttons for the four panels the keyboard opens. Placed on the
+  // bottom-right, above the key legend: the top bar is already full (four stat
+  // bars, floor badge, clock, gold, score) and the panel row would have sat on
+  // top of the world's floor labels.
+  //
+  // Every one of them goes through the same guard the keyboard path uses, and
+  // refuses to open a second panel on top of an open one — except its own, which
+  // toggles closed.
+  private buildHudButtons(): void {
+    for (const o of this.hudButtons) o.destroy();
+    this.hudButtons = [];
+    const items: Array<{ label: string; run: () => void; owned: () => boolean }> = [
+      { label: '背包 I', run: () => this.onToggleInventory(), owned: () => this.inventoryOpen },
+      { label: '制作 C', run: () => this.onToggleCrafting(), owned: () => this.craftingOpen },
+      { label: '地图 M', run: () => this.onToggleMap(), owned: () => false },
+      { label: '菜单', run: () => this.onEsc(), owned: () => this.pauseOpen },
+    ];
+    const W = 88;
+    const H = 26;
+    const GAP = 6;
+    const total = items.length * W + (items.length - 1) * GAP;
+    let x = DESIGN_WIDTH - 16 - total;
+    const y = DESIGN_HEIGHT - 56;
+    for (const item of items) {
+      const parts = framedButton(
+        this,
+        x,
+        y,
+        W,
+        H,
+        item.label,
+        104,
+        () => {
+          if (this.stairClimb) return;
+          if (this.anyPanelOpen() && !item.owned()) return;
+          item.run();
+        },
+        { fill: UI.surfaceRaised, line: UI.line, text: hex(TEXT.primary), hover: PALETTE.stoneLight },
+      );
+      for (const part of parts) {
+        const withScroll = part as unknown as { setScrollFactor?: (v: number) => unknown };
+        withScroll.setScrollFactor?.(0);
+        this.hudButtons.push(part);
+      }
+      x += W + GAP;
+    }
   }
 
   // OVERHAUL: the day's objective (rolled lazily on first read of the day) and
@@ -2564,7 +3032,7 @@ export class GameScene extends Phaser.Scene {
       this.goldText.setFontSize(TYPE.caption);
       if (this.goldText.width > 240) this.goldText.setFontSize(18);
     }
-    this.fitHudLine(this.goalText, 1240);
+    this.fitHudLine(this.goalText, 1200);
   }
 
   /** Preserve legible type; shorten only exceptional overlong HUD strings. */
@@ -2600,7 +3068,9 @@ export class GameScene extends Phaser.Scene {
     values.forEach((v, i) => {
       const x = HUD_LAYOUT.statX + i * HUD_LAYOUT.statPitch;
       const color = STAT_COLORS[STAT_BARS[i].key] ?? UI.good;
-      drawStatBar(this.barsGfx, x, 40, HUD_LAYOUT.statWidth, 8, v / 100, color);
+      // 10 segments at 10px: the concept sheet's bar, which reads as discrete
+      // pips rather than one continuous fill.
+      drawStatBar(this.barsGfx, x, HUD_LAYOUT.barY, HUD_LAYOUT.statWidth, HUD_LAYOUT.barH, v / 100, color, HUD_LAYOUT.barSegments);
       this.statValues[i]?.setText(String(Math.round(v)));
     });
     // The most urgent bar's label turns red, so the critical slot is findable
@@ -2618,7 +3088,7 @@ export class GameScene extends Phaser.Scene {
    * frame loop instead is what keeps the line honest.
    */
   private refreshEnvironmentHud(): void {
-    if (!this.environmentText) return;
+    if (!this.environmentText || !this.envRegionText || !this.envHumidText || !this.envNightText) return;
     const state = getGame();
     const temp = bodyTempOf(state);
     // The readout says what the heat is doing, not just the number: "回暖中" next
@@ -2629,13 +3099,27 @@ export class GameScene extends Phaser.Scene {
     else if (temp <= COLD_THRESHOLD) mood = '寒冷';
     else if (temp >= 85) mood = '暖和';
     else mood = '微凉';
-    // An ailment outranks the weather on this line: being ill is more urgent than
-    // being chilly, and this line is the only place either is stated.
+    // An ailment outranks the weather: being ill is more urgent than being
+    // chilly, and this row is the only place either is stated.
     const ill = ailmentLabel(state);
-    const envPart = ill ? `${ill} · ${environmentLabel(state.currentFloor)}` : environmentLabel(state.currentFloor);
-    this.environmentText.setText(`${TEMP_LABEL} ${Math.round(temp)} ${mood} · ${envPart}`);
+    const env = environmentFor(state.currentFloor);
+    const night = isNight(state.gameMinuteOfDay);
+
+    this.environmentText.setText(`${TEMP_LABEL} ${Math.round(temp)} ${mood}`);
     this.environmentText.setColor(temp <= COLD_THRESHOLD || ill !== '' ? hex(TEXT.warn) : hex(TEXT.secondary));
-    this.fitHudLine(this.environmentText, 1240);
+
+    // Region, with the ailment folded in when there is one — it is a property of
+    // the player, not the floor, so it rides on the region chip rather than
+    // getting a fifth slot.
+    this.envRegionText.setText(`区域 ${ill ? `${ill} · ` : ''}${env.label}`);
+    this.envRegionText.setColor(ill !== '' ? hex(TEXT.warn) : hex(TEXT.secondary));
+
+    this.envHumidText.setText(env.humidity >= 0.5 ? '潮湿' : '干燥');
+    this.envNightText.setText(env.hostile && night ? '夜间危险' : night ? '夜间' : '安全');
+
+    this.fitHudLine(this.envRegionText, HUD_LAYOUT.envChipX[2] - HUD_LAYOUT.envChipX[1] - 28);
+    this.fitHudLine(this.envHumidText, HUD_LAYOUT.envChipX[3] - HUD_LAYOUT.envChipX[2] - 28);
+    this.fitHudLine(this.envNightText, HUD_LAYOUT.hazardX - HUD_LAYOUT.envChipX[3] - 28);
   }
 
   private buildInventoryPanel(): void {
@@ -2651,6 +3135,8 @@ export class GameScene extends Phaser.Scene {
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
     const depth = PANEL_DEPTH.game.inventory;
 
     this.invObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
@@ -2696,6 +3182,27 @@ export class GameScene extends Phaser.Scene {
       this.invSlotIcons.push(icon);
       this.invSlotTexts.push(badge);
       this.invObjects.push(cell, border, icon, badge);
+      // Mouse: click selects; clicking the already-selected slot uses the item,
+      // which is what Enter does. Pushed into invObjects so it hides with the
+      // panel — an orphan hit rect would keep eating clicks over the world.
+      this.invObjects.push(
+        this.panelHit( x, y, CELL, CELL, depth + 8, {
+          onOver: () => {
+            if (this.invSelected === i) return;
+            this.invSelected = i;
+            this.refreshInventory();
+          },
+          onClick: () => {
+            if (this.invSelected !== i) {
+              this.invSelected = i;
+              this.refreshInventory();
+              playSfx('click');
+              return;
+            }
+            this.onUse();
+          },
+        }),
+      );
     }
 
     // ── the detail pane ─────────────────────────────────────────────────────
@@ -2737,7 +3244,15 @@ export class GameScene extends Phaser.Scene {
       const stack = slots[i];
       if (stack) {
         // Keyed by item id, never by display name — see itemIconKey().
-        icon.setTexture(itemIconKey(stack.itemId)).setVisible(true);
+        //
+        // No setVisible(true): refreshInventory() also runs while the panel is
+        // CLOSED — looting a container, a shop trade and a neighbour trade all
+        // call it. Showing the icon here used to float the bag's first row over
+        // the world with no panel behind it: four icons straddling the top
+        // frame of whatever panel happened to be open. Visibility is
+        // toggleInventory's job — it sets the whole list, and the empty slots
+        // below hide themselves again.
+        icon.setTexture(itemIconKey(stack.itemId));
         badge.setText(stack.quantity > 1 ? `${stack.quantity}` : '');
       } else {
         icon.setVisible(false);
@@ -2752,7 +3267,8 @@ export class GameScene extends Phaser.Scene {
 
     const selected = slots[this.invSelected];
     const cell = this.invCells[this.invSelected];
-    this.invMarker.setVisible(selected !== undefined && cell !== undefined);
+    // Same rule as the icons: the marker belongs to the open panel.
+    this.invMarker.setVisible(this.inventoryOpen && selected !== undefined && cell !== undefined);
     if (selected && cell) placeMarkerLeftOf(this.invMarker, cell);
 
     if (selected) {
@@ -2767,6 +3283,9 @@ export class GameScene extends Phaser.Scene {
       this.invDetailMeta?.setText('');
       this.invDetailBody?.setText('空格子。搜刮、制作或交易都往这里放东西。');
     }
+    // Safety net for the next caller that forgets: with the panel closed there
+    // is nothing of the bag on screen, whatever the data did on the way here.
+    if (!this.inventoryOpen) for (const o of this.invObjects) o.setVisible(false);
   }
 
 
@@ -2893,6 +3412,8 @@ export class GameScene extends Phaser.Scene {
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
 
     this.craftObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.craft));
     // OVERHAUL UI: header strip instead of a centred title floating on a slab.
@@ -2914,6 +3435,24 @@ export class GameScene extends Phaser.Scene {
       const status = this.add.text(left + panelW - 24, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
       this.craftRows.push({ band, name, status });
       this.craftObjects.push(band, name, status);
+      this.craftObjects.push(
+        this.panelHit( left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, PANEL_DEPTH.game.craft + 7, {
+          onOver: () => {
+            if (this.craftSelected === i) return;
+            this.craftSelected = i;
+            this.refreshCraft();
+          },
+          onClick: () => {
+            if (this.craftSelected !== i) {
+              this.craftSelected = i;
+              this.refreshCraft();
+              playSfx('click');
+              return;
+            }
+            this.onUse();
+          },
+        }),
+      );
     }
     // The pass chain gates one recipe behind another, so the selected row needs a
     // line that says which credential it wants. It goes under the last band (the
@@ -3027,6 +3566,8 @@ export class GameScene extends Phaser.Scene {
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
 
     this.pauseObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.pause));
     this.pauseObjects.push(...buildPanelHeader(this, left, top, panelW, '已暂停', UI.accent, PANEL_DEPTH.game.pause + 5));
@@ -3042,6 +3583,24 @@ export class GameScene extends Phaser.Scene {
       const t = this.add.text(cx, top + 96 + i * 40, label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE_BODY}px`, color: hex(TEXT.primary) }).setOrigin(0.5);
       this.pauseOptionTexts.push(t);
       this.pauseObjects.push(t);
+      this.pauseObjects.push(
+        this.panelHit( left + 40, top + 96 + i * 40 - 19, panelW - 80, 38, PANEL_DEPTH.game.pause + 7, {
+          onOver: () => {
+            if (this.pauseSelected === i) return;
+            this.pauseSelected = i;
+            this.refreshPause();
+          },
+          onClick: () => {
+            if (this.pauseSelected !== i) {
+              this.pauseSelected = i;
+              this.refreshPause();
+              playSfx('click');
+              return;
+            }
+            this.onUse();
+          },
+        }),
+      );
     });
 
     applyPanelDepth(this.pauseObjects, PANEL_DEPTH.game.pause);
@@ -3253,6 +3812,8 @@ export class GameScene extends Phaser.Scene {
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
 
     const depth = PANEL_DEPTH.game.dialogue;
     // The skin is captured, not just pushed: refreshDialogue re-places these
@@ -3324,6 +3885,24 @@ export class GameScene extends Phaser.Scene {
       const rule = this.add.rectangle(left + DIALOG_PADDING, rowY, 2, DIALOG_ROW_H, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 6);
       this.dialogueBands.push({ band, rule });
       this.dialogueObjects.push(band, rule);
+      // Mouse: hover moves the cursor, click confirms — guarded on the option
+      // count because the row list is shorter than the four bands in trade mode.
+      this.dialogueObjects.push(
+        this.panelHit(left + DIALOG_PADDING, rowY, panelW - DIALOG_PADDING * 2, DIALOG_ROW_H, depth + 8, {
+          onOver: () => {
+            if (!this.dialogue || this.dialogue.selected === i) return;
+            if (i >= this.dialogueOptionsView().length) return;
+            this.dialogue.selected = i;
+            this.refreshDialogue();
+          },
+          onClick: () => {
+            if (!this.dialogue || i >= this.dialogueOptionsView().length) return;
+            this.dialogue.selected = i;
+            this.refreshDialogue();
+            this.onUse();
+          },
+        }),
+      );
       const icon = this.add.image(left + 30, rowY + DIALOG_ROW_H / 2, 'blank').setOrigin(0.5).setDepth(depth + 7);
       const t = this.add
         .text(left + 46, rowY + DIALOG_ROW_H / 2, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
@@ -3665,6 +4244,14 @@ export class GameScene extends Phaser.Scene {
     this.keyQ.on('down', () => this.guard('q', this.onToggleQuests), this);
     this.cursors.up.on('down', () => this.guard('up', this.onNavUp), this);
     this.cursors.down.on('down', () => this.guard('down', this.onNavDown), this);
+
+    // Mouse. Scene-level on purpose: it fires for presses that did NOT land on an
+    // interactive object, which is exactly the set that should be read as "walk
+    // here". Rows and buttons get first refusal through `currentlyOver`.
+    // Off-then-on because create() runs again after a scene restart and the input
+    // plugin is not reset with it.
+    this.input.off('pointerdown', this.pointerHandler);
+    this.input.on('pointerdown', this.pointerHandler);
   }
 
   /**
@@ -3762,6 +4349,65 @@ export class GameScene extends Phaser.Scene {
   private onToggleInventory(): void {
     if (this.stairClimb || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
     this.toggleInventory();
+  }
+
+  // ── mouse ───────────────────────────────────────────────────────────────
+  /** Panel hit targets live in screen space: every panel in this scene is built
+   *  at fixed screen coordinates and pushed through lockToScreen/applyPanelDepth,
+   *  which sets scrollFactor 0. A hit rect left at scrollFactor 1 sits one camera
+   *  scroll above the row it is supposed to cover — measured: 52px off on floor 2,
+   *  which made every click land on the row above. */
+  private panelHit(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    depth: number,
+    handlers: Parameters<typeof hitRect>[6],
+  ): Phaser.GameObjects.Rectangle {
+    return hitRect(this, x, y, w, h, depth, handlers).setScrollFactor(0);
+  }
+
+  private anyPanelOpen(): boolean {
+    return (
+      this.encounterOpen || this.shelterOpen || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen
+    );
+  }
+
+  /** True when something E could act on sits within reach of `x`. */
+  private hasInteractableNear(x: number): boolean {
+    const state = getGame();
+    const near = (v: number): boolean => Math.abs(v - x) <= 36;
+    if (state.currentFloor === NPC_FLOOR && NPCS.some((n) => near(n.x))) return true;
+    if (this.floorView.containers.some((c) => c.items.length > 0 && near(c.x))) return true;
+    for (const marker of this.spotMarkers.values()) if (near(marker.x)) return true;
+    if (near(UP_EXIT_X) || near(DOWN_EXIT_X)) return true;
+    if (state.currentFloor === STARTING_FLOOR && near(BED_X)) return true;
+    return false;
+  }
+
+  private onPointerDown(pointer: Phaser.Input.Pointer, currentlyOver: unknown[]): void {
+    if (this.stairClimb) return;
+    // A row or a button already took this press.
+    if (currentlyOver.length > 0) return;
+
+    if (this.anyPanelOpen()) {
+      // The panel's own background swallows the click; anywhere else is the
+      // mouse's ESC. Without this a click on the world behind an open panel did
+      // nothing at all and the only way out was the keyboard.
+      const box = this.panelBox;
+      const inside =
+        !!box && pointer.x >= box.x && pointer.x <= box.x + box.w && pointer.y >= box.y && pointer.y <= box.y + box.h;
+      if (!inside) this.onEsc();
+      return;
+    }
+    if (getGame().status !== 'playing') return;
+    // The HUD is not the world: clicking a stat bar or the top strip should not
+    // send the player walking to a spot behind it.
+    if (pointer.y < HUD_LAYOUT.contextBottom) return;
+    const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    const x = Phaser.Math.Clamp(world.x, 8, FLOOR_WIDTH - 8);
+    this.walkTarget = { x, interact: this.hasInteractableNear(x) };
   }
 
   private onEsc(): void {
@@ -4048,12 +4694,23 @@ export class GameScene extends Phaser.Scene {
   // UI can produce: it looks like the game broke. This runs in dev only and
   // names the panel in the console the moment it opens empty, so a report of
   // "a big empty box appeared" becomes a one-line diagnosis instead of a hunt.
-  private assertPanelContent(panel: string, objects: PanelObject[]): void {
+  private assertPanelContent(panel: string, objects: ReadonlyArray<Phaser.GameObjects.GameObject>): void {
     if (!import.meta.env.DEV) return;
-    const readable = objects.some(
-      (o) => o instanceof Phaser.GameObjects.Text && o.visible && (o.text ?? '').trim().length > 0,
-    );
+    const texts = objects.filter((o): o is Phaser.GameObjects.Text => o instanceof Phaser.GameObjects.Text);
+    const readable = texts.some((o) => o.visible && (o.text ?? '').trim().length > 0);
     if (!readable) console.warn(`[ui] panel "${panel}" opened with no visible text — it will look like an empty box`);
+    // The other half of "it will look like an empty box": a text that is
+    // visible but not screen-locked is drawn in world space, so it appears
+    // somewhere the camera put it rather than inside the panel. This is the
+    // second panel to ship that way (the first was the frame and fill, fixed in
+    // buildPanel's own comment), and both times the symptom was a correctly
+    // framed panel with its words floating elsewhere on screen.
+    for (const o of texts) {
+      if (!o.visible) continue;
+      if (o.scrollFactorX !== 0 || o.scrollFactorY !== 0) {
+        console.warn(`[ui] panel "${panel}" has a text at scrollFactor (${o.scrollFactorX}, ${o.scrollFactorY}) — it will not sit inside the panel`);
+      }
+    }
   }
 
   // What the foot bar should say while a panel is open: the panel's own keys.
@@ -4118,6 +4775,8 @@ export class GameScene extends Phaser.Scene {
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
     const depth = PANEL_DEPTH.game.dialogue;
     const resolved = state.shelterPlan?.resolved === true;
 
@@ -4143,6 +4802,19 @@ export class GameScene extends Phaser.Scene {
         dim: resolved && state.shelterPlan?.action !== row.action,
       });
       this.shelterObjects.push(...objects);
+      this.shelterObjects.push(
+        this.panelHit( left + 16, rowsTop + index * 26, panelW - 32, 26, depth + 8, {
+          // No buildShelterPanel() here: it re-derives shelterSelected from the
+          // (still unresolved) plan and snaps the cursor back to row 0, so every
+          // click used to schedule 休息 no matter which row was pressed.
+          // activateShelterChoice() rebuilds after it resolves.
+          onClick: () =>
+            this.time.delayedCall(0, () => {
+              this.shelterSelected = index;
+              this.onUse();
+            }),
+        }),
+      );
       const label = objects.find((object) => object instanceof Phaser.GameObjects.Text && object.text === row.label) as Phaser.GameObjects.Text | undefined;
       if (index === this.shelterSelected && label) {
         placeMarker(this.shelterMarker, label);
@@ -4504,6 +5176,18 @@ export class GameScene extends Phaser.Scene {
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
     this.refreshBagFullWarning();
+    // The dorm's sleeping roommates breathe. Each Z carries its own phase, so
+    // five beds do not pulse in unison — a shared phase reads as one blinking
+    // overlay rather than as five people asleep. Driven from here rather than by
+    // tweens because a tween outlives the floor objects it targets.
+    if (this.dormSleepers.length > 0) {
+      const now = this.time.now;
+      for (const sleeper of this.dormSleepers) {
+        const wave = Math.sin(now / 900 + sleeper.phase);
+        sleeper.z.setAlpha(0.4 + 0.4 * wave);
+        sleeper.z.y = sleeper.baseY - 2 * wave;
+      }
+    }
     // The crowbar is stepped here, above the panel early-return.
     //
     // A fight holds encounterOpen for its whole duration and this method bails
@@ -4536,6 +5220,23 @@ export class GameScene extends Phaser.Scene {
     let dir = 0;
     if (this.cursors?.left.isDown || this.wasd?.left.isDown) dir -= 1;
     if (this.cursors?.right.isDown || this.wasd?.right.isDown) dir += 1;
+    // Click-to-walk. A held key cancels the order rather than fighting it, so the
+    // player never feels the mouse and the keyboard pulling opposite ways.
+    if (this.walkTarget) {
+      if (dir !== 0) {
+        this.walkTarget = null;
+      } else {
+        const remaining = this.walkTarget.x - state.player.x;
+        if (Math.abs(remaining) <= 6) {
+          const order = this.walkTarget;
+          this.walkTarget = null;
+          // Arrived: if the click landed on something E can use, use it.
+          if (order.interact) this.onInteract();
+        } else {
+          dir = remaining > 0 ? 1 : -1;
+        }
+      }
+    }
     // The speed is ramped rather than switched, so a tap of the key moves a
     // shorter distance than it used to and the run feels like it has weight.
     // OVERHAUL: an empty energy tank slows the walk (0.75x), so "how far can I

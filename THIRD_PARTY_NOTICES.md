@@ -62,6 +62,10 @@ Third-party assets bundled with this project, with their licence and provenance.
   resampling, so nothing is lost at 1:1 with `pixelArt: true`. Audit of the
   shipped files: 0 semi-transparent pixels, 0 magenta fringe pixels on any edge,
   all four cells share the same 4px bottom margin.
+- **Why not palette-snapped:** these were briefly quantised onto `PALETTE`. That
+  merged `#101820` and `#18242c` into one shadow, and turned the wanderer's cool
+  `#4b3436` hood into `#6b4630` (skin), which reads as flesh rather than shadow.
+  The originals ship instead.
 - **Licence:** the owner's to state.
 
 ---

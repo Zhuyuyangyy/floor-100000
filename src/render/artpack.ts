@@ -55,7 +55,9 @@ export const CHARACTER_FILES: Record<CharacterKey, string> = {
 //
 // The pack arrived on a #FF00FF key colour (RGB, no alpha); the shipped files are
 // the keyed RGBA versions — 17 unique colours in, 16 out, byte-identical palette,
-// no quantisation. See the audit in .workbuddy/memory/2026-11-14.md.
+// no quantisation. Somebody did quantise them onto PALETTE for one commit; that
+// collapsed #101820 and #18242c into the same shadow value and turned the
+// wanderer's cool #4b3436 hood into skin brown, so the originals are what ships.
 export const PORTRAIT_FILES: Record<CharacterKey, string> = {
   player: 'portrait-player.png',
   npc_alin: 'portrait-alin.png',

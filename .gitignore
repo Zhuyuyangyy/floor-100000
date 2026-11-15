@@ -39,7 +39,7 @@ re/frames/
 re/*.png
 re/*.log
 re/*.txt
-re/audit/
+re/audit*/
 re/check-*.py
 re/cmp.py
 re/dark.py

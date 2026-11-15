@@ -4,6 +4,7 @@ import { addItem, countItem, removeItem } from './InventorySystem';
 import { ensureGrowth, grantGrowthXp, tradePriceMultiplier } from '../core/growth';
 import { deriveSeed, makeRng } from '../core/rng';
 import { flagCount, setFlag } from './WorldFlags';
+import { asItemId } from '../data/items';
 
 // OVERHAUL Wave C1: the shop — the economy both benchmarks run on (Centum's
 // shop floor every ten, Altacima's merchants behind the question marks). One
@@ -128,6 +129,18 @@ export function materialShelf(seed: number, day: number): ShopEntry[] {
 
 // What the trader stocks, by floor band. The ladder mirrors the loot's depth
 // windows: the higher the floor, the better the stock.
+//
+// AG-29：band 3/4/5 各上一件"精神向"消耗品（香烟/咖啡/旧书+私酒），阶层感
+// 是定价的一半——越往上走，塔里才拿得出让人醉一夜的东西。三条边界：
+// 1. 每 band 股票行数 ≤5：行商面板按"股票 30px/行 + 材料 26px/行 ×8"排版，
+//    5 行库存正好落在面板高度内（top+30+5×30+6+22+8×26 = top+416 ≤ 424），
+//    第 6 行会把材料货架挤出面板。moraleItems.test.ts 钉死这个预算。
+// 2. 新物品一律不碰 hunger/thirst（只动 energy）：精神物不能成为水食的
+//    替代品——survivalBalance 的水食边际与"每层恰好一瓶保底水"都钉死着，
+//    economyLoop 也钉了"consumable 有效果"。
+// 3. 收购价不新开表：sellPrice 的既有逻辑（band 内标价折半）自动覆盖，新
+//    物品卖出价恒低于买入价，economyLoop 的"卖价永远到不了标价"对所有
+//    band 的断言原样成立。
 const SHOP_STOCK: Record<number, readonly ShopEntry[]> = {
   2: [
     { itemId: 'bread', price: 12 },
@@ -137,16 +150,20 @@ const SHOP_STOCK: Record<number, readonly ShopEntry[]> = {
     { itemId: 'bread', price: 12 },
     { itemId: 'clean_water', price: 15 },
     { itemId: 'medkit', price: 40 },
+    { itemId: asItemId('cigarette'), price: 10 },
   ],
   4: [
     { itemId: 'clean_water', price: 15 },
     { itemId: 'medkit', price: 40 },
     { itemId: 'crowbar', price: 60 },
+    { itemId: asItemId('coffee'), price: 18 },
   ],
   5: [
     { itemId: 'medkit', price: 40 },
     { itemId: 'crowbar', price: 60 },
     { itemId: 'ration_pack', price: 18 },
+    { itemId: asItemId('old_book'), price: 20 },
+    { itemId: asItemId('moonshine'), price: 25 },
   ],
 };
 

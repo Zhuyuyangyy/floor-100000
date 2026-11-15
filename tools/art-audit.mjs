@@ -245,7 +245,9 @@ async function main() {
   // directly behind it.
   const bits = await page.evaluate(() => {
     const sc = window.__PHASER_GAME__.scene.getScene('Game');
-    const spr = sc.children.list.find((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-'));
+    const spr =
+      sc.children.list.find((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-player')) ??
+      sc.children.list.find((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-'));
     if (!spr) return null;
     const cam = sc.cameras.main;
     const b = spr.getBounds();
@@ -275,7 +277,9 @@ async function main() {
   // converts a coordinate.
   const measured = await page.evaluate((opts) => {
     const sc = window.__PHASER_GAME__.scene.getScene('Game');
-    const spr = sc.children.list.find((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-'));
+    const spr =
+      sc.children.list.find((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-player')) ??
+      sc.children.list.find((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-'));
     if (!spr) return null;
     const tex = window.__PHASER_GAME__.textures.get(spr.texture.key);
     const src = tex.source[0];
@@ -400,7 +404,9 @@ async function main() {
   // describe the figure's own pixels, not the wall showing through its outline.
   const mask = await page.evaluate(() => {
     const sc = window.__PHASER_GAME__.scene.getScene('Game');
-    const spr = sc.children.list.find((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-'));
+    const spr =
+      sc.children.list.find((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-player')) ??
+      sc.children.list.find((o) => o.type === 'Sprite' && (o.texture?.key ?? '').startsWith('char-'));
     if (!spr) return null;
     const tex = window.__PHASER_GAME__.textures.get(spr.texture.key);
     const src = tex.source[0];
@@ -452,6 +458,11 @@ async function main() {
     // pixel art. The original 8% threshold was invented before any of that was
     // measured and would have kept flagging a scene that is fine.
     density: rows.filter((r) => r.name === 'world').every((r) => r.edgeDensity >= 4),
+    // The file header has claimed "contrast >= 25" since the metric existed, but
+    // it was never in this object — so the number was printed and ignored. It is
+    // the one gate that answers "can you see the survivor against the wall",
+    // which is the whole point of a side-view game, so it now counts.
+    contrast: contrast >= 25,
   };
   console.log(` PASS: ${Object.entries(pass).map(([k, v]) => `${k}=${v ? 'ok' : 'FAIL'}`).join('  ')}`);
   console.log('='.repeat(63) + '\n');

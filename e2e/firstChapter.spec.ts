@@ -42,7 +42,8 @@ const LIFT_CONNECTED = SECOND_SEGMENT ? hasFloorContent(SECOND_SEGMENT.from) : f
 // use, kept here with their source so a move shows up as a failure here too).
 const UP_EXIT_X = 40; // the up stairwell: the left end of every floor
 const LIFT_X = 1165; // GameScene.ts: beside the down stairwell on a segment's top floor
-const NEIGHBOUR_X = 480; // 阿林, on the floor above the dorm
+// No NEIGHBOUR_X: 阿林 walks her schedule (AG-11), so the dialogue step reads her
+// live sprite instead of the 480 anchor npcs.ts spawns her from.
 
 const DAY_MINUTE = BALANCE.time.dayStartMinute;
 const NIGHT_MINUTE = BALANCE.time.nightRiskStartMinute;
@@ -423,9 +424,18 @@ test('the bag, workbench, dialogue and tower panels stay inside the canvas and o
 
   // ── dialogue (one floor up, at the neighbour) ──────────────────────────
   await climbOneFloor(page, FIRST_SEGMENT.from + 1);
-  await setX(page, NEIGHBOUR_X);
   for (let i = 0; i < 6; i++) {
     if (await hasVisibleText(page, '阿林（维修工）')) break;
+    // 阿林 walks (AG-11 autonomy): the constant above is her spawn anchor in
+    // npcs.ts, not where she is now (measured 224 vs 480). Re-seat the player on
+    // her live sprite before each try, or E opens nothing.
+    const alinX = await page.evaluate(() => {
+      const g = window.__PHASER_GAME__;
+      const sc = g?.scene.getScene('Game') as unknown as { npcObjs?: Map<string, { sprite: { x: number } }> } | null;
+      const rec = sc?.npcObjs?.get('alin');
+      return rec ? Math.round(rec.sprite.x) : null;
+    });
+    if (alinX !== null) await setX(page, alinX);
     await page.keyboard.press('E');
     await page.waitForTimeout(220);
   }

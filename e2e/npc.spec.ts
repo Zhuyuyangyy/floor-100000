@@ -66,6 +66,42 @@ async function setX(page: Page, x: number): Promise<void> {
   }, x);
 }
 
+// Where a resident IS, not where the data file says they spawn.
+//
+// AG-11's autonomy walks them along a schedule (alin was measured at x=224 while
+// npcs.ts still says 480, xiaozhou at 560 vs 800). Nearest-npc is judged on the
+// live sprite, so parking the player on the static coordinate now opens nothing
+// at all. Read the sprite before every E press — they patrol ±28px every 15
+// game minutes, so a single setX goes stale within a second.
+async function npcSpriteX(page: Page, npcId: string): Promise<number | null> {
+  return page.evaluate((id) => {
+    const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { npcObjs?: Map<string, { sprite: { x: number } }> } | null } } }).__PHASER_GAME__;
+    const rec = g?.scene.getScene('Game')?.npcObjs?.get(id);
+    return rec ? Math.round(rec.sprite.x) : null;
+  }, npcId);
+}
+
+/** Stand on a walking resident's current x and press E until `check` passes. */
+async function pressEAtNpc(page: Page, npcId: string, check: () => Promise<boolean>, tries = 6): Promise<void> {
+  // Let the stair climb finish first: E is swallowed while stairClimb is set, and
+  // the first try otherwise burns against a scene that is still arriving.
+  await page.waitForTimeout(700);
+  for (let i = 0; i < tries; i++) {
+    if (await check()) return;
+    const x = await npcSpriteX(page, npcId);
+    if (x === null) throw new Error(`resident "${npcId}" is not on this floor`);
+    await setX(page, x);
+    await page.waitForTimeout(60);
+    await page.keyboard.press('E');
+    const deadline = Date.now() + 1200;
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(80);
+      if (await check()) return;
+    }
+  }
+  throw new Error(`interact at resident "${npcId}" did not take effect`);
+}
+
 async function hasVisibleText(page: Page, substr: string): Promise<boolean> {
   return page.evaluate((sub) => {
     const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean }> } } | null } } }).__PHASER_GAME__;
@@ -157,8 +193,7 @@ test('trade with 阿林 changes the bag (电线 for 废金属)', async ({ page }
     s?.player.inventory.slots.push({ itemId: 'scrap_metal', quantity: 1 });
   });
 
-  await setX(page, 480);
-  await pressEUntil(page, async () => hasVisibleText(page, '阿林（维修工）'));
+  await pressEAtNpc(page, 'alin', async () => hasVisibleText(page, '阿林（维修工）'));
   await selectInMenu(page, MAIN_OPTIONS, '交易');
   await page.keyboard.press('Enter'); // open trade menu
   await page.screenshot({ path: 'e2e/screenshots/09-npc-trade.png' });
@@ -183,8 +218,7 @@ test('trade with 小周 changes the bag (面包 for 口粮)', async ({ page }) =
   const rationBefore = await count(page, 'ration_pack');
   expect(rationBefore).toBeGreaterThanOrEqual(1);
 
-  await setX(page, 800);
-  await pressEUntil(page, async () => hasVisibleText(page, '小周（邻居）'));
+  await pressEAtNpc(page, 'xiaozhou', async () => hasVisibleText(page, '小周（邻居）'));
   await selectInMenu(page, MAIN_OPTIONS, '交易');
   await page.keyboard.press('Enter'); // open trade menu
   await page.waitForTimeout(150);
@@ -206,8 +240,7 @@ test('a failed trade leaves no half-exchange', async ({ page }) => {
   await startGame(page, 42);
   await goToNeighborFloor(page);
   // No 废金属 given: 阿林's 电线<-废金属 offer must fail.
-  await setX(page, 480);
-  await pressEUntil(page, async () => hasVisibleText(page, '阿林（维修工）'));
+  await pressEAtNpc(page, 'alin', async () => hasVisibleText(page, '阿林（维修工）'));
   await selectInMenu(page, MAIN_OPTIONS, '交易');
   await page.keyboard.press('Enter'); // trade menu
   await page.waitForTimeout(150);
@@ -222,8 +255,7 @@ test('a failed trade leaves no half-exchange', async ({ page }) => {
 test('back and exit do not get stuck', async ({ page }) => {
   await startGame(page, 42);
   await goToNeighborFloor(page);
-  await setX(page, 480);
-  await pressEUntil(page, async () => hasVisibleText(page, '阿林（维修工）'));
+  await pressEAtNpc(page, 'alin', async () => hasVisibleText(page, '阿林（维修工）'));
 
   await selectInMenu(page, MAIN_OPTIONS, '交易');
   await page.keyboard.press('Enter'); // -> trade menu

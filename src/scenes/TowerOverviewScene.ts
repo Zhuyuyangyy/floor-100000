@@ -448,8 +448,13 @@ export class TowerOverviewScene extends Phaser.Scene {
     // And a back arrow, pinned to the screen (scrollFactor 0) rather than to the
     // world: at this level the camera scrolls, and a world-space arrow drifted
     // 300px up the tower.
+    //
+    // One hint-row ABOVE the footer, not on it: the footer owns the band from
+    // DESIGN_HEIGHT - TOWER_FOOT_TOP (684..717), and the arrow used to open at
+    // 685 — 91x27px of overlap, measured on all three tower levels, which made
+    // the bottom-left corner read as one smudge.
     const back = this.add
-      .text(14, DESIGN_HEIGHT - 22, '← 返回', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_BODY}px`, color: hex(PALETTE.clothHigh) })
+      .text(14, DESIGN_HEIGHT - TOWER_FOOT_TOP - 26, '← 返回', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_BODY}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0, 0.5)
       .setScrollFactor(0)
       .setDepth(PANEL_DEPTH.tower.detail + 6);

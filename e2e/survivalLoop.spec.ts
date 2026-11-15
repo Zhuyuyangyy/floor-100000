@@ -284,11 +284,21 @@ test('barter converts resources and never creates them', async ({ page }) => {
   const wireBefore = await count(page, 'wire');
   expect(scrapBefore).toBeGreaterThan(0);
 
-  await setX(page, 480); // 阿林
   // The dialogue opening itself needs retrying: Phaser's frame-based input
-  // occasionally drops a single synthetic keypress.
+  // occasionally drops a single synthetic keypress. 阿林 also walks (AG-11), so
+  // 480 is her spawn anchor, not her position — re-seat on the live sprite.
   for (let i = 0; i < 6; i++) {
     if (await hasVisibleText(page, '阿林（维修工）')) break;
+    // 阿林 walks (AG-11 autonomy): the constant above is her spawn anchor in
+    // npcs.ts, not where she is now (measured 224 vs 480). Re-seat the player on
+    // her live sprite before each try, or E opens nothing.
+    const alinX = await page.evaluate(() => {
+      const g = window.__PHASER_GAME__;
+      const sc = g?.scene.getScene('Game') as unknown as { npcObjs?: Map<string, { sprite: { x: number } }> } | null;
+      const rec = sc?.npcObjs?.get('alin');
+      return rec ? Math.round(rec.sprite.x) : null;
+    });
+    if (alinX !== null) await setX(page, alinX);
     await page.keyboard.press('E');
     await page.waitForTimeout(220);
   }

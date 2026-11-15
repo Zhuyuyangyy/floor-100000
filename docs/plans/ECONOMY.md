@@ -115,3 +115,84 @@
 3. **`recipeAccessTier` 门禁未开**（见 R4）：字段、消费函数、测试就绪，等权力线独立等级来源。
 4. **shelter `treat` 路径（ShelterSystem.ts，非本工单文件）用医疗包治病不走 `useConsumable`**，因此那一次治疗不给 survival +15——要么该系统改为复用 `useConsumable`，要么由它的 Owner 补一次 `grantGrowthXp`。
 5. **商人不收购也不卖材料（buy 侧）**：tier 3 以后"交易网络丰富"的设计意图需要高楼层 shop 上架材料，本工单只做了收购侧（卖→金），避免稀释搜刮价值；上架侧留待楼层经济深化。
+
+---
+
+# AG-14 续篇：经济的时间维度、商人 buy 侧与产业投资
+
+**日期**：2026-11-15
+**范围**：接 AG-05 三个遗留（priceJitter/productionDecay 无调用方、商人 buy 侧、investedGold/ventures 无生产者），把经济从"闭环"推进到"有博弈"
+**分支**：`agent/2026-11-15/ag-14-economy-deep`
+**涉及文件**：`src/systems/shop.ts`、`src/systems/SurvivalSystem.ts`（仅跨日钩子）、`src/tests/economyLoop.test.ts`（只追加）、`docs/plans/ECONOMY.md`（本文）
+
+## 6. 价格与产量的时间维度（priceJitter / productionDecay）
+
+AG-05 遗留第 4 条：两个钩子导出后没有任何调用方，经济是静止的。本节把时间维度接上，全部走 `deriveSeed`/`makeRng`，禁 Math.random：
+
+| 钩子 | 语义 | 调用方 |
+|---|---|---|
+| `priceJitter(seed, day)` | 当日行情倍率 0.85..1.15，`makeRng(deriveSeed(seed, day, 'shop-price-jitter'))` 一抽 | `materialAsk` / `materialPrice` |
+| `productionDecay(day)` | 当日产量系数 `0.97^(day-1)`（第 1 天 1.0，逐日指数衰减） | `settleInvestments` |
+
+**为什么波动的只有"商人出售材料"的要价（buy 侧）**，收购价与商品标价一动不动：
+
+1. 收购价（`MATERIAL_SELL_PRICES`）是全经济的锚——"保底材料全卖 32 金"和"收购价永低于找阿林换实物（battery(3)<fuse(5)、scrap(2)<wire(3)）"两条硬断言钉在具体数字上，任何乘性抖动都会让 32 这个总数与等价序漂移。硬通货 therefore 全世界固定（AG-05 的原注释也是这个意思）。
+2. 商品架（`SHOP_STOCK`）标价由 GameScene 直接读 `shopStock().price` 渲染，若 `buy()` 改收抖动的价，面板显示与实际收费会分家（场景归 AG-11，本工单不碰）。
+3. 商人出售材料原本不存在，是本次新增的面，没有既有断言钉它——波动放在新面上，硬边界零风险。
+
+**无套利是结构性的，不靠运气**：要价 = `max(收购价 + 1, round(基础要价 × 当日行情))`，买侧的熟人折扣（`tradePriceMultiplier`，最低 0.7）也夹在同一个 `收购价 + 1` 下限上。所以任何 seed、任何一天、任何 connections 等级，材料买价都严格高于卖价——"买价和卖价用不同抖动"的套利在数学上不可能出现。测试对 3 seeds × 40 天 × 8 材料全扫，另扫满级人脉的往返。
+
+跨日推进挂在 `SurvivalSystem`（本工单文件）的两个既有路径上，场景零改动：`advanceGameMinutes` 的日滚循环（帧循环 `advanceTime` 与动作 `spendTime` 都汇到这里）和 `sleep`。**每条跨日路径都结一次"刚结束的那天"**，单调递增的 `state.day` 保证每天恰好结一次。
+
+## 7. 商人出售材料（buy 侧）
+
+`buy()` 扩展：先查本层货架（命中就按货架价，局部永远优先于全局），未命中再查材料货架（全球统一价，与收购侧同规则）。材料要价表 `MATERIAL_ASK_PRICES`：
+
+| 材料 | 收购价 | 基础要价 | 定价依据（三锚） |
+|---|---|---|---|
+| fuse | 5 | 8 | 全链唯一无 barter 来源的凭证料；保底仅 1 个却是 core_key 硬门槛 |
+| filter | 4 | 7 | purifier（生存命脉）+ permit 双需求；保底仅 1 个 |
+| battery | 3 | 5 | 阿林 fuse↔battery 1:1 的"次级 fuse" |
+| wire | 3 | 5 | 阿林 scrap↔wire 1:1；全链需求最大之一 |
+| scrap_metal | 2 | 4 | 保底 3 为全塔最富，与 wire 等价但供应三倍 |
+| cloth / wood / tape | 2 | 4 | 到处都有 / 保底=唯一需求 / 高层概率普遍 |
+
+三锚可复算：① 要价保持 battery(5)<fuse(8)、scrap(4)<wire(5) 的序（与收购侧同向），且**要价严格高于对应易物的金币成本**——一根电线的要价（≥4）永远高于付给阿林的那块废金属的收购价（2），一枚保险丝的要价（≥7）永远高于那颗电池的收购价（3）：拿货去兑永远是更优路径，阿林因此仍是保底之外的优解，商人只是"没有易物货可兑时的现金通道"；② tier 1 保底供应 vs 全链需求定档，与收购侧同一把尺；③ **变现总额约束的对称面**：tier 1 保底材料按要价全买 ≈ 58 金（行情 ±15%），永远高于全卖的 32 金——买料做配方不会成为比搜刮更优的解，卖料买食也不会（两个方向都有测试钉）。
+
+XP：买材料照付 wealth +10（"交易达成"，与商品买入同一契约行）。
+
+## 8. 投资与产业（investedGold / ventures 的生产者）
+
+终局路线 B"独立商人与产业领袖"的账本（GROWTH_INTERFACES §9）终于有生产者。三门生意（`VENTURES`，`src/systems/shop.ts`）：
+
+| 产业 | 成本 | 日产率 | 当日亏损率 | 倒闭率 |  fiction |
+|---|---|---|---|---|---|
+| 宿舍水站 | 40 | 5% | 6% | 1% | 路人拿脏水换净水你抽成，客源稳定本小利薄 |
+| 废铁商路 | 80 | 10% | 12% | 3% | 去维修层收废铁转手，塔里废铁捡一天少一天 |
+| 口粮暗线 | 120 | 16% | 20% | 6% | 从食堂倒出口粮，利润最厚，被查扣一次全没 |
+
+**账本形状**（不能给 GameState 加字段——`core/gameTypes.ts` 不是本工单地盘）：`investedGold` = 在册产业成本合计（沉没资本），`ventures` = 在册产业 id（一种一门，重复入股被拒）。倒闭/亏损只改这两个字段 + `player.gold`，存档天然携带整个账本（round-trip 有测试）。
+
+**结算**（`settleInvestments(state)`，由 SurvivalSystem 的两个跨日路径调用）：结算"刚结束的那一天"（`state.day - 1`）。当日毛产出 = `round(cost × baseRate × productionDecay(当日))`；`wealth +5`/有收入的产业；入股时 `wealth +50`（契约 §5）。
+
+**风险怎么触发**（不是稳赚）：对每门在册产业用 `makeRng(deriveSeed(runSeed, 当日, 'venture', 产业id))` 依次摇两个 chance——先 `collapseChance`（**倒闭**：本金全损、产业出局、当天没收入、不给 XP），再 `lossChance`（**当日亏损**：没收入，本金还在）。同 seed 同一天同一门产业必然同结果（可复现），跨天真的不同。期望周收益沿风险梯度上升（≈+23% / +32% / +32%），但左尾很肥：口粮暗线一周内存亡率约四成——"把钱沉下去还是攥在手里过冬"因此是个真决定。
+
+**幂等**：结算水位标记存在 `state.flags['economy:settled-day']`（走 WorldFlags 的 `flagCount/setFlag`，只读不改那个文件），任何调用方（包括未来一个"查看收益"的面板按钮）在同一天内重复调用不会重复结算刷钱。
+
+**产量的时间维度**：`productionDecay(day) = 0.97^(day-1)`——塔里存量逐日枯竭，捡一天少一天，产业产量随结算日指数衰减。"早入场"本身就是收益，长线不再复利。
+
+## 9. 测试增量（economyLoop.test.ts 只追加，21 例）
+
+1. **当日市场**：priceJitter 同 (seed, day) 两次同抽、区间 [0.85, 1.15]、跨天真不同、跨 seed 不同；同日两次购买同价且逐金等于 `materialAsk`；3 seeds × 40 天 × 8 材料全扫"要价 > 收购价且 ≥ 收购价+1"；要价 > 阿林易物的金币成本（wire>scrap 收购价、fuse>battery 收购价）；材料往返在每个扫描日必亏；满级人脉折扣也不能套利材料架；保底材料全买 > 32 金且一进一出必亏；`materialShelf` 八件齐全、按价降序、fuse 恒贵于 battery。
+2. **投资与风险**：入股金→账本 +50 XP、账本不变量（investedGold ≡ 在册成本合计）；拒绝未知/重复/钱不够且原子；结算确定性（两次运行逐字段相等）且逐金对上公式；日内幂等；productionDecay(1)=1 且严格递减、30 天不足半产；30 seeds × 3 门 × 29 天长扫——亏损日、倒塌、收钱都真实发生且每个结算日账本不变量成立；倒塌亏本金出局不给 XP；亏损日本金还在；睡一晚结算（醒来有钱）；熬过午夜也结算（与直接调用逐字段一致）；存档 round-trip 后账本完整且能继续结算。
+3. **survivalBalance 不被破坏**：材料楼层保底配额（scrap 3 / wood 2 / tape 1 / fuse 1 / filter 1 / wire 2）逐项未动，三件设施照旧可建——金币通道没有替代搜刮路径。
+
+**全量**：`npx tsc --noEmit` 干净；`VITE_NPC_MODEL= npx vitest run` → **67 文件 1101 例全绿**（基线 1080 + 21）。AG-05 钉死的硬边界（32 金 / 永低于找阿林换实物 / 三等级不套利 / 每层恰好一瓶 guaranteed 水）逐条未动分毫。
+
+## 10. 没处理干净的地方（交接）
+
+1. **材料 buy 侧没有 UI**：GameScene 的商店面板仍只渲染 `shopStock()` 的条目，材料货架（`materialShelf`）与投资面板（`VENTURES`/`invest`/`settleInvestments`）在系统层就绪，等 AG-11 接线；接线时注意牌价是当日价，重复打开面板会刷新。
+2. **撤资（退出产业收回部分本金）没做**：资本沉下去后只能等倒塌或收益，没有流动性出口。攥着金币过冬的玩家因此完全被锁死——不构成软锁（搜刮/卖料仍是现金来源），但"落袋为安"的反向操作缺失。
+3. **风险参数是拍的不是算的**：成本/日产率/亏损率/倒塌率按"风险梯度上周收益 ≈ +23%/+32%/+32%"拍的，未做完整蒙特卡洛平衡，等 playtest 数据回修。
+4. **结算只结"刚结束的那天"**，跳日（一次 `spendTime` 跨两天以上）时引擎循环逐日补结，但直接调用方若手工把 `state.day` 推远，中间日不补结算——水位标记是单点不是区间。
+5. **`investedGold` 与 NPC 经济的互动为零**：商路 fiction 上应该跟 AG-06 的 NPC 库存/补货压力联动（收废铁→阿林库存紧张），本工单只做了纯金币账本。

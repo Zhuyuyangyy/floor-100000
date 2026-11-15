@@ -5,6 +5,7 @@ import type { GameState } from '../core/gameTypes';
 import { grantGrowthXp } from '../core/growth';
 import { modeDecayMult } from './modes';
 import { hungerLossMult } from './relics';
+import { settleInvestments } from './shop';
 import { tickEnvironment, type EnvironmentTick } from './EnvironmentSystem';
 import { tickSickness, type SicknessTick } from './SicknessSystem';
 
@@ -90,6 +91,12 @@ function advanceGameMinutes(state: GameState, gameMinutes: number): TimeTick {
   while (minute >= MINUTES_PER_DAY) {
     minute -= MINUTES_PER_DAY;
     state.day += 1;
+    // AG-14: 产业按日结算——跨过午夜就结刚结束那天（无投资时是 no-op，
+    // 只写一个水位标记）。挂在时钟引擎里而不是场景里：推进时间的每条
+    // 路径（帧循环 advanceTime / 动作 spendTime / 睡觉 sleep）都汇到
+    // 这里或下面，日结因此真的随时间发生，AG-05 遗留的
+    // "productionDecay/priceJitter 没有调用方"到此闭环。
+    settleInvestments(state);
     dayChanged = true;
   }
   state.gameMinuteOfDay = minute;
@@ -177,6 +184,10 @@ export function sleep(state: GameState): SleepResult {
   state.day += 1;
   state.gameMinuteOfDay = GAME_CONFIG.time.dayStartMinute;
   state.player.energy = GAME_CONFIG.player.energyMax;
+  // AG-14: 睡醒即跨日，产业结算跟着醒来一起发生（无投资时 no-op）。
+  // 与 advanceGameMinutes 的日滚循环走同一个入口，水位标记保证同一天
+  // 不会被两条路径重复结算。
+  settleInvestments(state);
   // Charged after the clock moves, so a player who wakes up starving sees it
   // immediately rather than a minute later.
   applyRestDecay(state, nightHours);

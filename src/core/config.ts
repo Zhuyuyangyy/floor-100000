@@ -1,4 +1,11 @@
-import balance from '../../config/game-balance.json';
+// `with { type: 'json' }` is required, not decorative: a bare JSON import throws
+// ERR_IMPORT_ATTRIBUTE_MISSING under Node's ESM loader (Node >= 20.10), which
+// broke every Playwright spec that transitively imports this module. Vite and
+// Vitest transform imports through their own pipeline and accepted the bare
+// form, so the failure only surfaced outside the bundler. The attribute is the
+// standard (ECMA-262 import attributes; the older `assert` form is deprecated)
+// and is understood by Vite 5+/Vitest/tsc alike.
+import balance from '../../config/game-balance.json' with { type: 'json' };
 
 // Typed view over the design-balance JSON (docs/config/game-balance.json),
 // which is the single source of truth for starting values.

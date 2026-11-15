@@ -4,6 +4,7 @@ import { getGame, hasGame } from './core/session';
 import { unlockAudio } from './render/audio';
 import { FONT_FACES } from './render/uiKit';
 import { QuestPanelScene } from './scenes/QuestPanelScene';
+import { EndgameScene } from './scenes/EndgameScene';
 
 /**
  * Phaser creates a Text's canvas once and measures it against whatever font is
@@ -40,6 +41,14 @@ async function boot(): Promise<void> {
   // from anywhere without touching the core config. Key and event contract:
   // docs/plans/UI.md「任务面板与 quests:changed」.
   game.scene.add('QuestPanel', QuestPanelScene);
+
+  // The finale: floor 100000's ruling core (Q6 `same-pen`). Registered here for
+  // the same reason as the quest panel — core/gameConfig's scene list is the
+  // shared boot contract, and this scene is a handoff GameScene starts from the
+  // 100000 container interactions (entry contract: docs/plans/FINALE_UX.md).
+  // add() with autoStart false parks it dormant, so scene.start('Endgame')
+  // resolves from anywhere.
+  game.scene.add('Endgame', EndgameScene);
 
   // Browsers gate audio behind a user gesture; unlock on the first one.
   const unlock = (): void => unlockAudio();

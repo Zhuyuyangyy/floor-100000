@@ -45,13 +45,18 @@ describe('encounter spots', () => {
   it('follows the table to the tower top, and skips the tops without one', () => {
     // The tower top used to be a floor whose table had no boss (10, then 1010,
     // then 10010) and the marker had to stay off it. 50010 closes the VIP tier
-    // and DOES carry the keeper, so for the first time the list's end is also a
-    // boss floor — the marker follows the table up to it, still derived rather
-    // than hard-coded, so the old drift cannot come back.
+    // and DOES carry the keeper; the summit 100000 — authored in the finale —
+    // does not: 终局等的是终端不是怪物（encounters.ts 的 100000 行没有 boss）。
+    // So the marker follows the table up to the LAST boss floor, not to the
+    // list's end, still derived rather than hard-coded, so the old drift cannot
+    // come back.
     const top = Math.max(...PLAYABLE_FLOORS_V01);
-    expect(top).toBe(50010);
-    expect(ENCOUNTER_TABLE[top].some((e) => e.kind === 'boss')).toBe(true);
-    expect(encounterSpots(42, top).some((s) => s.isBoss)).toBe(true);
+    expect(top).toBe(100000);
+    expect(ENCOUNTER_TABLE[top].some((e) => e.kind === 'boss')).toBe(false);
+    expect(encounterSpots(42, top).some((s) => s.isBoss)).toBe(false);
+    const lastBoss = 50010;
+    expect(ENCOUNTER_TABLE[lastBoss].some((e) => e.kind === 'boss')).toBe(true);
+    expect(encounterSpots(42, lastBoss).some((s) => s.isBoss)).toBe(true);
     // The segment tops whose tables have no boss still carry none, even though
     // the list's end once sat on each of them.
     for (const floor of [1010, 10010]) {

@@ -226,7 +226,9 @@ describe('summarizeFloor 区段摘要', () => {
     expect(summarizeFloor(SEED_A, 1).authored).toBe(true);
     expect(summarizeFloor(SEED_A, 10).authored).toBe(true);
     expect(summarizeFloor(SEED_A, 100).authored).toBe(true);
-    expect(summarizeFloor(SEED_A, 100000).authored).toBe(false);
+    // 终局创作（AG-16）后 100000 不再是 dev 别名：它是段 6 的唯一楼层，也是
+    // 已创作楼层——摘要读它自己的模板（统治核心），不再是第 1 层宿舍。
+    expect(summarizeFloor(SEED_A, 100000).authored).toBe(true);
     // 摘要里的容器数/id 就是模板里的容器数/id。
     const s5 = summarizeFloor(SEED_A, 5);
     expect(s5.containerIds).toEqual(['counter', 'pantry']);
@@ -235,7 +237,8 @@ describe('summarizeFloor 区段摘要', () => {
   });
 
   it('marks the unexplored floors and derives their compact state', () => {
-    // 全部在段间空白里；100000 不在其列——它是段 6 的唯一楼层，未创作但在段内。
+    // 全部在段间空白里；100000 不在其列——它是段 6 的唯一楼层，已在段内且
+    // 已创作（上面的 authored 断言钉着这一点）。
     for (const f of [11, 50, 99, 111, 999, 1011, 9999, 10011, 49999, 50011, 99999]) {
       const s = summarizeFloor(SEED_A, f);
       expect(s.authored).toBe(false);
@@ -249,7 +252,7 @@ describe('summarizeFloor 区段摘要', () => {
       }
     }
     const summit = summarizeFloor(SEED_A, 100000);
-    expect(summit.authored).toBe(false);
+    expect(summit.authored).toBe(true);
     expect(summit.segment?.id).toBe(6);
   });
 
@@ -324,12 +327,14 @@ describe('generateFloorContent 确定性生成', () => {
     }
   });
 
-  it('finally generates the summit instead of borrowing floor 1', () => {
-    // DEV_FLOOR_ALIAS 让 generateFloor(100000) 返回玩家宿舍；本函数的合成分支
-    // 绕过别名——终局层第一次有了自己的名字与容器。
-    expect(hasFloorContent(100000)).toBe(false);
+  it('generates the authored summit through its own template', () => {
+    // 终局创作（AG-16）前，generateFloor(100000) 靠 DEV_FLOOR_ALIAS 返回玩家
+    // 宿舍，本函数的合成分支绕过别名自己造一层；别名已删、真模板就位，两条
+    // 路在终局会师——委托给模板，返回统治核心自己的名字与容器。
+    expect(hasFloorContent(100000)).toBe(true);
     const summit = generateFloorContent(SEED_A, 100000);
-    expect(summit.name).not.toBe(generateFloor(SEED_A, 100000).name);
+    expect(summit).toEqual(generateFloor(SEED_A, 100000));
+    expect(summit.name).toBe('统治核心');
     expect(summit.name).not.toBe('玩家宿舍');
     expect(summit.containers.length).toBeGreaterThanOrEqual(2);
   });

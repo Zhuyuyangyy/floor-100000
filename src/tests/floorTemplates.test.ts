@@ -336,8 +336,8 @@ describe('the commercial tier (10000-10010)', () => {
 // 水以净水为主，只有喂养层（50005）与楼上实验室（50008）是脏水。容器 id
 // 仍只能落在有贴图的家具上（没有新美术），问 containerTextureKey。
 describe('the VIP tier (50000-50010)', () => {
-  // 只圈阶层 5 自己：100000 是统治核心，另有终局 describe 钉它。
-  const VIP_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 50000);
+  // 只圈阶层 5 自己：100000 是统治核心（段 6），另有终局 describe 钉它。
+  const VIP_FLOORS = PLAYABLE_FLOORS_V01.filter((f) => f >= 50000 && f < 100000);
 
   it('is exactly the eleven floors of segment 5', () => {
     expect(VIP_FLOORS).toEqual([

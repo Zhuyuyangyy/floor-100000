@@ -140,7 +140,10 @@ export function freshStateFor(npc: NpcDef, day: number): NpcPersistedState {
 
 // 与 ai/config.ts 的 archetypeForNpcId 同规则；此处不 import 配置模块，
 // 避免库存模块牵连推理配置（保持纯逻辑依赖）。
+// AG-13：data/npcs.ts 的 archetype 字段优先（lab_clerk 显式 ally，
+// 五位新发布者各自标注），缺省才回落到写死映射，最后 neutral。
 function archetypeOf(npc: NpcDef): NpcPersistedState['archetype'] {
+  if (npc.archetype) return npc.archetype;
   if (npc.id === 'alin') return 'ally';
   if (npc.id === 'xiaozhou') return 'neutral';
   return 'neutral';

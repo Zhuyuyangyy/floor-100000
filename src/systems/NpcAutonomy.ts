@@ -14,7 +14,7 @@ import { validateProposal, type NpcEventFact, type NpcFact } from '../ai/rulesEx
 import { eventStatus } from './EventSystem';
 import { isNight } from './SurvivalSystem';
 import { loadNpcState } from './NpcMemory';
-import { FLOOR_WIDTH } from '../core/constants';
+import { FLOOR_WIDTH, STARTING_FLOOR } from '../core/constants';
 import { deriveSeed, makeRng, type Rng } from '../core/rng';
 import type { NpcActionProposal, NpcBrain, NpcObservation, NpcPersistedState } from '../ai/types';
 import type { GameState } from '../core/gameTypes';
@@ -241,6 +241,122 @@ export function planNightWanderer(state: GameState): NightWandererPlan {
   if (!isNight(state.gameMinuteOfDay) && event.source !== 'dwell') return absentPlan(floor, '天亮了，巡游体不会出现');
   const spawnX = wandererNightSpawnX(state, event.source ?? 'night', floor);
   return { present: true, floor, spawnX, aggroRange: wandererAggroRange(state), reason: '' };
+}
+
+// ── 跨层寻仇（AG-13）─────────────────────────────────────────────────────
+//
+// AG-06 遗留缺口：「结仇只放大仇恨范围，没有跨层寻仇」——流浪者记了仇，
+// 却只会在夜间事件恰好轮到玩家所在层时才出现。这里补上：关系 ≤ -30
+// （WANDERER_GRUDGE_RELATIONSHIP）之后，从记仇次日起每个游戏日掷一次
+// 骰，命中则当日盯上玩家——不管夜间事件抽没抽到这层，它都来。
+//
+// 概率模型（全部确定性，禁 Math.random）：
+//   P(寻仇) = 0（未结仇 / 结仇当日 / 宿舍层）
+//           = WANDERER_VENDETTA_CHANCE（结仇次日起，每日一次判定）
+// 每日判定走 deriveSeed(runSeed, day, 'wanderer', 'vendetta')：同 seed
+// 同天必得同一结果，跨天重新掷。呈现时机沿用流浪者的夜行习性——
+// 白天寻仇者只是「在这层埋伏」，入夜才真正登场（present）。
+// 宿舍（STARTING_FLOOR）是安全屋，与 EventSystem 的 EVENT_FLOORS
+// 豁免一致：回家就安全。
+
+/** 结仇后每日跨层寻仇的基础概率（可调；0.4 ≈ 平均两天半来一次）。 */
+export const WANDERER_VENDETTA_CHANCE = 0.4;
+
+export interface WandererVendettaPlan {
+  /** 今日流浪者是否盯上了玩家（跨层寻仇判定；白天也为 true，它在埋伏） */
+  hunting: boolean;
+  /** 这一帧该不该在场上：寻仇判定命中且是夜间 */
+  present: boolean;
+  /** 寻仇目标楼层 = 玩家当前楼层（不在场时也是当前楼层，供日志） */
+  floor: number;
+  /** 确定性出生点（不在场为 0） */
+  spawnX: number;
+  /** 仇恨范围（结仇放大后的 390；寻仇必然已结仇） */
+  aggroRange: number;
+  /** 今日掷出的点数 0..1（未掷时为 0；测试/日志用） */
+  roll: number;
+  /** 不寻仇/不在场的原因（测试/日志用；在场时为空串） */
+  reason: string;
+}
+
+/**
+ * 记仇日：关系已结仇时，取该 NPC 最近一条负面记忆（weight < 0）的日期。
+ * 没有负面记忆却已是结仇关系（例如直接写进存档的状态）→ 0，
+ * 视为「早于本存档」，从第 1 天起就可寻仇。未结仇 → 0（调用方先看关系）。
+ */
+export function wandererGrudgeDay(state: GameState): number {
+  const npcState = loadNpcState(state, 'wanderer');
+  const relationship = npcState?.relationship.player ?? 0;
+  if (relationship > WANDERER_GRUDGE_RELATIONSHIP) return 0;
+  let day = 0;
+  for (const m of npcState?.memory ?? []) {
+    if (m.weight < 0 && m.day > day) day = m.day;
+  }
+  return day;
+}
+
+/**
+ * 今日（这一帧）流浪者的跨层寻仇计划。纯函数：同 state → 同结果，
+ * 不写任何状态。与 planNightWanderer 的关系：两者独立求值，场景在
+ * present 时优先采用本计划（寻仇无视夜间事件的抽层结果），否则回落
+ * 到夜间事件计划。
+ */
+export function planWandererVendetta(state: GameState): WandererVendettaPlan {
+  const floor = state.currentFloor;
+  const aggroRange = wandererAggroRange(state);
+  const npcState = loadNpcState(state, 'wanderer');
+  const relationship = npcState?.relationship.player ?? 0;
+  if (relationship > WANDERER_GRUDGE_RELATIONSHIP) {
+    return { hunting: false, present: false, floor, spawnX: 0, aggroRange, roll: 0, reason: '流浪者尚未记仇（关系 > -30）' };
+  }
+  const grudgeDay = wandererGrudgeDay(state);
+  if (state.day <= grudgeDay) {
+    return {
+      hunting: false,
+      present: false,
+      floor,
+      spawnX: 0,
+      aggroRange,
+      roll: 0,
+      reason: `结仇第 ${grudgeDay} 日不寻仇，给玩家一夜缓冲`,
+    };
+  }
+  if (floor === STARTING_FLOOR) {
+    return { hunting: false, present: false, floor, spawnX: 0, aggroRange, roll: 0, reason: '宿舍是安全屋，寻仇者不进门' };
+  }
+  const rng = makeRng(deriveSeed(state.runSeed, state.day, 'wanderer', 'vendetta'));
+  const roll = rng.nextFloat();
+  if (roll >= WANDERER_VENDETTA_CHANCE) {
+    return {
+      hunting: false,
+      present: false,
+      floor,
+      spawnX: 0,
+      aggroRange,
+      roll,
+      reason: `今日未寻仇（掷出 ${roll.toFixed(2)} ≥ ${WANDERER_VENDETTA_CHANCE}）`,
+    };
+  }
+  if (!isNight(state.gameMinuteOfDay)) {
+    return {
+      hunting: true,
+      present: false,
+      floor,
+      spawnX: 0,
+      aggroRange,
+      roll,
+      reason: '寻仇者已盯上玩家，天亮了它就在本层埋伏',
+    };
+  }
+  return {
+    hunting: true,
+    present: true,
+    floor,
+    spawnX: wandererNightSpawnX(state, 'vendetta', floor),
+    aggroRange,
+    roll,
+    reason: '',
+  };
 }
 
 // ── 游荡行为（阶段 C）────────────────────────────────────────────────────

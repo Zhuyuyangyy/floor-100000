@@ -14,7 +14,8 @@
 import type { GameState, ItemId } from '../core/gameTypes';
 import { getItem } from '../data/items';
 import type { BarterOffer, NpcDef } from '../data/npcs';
-import { trade } from '../systems/TradeSystem';
+import { trade, canFit } from '../systems/TradeSystem';
+import { addItem, countItem, removeItem } from '../systems/InventorySystem';
 import { recordMemory, saveNpcState } from '../systems/NpcMemory';
 import type { NpcInventory, NpcPersistedState, NpcStockEntry, ReputationTier } from './types';
 import {
@@ -167,28 +168,50 @@ export function executeBarter(state: GameState, npc: NpcDef, offerId: string): B
 /**
  * 收下玩家的赠品并入库（阶段 D 路线图闭环：赠品 → NPC 真的持有 →
  * 日后可被交易/回赠）。同时记一条 gift 记忆（关系上升）。
+ *
+ * AG-13 背包闭环：赠品从玩家背包**真实扣除**（先校验后扣除，失败时
+ * NPC 库存/关系/记忆一律不动）。背包里没有就说没有——不再允许
+ * 「无中生有的礼物」把关系刷上去。只调用 InventorySystem，不改它。
  */
 export function receiveGift(state: GameState, npc: NpcDef, itemId: ItemId, quantity = 1): BarterOutcome {
   const { npcState, inventory } = syncNpcInventory(state, npc);
-  const nextInventory = giveToStock(inventory, itemId, quantity);
+  const want = Math.max(0, Math.floor(quantity));
+  if (want < 1) {
+    return { ok: false, reason: '赠品数量无效', tier: reputationOf(npcState) };
+  }
+  if (countItem(state.player.inventory, itemId) < want) {
+    return {
+      ok: false,
+      reason: `你没有足够的${getItem(itemId).displayName}，赠礼作罢`,
+      tier: reputationOf(npcState),
+    };
+  }
+  removeItem(state.player.inventory, itemId, want);
+  const nextInventory = giveToStock(inventory, itemId, want);
   const remembered = recordMemory(npcState, {
     day: state.day,
     minute: state.gameMinuteOfDay,
     kind: 'gift',
     actor: 'player',
-    summary: `获赠${getItem(itemId).displayName}×${quantity}`,
+    summary: `获赠${getItem(itemId).displayName}×${want}`,
   });
   saveNpcState(state, npc.id, withInventory(remembered, nextInventory));
   return {
     ok: true,
-    give: { itemId, quantity },
+    give: { itemId, quantity: want },
     inventory: nextInventory,
     relationship: remembered.relationship.player,
     tier: reputationOf(remembered),
   };
 }
 
-/** 取出回赠礼物（从库存扣除并返回物品）；没有可送的返回 null。 */
+/**
+ * 取出回赠礼物（从库存扣除并返回物品）；没有可送的返回 null。
+ *
+ * AG-13 背包闭环：回赠物品**真的进玩家背包**。装不下就整体失败
+ * （背包满的明确回执）——NPC 库存和玩家背包都不动，物品绝不凭空蒸发。
+ * 只调用 InventorySystem（addItem），不改它。
+ */
 export function claimGift(
   state: GameState,
   npc: NpcDef,
@@ -196,9 +219,13 @@ export function claimGift(
   const { npcState, inventory } = syncNpcInventory(state, npc);
   const gift = giftOffer(npc, inventory, reputationOf(npcState));
   if (!gift) return { ok: false, reason: 'NPC 没有可以回赠的东西' };
+  if (!canFit(state.player.inventory, gift.itemId, gift.quantity)) {
+    return { ok: false, reason: `背包空间不足，装不下${getItem(gift.itemId).displayName}` };
+  }
   const nextInventory = takeFromStock(inventory, gift.itemId, gift.quantity);
+  const added = addItem(state.player.inventory, gift.itemId, gift.quantity);
   saveNpcState(state, npc.id, withInventory(npcState, nextInventory));
-  return { ok: true, itemId: gift.itemId, quantity: gift.quantity, inventory: nextInventory };
+  return { ok: true, itemId: gift.itemId, quantity: added.added, inventory: nextInventory };
 }
 
 // 供测试与场景复用的读取入口：拿到「已按天结算」的库存，无需关心补货细节。

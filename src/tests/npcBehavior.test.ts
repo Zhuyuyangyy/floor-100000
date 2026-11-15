@@ -237,9 +237,9 @@ describe('信誉 → 交易与态度（确定性，不依赖模型推理）', ()
   });
 
   it('attitudeLine：同一 NPC 四种信誉四句台词，neutral 走兜底句', () => {
-    expect(attitudeLine(npc('alin'), 'trusted')).toBe('老主顾，维修件我给你留着。');
-    expect(attitudeLine(npc('alin'), 'disliked')).toBe('你上次那事我没忘——得加价。');
-    expect(attitudeLine(npc('alin'), 'hostile')).toBe('别靠近我。线路不伺候你。');
+    expect(attitudeLine(npc('alin'), 'trusted')).toBe('老主顾。维修件我给你压在工具箱底下。');
+    expect(attitudeLine(npc('alin'), 'disliked')).toBe('上回那笔我没忘。价钱得加。');
+    expect(attitudeLine(npc('alin'), 'hostile')).toBe('别碰我的工具箱。');
     expect(attitudeLine(npc('alin'), 'neutral')).toBe('拿东西换就行。'); // data 里没写 neutral，用兜底
   });
 
@@ -633,7 +633,7 @@ describe('记忆 → 关系 → 信誉的因果链', () => {
     saveNpcState(s, 'alin', state);
     expect(state.relationship.player).toBeCloseTo(43.2, 5); // 3 × 14.4
     expect(reputationOf(loadNpcState(s, 'alin')!)).toBe('trusted');
-    expect(attitudeLine(npc('alin'), reputationOf(loadNpcState(s, 'alin')!))).toBe('老主顾，维修件我给你留着。');
+    expect(attitudeLine(npc('alin'), reputationOf(loadNpcState(s, 'alin')!))).toBe('老主顾。维修件我给你压在工具箱底下。');
   });
 
   it('攻击记忆把关系打进 hostile，且敌对 archetype 双倍记仇', () => {

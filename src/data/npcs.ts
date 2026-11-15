@@ -79,8 +79,8 @@ export const NPCS: NpcDef[] = [
     title: '维修工',
     floor: NPC_FLOOR,
     x: 480,
-    greetings: ['线路又烧了……你身上有电池吗？', '这层楼的保险丝迟早要出问题。'],
-    asks: ['电线和保险丝，去维修层(4)的电箱能稳定找到。', '我拿电线换废金属、保险丝换电池，公平吧？'],
+    greetings: ['来了？先别站门口，帮我扶一下梯子。', '你手上这茧——干过活的。哪层的？'],
+    asks: ['电线和保险丝，四层配电房的电箱里还有剩。', '废金属换电线，电池换保险丝。我这儿不赊。'],
     offers: [
       { id: 'alin_wire', give: { itemId: 'wire', quantity: 1 }, get: { itemId: 'scrap_metal', quantity: 1 } },
       { id: 'alin_fuse', give: { itemId: 'fuse', quantity: 1 }, get: { itemId: 'battery', quantity: 1 } },
@@ -95,10 +95,11 @@ export const NPCS: NpcDef[] = [
       { from: 1080, to: 1230, label: '和人闲聊', x: 980, goal: '和人换换情报，打听哪层有维修件' },
       { from: 1230, to: 360, label: '睡觉', x: 300, goal: '回宿舍睡觉，养足精神修线路' },
     ],
+    // 不写 neutral：中性时的兜底句归 npcEconomy.attitudeLine（测试钉住了这条兜底）。
     attitudeLines: {
-      trusted: '老主顾，维修件我给你留着。',
-      disliked: '你上次那事我没忘——得加价。',
-      hostile: '别靠近我。线路不伺候你。',
+      trusted: '老主顾。维修件我给你压在工具箱底下。',
+      disliked: '上回那笔我没忘。价钱得加。',
+      hostile: '别碰我的工具箱。',
     },
   },
   {
@@ -107,8 +108,8 @@ export const NPCS: NpcDef[] = [
     title: '邻居',
     floor: NPC_FLOOR,
     x: 800,
-    greetings: ['囤粮了吗？我这儿还有面包。', '别客气，拿东西换就行。'],
-    asks: ['食堂(5)有吃的，储物层(3)有材料。', '我拿面包换口粮、净水换脏水，务实点。'],
+    greetings: ['你来得巧，我刚把面包数完第二遍。', '别站着。……你手上那袋是什么？'],
+    asks: ['五层食堂有热食，三层储物间的箱子还没锁。', '一个面包换一份口粮，净水换脏水，我不占你便宜。'],
     offers: [
       { id: 'zhou_bread', give: { itemId: 'bread', quantity: 1 }, get: { itemId: 'ration_pack', quantity: 1 } },
       { id: 'zhou_water', give: { itemId: 'clean_water', quantity: 1 }, get: { itemId: 'dirty_water', quantity: 1 } },
@@ -124,9 +125,10 @@ export const NPCS: NpcDef[] = [
       { from: 1230, to: 360, label: '睡觉', x: 420, goal: '回宿舍睡觉，明天继续换物资' },
     ],
     attitudeLines: {
-      trusted: '冲你，这次算便宜点。',
-      disliked: '现在手头紧，得加价。',
-      hostile: '没什么好换的，走吧。',
+      trusted: '你的那份我另搁着。别吭声。',
+      neutral: '换就换。不换我收摊。',
+      disliked: '你手头紧？我这更紧。',
+      hostile: '门在那边。面包不卖你。',
     },
   },
   // ── 首章五位发布者（AG-13，docs/plans/STORY.md §5 对话稿）──────────────
@@ -150,8 +152,8 @@ export const NPCS: NpcDef[] = [
     archetype: 'neutral',
     quests: ['work-badge'],
     x: 120,
-    greetings: ['电梯认牌子，不认脸。', '想上 100 层？先聊聊。'],
-    asks: ['废金属换布料，胶带拿木头换。', '仿的工牌也是工牌，别细看。'],
+    greetings: ['姓名、楼层、去处。三个空，填。', '你站在这儿，就是来填表的。说吧。'],
+    asks: ['工牌交回，才算走完流程。墙上那块没交。', '废金属换布料，木头换胶带。数量看牌子。'],
     offers: [
       { id: 'recruiter_cloth', give: { itemId: 'cloth', quantity: 1 }, get: { itemId: 'scrap_metal', quantity: 2 } },
       { id: 'recruiter_tape', give: { itemId: 'tape', quantity: 1 }, get: { itemId: 'wood', quantity: 2 } },
@@ -165,10 +167,10 @@ export const NPCS: NpcDef[] = [
       { from: 1230, to: 360, label: '睡觉', x: 250, goal: '回宿舍睡觉，明天继续认脸' },
     ],
     attitudeLines: {
-      trusted: '老主顾，下次招工我顶着。',
-      neutral: '照章程办事。',
-      disliked: '你这种面孔，得加钱。',
-      hostile: '保安，请他出去。',
+      trusted: '你的表我压在最上面。',
+      neutral: '按章程办。下一位。',
+      disliked: '你的名字我划掉过一次。',
+      hostile: '保安。带他下楼。',
     },
   },
   {
@@ -180,8 +182,8 @@ export const NPCS: NpcDef[] = [
     archetype: 'neutral',
     quests: ['pass-sticker'],
     x: 1180,
-    greetings: ['通行贴，两块电池，明码标价。', '军队守门，我守门缝。'],
-    asks: ['电池换滤芯，脏水也收。', '三号货梯别开——除非给够。'],
+    greetings: ['看看？看不收钱，摸要收。', '军队守门，我守门缝。你走哪边？'],
+    asks: ['三号货梯别开。里面的东西不认人。', '废金属两块换电池两块。脏水三桶换滤芯。'],
     offers: [
       { id: 'blackmarket_battery', give: { itemId: 'battery', quantity: 2 }, get: { itemId: 'scrap_metal', quantity: 2 } },
       { id: 'blackmarket_filter', give: { itemId: 'filter', quantity: 1 }, get: { itemId: 'dirty_water', quantity: 3 } },
@@ -197,10 +199,10 @@ export const NPCS: NpcDef[] = [
       { from: 1230, to: 360, label: '睡觉', x: 250, goal: '收摊睡觉，防着半夜查账' },
     ],
     attitudeLines: {
-      trusted: '老客户，给你个实价。',
-      neutral: '看货给价，不兴赊账。',
-      disliked: '你的价我看都不看。',
-      hostile: '滚。别逼我喊人。',
+      trusted: '给你实价。别跟人说。',
+      neutral: '看货，给价。不赊账。',
+      disliked: '你的钱我不接。',
+      hostile: '走。别让我喊人。',
     },
   },
   {
@@ -213,8 +215,8 @@ export const NPCS: NpcDef[] = [
     archetype: 'ally',
     quests: ['permit'],
     x: 110,
-    greetings: ['许可证三种拿法：买、签、攥。', '箱子外面从来不写内容。'],
-    asks: ['电池换医疗包，实验室硬通货。', '名单和箱子，我都知道。'],
+    greetings: ['证件。——哦，是你。等一下。', '箱子又送走六个。……你要办什么？'],
+    asks: ['许可证三种：买的、签的、攥着别人短处的。', '电池两块换一个医疗包。实验室只认这个。'],
     offers: [
       { id: 'lab_medkit', give: { itemId: 'medkit', quantity: 1 }, get: { itemId: 'battery', quantity: 2 } },
       { id: 'lab_filter', give: { itemId: 'filter', quantity: 1 }, get: { itemId: 'ration_pack', quantity: 2 } },
@@ -228,10 +230,10 @@ export const NPCS: NpcDef[] = [
       { from: 1230, to: 360, label: '睡觉', x: 250, goal: '回宿舍睡觉，名单在脑子里转' },
     ],
     attitudeLines: {
-      trusted: '你来了？名单我给你压着。',
-      neutral: '实验室有实验室的规矩。',
-      disliked: '你的记录我调出来看过了。',
-      hostile: '门禁不会给你开。',
+      trusted: '你的名字我不往上抄。',
+      neutral: '表格填完，放这儿。',
+      disliked: '你的记录我调出来看过。',
+      hostile: '门禁不会为你开第二次。',
     },
   },
   {
@@ -244,8 +246,8 @@ export const NPCS: NpcDef[] = [
     archetype: 'neutral',
     quests: ['vip-card', 'feast-ledger'],
     x: 1155,
-    greetings: ['贵宾卡只认体面，您是哪一种？', '盛宴那天的安静，您记得吗？'],
-    asks: ['电池续电，账本才肯开口。', '口粮和面包，拿电池换。'],
+    greetings: ['欢迎。贵宾卡只认体面，您是哪一种？', '您的手，先给我看一下。今晚有位置。'],
+    asks: ['口粮两份换电池两块。面包两份换一块。', '账本锁在清点室。想让它开口，得先有电。'],
     offers: [
       { id: 'banquet_ration', give: { itemId: 'ration_pack', quantity: 2 }, get: { itemId: 'battery', quantity: 2 } },
       { id: 'banquet_bread', give: { itemId: 'bread', quantity: 2 }, get: { itemId: 'battery', quantity: 1 } },
@@ -261,10 +263,10 @@ export const NPCS: NpcDef[] = [
       { from: 1230, to: 360, label: '睡觉', x: 250, goal: '回宿舍睡觉，明晚还有一场盛宴' },
     ],
     attitudeLines: {
-      trusted: '您的座位一直留着。',
-      neutral: '体面人办体面事。',
-      disliked: '侍者认得每一张脸。',
-      hostile: '请回。这里不欢迎你。',
+      trusted: '您的位置一直留着。',
+      neutral: '请慢用。银器不必碰。',
+      disliked: '侍者记得每一张脸。',
+      hostile: '请回。这里不欢迎您。',
     },
   },
   {
@@ -279,8 +281,8 @@ export const NPCS: NpcDef[] = [
     active: false,
     quests: ['same-pen'],
     x: 1165,
-    greetings: ['权限已移交。钥匙在你手里。', '同一支笔，写所有的表。'],
-    asks: ['电池换备件，系统照常运转。', '要坐下，还得再想一想。'],
+    greetings: ['校验失败：你不在名单上。是否继续？', '权限已移交。现在，你是操作员。'],
+    asks: ['电池两块换保险丝两根。库存：充足。', '停电表、配给表、处决名单，同一支笔。'],
     offers: [
       { id: 'core_terminal_fuse', give: { itemId: 'fuse', quantity: 2 }, get: { itemId: 'battery', quantity: 2 } },
       { id: 'core_terminal_flashlight', give: { itemId: 'flashlight', quantity: 1 }, get: { itemId: 'battery', quantity: 1 } },
@@ -292,10 +294,10 @@ export const NPCS: NpcDef[] = [
       { from: 1230, to: 360, label: '自检', x: 1165, goal: '夜间自检，权限列表滚动' },
     ],
     attitudeLines: {
-      trusted: '权限确认。听从您的调令。',
-      neutral: '等候指令。',
+      trusted: '权限确认。指令待输入。',
+      neutral: '等待指令。',
       disliked: '访问记录已标记。',
-      hostile: '访问拒绝。',
+      hostile: '访问拒绝。原因：不适用。',
     },
   },
 ];

@@ -1,9 +1,9 @@
 {
   "palette": 16,
   "summary": {
-    "files": 190,
-    "png": 174,
-    "locked": 85,
+    "files": 196,
+    "png": 180,
+    "locked": 91,
     "open": 84,
     "staged": 7,
     "aux": 14,
@@ -1526,6 +1526,126 @@
       "bytes": 814,
       "class": "locked",
       "note": "阶层墙/地板，16 色门禁适用"
+    },
+    {
+      "path": "env/stains/stain-crack.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-stain-crack]"
+        }
+      ],
+      "width": 64,
+      "height": 64,
+      "channels": 4,
+      "opaqueColours": 1,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 3719,
+      "semiAlphaPx": 377,
+      "bytes": 536,
+      "class": "locked",
+      "note": "墙面痕迹叠加层（64x64 带 alpha），16 色门禁适用"
+    },
+    {
+      "path": "env/stains/stain-hand.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-stain-hand]"
+        }
+      ],
+      "width": 64,
+      "height": 64,
+      "channels": 4,
+      "opaqueColours": 2,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 2640,
+      "semiAlphaPx": 1456,
+      "bytes": 459,
+      "class": "locked",
+      "note": "墙面痕迹叠加层（64x64 带 alpha），16 色门禁适用"
+    },
+    {
+      "path": "env/stains/stain-hole.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-stain-hole]"
+        }
+      ],
+      "width": 64,
+      "height": 64,
+      "channels": 4,
+      "opaqueColours": 3,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 2219,
+      "semiAlphaPx": 1425,
+      "bytes": 714,
+      "class": "locked",
+      "note": "墙面痕迹叠加层（64x64 带 alpha），16 色门禁适用"
+    },
+    {
+      "path": "env/stains/stain-scorch.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-stain-scorch]"
+        }
+      ],
+      "width": 64,
+      "height": 64,
+      "channels": 4,
+      "opaqueColours": 3,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 2725,
+      "semiAlphaPx": 1371,
+      "bytes": 574,
+      "class": "locked",
+      "note": "墙面痕迹叠加层（64x64 带 alpha），16 色门禁适用"
+    },
+    {
+      "path": "env/stains/stain-scratch.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-stain-scratch]"
+        }
+      ],
+      "width": 64,
+      "height": 64,
+      "channels": 4,
+      "opaqueColours": 2,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 3857,
+      "semiAlphaPx": 239,
+      "bytes": 421,
+      "class": "locked",
+      "note": "墙面痕迹叠加层（64x64 带 alpha），16 色门禁适用"
+    },
+    {
+      "path": "env/stains/stain-water.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-stain-water]"
+        }
+      ],
+      "width": 64,
+      "height": 64,
+      "channels": 4,
+      "opaqueColours": 3,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 2659,
+      "semiAlphaPx": 1437,
+      "bytes": 462,
+      "class": "locked",
+      "note": "墙面痕迹叠加层（64x64 带 alpha），16 色门禁适用"
     },
     {
       "path": "env/tile-door.png",

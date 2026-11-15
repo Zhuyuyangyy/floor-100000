@@ -224,6 +224,9 @@ function classify(path) {
   if (path.startsWith('ui/frame-dialogue/') || path.startsWith('ui/frame-item/') || path.startsWith('ui/frame-tower/')) {
     return { class: 'locked', note: '2026-11-15 三套面板框（八片），16 色门禁适用' };
   }
+  if (path.startsWith('env/stains/')) {
+    return { class: 'locked', note: '墙面痕迹叠加层（64x64 带 alpha），16 色门禁适用' };
+  }
   if (path.startsWith('env/fixtures/')) {
     return { class: 'locked', note: '墙装贴图，26px 宽，16 色门禁适用' };
   }

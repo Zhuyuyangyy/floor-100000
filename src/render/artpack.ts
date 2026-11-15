@@ -157,6 +157,16 @@ export const ENV_FILES: Record<string, string> = {
   'env-fixture-hazard': 'fixtures/hazard.png',
   'env-fixture-plate': 'fixtures/plate.png',
 
+  // Six wall stains, 64x64 with alpha, laid over the wall at low opacity. They
+  // are the only art in the project that is meant to be seen through: a water
+  // streak or a scorch mark reads as history, not as an object.
+  'env-stain-water': 'stains/stain-water.png',
+  'env-stain-scorch': 'stains/stain-scorch.png',
+  'env-stain-crack': 'stains/stain-crack.png',
+  'env-stain-hole': 'stains/stain-hole.png',
+  'env-stain-scratch': 'stains/stain-scratch.png',
+  'env-stain-hand': 'stains/stain-hand.png',
+
   // One floor band per tier; a missing tier degrades to the slum floor rather
   // than a green box (see corridors.floorKeyFor).
   'env-floor-slum': 'floors/floor-slum.png',

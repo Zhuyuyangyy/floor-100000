@@ -533,6 +533,20 @@ export function buildWallDressing(scene: Phaser.Scene, opts: DressingOpts): Phas
     out.push(scene.add.image(x, y, key).setOrigin(0, 0).setDepth(D + 1).setAlpha(0.8));
   }
 
+  // Wall history: water streaks, scorch marks, a hand print. Drawn UNDER the
+  // fixtures (depth 0) and at 0.32, so they read as the wall's own state rather
+  // than as another object hung on it. Three per floor — the fixtures already
+  // carry the detail budget.
+  const STAINS = ['water', 'scorch', 'crack', 'hole', 'scratch', 'hand'] as const;
+  for (let i = 0; i < 3; i++) {
+    const pick = STAINS[Math.floor(hh(seed + i * 31.7) * STAINS.length) % STAINS.length];
+    const key = `env-stain-${pick}`;
+    if (!scene.textures.exists(key)) continue;
+    const x = 60 + Math.round(hh(seed + i * 13.1) * (width - 184));
+    const y = top + 6 + Math.round(hh(seed + i * 7.3) * Math.max(1, bottom - top - 76));
+    out.push(scene.add.image(x, y, key).setOrigin(0, 0).setDepth(0).setAlpha(0.32));
+  }
+
   return out;
 }
 

@@ -200,7 +200,18 @@ AG-03 报告的 BUG-QA-01「塔楼总览起/终点标签出画布右缘 14px+」
 
 **AG-16 发现的数据层真缺陷**：`config/game-balance.json` 的 playableFloorsV01 没加 100000，`ENCOUNTER_TABLE` 不给终局建行 → 问号点回落 DEEPEST_FLOOR(50010) 配置 → **终局会刷出已打败的守段者 boss 108**。这不是测试问题，已要求必须修。
 
-当前并行：AG-11 / AG-12 / AG-17（AG-13/14/15/16 已合入）。
+当前并行：AG-11 / AG-17（AG-12/13/14/15/16 已合入）。
+
+## 第二轮进展（2026-11-15 11:20）——任务面板进门
+**AG-12 已合入** `da63892`（+1157 行，5 文件）：
+- **QuestPanelScene 新建**（499 行）：任务列表 + 分支 + 阻塞原因置灰（中文）；event 契约 `quests:changed`（载荷 `{questId, branchId}`）已写进 UI.md，发在 Game 场景 emitter 上（overlay/handoff 两种打开方式都能收到）；dev 句柄 `__PHASER_QUESTS__` 供 e2e 断言。
+- **塔楼详情卡双数据源**：已创作走 `describeFloorContents`（primary 色），未探索走 `summarizeFloor`（warn 琥珀色 + 「未探索·预估」前缀）。切换判据是 `hasFloorContent` 不是 visitedFloors。预估与实际生成同源（共用 planUnexploredFloor）。
+- **右上角重叠修掉**：缩放读数并入顶部中央状态 chip，修前重叠 80x12px → 修后全屏可见文本两两求交 0 处（1.5x/2.5x 同样 0）。
+- 连带修了自适应卡高的估算器偏差（阶层 1 七件物资池预估行实际包 5 行，动作行压内容行 6px → 改按 Text.height 推导，修后 13px）。
+
+**集成修复 1 处语义碰撞**（commit `13fc162`）：AG-12 的测试断言「100000 借 dev 别名、未创作」，AG-16 把终局做成真内容并删别名后该前提消失。被测性质（按 authored-ness 切换）不变，只翻转终局那一侧。
+
+**集成：69 文件 / 1152 测试全绿。**
 
 ## 第二轮进展（2026-11-15 11:00）——终局落地，塔内 55 层
 **AG-16 已合入**（3 commit：`215d17b` 创作 + `a930359` 语义翻转/config + `9665745` 文档）。

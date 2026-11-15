@@ -359,15 +359,18 @@ function estimateLine(seed: number, floor: number, containerCount: number): stri
 }
 
 describe('tower overview detail card: the unexplored-floor estimate', () => {
-  it('switches on authored-ness, not on the dev alias', () => {
-    // The switch must be hasFloorContent: floor 100000 borrows floor 1's
-    // template through DEV_FLOOR_ALIAS for entry purposes, but it is not
-    // authored, so it takes the estimate path like every other unexplored
-    // floor — and an authored floor keeps the resolved-contents path.
+  it('switches on authored-ness, and the summit is authored now', () => {
+    // The switch is hasFloorContent, nothing else. This test used to assert the
+    // opposite for floor 100000 — it borrowed floor 1's template through
+    // DEV_FLOOR_ALIAS, so it was "not authored" and took the estimate path.
+    // AG-16 authored the ruling core as real content and deleted the alias, so
+    // the summit now reads its own template on the resolved-contents path. The
+    // property under test (authored-ness decides, not an alias or a visited
+    // flag) is unchanged; only the summit's side of it flipped.
     expect(hasFloorContent(5)).toBe(true);
     expect(summarizeFloor(42, 5).authored).toBe(true);
-    expect(hasFloorContent(100000)).toBe(false);
-    expect(summarizeFloor(42, 100000).authored).toBe(false);
+    expect(hasFloorContent(100000)).toBe(true);
+    expect(summarizeFloor(42, 100000).authored).toBe(true);
     for (const floor of UNEXPLORED_PER_TIER) {
       expect(hasFloorContent(floor), `floor ${floor}`).toBe(false);
       expect(summarizeFloor(42, floor).authored, `floor ${floor}`).toBe(false);

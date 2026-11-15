@@ -212,3 +212,59 @@ describe('the staged 周禾 set', () => {
     expect(portrait?.height).toBe(96);
   });
 });
+
+describe('the AG-19 four-character sheet set', () => {
+  // AG-19 (2026-11-15): the four live characters' 20-frame action sheets,
+  // quantized from the v3 re-extraction pack in F:/new. They replace the
+  // procedural sheets that bakeWalkSheets() currently writes, so the drop-in
+  // is a file copy into src/assets/characters/ — a render-line change, which
+  // is why the sheets are staged rather than wired. The stills are already
+  // referenced by CHARACTER_FILES, so they are locked, not staged.
+  const sheets: Array<[string, string]> = [
+    ['player', 'char-player-sheet.png'],
+    ['npc_alin', 'char-alin-sheet.png'],
+    ['npc_xiaozhou', 'char-xiaozhou-sheet.png'],
+    ['wanderer', 'char-wanderer-sheet.png'],
+  ];
+  const stills = ['char-player.png', 'char-alin.png', 'char-xiaozhou.png', 'char-wanderer.png'];
+
+  it('ships all four sheets, staged and gate-clean', () => {
+    for (const [, file] of sheets) {
+      const f = byPath.get(`artpack/${file}`);
+      expect(f, `${file} missing`).toBeDefined();
+      expect(f?.class, `${file} class`).toBe('staged');
+      expect(f?.inPalette, `${file} palette`).toBe(true);
+      expect(f?.opaqueColours, `${file} colours`).toBeLessThanOrEqual(16);
+      expect(f?.semiAlphaPx, `${file} semi-alpha`).toBe(0);
+    }
+  });
+
+  it('ships the sheets at the geometry the loader expects', () => {
+    // The drop-in contract from src/assets/characters/README.md: one
+    // horizontal strip, 20 frames of 64x96, walk 0-5 / idle 6-7 / attack 8-10
+    // / hurt 11-12 / search 13-14 / die 15-17 / pickup 18-19.
+    for (const [, file] of sheets) {
+      const f = byPath.get(`artpack/${file}`);
+      expect(f?.width, `${file} width`).toBe(1280);
+      expect(f?.height, `${file} height`).toBe(96);
+      expect(f?.width! / 64, `${file} frame count`).toBe(20);
+    }
+  });
+
+  it('keeps the four stills locked, gate-clean and on the shared canvas', () => {
+    // The stills were the 22-colour build-characters.mjs outputs; AG-19
+    // replaced them with the idle frame of the same sheets, so the character
+    // set is one art family again. sceneScale.test.ts owns the canvas rule;
+    // this owns the gate.
+    for (const file of stills) {
+      const f = byPath.get(`artpack/${file}`);
+      expect(f, `${file} missing`).toBeDefined();
+      expect(f?.class, `${file} class`).toBe('locked');
+      expect(f?.inPalette, `${file} palette`).toBe(true);
+      expect(f?.opaqueColours, `${file} colours`).toBeLessThanOrEqual(16);
+      expect(f?.semiAlphaPx, `${file} semi-alpha`).toBe(0);
+      expect(f?.width, `${file} width`).toBe(64);
+      expect(f?.height, `${file} height`).toBe(96);
+    }
+  });
+});

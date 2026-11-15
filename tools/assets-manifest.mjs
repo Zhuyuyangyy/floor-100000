@@ -147,11 +147,25 @@ const LOCKED = [
   'ui/portraits/portrait-alin.png',
   'ui/portraits/portrait-xiaozhou.png',
   'ui/portraits/portrait-wanderer.png',
+  // AG-19：CHARACTER_FILES 静帧。原为 build-characters.mjs 的 22 色程序化产物，
+  // 已换成同批 v3 行动表的待机帧（--still 6）量化版，与行动表同一美术家族。
+  'artpack/char-player.png',
+  'artpack/char-alin.png',
+  'artpack/char-xiaozhou.png',
+  'artpack/char-wanderer.png',
 ];
 const STAGED = {
   'artpack/char-zhouhe.png': 'CHARACTER_FILES 单帧，待 artpack.ts 接线（walkcycle.ts COLORS 属 AG-09）',
   'artpack/char-zhouhe-sheet.png': '二十帧行动表；运行时应落位 src/assets/characters/npc_zhouhe.png',
   'ui/portraits/portrait-zhouhe.png': 'PORTRAIT_FILES 头像，待 artpack.ts 接线',
+  // AG-19：四角色二十帧行动表，源自 F:/new 四角色动作GIF预览包_v3_重新提取清晰版
+  // （player/alin/xiaozhou/wanderer_sprite_sheet_1280x96.png），量化后 4-15 色全在
+  // 板内、二值 alpha、脚底 95 行 spread 0，char-sheet-gate 全项 PASS。运行时应落位
+  // src/assets/characters/<who>.png 覆盖现有程序化表（BootScene glob 自动拾取）。
+  'artpack/char-player-sheet.png': '二十帧行动表（v3 重提取版量化）；运行时应落位 src/assets/characters/player.png',
+  'artpack/char-alin-sheet.png': '二十帧行动表（v3 重提取版量化）；运行时应落位 src/assets/characters/npc_alin.png',
+  'artpack/char-xiaozhou-sheet.png': '二十帧行动表（v3 重提取版量化）；运行时应落位 src/assets/characters/npc_xiaozhou.png',
+  'artpack/char-wanderer-sheet.png': '二十帧行动表（v3 重提取版量化）；运行时应落位 src/assets/characters/wanderer.png',
 };
 const AUX = [
   'fonts/ark-pixel-latin.woff2',

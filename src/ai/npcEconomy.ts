@@ -149,7 +149,7 @@ export function executeBarter(state: GameState, npc: NpcDef, offerId: string): B
   const nextInventory = takeFromStock(inventory, offer.give.itemId, offer.give.quantity);
   const remembered = recordMemory(npcState, {
     day: state.day,
-    minute: state.gameMinuteOfDay,
+    minute: Math.floor(state.gameMinuteOfDay),
     kind: 'trade',
     actor: 'player',
     summary: `换到${getItem(offer.give.itemId).displayName}×${offer.give.quantity}`,
@@ -190,7 +190,7 @@ export function receiveGift(state: GameState, npc: NpcDef, itemId: ItemId, quant
   const nextInventory = giveToStock(inventory, itemId, want);
   const remembered = recordMemory(npcState, {
     day: state.day,
-    minute: state.gameMinuteOfDay,
+    minute: Math.floor(state.gameMinuteOfDay),
     kind: 'gift',
     actor: 'player',
     summary: `获赠${getItem(itemId).displayName}×${want}`,

@@ -602,6 +602,26 @@ describe('NPC 自主行动循环（日程移动 + 种子化闲逛）', () => {
 
 // ── 5. 记忆影响关系（信誉的数据来源） ───────────────────────────────────────
 
+
+  // AG-11 在浏览器里实证的系统 bug：executeBarter 写记忆时原样写
+  // state.gameMinuteOfDay，而运行时分钟是小数（366.34…），isValidMemory 要求
+  // Number.isInteger → 整条 NPC 状态过不了 loadNpcState 校验 → 库存跨交易不
+  // 消耗、记忆不累积（浏览器实证 isValidNpcState=false / loadNpcState=NULL）。
+  // 修法是在写入入口 floor。这条钉住"小数分钟也能落库"。
+  it('floors the fractional game minute so memory survives loadNpcState', () => {
+    const state = createNewGame(1);
+    state.day = 1;
+    state.gameMinuteOfDay = 366.34;
+    seedNpcState(state, 'alin', { relationship: { player: 5 } });
+    addItem(state.player.inventory, 'scrap_metal', 1);
+    const before = loadNpcState(state, 'alin');
+    expect(executeBarter(state, npc('alin'), 'alin_wire').ok).toBe(true);
+    const after = loadNpcState(state, 'alin');
+    expect(after, '状态必须过校验，否则库存与记忆都不落库').not.toBeNull();
+    expect(after!.memory.length).toBeGreaterThan(before?.memory.length ?? 0);
+    for (const m of after!.memory) expect(Number.isInteger(m.minute)).toBe(true);
+  });
+
 describe('记忆 → 关系 → 信誉的因果链', () => {
   it('连续获赠把关系推到 trusted，交易台词随之变（确定性）', () => {
     const s = createNewGame(41);

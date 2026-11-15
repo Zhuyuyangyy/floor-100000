@@ -359,3 +359,24 @@ AG-23 修不了的那一个在 GameScene.ts（不属其权）：`CRAFT_ROW_PITCH
 | 总控 | fb29da5 | 第七个字体回归（制作面板行距） |
 
 **字体引入的回归至此全清**：6 个由 AG-24 定性、4 个由 AG-23 修、1 个由总控补、1 个（塔楼页脚）随 AG-23 的 TOWER_FOOT_TOP 调整一并落地。
+
+## 第四轮派工（2026-11-16 00:10）——TWOM 全方位对齐，8 个 Agent
+需求来源：`twom-reverse/docs/TWOM_MECHANICS.md`（This War of Mine mobile 1.0.7 反编译，
+14,930 个 Kosovo* 符号）。**先定接口契约再派工**——`docs/plans/TWOM_ALIGNMENT.md`
+把八个 Agent 的共同 schema 定死（新增玩家维度/环境参数/物品心情字段/日记事件/
+Flag-Trigger/NPC 三原子/行为树组件），任何一方不得单方面改。
+
+| Agent | 分支 | 独占文件 | 任务（TWOM 优先级） |
+|---|---|---|---|
+| AG-25 生存主循环 | ag-25-survival | `systems/SurvivalSystem.ts` + `core/gameTypes.ts` + `core/constants.ts` + `config/game-balance.json` | **#4 morale 第四维 + #2 楼层环境参数 + #3 brazier 供暖 + #6 疾病中间态**（TWOM §2 五机制 + §3 Tick 集） |
+| AG-26 Flag/Trigger | ag-26-flags | `systems/WorldFlags.ts` + `systems/triggers.ts`(新) + `EventSystem.ts` + `dailyGoals.ts` | **#1 Flag/Trigger 系统**（工作量小价值高，收敛 worldEvents/dailyGoal/combat 散落布尔） |
+| AG-27 日记系统 | ag-27-diary | `systems/DiarySystem.ts`(新) + 测试 | **#5 日记系统**（42 类取 11，个体/群体双轨，"没有效果"也是一条记录） |
+| AG-28 NPC 三原子 | ag-28-npc-atoms | `src/ai/**` + `data/npcs.ts` | **#7 NPC 三原子**（GoTo/Speak/PlayAnimation + Sensor 抽象 + Forced 打断） |
+| AG-29 心情物品 | ag-29-morale-items | `data/items.ts` + `data/recipes.ts` + `systems/shop.ts` + `systems/CraftingSystem.ts` | 物品提振心情（GetDepressionChangeOnCheer），新增 3-5 件精神向物品，**复用现有美术** |
+| AG-30 楼层环境数据 | ag-30-floor-env | `data/floorTemplates.ts` | 六段环境性格 + 8 层微调 + warmth 数据（配合 AG-25 的 tick） |
+| AG-31 行为树组件 | ag-31-behaviour | `src/ai/behaviour.ts`(新) + `docs/plans/BEHAVIOUR.md` | **#8 行为树组件化**（TWOM 判定"工作量大价值低"，只做四节点骨架+设计文档+一个真实用例） |
+| AG-32 对齐 e2e | ag-32-align-e2e | `e2e/**` | 六个新 spec；**两阶段**：先跑存量基线+写好标注待启用，合入后逐个启用 |
+
+**基线**：`b0500d6`（73 文件 / 1252 测试全绿，tsc 干净）。
+**契约**：`docs/plans/TWOM_ALIGNMENT.md`（8 个 Agent 共同 schema，含"minute 必须 Math.floor"
+这类从 AG-06 bug 学到的教训）。

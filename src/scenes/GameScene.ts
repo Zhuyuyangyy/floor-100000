@@ -209,6 +209,9 @@ const CRAFT_ROW_PITCH = 24;
 // and a fixed four rows would have let the selection walk off the bottom of the
 // list (Enter would have crafted an entry nobody could see).
 const CRAFT_ROWS = RECIPES.length;
+// AG-20：终局层（统治核心）。这一层的三个容器是终局演出入口
+// （docs/plans/FINALE_UX.md §2 契约，EndgameScene 归 AG-21）。
+const FINALE_FLOOR = 100000;
 // AG-20: 产业累计收益的账本标记。存在 state.flags（WorldFlags 的平地）而不是
 // 场景字段里：存档因此携带整个账本，读档后面板的「累计」读数不断档。结算本身
 // 由系统层的水位标记 economy:settled-day 把关，场景只把观察到的收益累加到这里。
@@ -5117,6 +5120,47 @@ export class GameScene extends Phaser.Scene {
     if (this.pauseOpen) this.activatePause();
   }
 
+  /**
+   * AG-20：终局层容器 → 演出入口（docs/plans/FINALE_UX.md §2 契约）。
+   * 三重门：终局层 + 容器已开过（openedContainers，二段式的第二段）+ id 有
+   * 映射。任何一关不过返回 null——调用方回落到既有搜刮。交互（onInteract）
+   * 与提示（hint）共用这一个判官，两边不会漂移。
+   */
+  private finaleEntryFor(containerId: string): 'terminal' | 'archive' | 'fuse' | null {
+    const state = getGame();
+    if (state.currentFloor !== FINALE_FLOOR) return null;
+    if (!(state.visitedFloors[state.currentFloor]?.openedContainers.includes(containerId) ?? false)) return null;
+    return containerId === 'counter' ? 'terminal'
+      : containerId === 'security_safe' ? 'archive'
+      : containerId === 'fuse_box' ? 'fuse'
+      : null;
+  }
+
+  /**
+   * AG-20：终局层视线内最近的容器——**不滤空**。
+   *
+   * 为什么不能直接用 nearestContainer：它跳过 items 为空的容器（既有语义，
+   * 空箱不给提示），而二段式的第二段交互的恰恰是空容器——终端台的
+   * guaranteed 水食第一次 E 就舔光了，剩下 45% 的电池 Roll 失败时它就是空的；
+   * 档案柜/配电箱本身就有约三成概率两件 Roll 全空。不滤空，空箱子才「开过」
+   * 得了、才进得了演出。三容器相距 240px，半径 44 内至多一个，不存在歧义。
+   */
+  private nearestFinaleContainer(): GeneratedContainer | null {
+    const state = getGame();
+    if (state.currentFloor !== FINALE_FLOOR) return null;
+    const px = state.player.x;
+    let best: GeneratedContainer | null = null;
+    let bestDist = INTERACT_DISTANCE;
+    for (const c of this.floorView.containers) {
+      const d = Math.abs(c.x - px);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = c;
+      }
+    }
+    return best;
+  }
+
   private onInteract(): void {
     if (this.stairClimb) return;
     if (this.shelterOpen) {
@@ -5150,8 +5194,21 @@ export class GameScene extends Phaser.Scene {
       this.attemptSleep();
       return;
     }
-    const container = this.nearestContainer();
+    // AG-20：100000 层（统治核心）的三个容器是终局演出入口
+    // （docs/plans/FINALE_UX.md §2）。二段式：第一次 E 保持既有搜刮——
+    // 终端台里的 guaranteed 水食是生存必需品；开过之后（openedContainers
+    // 判据，LootSystem 自己维护）再交互才进演出。演出/落地/返回全部归
+    // EndgameScene（handoff 语义，它自己 scene.start('Game') 回来）。
+    // 终局层走不滤空的最近容器判定（见 nearestFinaleContainer）：第二段
+    // 交互的就是被舔光的空箱子。
+    const finaleContainer = this.nearestFinaleContainer();
+    const container = finaleContainer ?? this.nearestContainer();
     if (container) {
+      const from = this.finaleEntryFor(container.id);
+      if (from) {
+        this.scene.start('Endgame', { from });
+        return;
+      }
       this.openContainer(container.id);
       return;
     }
@@ -6085,9 +6142,15 @@ export class GameScene extends Phaser.Scene {
       this.hintText.setText('此地漏水，地面物资受潮');
       return;
     }
+    const finaleContainer = this.nearestFinaleContainer();
     const container = this.nearestContainer();
     const zone = currentInteractionZone(state);
     if (this.nearestEncounterSpot()) this.hintText.setText('按 E 查看问号点');
+    else if (finaleContainer) {
+      // AG-20：终局层的容器开过之后，E 进的是演出不是搜刮——提示要说得准。
+      // 用不滤空的判定：被舔光的空箱子也要告诉玩家还能再看它一眼。
+      this.hintText.setText(this.finaleEntryFor(finaleContainer.id) ? `按 E 查看${finaleContainer.label}` : `按 E 打开 ${finaleContainer.label}`);
+    }
     else if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
     else if (this.nearLift(state)) this.hintText.setText('按 E 乘货运电梯');
     // OVERHAUL Wave C2: the up stairwell advertises the paid shortcut, priced

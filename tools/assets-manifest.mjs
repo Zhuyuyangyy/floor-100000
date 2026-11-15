@@ -214,6 +214,9 @@ function classify(path) {
   if (DECO.includes(path)) return { class: 'open', note: '墙面特写，255–335px 1:1 显示，不量化' };
   // 2026-11-15 包：六阶层 x 三变体墙 18 张 + 六阶层地板 6 张。
   // 交付时已按项目 16 色吸附（墙 7-12 色、地板 3-5 色），严格门禁适用。
+  if (path.startsWith('env/fixtures/')) {
+    return { class: 'locked', note: '墙装贴图，26px 宽，16 色门禁适用' };
+  }
   if (path.startsWith('env/walls/') || path.startsWith('env/floors/')) {
     return { class: 'locked', note: '阶层墙/地板，16 色门禁适用' };
   }

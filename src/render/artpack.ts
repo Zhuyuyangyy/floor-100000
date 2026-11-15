@@ -140,6 +140,23 @@ export const ENV_FILES: Record<string, string> = {
   'env-wall-core-b': 'walls/wall-core-b.png',
   'env-wall-core-c': 'walls/wall-core-c.png',
 
+  // 12 wall fixtures, cut from the 2026-11-15 sprite sheet and downscaled to a
+  // 26px width (nearest). They replace the procedural rectangles in
+  // roomDepth.buildWallDressing — the wall was the last place still drawn from
+  // 2px rects while everything else used art.
+  'env-fixture-vent': 'fixtures/vent.png',
+  'env-fixture-junction': 'fixtures/junction.png',
+  'env-fixture-notice': 'fixtures/notice.png',
+  'env-fixture-valve': 'fixtures/valve.png',
+  'env-fixture-bracket': 'fixtures/bracket.png',
+  'env-fixture-hooks': 'fixtures/hooks.png',
+  'env-fixture-extinguisher': 'fixtures/extinguisher.png',
+  'env-fixture-fusebox': 'fixtures/fusebox.png',
+  'env-fixture-gauge': 'fixtures/gauge.png',
+  'env-fixture-cable': 'fixtures/cable.png',
+  'env-fixture-hazard': 'fixtures/hazard.png',
+  'env-fixture-plate': 'fixtures/plate.png',
+
   // One floor band per tier; a missing tier degrades to the slum floor rather
   // than a green box (see corridors.floorKeyFor).
   'env-floor-slum': 'floors/floor-slum.png',

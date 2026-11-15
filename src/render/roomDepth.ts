@@ -499,40 +499,41 @@ export function buildWallDressing(scene: Phaser.Scene, opts: DressingOpts): Phas
     }
   }
 
-  // Vent grilles and junction boxes at varied heights.
-  // 14 of these across 1280px left the middle of the wall measurably empty - an
-  // edge-density grid put whole cells at 2-4% - so there are twice as many now,
-  // spread by a seeded hash that fills the gaps instead of clustering.
-  for (let i = 0; i < 30; i++) {
+  // The 12 real fixtures, instead of rects that only suggested them.
+  //
+  // Until 2026-11-15 this loop drew vents as four 1px lines and junction boxes as
+  // a 16x12 rectangle with a stripe: readable as "building services" but never as
+  // objects. The pack's sprite sheet gives actual silhouettes — a valve wheel, a
+  // fusebox with its door ajar, a fire extinguisher — and at 26px wide they were
+  // still legible when tested at 4x.
+  //
+  // Count dropped from 30 to 12 when the rects became art. The old 30 were the
+  // price of drawing walls out of 2px lines: 14 left whole grid cells empty, so
+  // it took double. Real silhouettes carry much more weight per object — at 30
+  // the wall read as stickers rather than as a building, which is the same
+  // "busier, not richer" failure the 2026-11-14 audit predicted for dressing
+  // drawn in the same visual vocabulary as its wall. They are also dimmed to 0.8
+  // so they sit in the wall instead of on it.
+  const FIXTURES = [
+    'vent', 'junction', 'notice', 'valve', 'bracket', 'hooks',
+    'extinguisher', 'fusebox', 'gauge', 'cable', 'hazard', 'plate',
+  ] as const;
+  const out = batch.out();
+  for (let i = 0; i < 12; i++) {
     const x = 40 + Math.round(hh(seed + i * 17.3) * (width - 80));
     if (!clear(x)) continue;
-    const y = top + 20 + Math.round(hh(seed + i * 5.9) * (bottom - top - 60));
-    if (hh(seed + i * 7.7) > 0.5) {
-      // vent: a dark recess with slats
-      batch.add(x, y, 26, 14, PALETTE.ink, 0.95, D);
-      for (let s = 0; s < 4; s++) {
-        batch.add(x + 3, y + 2 + s * 3, 20, 1, PALETTE.stoneLight, 0.9, D + 1);
-      }
-    } else {
-      // junction box with a conduit down to the skirting
-      batch.add(x, y, 16, 12, PALETTE.stoneLight, 0.95, D);
-      batch.add(x + 2, y + 2, 12, 1, PALETTE.dust, 0.9, D + 1);
-      batch.add(x + 7, y + 12, 2, bottom - (y + 12), PALETTE.ink, 0.85, D);
-    }
+    const pick = FIXTURES[Math.floor(hh(seed + i * 11.7) * FIXTURES.length) % FIXTURES.length];
+    const key = `env-fixture-${pick}`;
+    if (!scene.textures.exists(key)) continue;
+    const src = scene.textures.get(key).getSourceImage() as { width: number; height: number };
+    // Keep the whole fixture inside the wall band: a 48px extinguisher dropped at
+    // y=bottom would hang off the skirting.
+    const y = top + 16 + Math.round(hh(seed + i * 5.9) * Math.max(1, bottom - top - src.height - 24));
+    if (y + src.height > bottom - 4) continue;
+    out.push(scene.add.image(x, y, key).setOrigin(0, 0).setDepth(D + 1).setAlpha(0.8));
   }
 
-  // Faded signage: pale rectangles with a couple of dark strokes. They read as
-  // notices at a glance and cost nothing.
-  for (let i = 0; i < 12; i++) {
-    const x = 90 + Math.round(hh(seed + i * 23.1) * (width - 180));
-    if (!clear(x)) continue;
-    const y = 48 + Math.round(hh(seed + i * 3.7) * 70);
-    batch.add(x, y, 22, 14, PALETTE.dust, 0.72, D);
-    batch.add(x + 3, y + 4, 16, 1, PALETTE.shadow, 0.5, D + 1);
-    batch.add(x + 3, y + 8, 11, 1, PALETTE.shadow, 0.5, D + 1);
-  }
-
-  return batch.out();
+  return out;
 }
 
 export function buildFloorClutter(scene: Phaser.Scene, opts: DressingOpts): Phaser.GameObjects.GameObject[] {

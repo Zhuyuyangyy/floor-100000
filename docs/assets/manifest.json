@@ -1,9 +1,9 @@
 {
   "palette": 16,
   "summary": {
-    "files": 154,
-    "png": 138,
-    "locked": 49,
+    "files": 166,
+    "png": 150,
+    "locked": 61,
     "open": 84,
     "staged": 7,
     "aux": 14,
@@ -1146,6 +1146,246 @@
       "bytes": 111247,
       "class": "open",
       "note": "墙面特写，255–335px 1:1 显示，不量化"
+    },
+    {
+      "path": "env/fixtures/bracket.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-fixture-bracket]"
+        }
+      ],
+      "width": 26,
+      "height": 35,
+      "channels": 4,
+      "opaqueColours": 5,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 440,
+      "semiAlphaPx": 0,
+      "bytes": 238,
+      "class": "locked",
+      "note": "墙装贴图，26px 宽，16 色门禁适用"
+    },
+    {
+      "path": "env/fixtures/cable.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-fixture-cable]"
+        }
+      ],
+      "width": 26,
+      "height": 39,
+      "channels": 4,
+      "opaqueColours": 4,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 600,
+      "semiAlphaPx": 0,
+      "bytes": 461,
+      "class": "locked",
+      "note": "墙装贴图，26px 宽，16 色门禁适用"
+    },
+    {
+      "path": "env/fixtures/extinguisher.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-fixture-extinguisher]"
+        }
+      ],
+      "width": 26,
+      "height": 48,
+      "channels": 4,
+      "opaqueColours": 6,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 239,
+      "semiAlphaPx": 0,
+      "bytes": 328,
+      "class": "locked",
+      "note": "墙装贴图，26px 宽，16 色门禁适用"
+    },
+    {
+      "path": "env/fixtures/fusebox.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-fixture-fusebox]"
+        }
+      ],
+      "width": 26,
+      "height": 29,
+      "channels": 4,
+      "opaqueColours": 5,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 289,
+      "class": "locked",
+      "note": "墙装贴图，26px 宽，16 色门禁适用"
+    },
+    {
+      "path": "env/fixtures/gauge.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-fixture-gauge]"
+        }
+      ],
+      "width": 26,
+      "height": 19,
+      "channels": 4,
+      "opaqueColours": 7,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 193,
+      "semiAlphaPx": 0,
+      "bytes": 414,
+      "class": "locked",
+      "note": "墙装贴图，26px 宽，16 色门禁适用"
+    },
+    {
+      "path": "env/fixtures/hazard.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-fixture-hazard]"
+        }
+      ],
+      "width": 26,
+      "height": 22,
+      "channels": 4,
+      "opaqueColours": 4,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 286,
+      "semiAlphaPx": 0,
+      "bytes": 288,
+      "class": "locked",
+      "note": "墙装贴图，26px 宽，16 色门禁适用"
+    },
+    {
+      "path": "env/fixtures/hooks.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-fixture-hooks]"
+        }
+      ],
+      "width": 26,
+      "height": 13,
+      "channels": 4,
+      "opaqueColours": 6,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 215,
+      "semiAlphaPx": 0,
+      "bytes": 195,
+      "class": "locked",
+      "note": "墙装贴图，26px 宽，16 色门禁适用"
+    },
+    {
+      "path": "env/fixtures/junction.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-fixture-junction]"
+        }
+      ],
+      "width": 26,
+      "height": 31,
+      "channels": 4,
+      "opaqueColours": 4,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 214,
+      "semiAlphaPx": 0,
+      "bytes": 254,
+      "class": "locked",
+      "note": "墙装贴图，26px 宽，16 色门禁适用"
+    },
+    {
+      "path": "env/fixtures/notice.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-fixture-notice]"
+        }
+      ],
+      "width": 26,
+      "height": 20,
+      "channels": 4,
+      "opaqueColours": 6,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 225,
+      "class": "locked",
+      "note": "墙装贴图，26px 宽，16 色门禁适用"
+    },
+    {
+      "path": "env/fixtures/plate.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-fixture-plate]"
+        }
+      ],
+      "width": 26,
+      "height": 14,
+      "channels": 4,
+      "opaqueColours": 4,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 143,
+      "class": "locked",
+      "note": "墙装贴图，26px 宽，16 色门禁适用"
+    },
+    {
+      "path": "env/fixtures/valve.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-fixture-valve]"
+        }
+      ],
+      "width": 26,
+      "height": 11,
+      "channels": 4,
+      "opaqueColours": 5,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 176,
+      "semiAlphaPx": 0,
+      "bytes": 244,
+      "class": "locked",
+      "note": "墙装贴图，26px 宽，16 色门禁适用"
+    },
+    {
+      "path": "env/fixtures/vent.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-fixture-vent]"
+        }
+      ],
+      "width": 26,
+      "height": 13,
+      "channels": 4,
+      "opaqueColours": 5,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 0,
+      "semiAlphaPx": 0,
+      "bytes": 170,
+      "class": "locked",
+      "note": "墙装贴图，26px 宽，16 色门禁适用"
     },
     {
       "path": "env/floor.png",

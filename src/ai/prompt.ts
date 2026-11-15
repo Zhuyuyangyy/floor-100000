@@ -65,8 +65,12 @@ export function buildUserPrompt(obs: NpcObservation): string {
 }
 
 function fmtMinute(minute: number): string {
-  const h = Math.floor(minute / 60);
-  const m = minute % 60;
+  // gameMinuteOfDay 是小数（推进按帧累计，366.34… 这种），不取整的话 prompt 里
+  // 会出现 `06:4.696540000000255`——每次请求都带一份脏数据给模型。AG-41 在
+  // Spark 抓包里实测到的。
+  const total = Math.max(0, Math.floor(minute));
+  const h = Math.floor(total / 60) % 24;
+  const m = total % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 

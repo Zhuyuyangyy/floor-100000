@@ -508,6 +508,14 @@ export class GameScene extends Phaser.Scene {
   private dialogueObjects: PanelObject[] = [];
   /** one selection band per dialogue row, toggled in refreshDialogue */
   private dialogueBands: Array<{ band: Phaser.GameObjects.Rectangle; rule: Phaser.GameObjects.Rectangle }> = [];
+  /**
+   * One mouse hit target per row. Kept as a field because the rows MOVE: an AI
+   * opening line can be five lines, dialogueGeometry pushes rowsTop down, and a
+   * hit rect left at the base y then highlights row i while accepting a click
+   * meant for row i-1 (measured: 3px hover miss, clicks one row low at 5 lines).
+   * refreshDialogue re-places these alongside the bands.
+   */
+  private dialogueRowHits: Phaser.GameObjects.Rectangle[] = [];
   private dialogueTitle!: Phaser.GameObjects.Text;
   private dialoguePortrait!: Phaser.GameObjects.Image;
   private dialoguePortraitFrame!: Phaser.GameObjects.Rectangle;
@@ -3226,7 +3234,11 @@ export class GameScene extends Phaser.Scene {
       .text(DETAIL_X + 8, GRID_Y + 48, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
       .setDepth(depth + 7);
     this.invDetailBody = this.add
-      .text(DETAIL_X + 8, GRID_Y + 76, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: DETAIL_W - 16 } })
+      // useAdvancedWrap is load-bearing, fourth time in this codebase: the basic
+      // wrapper breaks on spaces only, and Chinese has none, so a width here is
+      // silently ignored. Measured: the empty-slot sentence rendered 688px wide
+      // inside a 520px panel, i.e. it ran 248px past the frame.
+      .text(DETAIL_X + 8, GRID_Y + 76, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: DETAIL_W - 16, useAdvancedWrap: true } })
       .setDepth(depth + 7);
     this.invObjects.push(this.invDetailName, this.invDetailMeta, this.invDetailBody);
 
@@ -3466,7 +3478,11 @@ export class GameScene extends Phaser.Scene {
     // the row is already 名称 + 材料 and a third column would collide with the
     // right-aligned status at this panel width.
     this.craftReqText = this.add
-      .text(left + 18, top + 246, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+      // Anchored under the LAST recipe row, not at a fixed 246: RECIPES grew to
+      // nine with the economy pass, so row 9's band (top+222..244) sat on top of
+      // a label pinned at 246. 30 is the list's own top inset and 12 is the gap
+      // the label wants under the list.
+      .text(left + 18, top + 30 + CRAFT_ROWS * CRAFT_ROW_PITCH + 12, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
       .setOrigin(0, 0.5)
       .setDepth(PANEL_DEPTH.game.craft + 6);
     const footer = this.add.text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
@@ -3808,6 +3824,9 @@ export class GameScene extends Phaser.Scene {
 
   private buildDialoguePanel(): void {
     const { width, height } = this.viewSize();
+    // A scene restart keeps the display list, so the previous run's row hit
+    // rects would otherwise be pushed into again and re-placed by index.
+    this.dialogueRowHits = [];
     // Geometry lives in render/dialogueLayout: the portrait column, the gap the
     // text must keep from it, and the wrap width all have to agree, and they did
     // not (the text started 84px inside the 96px face). dialogueLayout.test.ts
@@ -3893,22 +3912,23 @@ export class GameScene extends Phaser.Scene {
       this.dialogueObjects.push(band, rule);
       // Mouse: hover moves the cursor, click confirms — guarded on the option
       // count because the row list is shorter than the four bands in trade mode.
-      this.dialogueObjects.push(
-        this.panelHit(left + DIALOG_PADDING, rowY, panelW - DIALOG_PADDING * 2, DIALOG_ROW_H, depth + 8, {
-          onOver: () => {
-            if (!this.dialogue || this.dialogue.selected === i) return;
-            if (i >= this.dialogueOptionsView().length) return;
-            this.dialogue.selected = i;
-            this.refreshDialogue();
-          },
-          onClick: () => {
-            if (!this.dialogue || i >= this.dialogueOptionsView().length) return;
-            this.dialogue.selected = i;
-            this.refreshDialogue();
-            this.onUse();
-          },
-        }),
-      );
+      // Kept in dialogueRowHits so refreshDialogue can move it with the band.
+      const rowHit = this.panelHit(left + DIALOG_PADDING, rowY, panelW - DIALOG_PADDING * 2, DIALOG_ROW_H, depth + 8, {
+        onOver: () => {
+          if (!this.dialogue || this.dialogue.selected === i) return;
+          if (i >= this.dialogueOptionsView().length) return;
+          this.dialogue.selected = i;
+          this.refreshDialogue();
+        },
+        onClick: () => {
+          if (!this.dialogue || i >= this.dialogueOptionsView().length) return;
+          this.dialogue.selected = i;
+          this.refreshDialogue();
+          this.onUse();
+        },
+      });
+      this.dialogueRowHits.push(rowHit);
+      this.dialogueObjects.push(rowHit);
       const icon = this.add.image(left + 30, rowY + DIALOG_ROW_H / 2, 'blank').setOrigin(0.5).setDepth(depth + 7);
       const t = this.add
         .text(left + 46, rowY + DIALOG_ROW_H / 2, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
@@ -4134,10 +4154,17 @@ export class GameScene extends Phaser.Scene {
       const b = this.dialogueBands[i];
       b.band.setPosition(left + DIALOG_PADDING, rowY);
       b.rule.setPosition(left + DIALOG_PADDING, rowY);
+      // The mouse targets move with their row. Left at the base y they accept
+      // the click meant for the row above as soon as a five-line AI message
+      // pushes rowsTop down (measured: hover landed 3px off, click one row low).
+      this.dialogueRowHits[i]?.setPosition(left + DIALOG_PADDING, rowY);
       this.dialogueOptionIcons[i].setPosition(left + 30, rowY + DIALOG_ROW_H / 2);
       this.dialogueOptions[i].setPosition(left + 46, rowY + DIALOG_ROW_H / 2);
     }
     this.dialogueFooter.setPosition(cx, bottom - 12);
+    // The click-outside box follows the panel's grown height; otherwise the
+    // header and footer of a tall panel count as "outside" and close it.
+    this.panelBox = { x: left, y: top, w: DIALOG_PANEL_W, h: geo.panelH };
 
     const options = this.dialogueOptionsView();
     if (d.selected >= options.length) d.selected = options.length - 1;
@@ -4835,6 +4862,13 @@ export class GameScene extends Phaser.Scene {
       }).setOrigin(0.5).setDepth(depth + 6),
     );
     this.shelterObjects.push(this.shelterMarker);
+    // The one panel that never pinned its contents. It is rebuilt on every open,
+    // so nothing else set their scrollFactor: on floor 2 (scrollY=-200) the skin
+    // stayed locked to the screen while every label kept scrolling with the
+    // world — the frame sat at y=210 and its words 200px above it, on the floor
+    // overhead. Same failure as the encounter panel, fixed the same way.
+    applyPanelDepth(this.shelterObjects, PANEL_DEPTH.game.dialogue);
+    lockToScreen(this.shelterObjects);
     this.assertPanelContent('shelter', this.shelterObjects);
   }
 

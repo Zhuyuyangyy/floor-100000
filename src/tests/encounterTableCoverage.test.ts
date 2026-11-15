@@ -97,7 +97,9 @@ describe('every playable floor can roll an encounter', () => {
     const weight = (floor: number, kind: 'ambush' | 'trader' | 'loot' | 'cache'): number =>
       ENCOUNTER_TABLE[floor].find((e) => e.kind === kind)?.weight ?? 0;
     const commercial = PLAYABLE_FLOORS_V01.filter((f) => f >= 10000 && f < 50000);
-    const vip = PLAYABLE_FLOORS_V01.filter((f) => f >= 50000);
+    // 100000 是段 6（统治核心），不是富人区：VIP 段只圈 50000-50010，终局层
+    // 另有一段断言钉它。
+    const vip = PLAYABLE_FLOORS_V01.filter((f) => f >= 50000 && f < 100000);
     expect(vip).toEqual([
       50000, 50001, 50002, 50003, 50004, 50005, 50006, 50007, 50008, 50009, 50010,
     ]);
@@ -119,5 +121,27 @@ describe('every playable floor can roll an encounter', () => {
     const boss = top.find((e) => e.kind === 'boss');
     expect(boss, 'floor 50010 should have a boss').toBeDefined();
     expect(boss!.weight).toBe(Math.max(...top.map((e) => e.weight)));
+  });
+
+  it('makes the summit the heaviest ambush in the tower, with no boss', () => {
+    // 统治核心（100000，终局创作后进入可玩表）：ambush 110 是全塔最高的一档
+    // ——按遭遇种类比，它压过 50010 守段者的 boss 108；把着终点的是整套安保
+    // 体系，不是一只看门狗。但这一层没有 boss：终局等的是终端和四个选择
+    // （quests.ts Q6），统治者是对话不是血条。数值与 worldgen.ts 的
+    // ENCOUNTER_ANCHORS 末行逐字一致——手写表与曲线在塔顶会师。
+    const weight = (floor: number, kind: 'ambush' | 'loot' | 'trader' | 'note' | 'cache' | 'boss'): number =>
+      ENCOUNTER_TABLE[floor].find((e) => e.kind === kind)?.weight ?? 0;
+    const row = ENCOUNTER_TABLE[100000];
+    expect(row.some((e) => e.kind === 'boss'), 'floor 100000 should have no boss').toBe(false);
+    const worstAmbush = Math.max(
+      ...PLAYABLE_FLOORS_V01.filter((f) => f !== 100000).map((f) => weight(f, 'ambush')),
+    );
+    expect(weight(100000, 'ambush'), 'summit ambush').toBeGreaterThan(worstAmbush);
+    expect(weight(100000, 'ambush'), 'summit ambush vs the keeper boss').toBeGreaterThan(weight(50010, 'boss'));
+    expect(weight(100000, 'loot')).toBe(2); // 全塔最低：终局层不是来搜刮的
+    expect(weight(100000, 'ambush')).toBe(110);
+    expect(weight(100000, 'trader')).toBe(6);
+    expect(weight(100000, 'note')).toBe(1);
+    expect(weight(100000, 'cache')).toBe(22);
   });
 });

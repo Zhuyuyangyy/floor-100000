@@ -293,12 +293,13 @@ describe('stairs stay inside the VIP tier (50000-50010)', () => {
     s.currentFloor = 50010;
     expect(tryChangeFloor(s, 1)).toEqual({ ok: false, reason: 'top' });
     expect(s.currentFloor).toBe(50010);
-    // The gap above is real, and this time the next segment's first floor has
-    // no authored content either: 100000 resolves through DEV_FLOOR_ALIAS for
-    // the dev entry, but hasFloorContent says no — the lift refuses the ride
-    // before generateFloor could throw.
+    // The gap above is still real, and the stairs still refuse: the only way
+    // across is the freight lift. The summit used to be unauthored (a dev alias
+    // onto floor 1), so the lift refused as well; with the finale authored
+    // (AG-16) the ride completes — see the liftOutcome tests in
+    // segments.test.ts.
     expect(segmentOf(50011)).toBeUndefined();
-    expect(hasFloorContent(100000)).toBe(false);
+    expect(hasFloorContent(100000)).toBe(true);
   });
 
   it('refuses to descend from 50000 into the unexplored 10011..49999 gap', () => {
@@ -356,7 +357,10 @@ describe('exit availability', () => {
     expect(hasDownExit(1)).toBe(false);
     expect(hasUpExit(1)).toBe(true);
     expect(hasUpExit(top)).toBe(false);
-    expect(hasDownExit(top)).toBe(true);
+    // 塔顶 100000 是单层段（段 6 只有一层）：向下的楼梯同样没有——从统治
+    // 核心回富人区走货梯，不是楼梯（liftDirection 见下面的电梯断言）。
+    expect(hasDownExit(top)).toBe(false);
+    expect(liftDirection(top)).toBe('down');
   });
 });
 
@@ -402,9 +406,9 @@ describe('segment boundaries refuse with a lift to name', () => {
     // Below the dorm there is nothing at all.
     expect(hasDownExit(1)).toBe(false);
     expect(liftDirection(1)).toBeNull();
-    // The summit 100000 is not in the playable list (it is the dev-only
-    // fixture floor), but it is where the last lift ends: its only lift points
-    // DOWN, so an up-refusal there cannot name a lift and 已到顶层 is true.
+    // The summit 100000 is where the last lift ends: segment 6 is a single
+    // floor, so its only lift points DOWN — an up-refusal there cannot name a
+    // lift and 已到顶层 is true.
     expect(hasUpExit(100000)).toBe(false);
     expect(liftDirection(100000)).toBe('down');
   });

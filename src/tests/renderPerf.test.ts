@@ -536,7 +536,8 @@ describe('邻居楼层不画无内容楼层', () => {
     expect(bounds.above).toBe(2);
     expect(bounds.below).toBe(2);
     expect(bounds.lowest).toBe(1);
-    expect(bounds.highest).toBe(50010);
+    // 塔顶是终局层：段 6（100000）创作后进入可玩表，可玩列表以它结尾。
+    expect(bounds.highest).toBe(100000);
     // 任何楼层都不会被指派超过 STACK 数量的邻居。
     for (const floor of PLAYABLE_FLOORS_V01) {
       const ns = stackNeighbours(floor, bounds, hasFloorContent);

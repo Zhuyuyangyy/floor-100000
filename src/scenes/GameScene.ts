@@ -4411,7 +4411,12 @@ export class GameScene extends Phaser.Scene {
   private hasInteractableNear(x: number): boolean {
     const state = getGame();
     const near = (v: number): boolean => Math.abs(v - x) <= 36;
-    if (state.currentFloor === NPC_FLOOR && NPCS.some((n) => near(n.x))) return true;
+    // The residents MOVE (AG-11 autonomy): npc.x is the schedule's spawn anchor,
+    // not where they are. Measured: 阿林 stood at 241 while her data said 480,
+    // so clicking her sprite walked the player over and then did nothing at all
+    // — the click never armed interact, and only E worked. Containers and beds
+    // are static, which is why they were fine.
+    if (state.currentFloor === NPC_FLOOR && npcsOnFloor(NPC_FLOOR).some((n) => near(this.npcView(state, n).x))) return true;
     if (this.floorView.containers.some((c) => c.items.length > 0 && near(c.x))) return true;
     for (const marker of this.spotMarkers.values()) if (near(marker.x)) return true;
     if (near(UP_EXIT_X) || near(DOWN_EXIT_X)) return true;

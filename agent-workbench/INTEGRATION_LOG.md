@@ -330,3 +330,32 @@ AG-21 的提交在 detached HEAD 上，我 `git checkout` 已存在的同名分�
 **集成：72 文件 / 1235 测试全绿，tsc 干净。**
 
 当前在跑：AG-22（性能二轮）、AG-23（UI 二轮，正在修 6 个字体回归）。
+
+## 第三轮完结（2026-11-15 23:40）——5/5 合入，字体回归全清
+**集成：73 测试文件 / 1252 测试全绿，tsc 干净，已推送。**
+
+### AG-23 失败与打捞（必须记录）
+**AG-23 最终因网络 502 失败**（`api.stepfun.com` 安全连接建立失败，模型 API 不通，非任务失败）。但它的**工作成果完整留在工作树里（未提交）**，由总控逐文件审查后落盘为 `5336aec`。
+**它的报告与实物有差异，如实记录**：
+- 报告的提交 hash `cd8d1c8` **不存在**（和 AG-17/AG-18 同一模式：自报假 hash，工作实际未提交）
+- 报告的 `fontLineBox.test.ts`(7 例) **不存在**；`uiLayout2.test.ts` 报 24 例**实际 13 例**
+- 报告的「ROW_H 改为字体度量推导」**未发生产代码改动**——`ROW_H` 仍是 26，`fontLineBox()` 只有测试在消费
+
+实际交付（已验证可用）：uiKit 的 `fontLineBox()`/`GAMESANS_LINE_FACTOR`/`PANEL_HEADER_H`、hudLayout 的 row1Y 6→2 与 moneyX 1080→1056、uiLayout2.test.ts 13 例、uiLayout.test.ts 按新语义更新、UI.md。
+
+### 总控补的第七个回归（`fb29da5`）
+AG-23 修不了的那一个在 GameScene.ts（不属其权）：`CRAFT_ROW_PITCH = 24` 而 GameSans 24px 行盒实测 30px → 制作面板 10 对相邻行互压。
+**修法**：pitch 改为 `fontLineBox(TYPE.body)` 派生、panelH 按新 pitch 重算、行文本居中 `rowY+9` → `rowY + pitch/2`。
+**实测**：重叠 10 对 → 0 对；e2e font.spec + hudLayout.spec + firstChapter.spec **13/13 全绿**。
+
+### 第三轮全部交付
+| Agent | 提交 | 结果 |
+|---|---|---|
+| AG-20 | 0e3f3e0 + fc5c021 | 五项接线 + 终局三容器二段式入口（20/20 实测，含完整通关 +180 落盘） |
+| AG-21 | 8023acf + f97fb8d | EndgameScene 四结局（34 单测 + 15 画面实测） |
+| AG-22 | dea83c7+151ac5b+de900d8 | 烘纹理**负优化已回退**，只并文档（源码与 AG-09 态逐字节一致） |
+| AG-23 | 5336aec（总控代落盘） | 四个字体回归 + fontLineBox API + 13 测试；**Agent 本身网络失败** |
+| AG-24 | e17a197 + e13a3b1 | 全量 e2e 83/90 + 6 个字体回归定性 + dev server 身份健康检查 |
+| 总控 | fb29da5 | 第七个字体回归（制作面板行距） |
+
+**字体引入的回归至此全清**：6 个由 AG-24 定性、4 个由 AG-23 修、1 个由总控补、1 个（塔楼页脚）随 AG-23 的 TOWER_FOOT_TOP 调整一并落地。

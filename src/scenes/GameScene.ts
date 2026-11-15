@@ -105,6 +105,7 @@ import {
   buildPanelWell,
   drawLine,
   drawStatBar,
+  fontLineBox,
 } from '../render/uiKit';
 import { portraitKey } from '../render/artpack';
 import { framedButton, hitRect } from '../render/pointer';
@@ -202,8 +203,13 @@ import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId
 const INVENTORY_SLOTS = 12;
 // Row pitch for the inventory list: 20px fits a full-size 16x16 icon with a 2px
 // gap either side, and keeps every offset an integer (no scaling, no blur).
-// Crafting rows: same 16px icon, 24px pitch keeps the cost text readable.
-const CRAFT_ROW_PITCH = 24;
+// Crafting rows: the pitch is the font's line box, not a hand-tuned number.
+// It used to be 24, which was tuned for the 1.1em-era face; GameSans draws a
+// 24px label as a 30px line box, so at 24 the adjacent rows printed 6px through
+// each other (AG-24 measured 10 colliding pairs in font.spec.ts:165 — the
+// overlap was 20% of the smaller box, well past the 15% threshold). Deriving it
+// from fontLineBox() means the next font swap cannot rot it again.
+const CRAFT_ROW_PITCH = fontLineBox(TYPE.body);
 // One row per recipe. This used to be a hard-coded 4, which was fine while the
 // workbench had three recipes and a purify entry — the pass chain adds five more,
 // and a fixed four rows would have let the selection walk off the bottom of the
@@ -3770,7 +3776,10 @@ export class GameScene extends Phaser.Scene {
     // plus three materials, and at 460 it ran under the right-aligned status
     // column (screenshot: 核心权限's cost sat on top of 缺前置).
     const panelW = 530;
-    const panelH = 300;
+    // 30 header + CRAFT_ROWS rows at the font's line box + footer clearance.
+    // This was 300, sized when the pitch was 24; at the measured 30 the last
+    // row and the footer ran past the bottom edge.
+    const panelH = 30 + CRAFT_ROWS * CRAFT_ROW_PITCH + 40;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -3794,8 +3803,10 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < CRAFT_ROWS; i++) {
       const rowY = top + 30 + i * CRAFT_ROW_PITCH;
       const band = this.add.rectangle(left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.34).setDepth(PANEL_DEPTH.game.craft + 5);
-      const name = this.add.text(left + 18, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-      const status = this.add.text(left + panelW - 24, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      // Centre on the row, not on a hand-tuned offset: the row IS the font's
+      // line box now, so the middle of the pitch is the middle of the text.
+      const name = this.add.text(left + 18, rowY + CRAFT_ROW_PITCH / 2, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      const status = this.add.text(left + panelW - 24, rowY + CRAFT_ROW_PITCH / 2, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
       this.craftRows.push({ band, name, status });
       this.craftObjects.push(band, name, status);
       this.craftObjects.push(

@@ -35,7 +35,7 @@ import { hasFloorContent } from '../data/floorTemplates';
 // tweens.add。假实现逐项记录，返回值是可链式的记录对象。
 
 interface Recorded {
-  type: 'Image' | 'Rectangle' | 'Graphics' | 'Sprite';
+  type: 'Image' | 'Rectangle' | 'Graphics' | 'Sprite' | 'RenderTexture';
   depth: number;
   x: number;
   y: number;
@@ -79,6 +79,9 @@ class FakeObject {
   animTimeScale = 1;
   destroyed = false;
   commands: string[] = [];
+  // RenderTexture 的假 DynamicTexture：draw 把来源 Graphics 的命令抄进来，
+  // 于是"烘了什么"在快照里依然逐项可比（确定性断言不因烘焙而变弱）。
+  texture: { draw: (entries: FakeObject, dx: number, dy: number) => void; render: () => void } | null = null;
   // fx 的 startFxLoop 会写 sprite.anims.timeScale、读
   // sprite.anims.currentAnim.frames.length；假实现保持这两个面的形状。
   anims!: {
@@ -250,6 +253,9 @@ function makeScene(): { scene: unknown; objects: FakeObject[]; timers: number[];
   const objects: FakeObject[] = [];
   const timers: number[] = [];
   const tweens: unknown[] = [];
+  // AG-22：RenderTexture 的假纹理 key 用每场景一个计数器（真实 Phaser 用
+  // UUID）。两次渲染各建一个新场景，计数器序列一致，确定性断言仍逐项可比。
+  let rtSeq = 0;
   const textures = new Map<string, { frameTotal: number; getFrameNames: () => string[]; getSourceImage: () => { height: number } }>();
   for (const id of FX_IDS) {
     textures.set(id, {
@@ -290,6 +296,25 @@ function makeScene(): { scene: unknown; objects: FakeObject[]; timers: number[];
         o.x = x;
         o.y = y;
         o.textureKey = key;
+        objects.push(o);
+        return o;
+      },
+      // AG-22：静态批次烘焙的落点（render/lighting.ts 的 bakeStaticLayer）。
+      // x/y 是内容包围盒的左上角（调用方紧跟 setOrigin(0,0)）。
+      renderTexture: (x: number, y: number, w: number, h: number): FakeObject => {
+        const o = new FakeObject('RenderTexture');
+        o.x = x;
+        o.y = y;
+        o.width = w;
+        o.height = h;
+        o.textureKey = `rt-${rtSeq++}`;
+        o.texture = {
+          draw: (entries: FakeObject): void => {
+            // 把来源 Graphics 已画完的命令抄进来——烘进去的就是这些。
+            o.commands.push(...entries.commands);
+          },
+          render: (): void => {},
+        };
         objects.push(o);
         return o;
       },
@@ -384,10 +409,13 @@ function countLiveCorridor(floor: number): { total: number; byType: Record<strin
   const layerObjects = objects.slice(before);
   const rest = drawLiveCorridor(scene, floor);
   const all = [...layerObjects, ...rest];
+  // AG-22：数"显示树上有的"对象。烘焙会把画完的草稿 Graphics  destroy 掉，
+  // 与 Playwright 普查（遍历显示树）同一个口径；created-ever 会把草稿也算进去。
+  const live = all.filter((o) => !o.destroyed);
   const byType: Record<string, number> = {};
-  for (const o of all) byType[o.type] = (byType[o.type] ?? 0) + 1;
+  for (const o of live) byType[o.type] = (byType[o.type] ?? 0) + 1;
   layer.destroy();
-  return { total: all.length, byType, objects: all };
+  return { total: live.length, byType, objects: all };
 }
 
 // 邻居楼层（GameScene.drawNeighbourFloor 的镜像）：同样只量 render 模块的产出，
@@ -419,9 +447,11 @@ function countNeighbourFloor(floor: number): { total: number; byType: Record<str
   }
   buildCeilingLights(scene as never, { width: FLOOR_WIDTH, seed: floor * 13, top: 16, fixtures: fixtures as never });
   const created = objects.slice(before);
+  // 同 countLiveCorridor：只数没被烘焙销毁的（见该函数注释）。
+  const live = created.filter((o) => !o.destroyed);
   const byType: Record<string, number> = {};
-  for (const o of created) byType[o.type] = (byType[o.type] ?? 0) + 1;
-  return { total: created.length + NEIGHBOUR_FIXED_OBJECTS, byType, objects: created };
+  for (const o of live) byType[o.type] = (byType[o.type] ?? 0) + 1;
+  return { total: live.length + NEIGHBOUR_FIXED_OBJECTS, byType, objects: created };
 }
 
 // ── 对象预算 ───────────────────────────────────────────────────────────────
@@ -482,8 +512,9 @@ describe('每层 create 的对象数有上限', () => {
     buildLightLayer(dorm.scene as never, { width: FLOOR_WIDTH, height: FLOOR_HEIGHT, isDorm: true, hasUpExit: true, hasDownExit: true });
     const corr = corridor.objects.length;
     buildLightLayer(corridor.scene as never, { width: FLOOR_WIDTH, height: FLOOR_HEIGHT, isDorm: false, hasUpExit: true, hasDownExit: true });
-    const dormCount = dorm.objects.length - base;
-    const corridorCount = corridor.objects.length - corr;
+    // 数显示树上有的：AG-22 起 ambient/vignette 是烘焙纹理，草稿 Graphics 已销毁。
+    const dormCount = dorm.objects.slice(base).filter((o) => !o.destroyed).length;
+    const corridorCount = corridor.objects.slice(corr).filter((o) => !o.destroyed).length;
     expect(dormCount).toBeGreaterThan(corridorCount); // 床和工作台的灯
     expect(dormCount).toBeLessThanOrEqual(60);
     expect(corridorCount).toBeLessThanOrEqual(40);
@@ -653,23 +684,91 @@ describe('昼夜与光照的深度契约', () => {
       const { scene, objects } = makeScene();
       const before = objects.length;
       const layer = buildLightLayer(scene as never, { width: FLOOR_WIDTH, height: FLOOR_HEIGHT, isDorm: false, hasUpExit: true, hasDownExit: true });
-      const created = objects.slice(before);
-      // 两个灯池 = 两张 ADD 光晕图 + 各自 7 颗尘埃；加 ambient/vignette 两张合并图。
+      // AG-22：只数显示树上有的（烘焙会 destroy 草稿 Graphics）。
+      const created = objects.slice(before).filter((o) => !o.destroyed);
+      // 两个灯池 = 两张 ADD 光晕图 + 各自 7 颗尘埃；加 ambient/vignette 两张烘焙图。
       const glows = created.filter((o) => o.type === 'Image' && o.depth === LIGHT_DEPTH);
       expect(glows.length, `floor ${floor} 的灯池光晕`).toBe(2);
       expect(created.filter((o) => o.type === 'Rectangle' && o.depth === 25).length).toBe(14);
-      expect(created.filter((o) => o.type === 'Graphics' && o.depth === 0).length).toBe(1); // ambient 两带合一
-      expect(created.filter((o) => o.type === 'Graphics' && o.depth === 8).length).toBe(1); // vignette 十六条合一
+      expect(created.filter((o) => o.type === 'RenderTexture' && o.depth === 0).length).toBe(1); // ambient 两带合一
+      expect(created.filter((o) => o.type === 'RenderTexture' && o.depth === 8).length).toBe(1); // vignette 十六条合一
       layer.destroy();
     }
   });
 
-  it('接触阴影合并为一张 Graphics（玩家/容器/床各一处）', () => {
+  it('接触阴影烘焙为一张 RenderTexture（玩家/容器/床各一处）', () => {
     const { scene, objects } = makeScene();
     const before = objects.length;
     addContactShadow(scene as never, 640, 160, 26, 2, 0.55);
-    expect(objects.length - before).toBe(1);
-    expect(objects[objects.length - 1].commands.length).toBe(6); // 3 层 x (fillStyle+fillRect)
+    // 草稿 Graphics 已被烘焙销毁，显示树上只剩一张烘好的纹理。
+    const live = objects.slice(before).filter((o) => !o.destroyed);
+    expect(live.length).toBe(1);
+    expect(live[0].type).toBe('RenderTexture');
+    expect(live[0].commands.length).toBe(6); // 3 层 x (fillStyle+fillRect)，烘进去的就是这些
+  });
+});
+
+// ── AG-22：静态批次烘纹理 ──────────────────────────────────────────────────
+
+describe('静态图形烘进纹理，不进 commandBuffer', () => {
+  it('builder 的静态产出全部是 RenderTexture，没有 Graphics 漏网', () => {
+    // 每个 builder 的静态批次都该烘成纹理；drawLiveCorridor 里唯一的
+    // Graphics 是它自己创建、传给 drawCorridorRoom 的场景共享线work层——
+    // 那一层的烘焙需要 GameScene 把 detail.setAlpha(0.68) 的目标改成 builder
+    // 返回值（见 docs/plans/RENDER.md §10），本轮不动，所以它不在产出里。
+    for (const floor of [2, 3, 4, 5, 100, 10005, 50005]) {
+      const { scene } = makeScene();
+      const rest = drawLiveCorridor(scene, floor).filter((o) => !o.destroyed);
+      expect(rest.filter((o) => o.type === 'Graphics').length, `floor ${floor} 的 builder 不该留下 Graphics`).toBe(0);
+      // 而 RenderTexture 确实出现了：静态批次现在每帧是一个 quad。
+      expect(rest.filter((o) => o.type === 'RenderTexture').length, `floor ${floor}`).toBeGreaterThan(0);
+    }
+  });
+
+  it('烘焙的纹理尺寸 = 内容的包围盒，位置 = 包围盒左上角', () => {
+    const { scene } = makeScene();
+    const rts = buildRoomDepth(scene as never, { width: FLOOR_WIDTH, wallBottom: WALL_H, height: FLOOR_HEIGHT, lightXs: [40, 1240] }) as unknown as FakeObject[];
+    const rt = rts.find((o) => o.type === 'RenderTexture');
+    expect(rt).toBeDefined();
+    if (!rt) return;
+    // buildRoomDepth 只画 depth 0：天花渐隐(8..) + 踢脚线 + 地板渐变到 height。
+    expect(rt.depth).toBe(0);
+    expect(rt.x).toBe(0);
+    expect(rt.width).toBe(FLOOR_WIDTH);
+    // 顶部从天渐隐的 y=8 开始，底部到 height（地板渐变的最后一条 +1 像素）。
+    expect(rt.y).toBe(8);
+    expect(rt.height).toBeGreaterThanOrEqual(FLOOR_HEIGHT - 8);
+  });
+
+  it('邻居 dimObject 的上色不会落到烘焙层上（Graphics 时代也没有）', () => {
+    // GameScene.drawNeighbourFloor 的 dimObject 对"有 setTint 的对象"上色。
+    // 静态 scenery 在 Graphics 时代没有 Tint 组件、从未被上色；烘焙后
+    // bakeStaticLayer 在实例上屏蔽了 setTint 保住这条语义（天花灯外壳是
+    // 唯一真被 dimObject 扫到的烘焙对象，拿它钉住）。
+    const { scene } = makeScene();
+    const strips = buildCeilingLights(scene as never, { width: FLOOR_WIDTH, seed: 3 * 13, top: 16 }) as unknown as FakeObject[];
+    const housing = strips.find((o) => o.type === 'RenderTexture');
+    expect(housing).toBeDefined();
+    if (!housing) return;
+    housing.setTint(0x9dabbd);
+    expect(housing.tint).toBeNull();
+    // 灯管矩形不受影响：它本来就是被换 fill 的那一个。
+    const tube = strips.find((o) => o.type === 'Rectangle');
+    expect(tube).toBeDefined();
+    if (tube) {
+      tube.setTint(0x9dabbd);
+      expect(tube.tint).toBe(0x9dabbd);
+    }
+  });
+
+  it('同一层的两次烘焙逐项相同（确定性不因烘焙变弱）', () => {
+    const bake = (): string => {
+      const { scene, objects } = makeScene();
+      const before = objects.length;
+      buildWallDressing(scene as never, { width: FLOOR_WIDTH, wallBottom: WALL_H, seed: 5 * 19, keepClear: [40, 1240] });
+      return JSON.stringify(objects.slice(before).map((o) => o.snapshot()));
+    };
+    expect(bake()).toBe(bake());
   });
 });
 

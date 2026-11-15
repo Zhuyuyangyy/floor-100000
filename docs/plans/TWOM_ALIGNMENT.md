@@ -145,3 +145,83 @@ re-export `evaluateTriggers`，场景只需 import 这一个模块）。共 22 �
 4. `dailyGoal` HUD（:3383）保留 `isDailyGoalDone` 实时判定；旗只服务
    「第一次完成每日目标」类一次性反应。`progress.ts:82` 读存量
    `dailyGoal.done` 的 deprecated 迁移归 progress 属主，本单只加了注释。
+
+## 十、AG-28 实现说明（2026-11-16，NPC 三原子落地）
+
+实现文件：`src/ai/npcAtoms.ts`（新建）、测试 `src/tests/npcAtoms.test.ts`
+（新建，31 个断言）。`src/ai/npcSchedule.ts`、`src/data/npcs.ts` 未改
+（升级走复用，不重写）；`src/systems/NpcAutonomy.ts` 属 AG-25/26/27 领地，
+本模块只读 import 其计划函数。
+
+### 1. 三原子 API（契约 §7 schema 原样落地）
+
+```ts
+type NpcAtom =
+  | { kind: 'goTo'; x: number; speed?: number }
+  | { kind: 'speak'; text: string }
+  | { kind: 'playAnimation'; clip: string };
+
+npcAtomsFor(npc, state, opts?): NpcAtom[]   // 原子序列：goTo → playAnimation → (speak)
+sense(npc, state): NpcSense                // Sensor 感知快照（纯函数）
+wandererAtomsFor(state): NpcAtom[]         // 流浪者登场原子（第二个实体，证明原子不是 NPC 专属）
+```
+
+- `goTo`：x 来自 `npcAutonomyFor` 的运行时坐标（**同一纯函数，无第二套位置
+  逻辑**），`speed` 是 `NPC_WALK_SPEED`（像素/游戏分钟，信息性字段）。
+- `speak`：仅当玩家在交互距离内（Sensor 门控）时发射；文本 =
+  `npcEconomy.attitudeLine(npc, 信誉分级)`——信誉分层确定性台词，
+  关系/记忆真的改变 NPC 嘴里的话。每帧发射，场景侧按"进入范围"去重。
+- `playAnimation`：clip 与 `render/walkcycle.ts` 的 anim key 逐字同构
+  （`walk-{who}` / `idle-{who}`，由 npcAtoms.test.ts 钉死映射）；攻击/受击/
+  搜刮/倒地/拾取五个一次性 clip 归战斗与搜刮接线，本模块不产生。
+
+### 2. Sensor 感知面（`sense()` 输出）
+
+`{ npcId, floor, x, player: { floor, x, sameFloor, distance, withinInteract },
+time: { day, minuteOfDay, night }, self: { slotLabel, goal, moving, scarcity,
+reputation } }`。跨层时 `distance = Infinity`（看不见就不谈距离）；
+`night` 走 `SurvivalSystem.isNight`（1080–360）；`scarcity` 走
+`npcSchedule.scarcityOf` + `syncNpcInventory` 的既有惰性结算通路；
+`reputation` 走 `npcEconomy.reputationOf`。**该改走 sense 的既有直读点**：
+`GameScene.nearestNpc`（GameScene.ts:4175）与 `hasInteractableNear`
+（:4901）——两者已经用自主视图的运行时坐标（AG-11 修过），差的只是把
+"同层/距离/交互距离"三个结论统一收到 `sense()` 出，场景不再各自
+`Math.abs(view.x - player.x) <= INTERACT_DISTANCE`。
+
+### 3. Forced 打断怎么统一
+
+`npcAtomsFor(npc, state, { forcedTarget })`：`forcedTarget` 非空（有限数）
+时只回 `[goTo(钳制后的 forcedTarget), playAnimation(walk clip)]`，自主原子
+（含 speak）整棵丢弃——TWOM 的 `Forced*Decorator`：玩家指令 > AI 自主。
+它是**调用参数，不进 GameState**（不动 schema）。统一原则：场景里凡要回答
+"这个 NPC 现在在哪、听谁的"，都走 `npcAtomsFor` / `sense` 这条纯函数链，
+不再有第二套读数。AG-11/AG-24 修过的"点击走路交互判定用运行时坐标而非
+npc.spec 静态锚点"（GameScene.ts:4896-4901 注释：阿林站在 241 而数据说
+480）是同一原则的既有落地——runtime > 静态数据；forcedTarget 把这条原则
+从"位置"延伸到"指令"。
+
+### 4. 场景侧需接的精确位置（总控派活，本 Agent 未动 GameScene）
+
+| 位置 | 现状 | 接法 |
+|---|---|---|
+| `GameScene.ts:4142` `npcView()` | 调 `npcAutonomyFor` 拿 view | 可保留（内部就是 atoms 的 goTo 数据源）；若要统一入口改调 `npcAtomsFor(...)[0]` 取 x |
+| `GameScene.ts:4156-4173` `syncNpcs()` | `setPosition(view.x)` + `view.moving ? walkAnimKey : idleAnimKey`（:4164） | 按原子序应用：`goTo` → setPosition，`playAnimation` → play(clip)；本模块的 clip 与 :4164 现有选择逐字一致，可平滑替换 |
+| `GameScene.ts:4175` `nearestNpc()` | 自己算 `Math.abs(view.x - player.x) <= INTERACT_DISTANCE` | 改 `sense(npc, state).player.withinInteract` |
+| `GameScene.ts:4901` `hasInteractableNear()` | 同款距离判定（near 半径 36） | 同上走 sense；注意此处 36 ≠ INTERACT_DISTANCE(44)，是点击武装阈值，接入时保留各自常量 |
+| `GameScene.ts:4460` `openDialogue` | 开场白固定 `greetings[0]` | 对话面板开场句仍用 greetings（两行版面约束未变）；若要"信誉影响第一句话"，在 enhanceOpeningLine 前插 `npcAtomsFor` 的 speak 原子 |
+| `GameScene.ts:5936` `syncNpcs(state)` | 每帧调用 | 不变；新增 forcedTarget 生产者（玩家指令 NPC 移动）后，在此处把指令传进 `npcAtomsFor` |
+
+### 5. 验证与遗留
+
+- `npx tsc --noEmit` 干净；`VITE_NPC_MODEL= npx vitest run`：74 文件 /
+  1283 测试全绿（基线 1252 + 本 Agent 新增 31），AG-13 的 npcBehavior
+  断言未动、未红。
+- 遗留（没处理干净的地方）：
+  1. 五位新发布者没有 baked sheet（walkcycle 的 WALK_CHARACTERS 只有
+     alin/xiaozhou/wanderer/player/zhouhe），其 playAnimation clip 按命名
+     规则给出（`walk-recruiter` 等），场景侧消费时需按 sheet 存在性跳过
+     （与 drawNpcs 只画 NPC_FLOOR 的现状一致）；
+  2. speak 原子每帧发射同一句，需要场景侧"进入范围才播一次"的去重；
+  3. forcedTarget 目前没有生产者（等玩家指令 NPC 的功能），契约侧已就绪；
+  4. 流浪者的帧级游荡/扑击（stepWandererRoam / wandererAI 状态机）需要 dt
+     与帧间状态，未原子化——`wandererAtomsFor` 只覆盖"登场点"纯计划。

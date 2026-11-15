@@ -3,8 +3,21 @@ import { createNewGame } from '../core/gameState';
 import { getFloorView, lootContainer, lootGround } from '../systems/LootSystem';
 import { addItem, countItem, isBagFull, useConsumable } from '../systems/InventorySystem';
 import { STORAGE_RACK_SLOTS, canCraft, craft, hasUpgrade, purifyWater, recipeTierLocked } from '../systems/CraftingSystem';
-import { buy, sell, sellPrice, shopStock } from '../systems/shop';
-import { sleep } from '../systems/SurvivalSystem';
+import {
+  VENTURES,
+  VENTURE_DAY_XP,
+  buy,
+  invest,
+  materialAsk,
+  materialShelf,
+  priceJitter,
+  productionDecay,
+  sell,
+  sellPrice,
+  settleInvestments,
+  shopStock,
+} from '../systems/shop';
+import { sleep, spendTime } from '../systems/SurvivalSystem';
 import { trade } from '../systems/TradeSystem';
 import { deserialize, serialize, validateGameState } from '../systems/SaveSystem';
 import { grantGrowthXp, GROWTH_MAX_LEVEL } from '../core/growth';
@@ -348,8 +361,10 @@ describe('same seed, same result (determinism)', () => {
   });
 
   it('the favour-free shop has no hidden randomness across days', () => {
-    // shop 不读 day/seed 定价（材料价全局固定，商品价按 band），同一天内
-    // 反复买卖同价——这是"同 seed 交易可复现"的最低要求。
+    // 商品架标价与材料收购价不读 day/seed（材料价全局固定，商品价按 band），
+    // 同一天内反复买卖同价——这是"同 seed 交易可复现"的最低要求。
+    // （AG-14 起商人"出售"材料的要价按 (seed, day) 波动，见下一节"当日
+    // 市场"；收购侧与商品侧的确定性一个字没动。）
     const s = createNewGame(9);
     s.player.gold = 500;
     const p1 = ((): number => { buy(s, 'bread', 2); return 500 - s.player.gold; })();
@@ -498,5 +513,415 @@ describe('the growth lines are fed by the economy (B5 break: three lines had no 
     // 结果，不是准入门槛。
     expect(canCraft(s, 'work_badge').ok).toBe(true);
     expect(craft(s, 'work_badge').ok).toBe(true);
+  });
+});
+
+// ── AG-14：经济的时间维度（priceJitter / productionDecay）与 buy 侧 ──────
+//
+// AG-05 留下三个"功能就绪、没有调用方"的钩子：priceJitter /
+// productionDecay 无场景调用、商人不卖材料（buy 侧）、investedGold/ventures
+// 无生产者。本节把三件事接上，并钉死接上之后不许破坏的边界：
+//   1. 当日价格确定性——同 seed 同日两次同价，跨天真不同；
+//   2. 买卖无套利——任何 seed、任何一天、任何 connections 等级，商人出售
+//      材料的要价严格高于收购价（结构下限 bid+1，折扣也夹在下限上）；
+//   3. 投资有风险——倒塌亏本金、亏损日没收入，且都按 (runSeed, day) 确定；
+//   4. survivalBalance 的世界供给一个字没动（商人只是新增一条现金通道）。
+
+// 当日扫程：覆盖跨日波动与长期衰减两个尺度。
+const SWEEP_DAYS = Array.from({ length: 40 }, (_, i) => i + 1);
+const SWEEP_SEEDS = [1, 42, 2026];
+const ALL_MATERIALS = ['fuse', 'filter', 'battery', 'wire', 'scrap_metal', 'cloth', 'wood', 'tape'] as ItemId[];
+
+describe('the daily market: the trader’s ask moves with the day (AG-14: priceJitter)', () => {
+  it('one deterministic draw per (seed, day) — same inputs, same market', () => {
+    for (const seed of SWEEP_SEEDS) {
+      for (const day of SWEEP_DAYS) {
+        expect(priceJitter(seed, day)).toBe(priceJitter(seed, day));
+        const j = priceJitter(seed, day);
+        expect(j).toBeGreaterThanOrEqual(0.85);
+        expect(j).toBeLessThanOrEqual(1.15);
+      }
+    }
+    // 跨天真不同：同 seed 扫 40 天必然出现不止一种行情
+    const oneSeed = new Set(SWEEP_DAYS.map((d) => priceJitter(1, d)));
+    expect(oneSeed.size).toBeGreaterThan(1);
+    // 不同 seed 同一天是不同行情（市场不是全局同一个数）
+    expect(priceJitter(1, 5)).not.toBe(priceJitter(42, 5));
+  });
+
+  it('the shop charges exactly the day’s ask, twice the same day', () => {
+    const s = createNewGame(7);
+    s.day = 4;
+    s.player.gold = 500;
+    const ask = materialAsk('fuse', s.runSeed, s.day);
+    const before = s.player.gold;
+    expect(buy(s, 'fuse', 4).ok).toBe(true);
+    expect(s.player.gold).toBe(before - ask); // connections 1 级无折扣，按牌价
+    const mid = s.player.gold;
+    expect(buy(s, 'fuse', 4).ok).toBe(true);
+    expect(s.player.gold).toBe(mid - materialAsk('fuse', s.runSeed, s.day));
+    expect(countItem(s.player.inventory, 'fuse')).toBe(2);
+  });
+
+  it('the ask always beats the bid — no day and no seed can arbitrage the trader', () => {
+    for (const seed of SWEEP_SEEDS) {
+      for (const day of SWEEP_DAYS) {
+        for (const id of ALL_MATERIALS) {
+          const ask = materialAsk(id, seed, day);
+          const where = `${id} seed ${seed} day ${day}`;
+          expect(ask, where).toBeGreaterThan(sellPrice(id, 2));
+          // 结构性下限：要价永不低于收购价 + 1（商人转手不亏，套利无从下嘴）
+          expect(ask, where).toBeGreaterThanOrEqual(sellPrice(id, 2) + 1);
+        }
+      }
+    }
+  });
+
+  it('buying from the trader always costs more than paying 阿林 in goods', () => {
+    // 对称锚：AG-05 钉死"收购价永远低于找阿林换实物"；出售侧反过来——要价
+    // 永远高于对应易物的金币成本，拿货去兑永远是更优路径，商人只是没有
+    // 易物货可兑时的现金通道。
+    for (const seed of SWEEP_SEEDS) {
+      for (const day of SWEEP_DAYS) {
+        expect(materialAsk('wire', seed, day)).toBeGreaterThan(sellPrice('scrap_metal', 2));
+        expect(materialAsk('fuse', seed, day)).toBeGreaterThan(sellPrice('battery', 2));
+      }
+    }
+  });
+
+  it('material round-trips lose money on every day of the sweep', () => {
+    for (const seed of SWEEP_SEEDS) {
+      for (const day of SWEEP_DAYS) {
+        const s = createNewGame(seed);
+        s.day = day;
+        s.player.gold = 500;
+        const start = s.player.gold;
+        for (const id of ALL_MATERIALS) {
+          buy(s, id, 4);
+          sell(s, id, 4);
+        }
+        expect(s.player.gold, `seed ${seed} day ${day}`).toBeLessThan(start);
+      }
+    }
+  });
+
+  it('the connections discount cannot arbitrage the material shelf either', () => {
+    // 熟人折扣只打买价（与商品侧同规则），且材料要价夹在 bid+1 的结构下限
+    // 上——满级人脉买料卖料依旧亏。
+    const xpToReach = (level: number): number => (100 * (level - 1) * level) / 2;
+    for (const seed of SWEEP_SEEDS) {
+      for (const day of SWEEP_DAYS) {
+        const s = createNewGame(seed);
+        s.day = day;
+        grantGrowthXp(s, 'connections', xpToReach(GROWTH_MAX_LEVEL));
+        s.player.gold = 500;
+        const start = s.player.gold;
+        buy(s, 'scrap_metal', 4);
+        sell(s, 'scrap_metal', 4);
+        expect(s.player.gold, `seed ${seed} day ${day}`).toBeLessThan(start);
+      }
+    }
+  });
+
+  it('buying the guaranteed basket always costs more than selling it back', () => {
+    // 变现总额约束的对称面：AG-05 钉死"保底材料全卖 32 金"，本节钉死"全买
+    // 永远更贵"——买料做配方不会成为比搜刮更优的解。
+    const basket: Array<[ItemId, number]> = [
+      ['fuse', 1], ['filter', 1], ['battery', 1], ['wire', 2],
+      ['scrap_metal', 3], ['cloth', 1], ['wood', 2], ['tape', 1],
+    ];
+    for (const seed of SWEEP_SEEDS) {
+      for (const day of SWEEP_DAYS) {
+        const s = createNewGame(seed);
+        s.day = day;
+        s.player.gold = 500;
+        const start = s.player.gold;
+        for (const [id, n] of basket) for (let i = 0; i < n; i++) expect(buy(s, id, 4).ok, `${id} seed ${seed} day ${day}`).toBe(true);
+        expect(start - s.player.gold).toBeGreaterThan(32); // 全卖只回 32
+        for (const [id, n] of basket) for (let i = 0; i < n; i++) expect(sell(s, id, 4).ok).toBe(true);
+        expect(s.player.gold).toBeLessThan(start); // 一进一出必亏
+      }
+    }
+  });
+
+  it('the material shelf lists all eight materials at the day’s price, dearest first', () => {
+    const shelf = materialShelf(2026, 3);
+    expect(shelf.map((e) => e.itemId).sort()).toEqual([...ALL_MATERIALS].sort());
+    for (const e of shelf) {
+      expect(e.price).toBe(materialAsk(e.itemId, 2026, 3));
+      expect(e.price).toBeGreaterThan(sellPrice(e.itemId, 2));
+    }
+    for (let i = 1; i < shelf.length; i++) expect(shelf[i - 1].price).toBeGreaterThanOrEqual(shelf[i].price);
+    // 三锚在要价侧同向：保险丝（保底 1 个 + core_key 硬门槛）永远贵过电池
+    for (const day of SWEEP_DAYS) {
+      expect(materialAsk('fuse', 2026, day)).toBeGreaterThan(materialAsk('battery', 2026, day));
+    }
+  });
+
+  it('a buy the trader cannot supply changes nothing — materials included', () => {
+    const s = createNewGame(1);
+    s.player.gold = 500;
+    expect(buy(s, 'crowbar', 2).ok).toBe(false); // 2 层货架没有撬棍，撬棍也不是材料
+    expect(s.player.gold).toBe(500);
+    expect(s.player.inventory.slots.length).toBe(3);
+    const s2 = createNewGame(1);
+    s2.player.gold = 500;
+    expect(buy(s2, 'flashlight', 2).ok).toBe(false); // 哪层都不卖、也不是材料
+    expect(s2.player.gold).toBe(500);
+    expect(s2.player.inventory.slots.length).toBe(3);
+    // 手电确实不在材料货架上：商人不卖它
+    expect(materialShelf(1, 1).some((e) => e.itemId === 'flashlight')).toBe(false);
+  });
+});
+
+describe('ventures: capital sinks into the tower and pays by the day (AG-14: investedGold/ventures)', () => {
+  const investedOf = (state: GameState): number => state.growth?.investedGold ?? 0;
+  const venturesOf = (state: GameState): string[] => state.growth?.ventures ?? [];
+  const costOf = (id: string): number => VENTURES.find((v) => v.id === id)!.cost;
+  const ledgerCost = (state: GameState): number =>
+    VENTURES.reduce((sum, v) => sum + (venturesOf(state).includes(v.id) ? v.cost : 0), 0);
+
+  it('investing moves gold into the ledger and pays +50 wealth', () => {
+    const s = createNewGame(1);
+    s.player.gold = 200;
+    expect(invest(s, 'water_stall').ok).toBe(true);
+    expect(s.player.gold).toBe(200 - costOf('water_stall'));
+    expect(investedOf(s)).toBe(costOf('water_stall'));
+    expect(venturesOf(s)).toEqual(['water_stall']);
+    expect(s.growth?.wealth.totalXp).toBe(50); // 契约 §5：完成一笔产业投资 +50
+    expect(investedOf(s)).toBe(ledgerCost(s)); // 账本不变量：沉没资本 = 在册成本合计
+  });
+
+  it('refuses an unknown venture, a duplicate, and a purse too light — atomically', () => {
+    const s = createNewGame(1);
+    s.player.gold = 50;
+    expect(invest(s, 'nope').ok).toBe(false);
+    expect(invest(s, 'water_stall').ok).toBe(true);
+    const snapshot = {
+      gold: s.player.gold,
+      invested: investedOf(s),
+      ventures: venturesOf(s),
+      xp: s.growth?.wealth.totalXp ?? 0,
+    };
+    expect(invest(s, 'water_stall').ok).toBe(false); // 一种一门
+    expect(invest(s, 'scrap_caravan').ok).toBe(false); // 80 > 50
+    expect(s.player.gold).toBe(snapshot.gold);
+    expect(investedOf(s)).toBe(snapshot.invested);
+    expect(venturesOf(s)).toEqual(snapshot.ventures);
+    expect(s.growth?.wealth.totalXp ?? 0).toBe(snapshot.xp);
+  });
+
+  it('settlement is deterministic per (seed, day) and pays the formula exactly', () => {
+    // 找一个"当日全付"的 (seed, day)，结算报告必须逐金对上公式。
+    let found: { seed: number; day: number } | null = null;
+    for (let seed = 1; seed <= 60 && !found; seed++) {
+      for (let day = 2; day <= 12 && !found; day++) {
+        const probe = createNewGame(seed);
+        probe.player.gold = 200;
+        probe.day = day;
+        invest(probe, 'water_stall');
+        const r = settleInvestments(probe);
+        if (r.paid.length === 1 && r.lossDays.length === 0 && r.collapsed.length === 0) found = { seed, day };
+      }
+    }
+    expect(found).not.toBeNull();
+    const run = (): GameState => {
+      const s = createNewGame(found!.seed);
+      s.player.gold = 200;
+      s.day = found!.day;
+      invest(s, 'water_stall');
+      settleInvestments(s);
+      return s;
+    };
+    const a = run();
+    const b = run();
+    expect(a.player.gold).toBe(b.player.gold);
+    expect(a.growth).toEqual(b.growth);
+    const settledDay = found!.day - 1; // 结算的是刚结束的那天
+    const def = VENTURES.find((v) => v.id === 'water_stall')!;
+    const expectedIncome = Math.max(1, Math.round(def.cost * def.baseRate * productionDecay(settledDay)));
+    expect(a.player.gold).toBe(200 - def.cost + expectedIncome);
+    expect(a.growth?.wealth.totalXp).toBe(50 + VENTURE_DAY_XP);
+  });
+
+  it('settlement is idempotent within a day — a second call pays nothing', () => {
+    const s = createNewGame(1);
+    s.player.gold = 200;
+    s.day = 3;
+    invest(s, 'water_stall');
+    const first = settleInvestments(s);
+    expect(first.day).toBe(2);
+    const goldAfterFirst = s.player.gold;
+    const second = settleInvestments(s);
+    expect(second).toEqual({ day: 0, paid: [], lossDays: [], collapsed: [], totalIncome: 0 });
+    expect(s.player.gold).toBe(goldAfterFirst);
+  });
+
+  it('production decays with the day — the tower keeps less every morning', () => {
+    expect(productionDecay(1)).toBe(1);
+    for (let day = 1; day < 40; day++) {
+      expect(productionDecay(day + 1)).toBeLessThan(productionDecay(day));
+    }
+    expect(productionDecay(30)).toBeLessThan(0.5); // 一个月后产量不足一半
+  });
+
+  it('risk actually fires: over a long sweep, ventures pay, lose days, and collapse', () => {
+    let paid = 0;
+    let losses = 0;
+    let collapses = 0;
+    for (let seed = 1; seed <= 30; seed++) {
+      for (const def of VENTURES) {
+        const s = createNewGame(seed);
+        s.player.gold = 1000;
+        expect(invest(s, def.id).ok).toBe(true);
+        for (let day = 2; day <= 30; day++) {
+          s.day = day;
+          const r = settleInvestments(s);
+          if (r.paid.length > 0) paid++;
+          if (r.lossDays.length > 0) losses++;
+          if (r.collapsed.length > 0) collapses++;
+          expect(investedOf(s)).toBe(ledgerCost(s)); // 账本不变量每个结算日都成立
+          if (r.collapsed.length > 0) break; // 出局
+        }
+      }
+    }
+    expect(paid).toBeGreaterThan(0);
+    expect(losses).toBeGreaterThan(0);
+    expect(collapses).toBeGreaterThan(0); // 不是稳赚：三门生意都真的会倒
+  });
+
+  it('a collapse takes the principal and the venture off the books, and teaches nothing', () => {
+    let hit: { seed: number; day: number } | null = null;
+    for (let seed = 1; seed <= 200 && !hit; seed++) {
+      for (let day = 2; day <= 40 && !hit; day++) {
+        const probe = createNewGame(seed);
+        probe.player.gold = 1000;
+        probe.day = day;
+        invest(probe, 'ration_route'); // 倒塌率最高的一门
+        if (settleInvestments(probe).collapsed.length > 0) hit = { seed, day };
+      }
+    }
+    expect(hit).not.toBeNull();
+    const s = createNewGame(hit!.seed);
+    s.player.gold = 1000;
+    invest(s, 'ration_route');
+    const afterInvest = s.player.gold;
+    s.day = hit!.day;
+    const r = settleInvestments(s);
+    expect(r.collapsed).toEqual(['ration_route']);
+    expect(r.paid).toEqual([]);
+    expect(r.totalIncome).toBe(0);
+    expect(s.player.gold).toBe(afterInvest); // 倒塌当天没有收入
+    expect(venturesOf(s)).toEqual([]);
+    expect(investedOf(s)).toBe(0);
+    expect(s.growth?.wealth.totalXp).toBe(50); // 失败不喂经验
+  });
+
+  it('a loss day pays nothing but keeps the principal on the books', () => {
+    let hit: { seed: number; day: number } | null = null;
+    for (let seed = 1; seed <= 200 && !hit; seed++) {
+      for (let day = 2; day <= 40 && !hit; day++) {
+        const probe = createNewGame(seed);
+        probe.player.gold = 1000;
+        probe.day = day;
+        invest(probe, 'water_stall');
+        const r = settleInvestments(probe);
+        if (r.lossDays.length === 1 && r.collapsed.length === 0) hit = { seed, day };
+      }
+    }
+    expect(hit).not.toBeNull();
+    const s = createNewGame(hit!.seed);
+    s.player.gold = 1000;
+    invest(s, 'water_stall');
+    const afterInvest = s.player.gold;
+    s.day = hit!.day;
+    const r = settleInvestments(s);
+    expect(r.lossDays).toEqual(['water_stall']);
+    expect(r.paid).toEqual([]);
+    expect(s.player.gold).toBe(afterInvest); // 没收入
+    expect(venturesOf(s)).toEqual(['water_stall']); // 但本金还在
+    expect(investedOf(s)).toBe(costOf('water_stall'));
+  });
+
+  it('a night of sleep settles the day that ended — income lands on waking', () => {
+    // 跨日路径之一：睡觉。找一棵"睡醒就收钱"的 seed。
+    let seed = 0;
+    for (let candidate = 1; candidate <= 60; candidate++) {
+      const probe = createNewGame(candidate);
+      probe.player.gold = 1000;
+      invest(probe, 'water_stall');
+      probe.gameMinuteOfDay = 1200;
+      sleep(probe);
+      if (probe.player.gold > 1000 - costOf('water_stall')) {
+        seed = candidate;
+        break;
+      }
+    }
+    expect(seed).toBeGreaterThan(0);
+    const s = createNewGame(seed);
+    s.player.gold = 1000;
+    invest(s, 'water_stall');
+    s.gameMinuteOfDay = 1200;
+    expect(sleep(s).ok).toBe(true);
+    expect(s.day).toBe(2);
+    const def = VENTURES.find((v) => v.id === 'water_stall')!;
+    const income = Math.max(1, Math.round(def.cost * def.baseRate * productionDecay(1)));
+    expect(s.player.gold).toBe(1000 - def.cost + income);
+    expect(s.growth?.wealth.totalXp).toBe(50 + VENTURE_DAY_XP);
+  });
+
+  it('staying up past midnight settles too — the clock engine drives the day', () => {
+    // 跨日路径之二：时钟推进（动作耗时/帧循环都汇到 advanceGameMinutes）。
+    const s = createNewGame(1);
+    s.player.gold = 1000;
+    invest(s, 'water_stall');
+    s.gameMinuteOfDay = 1439; // 23:59
+    spendTime(s, 30); // 跨过午夜
+    expect(s.day).toBe(2);
+    // 结算结果与直接调 settleInvestments 逐字段一致（同一条引擎路径）
+    const mirror = createNewGame(1);
+    mirror.player.gold = 1000;
+    mirror.day = 2;
+    invest(mirror, 'water_stall');
+    const direct = settleInvestments(mirror);
+    expect(s.player.gold).toBe(1000 - 40 + direct.totalIncome);
+    expect(s.growth?.wealth.totalXp).toBe(50 + (direct.paid.length > 0 ? VENTURE_DAY_XP : 0));
+  });
+
+  it('the venture ledger survives a save round-trip and still validates', () => {
+    const s = createNewGame(3);
+    s.player.gold = 300;
+    expect(invest(s, 'water_stall').ok).toBe(true);
+    expect(invest(s, 'scrap_caravan').ok).toBe(true);
+    expect(investedOf(s)).toBe(costOf('water_stall') + costOf('scrap_caravan'));
+    const back = deserialize(serialize(s));
+    expect(back.ok).toBe(true);
+    if (back.ok) {
+      expect(back.state.growth?.investedGold).toBe(costOf('water_stall') + costOf('scrap_caravan'));
+      expect(back.state.growth?.ventures).toEqual(['water_stall', 'scrap_caravan']);
+      expect(validateGameState(back.state)).toEqual([]);
+      // 读回来的档继续按日结算，不受round-trip 影响
+      back.state.day = 5;
+      const r = settleInvestments(back.state);
+      expect(r.day).toBe(4);
+      expect(r.paid.every((p) => p.income >= 1)).toBe(true);
+    }
+  });
+
+  it('the economy deepening does not touch world supply — the guaranteed basket is still exactly there', () => {
+    // survivalBalance 的所有权事实（每层保底供给）一个没动：商人卖料只是
+    // 给"有金币没时间"的玩家加一条现金通道，世界该给的材料照给。
+    const s = createNewGame(1);
+    lootMaterialFloors(s);
+    expect(countItem(s.player.inventory, 'scrap_metal')).toBe(3); // survivalBalance 钉死
+    expect(countItem(s.player.inventory, 'wood')).toBe(2);
+    expect(countItem(s.player.inventory, 'tape')).toBe(1);
+    expect(countItem(s.player.inventory, 'fuse')).toBe(1);
+    expect(countItem(s.player.inventory, 'filter')).toBe(1);
+    expect(countItem(s.player.inventory, 'wire')).toBe(2);
+    // 三件设施照旧可建（搜刮 → 建设的路径没有被金币通道替代）
+    const built: string[] = [];
+    for (const r of RECIPES) if (craft(s, r.id).ok) built.push(r.id);
+    expect(built).toEqual(['lamp', 'reinforced_door', 'purifier']);
   });
 });

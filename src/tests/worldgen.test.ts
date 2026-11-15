@@ -120,7 +120,12 @@ describe('environmentProfile', () => {
   it('records floor 1 as the documented exception: the dorm is safe', () => {
     // environmentFor(1) 命中精确层（宿舍：不冷、不危险、不 hostile）；
     // 曲线给的是阶层基线（贫民区）。运行时保留精确层，曲线不外溢。
-    expect(environmentFor(1)).toEqual({ label: '宿舍', cold: 0.6, humidity: 0.1, danger: 0, hostile: false });
+    //
+    // AG-30 给第 1 层加了 warmth 0.35（床是热源，TWOM 对齐 §2），AG-25 的
+    // template 叠加生效后 environmentFor(1) 多带回这一个字段。断言的意图
+    // （宿舍是安全例外）不变，只是把新字段一并钉住——少钉一个字段，
+    // 下次谁改 warmth 就没测试拦了。
+    expect(environmentFor(1)).toEqual({ label: '宿舍', cold: 0.6, humidity: 0.1, danger: 0, hostile: false, warmth: 0.35 });
     expect(environmentProfile(1).danger).toBe(0.45);
     expect(environmentProfile(1).hostile).toBe(true);
   });

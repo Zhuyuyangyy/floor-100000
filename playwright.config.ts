@@ -8,6 +8,13 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
   reporter: 'list',
+  // The dev-server identity guard. strictPort (below) only makes a PORT
+  // collision loud; it cannot see the CODE behind the port, and
+  // reuseExistingServer reuses any server that answers — including one rooted
+  // in another worktree. This globalSetup fingerprints the server before any
+  // test runs and fails loudly when the code it serves is not this worktree's.
+  // Rationale and mechanics: e2e/verifyServerIdentity.ts.
+  globalSetup: './e2e/verifyServerIdentity.ts',
   use: {
     // 5199, not the default 5173: several agents run `npm run dev` in parallel
     // worktrees, and when two servers raced for 5173 the loser either died
@@ -15,7 +22,9 @@ export default defineConfig({
     // could land on a *different branch's* dev server — green runs that tested
     // the wrong code, red runs that were never broken. An uncommon port plus
     // --strictPort in the webServer command makes a collision loud instead of
-    // silent (BUG-QA-05 的假失败来源之一).
+    // silent (BUG-QA-05 的假失败来源之一). strictPort still cannot catch a
+    // server that is already up and serving a DIFFERENT worktree's code — the
+    // globalSetup above is what closes that hole.
     baseURL: 'http://localhost:5199',
     // Keep the artefacts of a failure: without them a red CI run gives no way
     // to tell a real regression from a timing miss.

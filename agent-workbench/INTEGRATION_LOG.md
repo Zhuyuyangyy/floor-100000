@@ -174,3 +174,13 @@ AG-03 报告的 BUG-QA-01「塔楼总览起/终点标签出画布右缘 14px+」
 - **总控清理**：`ag-02-navigation/test-results` 345MB Playwright trace 产物（0 个源码文件，删前 ls 确认）已清。
 
 当前并行：AG-11 / AG-12 / AG-13 / AG-14 / AG-16 / AG-17 共 6 个。
+
+## 总控错误记录（2026-11-15 10:00）
+集成日志里写的三个"未接消费方"符号名（bagFullCount / shelterLightDim / waterPurifierRuns）**是我写的概念 shorthand，没有核对真实符号**。AG-11 全库 grep 证实这三个不存在，实际存量是：
+- `isBagFull` + `bagFullText`（InventorySystem）——**已接线**
+- `nightOverlayAlpha`（CraftingSystem）——**已被 applyNightLighting:2710 消费，e2e/crafting.spec.ts 钉住 lamp→overlay 0.6→0.16**
+- `purifyWater`（CraftingSystem，批量语义，无"次数"状态）——真缺口是"剩余可炼瓶数"显示
+**教训：派工指令里的符号名必须自己先 grep 过再写。** 这是第二次同类错误（第一次是 bossFloors 导出）。
+
+## 冲突裁决（2026-11-15 10:00）
+**AG-11 的 NPC 移动接线 vs e2e/npc.spec.ts 静态寻路**：批准 AG-11 改 npc.spec.ts 的**寻路 setup**（静态坐标→读场景实时 NPC 位置），硬约束是不准动任何断言期望值；同时通知 AG-17 对该文件只读不改，避免双写。

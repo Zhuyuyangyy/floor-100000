@@ -1,4 +1,4 @@
-import { RECIPES, getRecipe, isPassUpgrade, type UpgradeId } from '../data/recipes';
+import { RECIPES, getRecipe, isPassUpgrade, materialSourceHint, type UpgradeId } from '../data/recipes';
 import { addItem, countItem, removeItem } from './InventorySystem';
 import { isNight } from './SurvivalSystem';
 import { STARTING_FLOOR } from '../core/constants';
@@ -42,13 +42,98 @@ export function recipeTierLocked(state: GameState, id: UpgradeId): boolean {
   return recipeAccessTier(ensureGrowth(state)) < tier;
 }
 
+/**
+ * AG-42：配方的档位读数——"这条配方属于第几档、权力线现在到没到"。
+ *
+ * 修前：recipeTierLocked 只有 economyLoop.test.ts 一个调用方，档位信息不出现在
+ * 任何玩家可见的面板上，"凭证链按档位分层"因此是纸面设计。本函数把档位与
+ * 权力线现状合成一句可渲染的文本（未达档位时明确说"未达"），供制作面板的
+ * 行尾/详情行显示；scene 归 AG-11，这里只发数据。
+ *
+ * 注意它**不改变门禁语义**：craft/canCraft 依旧不因档位拒绝（冷启动软锁 +
+ * passChain"材料齐全必可建"两条既有约束钉死，economyLoop.test.ts 有断言），
+ * 档位是给玩家看的进度感，不是准入。
+ */
+export function recipeTierNote(state: GameState, id: UpgradeId): string | undefined {
+  const tier = getRecipe(id).tier;
+  if (tier === undefined) return undefined;
+  const access = recipeAccessTier(ensureGrowth(state));
+  return access >= tier ? `档位 ${tier}` : `档位 ${tier}｜权力线 ${access} 级未达`;
+}
+
+export interface RecipeCostView {
+  itemId: ItemId;
+  displayName: string;
+  need: number;
+  have: number;
+  /** 该材料的"去哪拿"（MATERIAL_SOURCES），没有出处则缺省。 */
+  source?: string;
+}
+
+export interface RecipePreview {
+  id: UpgradeId;
+  displayName: string;
+  /** 效果预览（recipes.ts 的 effect 字段）：做出来会怎样。 */
+  effect: string;
+  description: string;
+  cost: RecipeCostView[];
+  requires?: { id: UpgradeId; displayName: string; met: boolean };
+  tier?: number;
+  /** 权力线未达到配方档位时为 true（ informational，不拦截建造）。 */
+  tierLocked: boolean;
+  tierNote?: string;
+  built: boolean;
+  canCraft: boolean;
+  missing: MissingMaterial[];
+  hints?: string[];
+}
+
+/**
+ * AG-42：制作面板一行的完整数据——名称、效果预览、逐项成本（持有/需求/
+ * 出处）、前置、档位、可制作性。修前面板只有 名称+材料 两列，玩家在按
+ * Enter 前看不到"做出来会怎样"（effect）、"这条属于更高档位"（tierNote）、
+ * "差的料去哪拿"（cost.source/hints）。GameScene 的 buildCraftPanel 归
+ * AG-11；本函数把三样新信息打包成它可以直接渲染的形状。
+ */
+export function recipePreview(state: GameState, id: UpgradeId): RecipePreview {
+  const recipe = getRecipe(id);
+  const check = canCraft(state, id);
+  const cost: RecipeCostView[] = (Object.entries(recipe.cost) as Array<[ItemId, number]>).map(([itemId, need]) => ({
+    itemId,
+    displayName: getItem(itemId).displayName,
+    need,
+    have: countItem(state.player.inventory, itemId),
+    source: materialSourceHint(itemId),
+  }));
+  const requires = recipe.requires
+    ? { id: recipe.requires, displayName: getRecipe(recipe.requires).displayName, met: hasUpgrade(state, recipe.requires) }
+    : undefined;
+  return {
+    id,
+    displayName: recipe.displayName,
+    effect: recipe.effect,
+    description: recipe.description,
+    cost,
+    requires,
+    tier: recipe.tier,
+    tierLocked: recipeTierLocked(state, id),
+    tierNote: recipeTierNote(state, id),
+    built: hasUpgrade(state, id),
+    canCraft: check.ok,
+    missing: check.ok ? [] : check.missing,
+    hints: check.ok ? undefined : check.hints,
+  };
+}
+
 export interface MissingMaterial {
   itemId: ItemId;
   need: number;
   have: number;
 }
 
-export type CanCraftResult = { ok: true } | { ok: false; missing: MissingMaterial[]; reason?: string };
+export type CanCraftResult =
+  | { ok: true }
+  | { ok: false; missing: MissingMaterial[]; reason?: string; hints?: string[] };
 
 export function canCraft(state: GameState, id: UpgradeId): CanCraftResult {
   // 前置资格 is checked before materials: a gated recipe the player cannot walk up
@@ -62,7 +147,18 @@ export function canCraft(state: GameState, id: UpgradeId): CanCraftResult {
     const have = countItem(state.player.inventory, itemId);
     if (have < need) missing.push({ itemId, need, have });
   }
-  return missing.length === 0 ? { ok: true } : { ok: false, missing };
+  if (missing.length === 0) return { ok: true };
+  // AG-42：缺料提示从"缺什么"补上"去哪拿"。上链凭证（通行贴起）的进阶料在
+  // tier 1 内做不齐（craftLoop.test.ts 的种子扫描钉死 0/N），"去哪拿"因此
+  // 不是文案而是真实路径指引；提示文本唯一来源是 recipes.ts 的
+  // MATERIAL_SOURCES（数据与 floorTemplates/encounters 逐条对齐）。
+  const hints = missing
+    .map((m) => {
+      const hint = materialSourceHint(m.itemId);
+      return hint ? `${getItem(m.itemId).displayName}：${hint}` : undefined;
+    })
+    .filter((h): h is string => h !== undefined);
+  return { ok: false, missing, hints: hints.length > 0 ? hints : undefined };
 }
 
 export type CraftResult = { ok: true; id: UpgradeId } | { ok: false; reason: string };
@@ -77,7 +173,12 @@ export function craft(state: GameState, id: UpgradeId): CraftResult {
     // A missing prerequisite must never be reported as (or bypassed by) a
     // material problem, so it short-circuits before the material detail.
     if (check.reason) return { ok: false, reason: check.reason };
-    const detail = check.missing.map((m) => `${getItem(m.itemId).displayName} ${m.have}/${m.need}`).join('，');
+    const detail = check.missing
+      .map((m) => {
+        const hint = materialSourceHint(m.itemId);
+        return `${getItem(m.itemId).displayName} ${m.have}/${m.need}${hint ? `（${hint}）` : ''}`;
+      })
+      .join('，');
     return { ok: false, reason: `材料不足：${detail}` };
   }
   for (const [itemId, need] of Object.entries(recipe.cost) as Array<[ItemId, number]>) {

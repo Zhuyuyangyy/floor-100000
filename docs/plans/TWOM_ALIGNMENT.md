@@ -102,3 +102,46 @@ type NpcAtom =
 
 实体模板三型：`BEHAVIOUR_TREE` / `TRIGGER` / `FLAG`。**只做设计与新文件**，
 不改现有 NPC；文档写清"现在规模不需要完整行为树，但组件要能挂"。
+
+## 九、AG-26 实现说明（Flag/Trigger，2026-11-16）
+
+契约第六节的接口**未动**，原样落在属主文件 `src/systems/WorldFlags.ts`：
+`Trigger` / `registerTrigger` / `evaluateTriggers`，另加
+`registeredTriggers()`（清单自省，测试用）。`registerTrigger` 幂等（同 id
+先注册者赢）；`evaluateTriggers` 只返回**本次新置**的旗，已置过不重复
+返回；`when` 全部纯判定，禁 Math.random，同 state 必然同结果。
+
+触发器清单在新文件 `src/systems/triggers.ts`（**导入即启动注册**，
+re-export `evaluateTriggers`，场景只需 import 这一个模块）。共 22 个：
+
+| 旗 | 触发条件 | 解散的散落判断 |
+|---|---|---|
+| `ev:active` / `ev:blackout` / `ev:wanderer` / `ev:leak` | `worldEvents.activeEvent` 存在性/类型 | GameScene :3691/:3718/:5855/:6241/:6274、LootSystem:31、CraftingSystem:139、NpcAutonomy:236 各自 re-read |
+| `st:night-exposed` | `isNight && environmentFor(floor).hostile` | 夜事件目标楼层表、dwell 的 isDwellExempt、NpcAutonomy 撤退步进三处各算 |
+| `st:bag-overflowing` | `isBagFull(inventory)` | HUD 预警、搜刮溢出、战斗掉落、商人拒售四处各问 |
+| `goal:met` | `isDailyGoalDone(state)` | HUD（:3383）与结算路径（:6019）各算一次；progress.ts 却读存量 done |
+| `combat:active` | `state.combat !== undefined` | GameScene 四个存在性读点（:1761/:1912/:1990/:4736） |
+| `stat:thirst-critical` / `stat:hunger-critical` | 对应条归零 | SurvivalSystem 的掉血闸门 ×2 + deathCause |
+| `tier:<2..6>:arrived` | `currentFloor >= 段起点`（按 PLAYABLE_SEGMENTS 展开） | deepestFloor/bestDepth 数值比较在 shop 货带、电梯文案、深度记录各处各自回答 |
+| `npc:<id>:regular` | 与该 NPC 的 trade 记忆 ≥3（按 NPCS 展开） | 「老主顾」原来只有 relationship 一个 proxy |
+
+**语义（对全团队有效）**：旗是「本 run 曾经如此」的一次性事实，
+`evaluateTriggers` 只置不清；每帧的实时判定（熄灯、流浪者在场、HUD 的
+✓、战斗在场）继续直读 state。两类问题是不同的，不要用旗做实时查询。
+
+存量字段已加 deprecated 注释指向 flag 路径（**不迁移存量数据、不改存量
+行为**）：`EventSystem.ts`（activeEvent 读点）、`dailyGoals.ts`
+（dailyGoal/done 读点）。
+
+**需要 GameScene 落的接线（AG-26 不动场景，清单交总控）**：
+1. 每帧求值一处：`GameScene.ts` update 内 `:6046`
+   （`const event = state.worldEvents.activeEvent;`）附近加
+   `evaluateTriggers(state)`（22 个纯判定，每帧一次成本可忽略）；
+   import 走 `../systems/triggers`。
+2. 一次性反应接旗的返回（日记/flash）：如首次 `ev:blackout`、
+   首次 `st:night-exposed`、首次 `combat:active`。
+3. `combat` 置位/清除处（:1723 置、:1748/:2066 清）无需改——旗由第 1
+   条的每帧求值自动跟上；实时在场判定保留直读 `state.combat`。
+4. `dailyGoal` HUD（:3383）保留 `isDailyGoalDone` 实时判定；旗只服务
+   「第一次完成每日目标」类一次性反应。`progress.ts:82` 读存量
+   `dailyGoal.done` 的 deprecated 迁移归 progress 属主，本单只加了注释。

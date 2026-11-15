@@ -17,6 +17,50 @@
   "dwellPressure": {
     "rollIntervalGameMinutes": 60
   },
+  "warmthSources": {
+    "_comment": "AG-25 TickHeaters：每层热源（床/蜡烛/火把/火盆）。x 世界像素、radius 供暖半径、power 中心回温点数/游戏小时。零新增美术——candle/torch/brazier 的照明位置就是热源位置。",
+    "1": [
+      { "x": 236, "radius": 70, "power": 4 },
+      { "x": 640, "radius": 70, "power": 4 },
+      { "x": 1044, "radius": 70, "power": 4 }
+    ],
+    "5": [
+      { "x": 1188, "radius": 150, "power": 14 }
+    ]
+  },
+  "floorWarmth": {
+    "_comment": "AG-25：楼层「可取暖程度」默认梯（0..1）。AG-30 的 FloorTemplate.environment.warmth 逐层覆盖优先；没有热源的楼上各段不列即 0。",
+    "1": 0.5,
+    "2": 0.3,
+    "3": 0,
+    "4": 0.15,
+    "5": 1
+  },
+  "morale": {
+    "_comment": "AG-25 心情点数池（TWOM §2 的 Depression 模型，见 systems/MoraleSystem.ts）。点数值可为负；一切概率掷走 seeded RNG（deriveSeed/makeRng），禁 Math.random。",
+    "defaultMorale": 0,
+    "moraleMin": -100,
+    "moraleMax": 100,
+    "dayBeginChange": -1,
+    "decayPerGameHour": 0.5,
+    "goodMorale": 10,
+    "badMorale": -10,
+    "traumaProbability": 0.35,
+    "traumaDelta": -15,
+    "backHigherMorale": 8,
+    "backLowerMorale": -8,
+    "backFullLoad": 3
+  },
+  "sickness": {
+    "_comment": "AG-25 ProcessSickness：染病条件与中间态结算。体温过低持续染病沿用 SicknessSystem 既有规则（FREEZE_TO_COLD_MINUTES），这里只放 AG-25 新增的两条与睡眠/失温结算。",
+    "starveGameHours": 3,
+    "exposureGameMinutes": 60,
+    "exposureHumidity": 0.5,
+    "exposureDanger": 0.6,
+    "exposureSeverity": 20,
+    "sleepBodyHeatPerHour": 4,
+    "hypothermiaHpPerGameHour": 6
+  },
   "overhaul": {
     "sleepAnytime": true,
     "nightLootBonusCount": 1,

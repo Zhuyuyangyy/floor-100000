@@ -200,7 +200,25 @@ AG-03 报告的 BUG-QA-01「塔楼总览起/终点标签出画布右缘 14px+」
 
 **AG-16 发现的数据层真缺陷**：`config/game-balance.json` 的 playableFloorsV01 没加 100000，`ENCOUNTER_TABLE` 不给终局建行 → 问号点回落 DEEPEST_FLOOR(50010) 配置 → **终局会刷出已打败的守段者 boss 108**。这不是测试问题，已要求必须修。
 
-当前并行：AG-11 / AG-17（AG-12/13/14/15/16 已合入）。
+当前并行：AG-17（AG-11/12/13/14/15/16 已合入）。
+
+## 第二轮进展（2026-11-15 11:45）——场景接线完成，AG-11 合入
+**AG-11 已合入** `8d67a9e`（GameScene.ts +359/-70，wiring.test.ts 新建 20 测试）：
+- **电梯文案**：接 `crossingSummary()`，修前「正在穿过 89 层未探索区」→ 修后「穿过 89 层：底层贫民区的废弃段」，上下行都拿到区段名。
+- **背包预警**：补计数「背包已满（12/12）」+ 容器 flash「剩余 N 件留在容器」。
+- **净水器**：制作面板「可净化」→「可净化 ×3」（N=袋里脏水数，purifyWater 批量语义下唯一诚实的读数）。
+- **宿舍灯光**：存量已接线（nightOverlayAlpha 被 applyNightLighting 消费，e2e 钉住），未重复接。
+- **NPC 接入渲染层**：drawNpcs/nearestNpc 走 npcAutonomyFor（实测小周 x 499→556、阿林 480→194）；交易换 availableOffers + executeBarter；updateWanderer 换 planNightWanderer（出生点 1232→731，600ms 后 687 追玩家）。
+- **quests 入口**：Q 键 launch('QuestPanel')，按 AG-12 真实契约（emit 到 Game 场景 emitter）落地分支后果——实测净水×2 入包、bestScore 0→15、三旗落盘、二次 emit 幂等、坏载荷不崩。
+- **AG-08 遗留**：床/工作台招牌 depth 0→105；NPC 名签 y=132→头顶 28 + depth 105/106 + 墨底 plate + 距离比例渐隐。
+- **它推翻了 UI.md 一个前提**：UI.md 说床/工作台标签 max lum=33 完全不可见，AG-11 默认相机下复测**修前 maxLum 222/220（可见）**，怀疑 33 是把世界坐标当屏幕坐标采样了 HUD 带本身。depth 105 照改（防相机滚动），但"不可见"前提未复现。
+
+**集成修复 AG-06 系统 bug**（commit `59a1613`）：AG-11 浏览器实证 `executeBarter` 写记忆用 `state.gameMinuteOfDay` 原值（小数 366.34…），而 `isValidMemory` 要求 `Number.isInteger` → **整条 NPC 状态被 loadNpcState 拒收 → 库存跨交易不消耗、记忆不累积**。修法：写入入口 Math.floor（2 处）。AG-11 的接线因此从半效变全效。回归测试已钉住。
+
+**集成：70 文件 / 1173 测试全绿。**
+
+## 待 AG-17 处理（已转接）
+AG-11 的 NPC 移动接线打破 5 个 e2e 的静态坐标 setup（npc.spec.ts 4 个 + firstChapter.spec.ts 1 个），断言本身没失效。已把 AG-11 的精确读法转给 AG-17（排除 shop 事件点的商人贴图——它也用 char-npc_alin 行走图，固定 x=956）。
 
 ## 第二轮进展（2026-11-15 11:20）——任务面板进门
 **AG-12 已合入** `da63892`（+1157 行，5 文件）：

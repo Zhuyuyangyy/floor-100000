@@ -3,7 +3,7 @@ import Phaser from 'phaser';
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { playFx, startFxLoop } from '../render/fx';
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../core/design';
-import { getGame, startNewGame } from '../core/session';
+import { getGame, hasGame, startNewGame } from '../core/session';
 import {
   BED_X,
   CRAFT_X,
@@ -46,7 +46,8 @@ import {
 import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
 import { hasFloorContent } from '../data/floorTemplates';
 import { liftDirection, liftOutcome, liftRequirement, nextSegment, prevSegment, skippedFloors } from '../core/segments';
-import { countItem, isBagFull, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
+import { crossingSummary } from '../core/worldgen';
+import { countItem, isBagFull, removeItem, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
 import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, isNight, spendTime } from '../systems/SurvivalSystem';
 import { ensureNightEvent, eventStatus, setEventStatus } from '../systems/EventSystem';
@@ -169,9 +170,13 @@ import {
 import { getItem } from '../data/items';
 import { CONTAINER_LABEL_DROP, HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
 import { RECIPES, getRecipe, isPassUpgrade, type UpgradeId } from '../data/recipes';
-import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
-import { trade } from '../systems/TradeSystem';
-import { aiNpcConfig, archetypeForNpcId, npcFactFromDef } from '../ai/config';
+import { NPCS, NPC_FLOOR, getNpc, type BarterOffer, type NpcDef, type NpcId } from '../data/npcs';
+import { QUEST_FLAG, QUESTS } from '../data/quests';
+import { clearFlag, hasFlag, setFlag } from '../systems/WorldFlags';
+import { availableOffers, executeBarter, reputationOf } from '../ai/npcEconomy';
+import { stockOf, syncNpcInventory } from '../ai/npcInventory';
+import { npcAutonomyFor, type NpcAutonomyView } from '../ai/npcSchedule';
+import { aiNpcConfig, archetypeForNpcId, npcFactFor } from '../ai/config';
 import { OllamaBrain } from '../ai/brains/ollamaBrain';
 import { OptionTreeBrain } from '../ai/brains/optionTreeBrain';
 import { createNpcState } from '../data/npcPersonalities';
@@ -179,6 +184,7 @@ import { loadNpcState, recordMemory, saveNpcState } from '../systems/NpcMemory';
 import { decideNpcAction, isDialogueFresh, type DialogueSession, type NpcRuntimeConfig } from '../systems/NpcRuntime';
 import {
   decideWandererIntent,
+  planNightWanderer,
   WandererAutonomyController,
   WandererFallbackBrain,
   type WandererIntent,
@@ -229,6 +235,13 @@ const CONTAINER_LABEL_FONT = 22;
  * (The drop itself lives in render/hudLayout as CONTAINER_LABEL_DROP.)
  */
 const CONTAINER_LABEL_FADE_PX = 24;
+/**
+ * AG-11: NPC 名签的 y——居民头顶上方一个 CONTAINER_LABEL_DROP。
+ * 容器是 28px 的矮道具，「基座-36」落在道具正面；居民是 96px 的立绘
+ * （脚在 PLAYER_FEET_Y，头在 PLAYER_FEET_Y-FRAME_H），同一个 DROP 只能从
+ * 头顶算，否则名签压在角色身上（旧位置 y=FLOOR_HEIGHT-68=132，正在躯干上）。
+ */
+const NPC_LABEL_Y = PLAYER_FEET_Y - FRAME_H - CONTAINER_LABEL_DROP;
 /**
  * One fade listener per scene, replaced on every floor build. Registering per
  * build without removing the previous one stacks listeners that all drive the
@@ -307,7 +320,7 @@ const SHELTER_ROWS: Array<{ action: ShelterAction; label: string; value: string 
   { action: 'repair', label: '修理', value: '木材×2 + 胶带×1' },
   { action: 'care', label: '照顾邻居', value: '口粮×1 · 压力 -12' },
 ];
-type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 's' | 'f' | 'up' | 'down';
+type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 's' | 'f' | 'q' | 'up' | 'down';
 type DirKeys = {
   up: Phaser.Input.Keyboard.Key;
   down: Phaser.Input.Keyboard.Key;
@@ -332,6 +345,9 @@ export class GameScene extends Phaser.Scene {
 
   private floorView!: GeneratedFloor;
   private containerObjs = new Map<string, { box: Phaser.GameObjects.Graphics | Phaser.GameObjects.Image; label: Phaser.GameObjects.Text; plate: Phaser.GameObjects.Rectangle }>();
+  // AG-11: the neighbours on the NPC floor: sprite, shadow, name plate and name,
+  // kept so syncNpcs can walk them along their schedule every frame.
+  private npcObjs = new Map<string, { who: CharacterKey; sprite: Phaser.GameObjects.Sprite; shadow: Phaser.GameObjects.GameObject[]; label: Phaser.GameObjects.Text; plate: Phaser.GameObjects.Rectangle }>();
   private groundObjs = new Map<string, Phaser.GameObjects.Rectangle>();
   private floorObjects: Phaser.GameObjects.GameObject[] = [];
   private wanderer?: Phaser.GameObjects.Sprite;
@@ -451,6 +467,10 @@ export class GameScene extends Phaser.Scene {
   private keyM!: Phaser.Input.Keyboard.Key;
   private keyS!: Phaser.Input.Keyboard.Key;
   private keyF!: Phaser.Input.Keyboard.Key;
+  /** AG-11: Q opens the quest panel (QuestPanelScene, owned by AG-12). */
+  private keyQ!: Phaser.Input.Keyboard.Key;
+  /** The quests:changed subscription survives a Game restart; the panel scene does not restart. */
+  private questsEventBound = false;
 
   private dialogueOpen = false;
   // sessionId/revision：AI 异步返回的保鲜键。玩家每次开对话 sessionId+1，
@@ -499,7 +519,7 @@ export class GameScene extends Phaser.Scene {
   // drain, so every menu action has to be accepted at most once per frame —
   // otherwise one ArrowDown moves the pause selection two entries and the
   // player lands on 重新开始 when they asked for 塔楼地图.
-  private lastInputFrame: Record<GameKey, number> = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, up: -1, down: -1 };
+  private lastInputFrame: Record<GameKey, number> = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, q: -1, up: -1, down: -1 };
 
   constructor() {
     super({ key: 'Game' });
@@ -513,7 +533,7 @@ export class GameScene extends Phaser.Scene {
     this.lastActiveEvent = null;
     // The frame counter is monotonic across the session, so a stale slot would
     // never match anyway — reset to keep the per-create state honest.
-    this.lastInputFrame = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, up: -1, down: -1 };
+    this.lastInputFrame = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, q: -1, up: -1, down: -1 };
     // Field initialisers do not re-run, so the HUD's cached visibility has to be
     // re-derived against the fresh bag of a restarted run.
     this.bagFullShown = false;
@@ -524,6 +544,7 @@ export class GameScene extends Phaser.Scene {
     // wrote to dead objects and both panels came up empty.
     this.floorObjects = [];
     this.containerObjs.clear();
+    this.npcObjs.clear();
     this.groundObjs.clear();
     this.invObjects = [];
     this.invSlotTexts = [];
@@ -602,6 +623,60 @@ export class GameScene extends Phaser.Scene {
     this.buildDialoguePanel();
     this.buildPausePanel();
     this.bindInput();
+
+    // AG-11: QuestPanel 的回报通道（UI.md「quests:changed」契约，AG-12）：
+    // 面板 emit 到 **Game 场景自己的 emitter**（载荷 { questId, branchId }）——
+    // scene events 挂在 Scene 对象上与运行状态无关，overlay/launch 与 handoff/start
+    // 两种打开方式都收得到。面板自己不写 GameState（quests.ts 顶部分工），后果
+    // 由这里落地：flag、物品、凭证、分数，外加 accepted/branch/done 三个生命周期旗。
+    // 同步落地后面板直接重读 evaluateAllQuests，无需重开就反映后果。
+    // 幂等：旗已在 → 不重复落地。绑定每局一次（面板场景比 Game 重启活得久，
+    // 重复绑定会叠加保存）。
+    if (!this.questsEventBound) {
+      this.questsEventBound = true;
+      this.events.on('quests:changed', (payload: { questId?: unknown; branchId?: unknown }) => {
+        if (!hasGame()) return;
+        const state = getGame();
+        // 用 find 而不是 getQuest：后者对未知 id 抛错，而事件来自另一个场景，
+        // 载荷永远不可全信——坏 id 当没发生处理，不把面板搞崩。
+        const quest = typeof payload?.questId === 'string' ? QUESTS.find((q) => q.id === payload.questId) : undefined;
+        const branch = quest?.branches.find((b) => b.id === payload?.branchId);
+        if (!quest || !branch) return;
+        if (hasFlag(state, QUEST_FLAG.branch(quest.id, branch.id))) return; // 确认过一次
+        setFlag(state, QUEST_FLAG.accepted(quest.id));
+        setFlag(state, QUEST_FLAG.branch(quest.id, branch.id));
+        for (const c of branch.consequences) {
+          switch (c.kind) {
+            case 'setFlag':
+              setFlag(state, c.flag);
+              break;
+            case 'clearFlag':
+              clearFlag(state, c.flag);
+              break;
+            case 'giveItem':
+              addItem(state.player.inventory, c.itemId, c.count);
+              break;
+            case 'takeItem':
+              removeItem(state.player.inventory, c.itemId, c.count);
+              break;
+            case 'grantPass':
+              // 与 craft() 同一落点：凭证就是 homeUpgrades 的一条，不额外写 upg: flag。
+              if (!state.player.homeUpgrades.includes(c.pass)) state.player.homeUpgrades.push(c.pass);
+              break;
+            case 'score':
+              if (!state.records) state.records = { deepestFloor: state.currentFloor, bestScore: 0 };
+              state.records.bestScore += c.delta;
+              break;
+          }
+        }
+        // 目标齐了 → done（doneFlag 由玩法过程写入，这里只做收口）。
+        if (quest.objectives.every((o) => hasFlag(state, o.doneFlag))) {
+          setFlag(state, QUEST_FLAG.done(quest.id));
+        }
+        saveToStorage(state);
+        this.refreshInventory();
+      });
+    }
 
     if (getGame().day === 1) {
       this.flash('目标：从第 1 层一路爬到第 100000 层。A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图');
@@ -807,6 +882,7 @@ export class GameScene extends Phaser.Scene {
     this.playerShadow = [];
     this.speedX = 0;
     this.containerObjs.clear();
+    this.npcObjs.clear();
     this.groundObjs.clear();
     this.wanderer?.destroy();
     this.wanderer = undefined;
@@ -2331,7 +2407,12 @@ export class GameScene extends Phaser.Scene {
   private drawBed(): void {
     const y = FLOOR_HEIGHT - 64;
     const bed = this.add.image(BED_X, y + 4, 'furn_bed').setOrigin(0.5, 1);
-    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5);
+    // AG-11: depth 0 → 105，与容器名签同线。旧位置整块落在 HUD 上下文带
+    // （y 64..124，depth 100，alpha 0.94）里，像素采样实测 max lum=33——
+    // 文字一个像素都没画出来（AG-08 UI.md 12b 记录的存量缺陷）。带在 100，
+    // 它的发丝线 chrome 在 101，所以标签取 105，压在带上面、仍在 HUD 自己的
+    // 反馈通道（300）下面。
+    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5).setDepth(105);
     this.floorObjects.push(bed, bedLabel);
   }
 
@@ -2780,7 +2861,9 @@ export class GameScene extends Phaser.Scene {
   private drawWorkbench(): void {
     const y = FLOOR_HEIGHT - 64;
     const bench = this.add.image(CRAFT_X, y + 4, 'furn_workbench').setOrigin(0.5, 1);
-    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5);
+    // AG-11: depth 0 → 105，与床标签、容器名签同线（同一个 HUD 上下文带吞字
+    // 问题，UI.md 12b：工作台招牌旧实测 max lum=33，完全不可见）。
+    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5).setDepth(105);
     this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
     this.floorObjects.push(bench, benchLabel, this.upgradeBoard);
     this.refreshUpgradeBoard();
@@ -2898,10 +2981,15 @@ export class GameScene extends Phaser.Scene {
         row.status.setText(built ? '已建' : gated ? '缺前置' : check.ok ? '可制作' : '材料不足');
         row.status.setColor(selected ? hex(PALETTE.ink) : built ? hex(PALETTE.clothHigh) : gated ? hex(TEXT.warn) : check.ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
       } else {
-        const can = countItem(state.player.inventory, 'dirty_water') >= 1;
+        // AG-11: waterPurifierRuns 的显示语义。purifyWater 一次炼光整袋脏水，
+        // 没有"次数"状态可读——诚实的"剩余"是下一次开机能炼多少瓶。批次化
+        // 是这个升级的价值所在（小周 1:1 免费换，净水器赢在回来时满载），
+        // 瓶数让那份价值在按 Enter 之前就看得见。
+        const dirty = countItem(state.player.inventory, 'dirty_water');
+        const can = dirty >= 1;
         row.name.setText('净化  脏水→净水');
         row.name.setColor(selected ? hex(PALETTE.ink) : hex(TEXT.primary));
-        row.status.setText(can ? '可净化' : '缺脏水');
+        row.status.setText(can ? `可净化 ×${dirty}` : '缺脏水');
         row.status.setColor(selected ? hex(PALETTE.ink) : can ? hex(PALETTE.clothHigh) : hex(TEXT.dim));
       }
     }
@@ -3069,6 +3157,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ── NPCs & dialogue ─────────────────────────────────────────────────────
+  // AG-11: 居民按自己的日程移动（npcAutonomyFor：位置是
+  // (npcId, day, minuteOfDay, runSeed) 的纯函数），名签跟着精灵走。
+  // 名签做法与容器名签同族：固定在角色头顶上方（容器是矮道具，落在道具正面；
+  // 96px 的居民不行——y=132 旧位置压在角色身上），depth 105/106（HUD 上下文
+  // 带是 depth 100 的 0.94 alpha 面，低于它会被吞），距离比例渐隐
+  // （贴近角色时不挡脸，信息交给底栏的「按 E 对话」）。
   private drawNpcs(): void {
     for (const npc of NPCS) {
       const who = npc.id === 'alin' ? 'npc_alin' : 'npc_xiaozhou';
@@ -3079,20 +3173,70 @@ export class GameScene extends Phaser.Scene {
         .setDepth(ACTOR_DEPTH);
       // NPCs stand still, so they breathe on the idle clip. Without an explicit
       // play() a sprite sits on frame 0 forever, which reads as a frozen mannequin
-      // rather than someone waiting to talk to you.
+      // rather than someone waiting to talk to you. syncNpcs swaps in the walk
+      // clip whenever the schedule has them moving.
       sprite.play(idleAnimKey(who));
       // Same contact shadow as the player, so an NPC stands on the floor rather
       // than hovering a few pixels above it.
       const shadow = addContactShadow(this, npc.x, PLAYER_FEET_Y + 2, 26, 2, 0.5);
-      const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5);
-      this.floorObjects.push(...shadow, sprite, nameLabel);
+      // The name plate: the same ink plate + 22px text the containers wear, sized
+      // from the measured text (the pixel font is still loading at floor build,
+      // so Text.width is a placeholder — estimateTextWidth is font-independent).
+      const plateW = Math.ceil(estimateTextWidth(npc.name, CONTAINER_LABEL_FONT)) + 14;
+      const plate = this.add
+        .rectangle(npc.x, NPC_LABEL_Y, plateW, CONTAINER_LABEL_FONT + 8, PALETTE.ink, 0.94)
+        .setOrigin(0.5)
+        .setStrokeStyle(1, PALETTE.shadow)
+        .setDepth(105);
+      const label = this.add
+        .text(npc.x, NPC_LABEL_Y, npc.name, { fontFamily: FONT_FAMILY, fontSize: `${CONTAINER_LABEL_FONT}px`, color: hex(TEXT.primary) })
+        .setOrigin(0.5)
+        .setDepth(106);
+      this.npcObjs.set(npc.id, { who, sprite, shadow, label, plate });
+      this.floorObjects.push(...shadow, sprite, plate, label);
+    }
+  }
+
+  /** 某 NPC 当前时刻的自主状态（位置/是否在走/目标）。场景每帧据此摆精灵。 */
+  private npcView(state: GameState, npc: NpcDef): NpcAutonomyView {
+    const { inventory } = syncNpcInventory(state, npc);
+    return npcAutonomyFor(npc, {
+      day: state.day,
+      minuteOfDay: state.gameMinuteOfDay,
+      runSeed: state.runSeed,
+      stock: (itemId) => stockOf(inventory, itemId),
+    });
+  }
+
+  /**
+   * 把居民摆到日程算出位置上，名签与影子跟随，走起来就换步行clip。
+   * 只在 NPC 层调用；游戏时钟冻结时（面板打开）位置本来就不变。
+   */
+  private syncNpcs(state: GameState): void {
+    if (state.currentFloor !== NPC_FLOOR) return;
+    for (const npc of NPCS) {
+      const rec = this.npcObjs.get(npc.id);
+      if (!rec) continue;
+      const view = this.npcView(state, npc);
+      rec.sprite.setPosition(view.x, PLAYER_FEET_Y);
+      for (const s of rec.shadow) (s as Phaser.GameObjects.Rectangle).setPosition(view.x, PLAYER_FEET_Y + 2);
+      const want = view.moving ? walkAnimKey(rec.who) : idleAnimKey(rec.who);
+      if (rec.sprite.anims.currentAnim?.key !== want) rec.sprite.play(want, true);
+      rec.label.setPosition(view.x, NPC_LABEL_Y);
+      rec.plate.setPosition(view.x, NPC_LABEL_Y);
+      // 距离比例渐隐，与容器名签同一公式：贴近角色时名字让位给角色。
+      const a = Phaser.Math.Clamp((Math.abs(state.player.x - view.x) - INTERACT_DISTANCE) / CONTAINER_LABEL_FADE_PX, 0, 1);
+      rec.label.setAlpha(a);
+      rec.plate.setAlpha(a * 0.94);
     }
   }
 
   private nearestNpc(state: GameState): NpcDef | null {
     if (state.currentFloor !== NPC_FLOOR) return null;
     for (const npc of NPCS) {
-      if (Math.abs(npc.x - state.player.x) <= INTERACT_DISTANCE) return npc;
+      // AG-11: 用自主视图的 x，不是 npc.x 静态坐标——居民会走，能对话的
+      // 必须是眼里看见的那个位置。
+      if (Math.abs(this.npcView(state, npc).x - state.player.x) <= INTERACT_DISTANCE) return npc;
     }
     return null;
   }
@@ -3204,6 +3348,17 @@ export class GameScene extends Phaser.Scene {
   // Label + icon key per dialogue option. The icon is the item the player
   // RECEIVES (the trade's output), matching how the crafting list shows outputs;
   // 问候/询问/退出/返回 are not items and get no icon.
+  //
+  // AG-11: the trade list reads availableOffers, not the static npc.offers —
+  // 信誉修正（trusted 双倍货 / disliked 双倍价）与真实库存过滤（没货下架、
+  // hostile 整体清空）都发生在系统侧，场景展示的就是此刻真正成交得了的报价。
+  // 静态表会让玩家看见一件 NPC 库存里没有的货，按了 Enter 才被拒绝。
+  private dialogueOffers(npc: NpcDef): BarterOffer[] {
+    const state = getGame();
+    const { npcState, inventory } = syncNpcInventory(state, npc);
+    return availableOffers(inventory, npc, reputationOf(npcState));
+  }
+
   private dialogueOptionsView(): Array<{ label: string; icon?: ItemId }> {
     const d = this.dialogue;
     if (!d) return [];
@@ -3212,7 +3367,7 @@ export class GameScene extends Phaser.Scene {
     }
     const npc = getNpc(d.npc);
     return [
-      ...npc.offers.map((o) => ({
+      ...this.dialogueOffers(npc).map((o) => ({
         label: `用 ${getItem(o.get.itemId).displayName}×${o.get.quantity} 换 ${getItem(o.give.itemId).displayName}×${o.give.quantity}`,
         icon: o.give.itemId,
       })),
@@ -3263,7 +3418,10 @@ export class GameScene extends Phaser.Scene {
     const captured = this.currentDialogueSession();
     if (!captured) return;
     try {
-      const decision = await decideNpcAction(getGame(), npcFactFromDef(npc), this.npcStateFor(npc), runtime);
+      // AG-11: npcFactFor 把 npcStates 里已按天结算的真实库存喂给规则执行器
+      // （阶段 C）——模型看到的才是「NPC 现在真的有什么」。静态报价表推导
+      // （npcFactFromDef）会让执行器放行一笔 NPC 库存里根本没有的交易。
+      const decision = await decideNpcAction(getGame(), npcFactFor(getGame(), npc), this.npcStateFor(npc), runtime);
       if (!decision.validated.ok) return;
       const { action, utterance } = decision.validated;
       // 第一阶段只落地对话文本；其他行动类型在第一阶段就被 availableActions 挡掉
@@ -3278,23 +3436,6 @@ export class GameScene extends Phaser.Scene {
     } catch {
       // AI 层任何意外都不能把对话搞坏：保持原句即为正确行为
     }
-  }
-
-  /** 交易成功后记一条记忆，积累关系历史。AI 关闭时整个方法不执行。 */
-  private recordNpcTrade(npc: NpcDef, summary: string): void {
-    if (!aiNpcConfig().enabled) return;
-    const game = getGame();
-    const next = recordMemory(this.npcStateFor(npc), {
-      day: game.day,
-      minute: game.gameMinuteOfDay,
-      kind: 'trade',
-      actor: 'player',
-      summary,
-    });
-    saveNpcState(game, npc.id, next);
-    // 记忆写进 npcStates 之后必须再存一次盘：chargeTime 的保存发生在这之前，
-    // 否则交易成功即刻刷新页面会丢掉这条记忆（P1-4）。
-    saveToStorage(game);
   }
 
   private openDialogue(npc: NpcDef): void {
@@ -3463,24 +3604,30 @@ export class GameScene extends Phaser.Scene {
           this.closeDialogue();
           return;
       }
-    } else if (d.selected < npc.offers.length) {
-      const offer = npc.offers[d.selected];
-      const result = trade(getGame(), offer);
-      d.message = result.ok
-        ? `换到了 ${getItem(offer.give.itemId).displayName}×${offer.give.quantity}`
-        : result.reason;
-      if (result.ok) {
-        saveToStorage(getGame());
-        this.refreshInventory();
-        playSfx('trade');
-        d.message = `换到了 ${getItem(offer.give.itemId).displayName}×${offer.give.quantity}（-${ACTION_COSTS.trade} 分钟）`;
-        this.chargeTime(ACTION_COSTS.trade);
-        this.recordNpcTrade(npc, `换到${getItem(offer.give.itemId).displayName}×${offer.give.quantity}`);
-      }
     } else {
-      d.level = 'main';
-      d.selected = 0;
-      d.message = '';
+      const offers = this.dialogueOffers(npc);
+      if (d.selected < offers.length) {
+        // AG-11: 交易执行走 npcEconomy.executeBarter——它一次做完校验（信誉+
+        // 库存过滤后的报价）、原子交易、扣 NPC 库存、记一条 trade 记忆并写回
+        // npcStates。场景原来自己调 trade() + recordNpcTrade：记忆会记两条、
+        // NPC 库存永不消耗（同样的货能无限次换），信誉分级也从未生效。
+        const offer = offers[d.selected];
+        const result = executeBarter(getGame(), npc, offer.id);
+        d.message = result.ok
+          ? `换到了 ${getItem(offer.give.itemId).displayName}×${offer.give.quantity}`
+          : (result.reason ?? '交易没成');
+        if (result.ok) {
+          saveToStorage(getGame());
+          this.refreshInventory();
+          playSfx('trade');
+          d.message = `换到了 ${getItem(offer.give.itemId).displayName}×${offer.give.quantity}（-${ACTION_COSTS.trade} 分钟）`;
+          this.chargeTime(ACTION_COSTS.trade);
+        }
+      } else {
+        d.level = 'main';
+        d.selected = 0;
+        d.message = '';
+      }
     }
     this.refreshDialogue();
   }
@@ -3499,6 +3646,7 @@ export class GameScene extends Phaser.Scene {
     this.keyM = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
     this.keyS = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyF = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
+    this.keyQ = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
 
     this.keyE.on('down', () => this.guard('e', this.onInteract), this);
     this.keyEsc.on('down', () => this.guard('esc', this.onEsc), this);
@@ -3512,14 +3660,13 @@ export class GameScene extends Phaser.Scene {
     }, this);
     // OVERHAUL Wave C2: F buys the paid shortcut at the up stairwell.
     this.keyF.on('down', () => this.guard('f', this.tryShortcut), this);
+    // AG-11: Q opens the quest panel. The panel scene belongs to AG-12; until it
+    // is registered this degrades to a flash instead of a console warning.
+    this.keyQ.on('down', () => this.guard('q', this.onToggleQuests), this);
     this.cursors.up.on('down', () => this.guard('up', this.onNavUp), this);
     this.cursors.down.on('down', () => this.guard('down', this.onNavDown), this);
   }
 
-  // Accept a key at most once per frame (GHI-03 m9). The action has to be
-  // invoked with the scene as `this` — passing a bare method reference would
-  // lose it. Movement is NOT routed through here: it reads
-  // cursors.left/right.isDown in update(), so holding a direction key works.
   /**
    * Hide every panel object that is visible while no panel is open.
    *
@@ -3548,7 +3695,41 @@ export class GameScene extends Phaser.Scene {
     return found;
   }
 
+  /**
+   * AG-11: the quest panel is launched OVER this scene, so Game keeps running
+   * behind it — every menu key is held in guard() while it is up, and update()
+   * early-returns so the survival clock freezes with it. Polled rather than
+   * tracked: the panel owns its own close key, and a flag here could only
+   * learn about it by asking.
+   */
+  private get questsOpen(): boolean {
+    return this.scene.isActive('QuestPanel');
+  }
+
+  /**
+   * Q — open the quest panel. The panel scene (QuestPanelScene) is AG-12's;
+   * this is only the launch call and the key, per the interface contract:
+   * `this.scene.launch('QuestPanel', { from: 'Game' })`.
+   *
+   * Graceful degradation is not optional: before AG-12's scene is registered,
+   * Phaser's launch would only console.warn "Scene key not found" and the
+   * player would press Q into silence. Say so instead.
+   */
+  private onToggleQuests(): void {
+    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.questsOpen) return;
+    if (!this.scene.get('QuestPanel')) {
+      this.flash('任务面板未就绪');
+      return;
+    }
+    this.scene.launch('QuestPanel', { from: 'Game' });
+  }
+
+  // Accept a key at most once per frame (GHI-03 m9). The action has to be
+  // invoked with the scene as `this` — passing a bare method reference would
+  // lose it. Movement is NOT routed through here: it reads
+  // cursors.left/right.isDown in update(), so holding a direction key works.
   private guard(slot: GameKey, action: () => void): void {
+    if (this.questsOpen) return; // the panel owns the keyboard while it is up
     const frame = this.game.getFrame();
     if (this.lastInputFrame[slot] === frame) return;
     this.lastInputFrame[slot] = frame;
@@ -3568,6 +3749,7 @@ export class GameScene extends Phaser.Scene {
     this.keyM?.removeAllListeners();
     this.keyS?.removeAllListeners();
     this.keyF?.removeAllListeners();
+    this.keyQ?.removeAllListeners();
     this.cursors?.up.removeAllListeners();
     this.cursors?.down.removeAllListeners();
   }
@@ -4047,9 +4229,14 @@ export class GameScene extends Phaser.Scene {
       // B3-16: the bag takes mergeable stacks and refuses new ones, and nothing
       // on screen said so — the playtest found players discovering the rule by
       // being refused three times. Name which half happened.
+      // AG-11: and how much is left behind. lootContainer reports took/full
+      // only, but the post-loot view is re-read above anyway, so the count is
+      // free — "剩余留在容器" without a number made players re-open the crate
+      // to find out whether it was one bottle or five.
+      const remaining = this.floorView.containers.find((c) => c.id === containerId)?.items.length ?? 0;
       this.flash(
         result.took.length > 0
-          ? '叠放进的已入包；新物品放不下（背包已满），剩余留在容器'
+          ? `叠放进的已入包；新物品放不下（背包已满），剩余 ${remaining} 件留在容器`
           : '背包已满：新物品放不下，能叠进已有堆的才能进包',
       );
     } else {
@@ -4156,6 +4343,7 @@ export class GameScene extends Phaser.Scene {
    */
   private rideLiftTo(target: number, skipped: number): void {
     const state = getGame();
+    const from = state.currentFloor;
     state.currentFloor = target;
     state.player.x = ENTRY_X;
     this.clearFloor();
@@ -4166,7 +4354,13 @@ export class GameScene extends Phaser.Scene {
     if (state.worldEvents.activeEvent?.source === 'dwell') state.worldEvents.activeEvent = null;
     saveToStorage(state);
     playSfx('goal');
-    this.flash(`正在穿过 ${skipped} 层未探索区 · 到达第 ${target} 层`);
+    // AG-11: worldgen 的一句话概括接管电梯文案。穿过的不只是"N 层未探索区"——
+    // crossingSummary 说得清那 N 层是哪个阶层的什么段（11-99 是底层贫民区的
+    // 废弃段，不是抵达的工人宿舍区）。上行时出发层就是段顶；下行时抵达层才是
+    // 段顶——两条路跨的是同一道间隙，所以取较低的那层问它。非段顶（没有向上的
+    // 电梯）时它返回 null，文案退回原来的计数句式。
+    const summary = crossingSummary(Math.min(from, target));
+    this.flash(summary ? `${summary.text} · 到达第 ${target} 层` : `正在穿过 ${skipped} 层未探索区 · 到达第 ${target} 层`);
   }
 
   // M1-4: what the player is told when the stairs refuse. At a segment end
@@ -4286,11 +4480,25 @@ export class GameScene extends Phaser.Scene {
   // panel early-return below on purpose: a full bag matters most while the
   // inventory panel is open, which is exactly when the player is looking for
   // something to spend.
+  //
+  // AG-11: the warning carries the count (used/capacity). A bare "背包已满"
+  // never said how full — 11/12 and 12/12 read the same and plan differently.
   private refreshBagFullWarning(): void {
-    const full = isBagFull(getGame().player.inventory);
-    if (full === this.bagFullShown) return;
-    this.bagFullShown = full;
-    this.bagFullText.setVisible(full);
+    const inv = getGame().player.inventory;
+    if (isBagFull(inv)) {
+      // AG-11: 预警带计数（已用/容量）。光一句「背包已满」分不出 11/12 和
+      // 12/12——两者的下一步打算完全不同。计数会变（置物架抬 slotCount、
+      // 叠放释放格子），所以比对整句而非仅开关状态。
+      const label = `背包已满（${inv.slots.length}/${inv.slotCount}）· 使用、制作或交易腾出格子，否则搜刮会留在原处；能叠进已有堆的物品仍可拾取`;
+      if (this.bagFullShown && this.bagFullText.text === label) return;
+      this.bagFullShown = true;
+      this.bagFullText.setVisible(true);
+      this.bagFullText.setText(label);
+    } else {
+      if (!this.bagFullShown) return;
+      this.bagFullShown = false;
+      this.bagFullText.setVisible(false);
+    }
   }
 
   // ── frame ──────────────────────────────────────────────────────────────
@@ -4307,8 +4515,13 @@ export class GameScene extends Phaser.Scene {
       this.updateStairClimb(delta);
       return;
     }
-    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
+    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.questsOpen) return;
     const state = getGame();
+
+    // AG-11: the neighbours walk their own schedule. Pure function of game
+    // time, so it only has to run where the clock runs — which is exactly after
+    // the panel early-return above.
+    this.syncNpcs(state);
 
     // B3-01 D9: a rejected write used to be silent, so a full disk or a private
     // window lost the run without a word. The count only grows, so comparing it
@@ -4604,13 +4817,13 @@ export class GameScene extends Phaser.Scene {
 
   private updateWanderer(delta: number): void {
     const state = getGame();
+    // AG-11: 呈现判定归导演器（NpcAutonomy.planNightWanderer）。该不该在场、
+    // 在不在本层、天亮不亮、从哪出来——它读 EventSystem 的既有产物一次算清，
+    // 场景原来在这里复述同一套条件（事件类型/resolved/楼层/夜间或停留），两边
+    // 迟早会对不上；现在只有一处语义。present=false 时 plan.reason 是缺席原因。
+    const plan = planNightWanderer(state);
     const event = state.worldEvents.activeEvent;
-    const active =
-      event?.type === 'wanderer' &&
-      eventStatus(event) !== 'resolved' &&
-      state.currentFloor === event.floor &&
-      (isNight(state.gameMinuteOfDay) || event.source === 'dwell');
-    if (!active) {
+    if (!plan.present || !event) {
       if (this.wanderer || this.wandererEventKey) this.wandererAutonomy.cancel();
       if (this.wanderer) {
         this.wanderer.destroy();
@@ -4625,7 +4838,10 @@ export class GameScene extends Phaser.Scene {
     }
     const key = this.wandererEventKeyFor(state, event);
     if (!this.wanderer) {
-      const spawnX = state.player.x < FLOOR_WIDTH / 2 ? FLOOR_WIDTH - 48 : 48;
+      // AG-11: 出生点也归导演器——plan.spawnX 是 (runSeed, day, source, floor)
+      // 的确定性答案，同一天同一层它永远从同一个地方出来（测试可钉、读档可复现）；
+      // 旧的「玩家左半边就从右端出」是启发式，同一次 run 里能给出两个位置。
+      const spawnX = plan.spawnX;
       this.wanderer = this.add.sprite(spawnX, PLAYER_FEET_Y, walkSheetKey('wanderer')).setOrigin(0.5, 1).setDepth(ACTOR_DEPTH);
       this.wanderer.play(walkAnimKey('wanderer'));
       this.wandererAI = freshWandererAI(spawnX);
@@ -4633,6 +4849,9 @@ export class GameScene extends Phaser.Scene {
       this.wandererIntent = eventStatus(event) === 'flee' ? 'flee' : 'attack';
       this.wandererLastEncounter = '';
       this.wandererGlow = addGlow(this, spawnX, PLAYER_FEET_Y - 8, 34, 0.42, LIGHT_DEPTH);
+      // 生成宽限：种子出生点可能离玩家很近（旧启发式保证出生在对面，种子不保证），
+      // 把命中冷却锚在生成帧——首击遵守与其他击打相同的间隔，不是免打死，只是不瞬发。
+      this.wandererHitAt = this.time.now;
       if (eventStatus(event) === 'active') this.requestWandererIntent(state, event);
     }
     const ai = this.wandererAI!;

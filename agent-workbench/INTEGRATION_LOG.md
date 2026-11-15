@@ -274,3 +274,17 @@ AG-17 后台任务结束但**未交活**：分支停在基点 9b81369，无提�
 - `e2e/stairNavigation.spec.ts` 的 `walkToLift` 过冲修复（卡帧会把角色带进下楼口区，实测走到 x=1240；只改 setup，产品断言不变）——质量合格
 - 7 个 `test-results-old-*` 目录共约 850MB 历史 trace 归档（改名后没人认领）
 AG-17 会话已不在团队内无法续，**改派 AG-18 接手**：提交该修复、清理 850MB、修 AG-11 导致的 5 个 e2e setup 腐烂、跑全量 e2e 并出报告。
+
+## 第三轮派工（2026-11-15 21:10）——5 个 Agent，把已建好的系统接上线
+用户问"该高并发改什么"，总控盘点后确认：**最大缺口不是没做系统，而是系统做了没接上线**。
+
+| Agent | 分支 | 独占文件 | 任务 |
+|---|---|---|---|
+| AG-20 接线二轮 | ag-20-wiring2 | `src/scenes/GameScene.ts` | 产业投资面板（`invest`/`settleInvestments`/`VENTURES`）、商人材料货架（`materialShelf` 当日价）、赠品闭环（`receiveGift`/`claimGift`）、跨层寻仇消费（`planWandererVendetta`）、净水器可炼瓶数 |
+| AG-21 终局演出 | ag-21-finale-ux | `EndgameScene.ts`(新) + `main.ts` | 100000 层四结局呈现（shutdown/hand-over/throne/walk-away），读 quests.ts 真实条件；入口契约写进 FINALE_UX.md 供 AG-20 调用 |
+| AG-22 性能二轮 | ag-22-perf2 | `render/{roomDepth,lighting,corridors,fx,pixelArt,feedback,audio,walkcycle}.ts` | AG-09 遗留的稳态帧时间（Graphics 每帧重放 commandBuffer）——静态图形烘纹理，key 生命周期防活地板与邻居互覆 |
+| AG-23 UI 二轮 | ag-23-ui2 | `render/{uiKit,panels,hudLayout,dialogueLayout,itemIcons}.ts` | 独立复测床/工作台招牌可见性（AG-11 推翻过 AG-08 的前提）、buildPanelHeader 溢出、新字体下响应式 |
+| AG-24 e2e 二轮 | ag-24-e2e2 | `e2e/**` | 修 AG-11 合入后复发的 NPC 坐标腐烂（5 个）+ 给第二轮新系统补 e2e |
+
+**基线**：`origin/integrate/sprint-01` @ `f74e972`（70 文件 / 1176 全绿，tsc 干净，字体已换 Noto Sans SC）。
+**派工纪律**：每个工单只派一次；派发后用任务清单核对；文件独占严格（GameScene 只给 AG-20，EndgameScene+main.ts 只给 AG-21）。

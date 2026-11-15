@@ -381,8 +381,27 @@ collapse=229）。产品表或摇序一变，spec 跟着变而不是烂掉。
 | --- | --- | --- |
 | 1 | `e2e/font.spec.ts` | **新增**：GameSans 加载证明 + 全栈字体审计 + 五面板几何（§5.1） |
 | 2 | `e2e/investment.spec.ts` | **新增**：产业按日结算四路径（收益/亏损/倒闭/no-op），期望值从产品代码派生（§5.2） |
-| 3 | `e2e/npc.spec.ts`、`e2e/firstChapter.spec.ts` | **未改**：NPC 腐烂已由 `661d00d` 修掉（§3） |
-| 4 | 全部存量 spec | **未改**：无删测试、无 skip/only、无放宽断言；`src/**` 零改动 |
+| 3 | `playwright.config.ts` + `e2e/verifyServerIdentity.ts` | **新增服务身份健康检查**（§8.1） |
+| 4 | `e2e/npc.spec.ts`、`e2e/firstChapter.spec.ts` | **未改**：NPC 腐烂已由 `661d00d` 修掉（§3） |
+| 5 | 全部存量 spec | **未改**：无删测试、无 skip/only、无放宽断言；`src/**` 零改动 |
+
+### 8.1 服务身份健康检查（team-lead 指派，防「静默测错分支」）
+
+§7.1 事故暴露的制度缺口：`reuseExistingServer: !CI` 会复用 5199 上任何应答的服务，
+`strictPort` 只保证端口独占、看不到端口后面的代码。修法（team-lead 定的方向，本轮落地）：
+
+- `e2e/verifyServerIdentity.ts`（globalSetup，每轮 Playwright 启动时跑一次）：fetch
+  `/src/scenes/GameScene.ts`，把响应内联 sourcemap 的 `sourcesContent`（服务器实际编译的
+  原文——vite 转换会丢注释块，转换输出不可比对，sourcesContent 可以）与本 worktree 同文件
+  逐字节比对（md5 上消息）。选 GameScene.ts 是因为它是每个功能分支都改的模块、最可能不同。
+- 端口无应答 → 放行（Playwright 随后以配置目录为 cwd 起自己的服务，正确性由构造保证）；
+  指纹不符 → **任何测试开跑前**大声失败并给出两个 md5 与处置说明。
+- 三场景实测：① 端口空 → 放行 + 自起服务 + smoke 过；② 外来 worktree 服务占位 →
+  `[server-identity] server md5 100498b3 vs 本地 e429031b`，退出码 1，零测试运行；
+  ③ 本 worktree 自己的残留服务 → 指纹相符放行复用。
+- 已知边界：复用一个刚起 10s、dep 优化还在 scanning 的服务会撞上 vite cold-load
+  （smoke 首跑超时、温跑 3.9s 过）——这是 reuseExistingServer 既有行为，非本守卫引入；
+  globalSetup 与 webServer 启动之间的窄窗口理论上可被第三方抢驻，无法在本层消除。
 
 ## 9. 没处理干净的地方
 

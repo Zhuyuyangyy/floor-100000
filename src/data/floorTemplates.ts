@@ -1,5 +1,6 @@
 import { deriveSeed, makeRng } from '../core/rng';
 import type { GeneratedContainer, GeneratedFloor, GroundItem, InventoryStack, ItemId } from '../core/gameTypes';
+import { segmentOf } from '../core/segments';
 // Type-only: constants.ts will read FLOOR_TEMPLATES at runtime once AG-25 wires
 // the template overlay into environmentFor (TWOM_ALIGNMENT.md §2), but a type
 // import is erased at compile time, so no module cycle exists either way.
@@ -2451,6 +2452,11 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         loot: [
           { itemId: 'fuse', min: 1, max: 1, probability: 0.4 },
           { itemId: 'wire', min: 1, max: 2, probability: 0.5 },
+          // 撬棍在全塔只有一个保底来源（3 层铁箱），之上再也不掉—— encounters.ts
+          // 的 FLOOR_LOOT_POOLS[100000] 却写着「阶层 6 是唯一带回撬棍的一档」
+          // （把着终点的是有装备的安保体系）。模板补上这一条，让遭遇池的承诺
+          // 在容器里也作数：一次 0.4 的单点掉落，不是刷点。
+          { itemId: 'crowbar', min: 1, max: 1, probability: 0.4 },
         ],
       },
       {
@@ -2466,6 +2472,39 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     ground: [],
   },
 };
+
+// 阶层内分层（AG-43，docs/plans/LOOT.md）：supplyLevel 承诺「楼层越高物资越好」，
+// 可已创作段的概率掉落在段内是平的——100 层和 110 层抽中一根电线的机会一样大，
+// 爬到段顶除了电梯没有任何物资理由。本函数把段内位置还原成一个乘数，只套在
+// 非保底、非水食的掉落上：段底 ×1.0（现状不变）→ 段顶 ×1.5。
+//
+// 三条红线，对应测试钉死的东西：
+//   - 1-5 层不放大：v0.1 初始切片的期望值被 survivalBalance 的审计逐层钉死
+//     （F3 的废金属恰好 3 件、F4 的保底件、八 seed 可建性），那一段是冻结基线；
+//   - 保底条目不放大：它们是进度保证（净化器、加固门、通行凭证的确定性来源），
+//     guaranteed 的语义就是「与种子无关」；
+//   - 水与食不放大：每层恰好一瓶水一份饭是生存契约，概率化的第二瓶会踩穿
+//     survivalBalance 的每层水量上限。
+// RNG 流不变：chance() 照旧只抽一次，变的只是这一次有没有中——所以旧 seed 的
+// 「箱子怎么摆」原样保留，LOOT_DATA_VERSION 无需为之 bump（lootSystem.test.ts
+// 钉着 seed 42 在 F1/F3 的具体抽签结果，bump 会连坐那条断言）。
+const SLOPE_START_FLOOR = 6;
+const SLOPE_TOP_MULTIPLIER = 1.5;
+
+/** 段内物资分层乘数：段底 1.0 → 段顶 1.5；1-5 层、段外楼层与单层段恒为 1。 */
+export function withinSegmentLootBoost(floorNumber: number): number {
+  if (floorNumber < SLOPE_START_FLOOR) return 1;
+  const segment = segmentOf(floorNumber);
+  if (!segment) return 1;
+  const from = Math.max(segment.from, SLOPE_START_FLOOR);
+  const span = segment.to - from;
+  if (span <= 0) return 1;
+  const share = (floorNumber - from) / span;
+  return 1 + (SLOPE_TOP_MULTIPLIER - 1) * share;
+}
+
+// 生存契约件：水与食不走分层乘数（见上方红线第三条）。
+const SURVIVAL_ITEM_IDS: readonly ItemId[] = ['clean_water', 'dirty_water', 'ration_pack', 'bread'];
 
 function resolveLoot(
   specs: LootSpec[],
@@ -2486,7 +2525,8 @@ function resolveLoot(
       out.push({ itemId: spec.itemId, quantity: spec.min });
       continue;
     }
-    if (rng.chance(spec.probability)) {
+    const boost = SURVIVAL_ITEM_IDS.includes(spec.itemId) ? 1 : withinSegmentLootBoost(floorNumber);
+    if (rng.chance(Math.min(1, spec.probability * boost))) {
       out.push({ itemId: spec.itemId, quantity: rng.nextInt(spec.min, spec.max) });
     }
   }

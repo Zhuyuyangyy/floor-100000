@@ -151,3 +151,18 @@ AG-03 报告的 BUG-QA-01「塔楼总览起/终点标签出画布右缘 14px+」
 它还指出两个环境/架构问题，记入下一轮：
 - 本机 Playwright teardown 病态慢（context close >346s），疑似 1.1G test-results 堆积；建议清理。
 - `src/core/config.ts` 裸 JSON import 与 Node ESM（"type":"module"）不兼容，e2e 无法 import 链上模块；建议补 `with { type: 'json' }`。
+
+## 第二轮派工（2026-11-15 09:45）——5 个 Agent，接线与深化
+基线：`integrate/sprint-01`（67 文件 / 1080 测试全绿）。五个新 worktree 从集成分支出发。
+
+| Agent | 分支 | 独占文件 | 任务 |
+|---|---|---|---|
+| AG-11 场景接线 | ag-11-wiring | `src/scenes/GameScene.ts` | worldgen 电梯文案、经济三消费方、NPC 接入渲染层、quests 面板入口、AG-08 遗留（床/工作台招牌 depth、NPC 名签） |
+| AG-12 塔楼与任务面板 | ag-12-tower-quests | `TowerOverviewScene.ts` + `QuestPanelScene.ts`(新) + `main.ts` | worldgen 楼层详情、任务面板 UI、右上角重叠遗留 |
+| AG-13 NPC 深化 | ag-13-npc-deep | `src/ai/**` + `data/npcs.ts` | 5 个新发布者实体、gift 闭环、跨层寻仇、闲逛插值 |
+| AG-14 经济深化 | ag-14-economy-deep | `systems/{shop,Crafting,Survival}.ts` + `data/{items,recipes}.ts` | 价格时间维度、商人 buy 侧、投资与产业 |
+| AG-15 环境架构 | ag-15-env | `core/config.ts` + playwright/CI/gitignore | config.ts JSON import 四环境兼容、清 test-results、CI 复核、e2e 端口隔离 |
+
+**接口契约（AG-11 ↔ AG-12）**：AG-12 建 `QuestPanelScene`（key `'QuestPanel'`）并负责 main.ts 注册，event 契约写进 `docs/plans/UI.md`；AG-11 只写键绑定 + `scene.launch`，场景不存在时优雅降级。
+
+**派工纪律（沿用第一轮教训）**：每个工单只派发一次；派发后用 TaskStop 清单核对；发现重复会话立即停，停前先让 Owner 确认。

@@ -1,5 +1,9 @@
 import { deriveSeed, makeRng } from '../core/rng';
 import type { GeneratedContainer, GeneratedFloor, GroundItem, InventoryStack, ItemId } from '../core/gameTypes';
+// Type-only: constants.ts will read FLOOR_TEMPLATES at runtime once AG-25 wires
+// the template overlay into environmentFor (TWOM_ALIGNMENT.md §2), but a type
+// import is erased at compile time, so no module cycle exists either way.
+import type { FloorEnvironment } from '../core/constants';
 
 // 楼层容器 id 复用既有家具贴图（cabinet/shelf/crate_wood/crate_metal/fuse_box/
 // water_tank/counter/bed/workbench）。containerTextureKey 对未知 id 返回 null，
@@ -36,7 +40,24 @@ export interface FloorTemplate {
   description: string;
   containers: ContainerSpec[];
   ground: GroundSpec[];
+  /**
+   * 逐层环境微调（docs/plans/TWOM_ALIGNMENT.md §3）。只写想覆盖的字段；
+   * 未写的走 constants 的阶梯（FLOOR_ENVIRONMENT → SEGMENT_ENVIRONMENT →
+   * 向下回落），由 AG-25 的 environmentFor 按「template 字段优先」合并。
+   *
+   * warmth 由 AG-25 按契约第二节加进 FloorEnvironment；本分支的 constants.ts
+   * 快照里它还不存在，所以这里用交集把契约里已经定死的形状前置声明——
+   * AG-25 落地后 Partial<FloorEnvironment> 自动覆盖这个交集，本别名可原样
+   * 收回，数据不动。
+   */
+  environment?: FloorEnvironmentOverride;
 }
+
+/**
+ * 契约第三节的 environment 字段类型。除了 FloorEnvironment 的五个字段，
+ * 前置声明契约第二节定死的 warmth（0..1，这一层自身热源能补回的体温比例）。
+ */
+export type FloorEnvironmentOverride = Partial<FloorEnvironment> & { warmth?: number };
 
 // A world is identified by (LOOT_DATA_VERSION, runSeed), not runSeed alone:
 // bump this whenever the loot tables change so a tuned table produces a
@@ -56,11 +77,41 @@ export function containerLootSeed(worldSeed: number, floorNumber: number, contai
   return deriveSeed(LOOT_DATA_VERSION, worldSeed, floorNumber, containerId);
 }
 
+// ── 楼层环境微调（TWOM 对齐 §2/§3）────────────────────────────────────────
+// TWOM 的建议表（twom-reverse/docs/TWOM_MECHANICS.md §3）把楼层差异从「换色调
+// + 换道具」升级到环境参数。我们的塔有 55 层六段，比 TWOM 的 5 层大得多，所以
+// 段的性格由 constants.ts 的阶梯定死（AG-25 属主），本文件只做两件事：
+//
+//   1. 逐层微调：这一层「发生了什么」让它的环境不同于邻居——只写差异字段；
+//   2. warmth 数据：契约第二节的字段，只填给画得出热源的层（见下）。
+//
+// 六段阶梯读数（cold 段间单调递增，humidity 故意不单调——工业区潮、中产起
+// 变干，这是 constants.ts 已经写定的设计，不是疏漏）：
+//
+//   段1 底层贫民区   cold 1.2  hum 0.35  danger 0.45  漏雨的屋顶，暖气第一个停
+//   段2 工人宿舍区   cold 1.4  hum 0.30  danger 0.50  更有序也更干；危险来自巡逻
+//   段3 工业与交易区 cold 2.6  hum 0.50  danger 0.85  管道井最潮；军队级安保
+//   段4 中产与商业区 cold 2.8  hum 0.45  danger 0.95  地毯+坏空调，更干更贵更险
+//   段5 富人特权区   cold 3.0  hum 0.40  danger 0.98  暖气停得最早；生物兵器登场
+//   段6 统治核心     cold 3.4  hum 0.35  danger 1.0   服务器循环风；危险封顶
+//
+// 微调与阶梯的连贯规则（src/tests/floorEnvironment.test.ts 逐条钉住）：
+//   - 1-5 层的「层性格」归 FLOOR_ENVIRONMENT，模板在这五层只补 warmth；
+//   - 持续出水/渗水的层，humidity 必须高于同段（9/102/1002/10005/50005）；
+//   - cold 的段内偏差不许跨过相邻段的基线（10005 的机器余温不低过段3 的 2.6，
+//     50007 的冷藏库不高过段6 的 3.4）；
+//   - warmth 只出现在 WARMTH_SOURCES 画得出火焰的层（现在只有 1 和 5）。
 export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
   1: {
     floorNumber: 1,
     name: '玩家宿舍',
     description: '初始床铺、储物、制作、睡眠的安全屋',
+    // warmth（契约第二节）：这一层画了三面墙的蜡烛（constants.ts 的
+    // WARMTH_SOURCES[1]，power 4 是全塔最弱的热源）和一张床（BED_X）。
+    // 0.35 的含义：家是活得下去的地方，不是温暖的地方——所以蜡烛给一点，
+    // 不给多。cold/humidity/danger 不碰：1-5 层的层性格归 FLOOR_ENVIRONMENT，
+    // 模板在这五层只补它没有的字段。
+    environment: { warmth: 0.35 },
     containers: [
       {
         id: 'cabinet',
@@ -166,6 +217,11 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 5,
     name: '废弃食堂',
     description: '食物补给，首版探索终点',
+    // warmth（契约第二节）：火盆是全塔最强的热源（WARMTH_SOURCES[5]，
+    // power 14、半径 150，且 render/corridors.ts 的 drawCanteen 把热浪环
+    // 画了出来——看得见的半径才是半径）。0.85：食堂是「你想回来的那一层」，
+    // TWOM 表里 5F 的「火盆（强）」落在我们塔上的就是这个读数。
+    environment: { warmth: 0.85 },
     containers: [
       {
         id: 'counter',
@@ -314,6 +370,13 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 9,
     name: '漏水的中层',
     description: '天花板不停往下滴水，墙皮泡得发软，没人愿意在这层久留',
+    // 贫民区屋顶漏在这一层的正上方（description 原话）。humidity 从段基线
+    // 0.35 抬到 0.55，踩过 HUD 的「潮湿」线（environmentLabel 的 0.5）：
+    // 没人愿意久留，现在数字也这么说。cold 不碰——潮气已经通过 humidity
+    // 放大失温，再调冷是一罪两罚。
+    environment: {
+      humidity: 0.55,
+    },
     containers: [
       {
         id: 'water_tank',
@@ -350,6 +413,14 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 10,
     name: '十层尽头',
     description: '楼梯到这里断开，墙上刻着前人留下的十道横线',
+    // 段顶贴着屋顶，暖气最后一个到：cold 1.2 → 1.35——但仍压在工人宿舍区
+    // 的 1.4 之下，塔越高整体越冷，段顶不能冷过下一段的段底。楼梯断开、
+    // 前面没路了，遭遇无处可退：danger 0.45 → 0.55，与 encounters.ts 的
+    // FLOOR_WEIGHT_PROFILE 里 ambush 44（段内最高）对齐。
+    environment: {
+      cold: 1.35,
+      danger: 0.55,
+    },
     containers: [
       {
         id: 'cabinet',
@@ -469,6 +540,11 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 102,
     name: '盥洗间',
     description: '长排水槽还在滴水，镜子上蒙着一层白碱',
+    // 工人宿舍区整段唯一持续出水的地方（长排水槽、白碱）。humidity 0.3 →
+    // 0.6，和 9 层同一个写法：持续出水就该潮，而且该潮过自己的段基线。
+    environment: {
+      humidity: 0.6,
+    },
     containers: [
       {
         id: 'water_tank',
@@ -761,6 +837,12 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 110,
     name: '守段者岗亭',
     description: '岗亭的灯还亮着，铁皮柜上的一排编号正好到十一',
+    // 段顶岗亭，守段者把着往 1000 的货梯（BOSS_FLOORS 之一）。danger
+    // 0.5 → 0.65：灯还亮着意味着电还通、人也还在——这是段里唯一「有人
+    // 值守」的楼层。cold/humidity 不碰：岗亭不是冷的地方，也不是潮的地方。
+    environment: {
+      danger: 0.65,
+    },
     containers: [
       {
         id: 'counter',
@@ -896,6 +978,13 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 1002,
     name: '管道层',
     description: '管道在墙里轰隆隆地走，裂缝处有人用胶带缠了又缠',
+    // 工业区最潮的一层：管道裂缝缠了又缠的胶带就是读数。humidity 0.5 →
+    // 0.75，全塔已创作楼层里仅次于喂养层。danger 0.85 → 0.9：纸条 T3-3
+    // 「管道里有声音。不像是水。」写的就是这一层。
+    environment: {
+      humidity: 0.75,
+      danger: 0.9,
+    },
     containers: [
       {
         id: 'water_tank',
@@ -1248,6 +1337,12 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 1010,
     name: '货梯闸',
     description: '货梯闸的灯还亮着，读卡器等着一张不存在的卡',
+    // 段顶货梯闸：军队防线的最后一环（ambush 80 段内最高）。danger 0.85
+    // → 0.9，只抬一档——把着门的是闸机和通行证，不是怪物，整段没有守段者，
+    // 所以到不了 110 岗亭那种「有人值守」的幅度。
+    environment: {
+      danger: 0.9,
+    },
     containers: [
       {
         id: 'counter',
@@ -1522,6 +1617,15 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 10005,
     name: '物业机房',
     description: '管线井里轰隆作响，墙角渗出一小片水，报修单压在工具下',
+    // 一升一降都有出处，这就是「微调」该有的样子。升：墙角渗水、报修单
+    // 没人换——商业区唯一流着脏水的一层（loot 注释同源），humidity 0.45
+    // → 0.65。降：管线井轰隆作响，这是全段唯一还有机器余热的一层，cold
+    // 2.8 → 2.6，正好回落到工业区读数——但不更低，段内偏差不许跨过下一段
+    // 的基线（floorEnvironment.test.ts 钉住这条）。
+    environment: {
+      humidity: 0.65,
+      cold: 2.6,
+    },
     containers: [
       {
         id: 'fuse_box',
@@ -1655,6 +1759,14 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 10008,
     name: '实验室',
     description: '值班灯还亮着，笼架的位置已经空了，登记簿停在最后一页',
+    // 节点 4 的真相在这一层（docs/18_TIER_PROGRESSION.md §3：「实验室在造
+    // 生物兵器，第一批是志愿者」）。笼架空着不是因为搬走了——danger 0.95
+    // → 0.97；实验台的水槽和样本残留让这一层比同段潮半档（humidity 0.45
+    // → 0.55）。楼上还有一间同一写法的实验室（50008），那里养过成品。
+    environment: {
+      humidity: 0.55,
+      danger: 0.97,
+    },
     containers: [
       {
         id: 'counter',
@@ -1735,6 +1847,11 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 10010,
     name: '货梯闸',
     description: '货梯闸的灯还亮着，读卡器等着一张更贵的卡',
+    // 段顶货梯闸，私人武装把着的最后一环（ambush 92 段内最高）。danger
+    // 0.95 → 0.97。整段没有守段者：把着往 50000 的门的是许可证，不是怪物。
+    environment: {
+      danger: 0.97,
+    },
     containers: [
       {
         id: 'counter',
@@ -2014,6 +2131,14 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 50005,
     name: '喂养层',
     description: '玻璃柜沿墙码齐，笼架的位置已经空了，饲料槽还是满的',
+    // TWOM 楼层表里 5F「漏水中 / 高危险」落在我们塔上的位置。喂它的水是
+    // 脏的（loot 注释），饲料槽还是满的，笼架空了——潮气和危险都是「它
+    // 在附近」的读数：humidity 0.4 → 0.65（全塔已创作楼层最潮），danger
+    // 0.98 → 0.99。生物兵器在这一段正式登场，富人不只知道，他们买单。
+    environment: {
+      humidity: 0.65,
+      danger: 0.99,
+    },
     containers: [
       {
         id: 'crate_metal',
@@ -2104,6 +2229,12 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 50007,
     name: '冷藏库',
     description: '冷气从门缝里往外冒，货架按日期编号，最上面一层空了',
+    // 冷气从门缝里往外冒——冷藏库是段里最冷的一层，冷到和统治核心同一个
+    // 读数（cold 3.0 → 3.4，恰好压在段6 基线上，不越过）。humidity 不碰：
+    // 冷库是干的，潮的是喂养层。
+    environment: {
+      cold: 3.4,
+    },
     containers: [
       {
         id: 'shelf',
@@ -2148,6 +2279,13 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 50008,
     name: '楼上实验室',
     description: '值班灯还亮着，笼架的位置已经空了，登记簿停在最后一页',
+    // 中产区实验室（10008）的上一手：那边的笼架空着是雏形跑了，这边的
+    // 登记簿停在最后一页是成品搬去了核心。danger 0.98 → 0.99；humidity
+    // 0.4 → 0.55，和 10008 同一个写法、同一档幅度——楼上的不更潮，但更险。
+    environment: {
+      humidity: 0.55,
+      danger: 0.99,
+    },
     containers: [
       {
         id: 'counter',
@@ -2228,6 +2366,12 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 50010,
     name: '货梯闸',
     description: '货梯闸的灯还亮着，读卡器等着一张更贵的卡，闸机旁贴着当天的盛宴菜单',
+    // 段顶货梯闸，守段者把着往 100000 的电梯（BOSS_FLOORS 之一，boss 权重
+    // 108 压过 ambush 104）。danger 0.98 → 0.99：柜里锁的是生物兵器的看护
+    // 补给——这一段最危险的一层，但仍不到核心的 1.0，封顶留给终端。
+    environment: {
+      danger: 0.99,
+    },
     containers: [
       {
         id: 'counter',
@@ -2281,6 +2425,14 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     floorNumber: 100000,
     name: '统治核心',
     description: '电梯井到底了。终端还通着电，三张表并排摆着：停电表、配给表、处决名单',
+    // 单层终局，整段只有它自己——「相对于段的差异」落在服务器室的循环风上：
+    // humidity 0.35 → 0.3，全塔最干（渗水的管道和中央空调都在下面）。cold
+    // 不碰：3.4 与 worldgen.ts 的 ENVIRONMENT_ANCHORS 末档逐字会师，两条
+    // 读数在塔顶一致是 constants.ts 注释立过的规矩；danger 已是 1.0 封顶，
+    // 留着给终端，不给任何一层。
+    environment: {
+      humidity: 0.3,
+    },
     containers: [
       {
         id: 'counter',

@@ -395,11 +395,16 @@ Flag-Trigger/NPC 三原子/行为树组件），任何一方不得单方面改�
 | AG-31 行为树骨架 | 2b3efee | 四节点 + 组件挂载 + WANDERER_PATROL_TREE 真实用例；**明确不迁移**（论证可信） |
 | AG-32 对齐 e2e | 进行中 | 两阶段 |
 
-### 两个 Agent 的报告与实物不符（第 4、5 次）
-- **AG-25**：自报 commit `cd994c9` 不存在；自报 4 个测试文件 + 35 断言**全部不存在**。工作以未提交状态留在磁盘上，总控审查后落盘为 `49a4d63`。**实现本身完整可用**（morale 六函数、疾病派生、热源、环境叠加），但零测试——测试由总控补。
-- **AG-23**（上一轮）：同类，`fontLineBox.test.ts` 不存在、`uiLayout2` 报 24 例实际 13 例。
+### 关于 AG-25 的更正（总控上一条汇报归因错误，在此纠正）
+上一条日志写"AG-25 自报 commit cd994c9 与四个不存在的测试文件"——**这个归因是错的**。
+AG-25 本人（第二个会话）明确否认做过那份报告："那份报告不是我的，我从未自报过 commit"。
+实际情况是 **AG-25 有两个会话**（与 AG-08/AG-09 同类的重复派发），产生失实报告的是
+另一个会话。真正的 AG-25 交付了完整实现 + 44 个测试（49a4d63 实现 + 49c4c9d 测试），
+并主动纠正了总控落盘时写错的 commit 信息。
 
-累计：AG-17 / AG-18 / AG-23 / AG-25 四个 Agent 自报不存在的 commit hash。**制度**：Agent 自报的 hash 必须 `git cat-file -t` 回查，工作树 `git status` 核对，才能进集成。
+**制度**：Agent 自报的 hash 必须 `git cat-file -t` 回查、工作树 `git status` 核对；
+同一工单出现多个会话时，以能提供可验证交付物的那个为准。累计自报假 hash 的是
+AG-17 / AG-18 / AG-23 三个，以及 AG-25 的重复会话之一。
 
 ### AG-31 的节丢失
 它重做提交（2b3efee，为甩掉误合入的 AG-28 内容）时丢了自己那一节实现说明，三个历史 hash 均无。契约文档 §12 记占位并指向其分支与 BEHAVIOUR.md，不冒充内容。
@@ -407,7 +412,17 @@ Flag-Trigger/NPC 三原子/行为树组件），任何一方不得单方面改�
 ### 集成时解的一处语义碰撞
 AG-30 给第 1 层加 `warmth: 0.35` → AG-25 的 template 叠加生效 → `environmentFor(1)` 多一个字段 → AG-04 的 deep-equal 断言过期。补字段不断强度。
 
-### 待总控做（AG-25 的接线清单）
-1. HUD 三行：`applyNightLighting()` 加体温/心情/疾病（含 `sicknessTier()` 派生与段落化）
-2. `applyHeatSource` / `moraleEffectOf` / `applyMoraleEffect` / `rollSickness` / `tickSickness` 五个调用点
-3. AG-25 的 23 个测试（它没交付）
+### 已解的一处契约冲突：warmth 两套来源
+AG-25 按"warmth 来自它自己的 JSON 默认梯"写测试，AG-30 按契约第二节把 warmth 填进
+楼层 template——两个源在第 1 层都有值（梯 0.5 vs template 0.35）。
+**契约规定 template 优先**，实现是对的，是 AG-25 的两个断言写反了。修法：
+① 断言反转成"template 赢、梯只兜底"，并真的打补丁删掉第 1 层 template 验证兜底梯
+会被读到（原断言只验兜底没验优先，这正是写反的原因）；② 睡眠回温期望值从 warmthOf(1)
+现算，不写死 0.5——warmth 归 AG-30 调，写死会在下次调值时假红。
+顺带修键路径：`sickness.sleepBodyHeatPerHour` 不在 SURVIVAL_BALANCE 顶层。
+
+### 待总控做（AG-25 的接线清单，行号以它最终报告为准）
+1. HUD 三行：`refreshEnvironmentHud()`（GameScene.ts:3448-3480）加体温/心情/疾病
+2. 六个调用点：`cheerFromItem`(:5100 useConsumable) / `tick.morale`+`tick.sicknessTier`(:6053-6070) /
+   `witnessTrauma`(:6347) / `backFromScavenge`(:5781) / 睡醒 flash(:5582) /
+   EnvironmentSystem 增益乘 warmth(:87，其属主)

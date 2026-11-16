@@ -3211,24 +3211,19 @@ export class GameScene extends Phaser.Scene {
     const backG = this.add.graphics().setDepth(2);
     this.floorObjects.push(backG);
 
-    const cloths: Array<[number, number]> = [
-      [PALETTE.cloth, PALETTE.clothDeep],
-      [PALETTE.clothDeep, PALETTE.cloth],
-      [PALETTE.cloth, PALETTE.clothDeep],
-      [PALETTE.clothDeep, PALETTE.cloth],
-      [PALETTE.cloth, PALETTE.clothDeep],
-    ];
-
     // Back row first, so the front row overlaps it.
-    back.forEach((x, i) => {
-      const [blanket, fold] = cloths[i % cloths.length];
-      this.drawBed3D(backG, x, backY, { blanket, fold, scale: 0.72, sleeper: true });
+    // The beds are the art pack's now, not the procedural ones: the same bunk
+    // that stands in every corridor of the tower. The back row keeps its 0.72
+    // scale and its lower depth so the front row still overlaps it.
+    back.forEach((x) => {
+      const bed = this.add.image(x, backY, 'env-bunk-sleeper').setOrigin(0.5, 1).setScale(0.72).setDepth(2);
+      this.floorObjects.push(bed);
     });
 
     // Pitch 96, so the row is crowded - beds nearly touching.
     front.forEach((x, i) => {
-      const [blanket, fold] = cloths[i % cloths.length];
-      this.drawBed3D(g, x, floorY, { blanket, fold, scale: 1, sleeper: true });
+      const bed = this.add.image(x, floorY, 'env-bunk-sleeper').setOrigin(0.5, 1).setDepth(4);
+      this.floorObjects.push(bed);
       this.floorObjects.push(...addContactShadow(this, x + 40, floorY + 2, 70, 2, 0.35));
 
       // Label and Z sit above the headboard line and beside the head. Both are

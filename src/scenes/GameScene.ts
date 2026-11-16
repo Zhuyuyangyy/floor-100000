@@ -27,8 +27,6 @@ import {
   STAIR_RISE,
   STAIR_START_Y,
   UP_EXIT_X,
-  STACK_ABOVE,
-  STACK_BELOW,
   WANDERER_DAMAGE,
   WANDERER_HIT_COOLDOWN_MS,
   WANDERER_SPEED,
@@ -273,20 +271,85 @@ const SLEEPING_FLOORS = new Set([101, 104, 109]);
 
 /** Container name size, shared by the text and its backing plate. */
 const CONTAINER_LABEL_FONT = 22;
+/** The plate's own fill alpha (also what a future selected look restores). */
+const CONTAINER_LABEL_PLATE_ALPHA = 0.94;
 /**
- * The player-proximity fade, in px before INTERACT_DISTANCE.
+ * AG-52: the player-proximity band, in px before INTERACT_DISTANCE.
  *
- * The label band crosses the player's head and shoulders (figure spans
- * y 64..160), and the player stands AT the container's x, so no position keeps
- * the plate off the figure — measured overlap at the old spot: 19px vertically
- * across the plate's full width. The name yields instead of moving: it fades
- * out over the last 24px of approach and back in on the way out, which is also
- * when the foot bar starts reading "按 E 打开 储物柜" — the name is on screen
- * exactly when it is actionable, and never under the player's chin.
- * Distance-proportional rather than a hard cut so walking past does not pop.
+ * The semantics FLIPPED with the invisible-label rework (user: 「你不用把字写在
+ * 上面。就不用写这个储物柜是啥啥啥的……靠近它的时候，或者是比较隐形的文字……
+ * 不是这么明显的，会影响我们的观感」). The nameplate used to be a permanent
+ * fixture that faded OUT over the last 24px of approach, because a plate under
+ * the player's chin read as clutter. It is now the opposite: nothing at all
+ * from afar, and a low-alpha stealth line that fades IN over the same 24px,
+ * so walking past never pops. The name is on screen exactly when the container
+ * is actionable — the same window the foot bar's 「按 E 打开」 owns.
  * (The drop itself lives in render/hudLayout as CONTAINER_LABEL_DROP.)
  */
 const CONTAINER_LABEL_FADE_PX = 24;
+/**
+ * AG-52: the stealth look's alpha — low enough to read as a shadow on the wall
+ * rather than as a nameplate, high enough to read when the player is standing
+ * on top of the container. The old plate's ink at 0.94 is exactly the
+ * 「这么明显」 the user rejected.
+ */
+const CONTAINER_LABEL_STEALTH_ALPHA = 0.35;
+/**
+ * AG-52: the stealth look's font size. A step down from the 22px plate font,
+ * the same 18px the dorm's 「室友」 sleeper tags already use — a quiet second
+ * voice in the room rather than a sign over it.
+ */
+const CONTAINER_LABEL_STEALTH_FONT = 18;
+
+/**
+ * AG-52: what a container's name looks like right now — the pure contract the
+ * scene draws and labelsAndView.test.ts pins. Three looks:
+ *
+ *   - afar: nothing at all (alpha 0, no plate). The wall is just a wall.
+ *   - near (inside INTERACT_DISTANCE, fading in over CONTAINER_LABEL_FADE_PX):
+ *     the stealth line — 0.35 alpha, 18px, NO backing plate.
+ *   - selected: the full old nameplate — 22px, alpha 1, plate at full ink.
+ *     Nothing produces `selected` yet; it is the interface the user's future
+ *     「选位置」 interaction (「等到后面我们就是说做一个东西之后的话，会让用户
+ *     选这个位置」) plugs into, so the scene never has to relearn this shape.
+ *
+ * Pure and Phaser-free on purpose: the scene's per-frame fader calls it, and
+ * the unit test imports the very same function.
+ */
+export interface ContainerLabelLook {
+  /** The name to draw. Always the container's own label; alpha decides if it shows. */
+  text: string;
+  /** Text alpha, 0..1. */
+  alpha: number;
+  /** Backing-plate alpha, 0..1. Stealth has no plate; selected restores it. */
+  plateAlpha: number;
+  /** Font size in px: the quiet size for stealth, the plate font for selected. */
+  fontSize: number;
+}
+
+export function containerLabelFor(
+  container: { x: number; label: string },
+  view: { playerX: number; selected?: boolean },
+): ContainerLabelLook {
+  if (view.selected) {
+    return {
+      text: container.label,
+      alpha: 1,
+      plateAlpha: CONTAINER_LABEL_PLATE_ALPHA,
+      fontSize: CONTAINER_LABEL_FONT,
+    };
+  }
+  const dist = Math.abs(view.playerX - container.x);
+  // Distance-proportional fade-in rather than a hard cut, so walking past does
+  // not pop — the mirror of the old fade-out.
+  const t = Math.max(0, Math.min(1, (INTERACT_DISTANCE + CONTAINER_LABEL_FADE_PX - dist) / CONTAINER_LABEL_FADE_PX));
+  return {
+    text: container.label,
+    alpha: CONTAINER_LABEL_STEALTH_ALPHA * t,
+    plateAlpha: 0,
+    fontSize: CONTAINER_LABEL_STEALTH_FONT,
+  };
+}
 /**
  * AG-11: NPC 名签的 y——居民头顶上方一个 CONTAINER_LABEL_DROP。
  * 容器是 28px 的矮道具，「基座-36」落在道具正面；居民是 96px 的立绘
@@ -301,6 +364,12 @@ const NPC_LABEL_Y = PLAYER_FEET_Y - FRAME_H - CONTAINER_LABEL_DROP;
  * nothing would remove the handler. A WeakMap so a scene restart cannot leak.
  */
 const CONTAINER_LABEL_FADERS = new WeakMap<Phaser.Scene, () => void>();
+/**
+ * AG-52: one climb-target syncer per scene, replaced on every floor build — the
+ * same shape as CONTAINER_LABEL_FADERS above, for the same reason: stacking
+ * listeners across floors would drive the new floor from stale closures.
+ */
+const CLIMB_TARGET_SYNCERS = new WeakMap<Phaser.Scene, () => void>();
 
 const LIFT_X = 1165;
 const LIFT_REACH = 30;
@@ -457,6 +526,21 @@ export class GameScene extends Phaser.Scene {
   // can widen them and the landing can put them back. drawFloor owns the
   // standing values; these are only a mirror of the last setBounds call.
   private standingCamBounds?: { top: number; bottom: number };
+  // AG-52: the climb's target floor, drawn beside the live one while the player
+  // is on the stairs (see syncClimbTargetFloor). The layer reference is only
+  // needed to take it down on a REFUSED landing — a successful landing's
+  // clearFloor() destroys it with the rest of the old floor, and the includes()
+  // guard below keeps that from becoming a double destroy.
+  private climbTargetLayer?: Phaser.GameObjects.GameObject;
+  private climbTargetFloor?: number;
+  /**
+   * AG-52: the direction of the most recent climb. drawFloor's landing ease
+   * reads it to put the camera back in the pre-swap frame, so the arriving
+   * floor does not teleport a full FLOOR_HEIGHT in one frame. Recorded by the
+   * climb-target syncer while stairClimb is live; stale values are harmless
+   * because only the landingEase path reads it.
+   */
+  private lastClimbDirection?: 1 | -1;
   // OVERHAUL: a one-shot action clip (search / attack / hurt) and the time it
   // holds the sprite. Without the hold, the walk/idle selection below would
   // switch back on the very next frame and the clip would never be seen.
@@ -888,25 +972,21 @@ export class GameScene extends Phaser.Scene {
     } else {
       this.drawCorridor(floor);
     }
-    // AND THE NEIGHBOURS. The cross-section only works if the floors beside the
-    // player's are actually there — the camera is zoomed out to 3.6 floors of
-    // height, so anything not drawn is empty black above and below. They go in
-    // before the exits so the stairs have a landing to arrive at.
-    const lowest = PLAYABLE_FLOORS_V01[0];
-    const highest = PLAYABLE_FLOORS_V01[PLAYABLE_FLOORS_V01.length - 1];
-    // Only floors that were actually authored. The cross-section used to draw
-    // every numeric neighbour, so standing on 100 painted floors 99 and 98 as lit
-    // rooms with their own lamps — rooms that do not exist, in a stretch the
-    // design says is empty. The gap now reads as empty, which is the whole point
-    // of saying the other 89 floors are skipped.
-    for (let d = 1; d <= STACK_ABOVE; d++) {
-      const f = floor - d;
-      if (f >= lowest && hasFloorContent(f)) this.drawNeighbourFloor(f, -FLOOR_HEIGHT * d, true, d);
-    }
-    for (let d = 1; d <= STACK_BELOW; d++) {
-      const f = floor + d;
-      if (f <= highest && hasFloorContent(f)) this.drawNeighbourFloor(f, FLOOR_HEIGHT * d, false, d);
-    }
+    // AG-52: 只画本层。用户原话：「我在最下面只能看到一层……你只能看到你自己
+    // 这一层，因为角色他只能看到这一层，所以我在想要不要就是说做只看见一层，
+    // 根据角色的这个视角来决定能看见的范围」——剖面图的上下邻居层全部撤掉，
+    // 站立态场景里只有当前层，相机 bounds 也收到本层（下文）。省掉的邻居层
+    // 重放约占整层渲染成本四成（RENDER.md §10），不画反而更快。
+    //
+    // 唯一例外是爬梯：角色夹在两段楼层之间时必须看见目标层，否则是往虚空里
+    // 走。那层由 syncClimbTargetFloor（下面的 UPDATE 监听）在爬梯态补画、
+    // 落地或拒绝落地时撤走——楼梯 therefore shows where it goes exactly
+    // while you are on it, and the rest of the time the tower is one floor.
+    const syncClimbTarget = (): void => this.syncClimbTargetFloor();
+    const previousSyncer = CLIMB_TARGET_SYNCERS.get(this);
+    if (previousSyncer) this.events.off(Phaser.Scenes.Events.UPDATE, previousSyncer);
+    CLIMB_TARGET_SYNCERS.set(this, syncClimbTarget);
+    this.events.on(Phaser.Scenes.Events.UPDATE, syncClimbTarget);
     this.drawExits(floor);
     // After the exits: the door is drawn over the wall dressing, and it stands
     // beside the stairwell rather than in front of it.
@@ -979,43 +1059,49 @@ export class GameScene extends Phaser.Scene {
     // 1 following x only, which could never show more than the floor you were
     // standing on.
     const cam = this.cameras.main;
-    cam.setZoom(FLOOR_VIEW_ZOOM);    // The bounds are per-floor, not global. On the bottom floor there is nothing
-    // above it, so the camera must not be allowed to scroll up into the void —
-    // a global bound let it, and the bottom floor showed 200px of empty black
-    // over the dorm. Same at the top of the tower looking down.
-    //
-    // The bottom floor's ceiling is the HUD, not the floor band: the wall art is
-    // 128 tall (y 8..136) and the plate is 102, so stopping at -FLOOR_BAND(-64)
-    // still clipped the wall's top 34px. Stopping at -contextBottom puts the
-    // wall's first row exactly under the plate. Floors with neighbours above keep
-    // the old bound — they are scrolled for the cross-section, not for the HUD.
-    const topBound = floor <= PLAYABLE_FLOORS_V01[0] ? -Math.max(FLOOR_BAND, HUD_LAYOUT.contextBottom) : -FLOOR_HEIGHT * (STACK_ABOVE + 1);
-    const bottomBound =
-      floor >= PLAYABLE_FLOORS_V01[PLAYABLE_FLOORS_V01.length - 1]
-        ? FLOOR_HEIGHT + FLOOR_BAND
-        : FLOOR_HEIGHT * (STACK_BELOW + 2);
+    cam.setZoom(FLOOR_VIEW_ZOOM);
+    // AG-52: 只看见一层 —— 相机 bounds 收到本层。角色站在一层上 y 不动
+    // （PLAYER_FEET_Y），follow 本来就把相机钉在角色身上；bounds 从「3.6 层
+    // 高的剖面」收紧到「角色身边一层」之后，虚空永远滚不到——这是"根据角色
+    // 的视角决定能看见的范围"在相机侧的落实。bounds 比视口矮时 Phaser 的
+    // clampY 把 scrollY 钉在 bounds 顶（BaseCamera.clampY），所以站立位就是
+    // 角色居中：scrollY = PLAYER_FEET_Y - 视口高/2。旧代码在塔底/塔沿还各有
+    // 特判（-contextBottom / +FLOOR_BAND），现在一层之内没有邻居要避让，
+    // 所有楼层同一个数。
+    const viewH = this.viewSize().height;
+    const standScrollY = PLAYER_FEET_Y - viewH / 2;
+    const topBound = standScrollY;
+    const bottomBound = topBound + FLOOR_HEIGHT;
     // The world width equals the design viewport width. Locking the horizontal
     // bounds to one floor keeps the full corridor visible when the player lands
     // at x=40 or x=1240; only the tower's vertical cross-section may scroll.
     cam.setBounds(0, topBound, this.floorW, bottomBound - topBound);
     this.standingCamBounds = { top: topBound, bottom: bottomBound };
-    const centreY = Math.max(topBound + 180, Math.min(bottomBound - 180, PLAYER_FEET_Y - FLOOR_HEIGHT * 0.5));
     if (this.landingEase) {
-      // Landing used to snap: setBounds clamps the scroll the instant the climb
-      // bounds come off, so a descent jumped 104px in one frame. Ease into the
-      // standing position over 220ms instead, then hand the follow back.
+      // 落地不跳帧。换层会把本层内容从「目标层的世界坐标」挪回「本层坐标」
+      // ——整整一个 FLOOR_HEIGHT。相机若已经站在新层的站立位，内容和角色会
+      // 一起瞬移 200px（旧代码靠 3.6 层高的大 bounds 让 setBounds 的钳制晚一
+      // 步发生、再 220ms 滑回，意图相同；现在 bounds 收到一层之内，旧帧显式
+      // 算）：按爬梯方向先把相机放回爬梯时的旧帧——内容在落地瞬间原地不动
+      // ——再 220ms 滑到站立位。滑动期间 bounds 临时放宽到「旧帧→站立位」这
+      // 两帧之间，回位后立刻收回一层之内（onComplete）。
       this.landingEase = false;
-      const fromY = cam.scrollY;
+      const dir = this.lastClimbDirection ?? 1;
+      const fromY = cam.scrollY + FLOOR_HEIGHT * dir;
+      const toY = standScrollY;
       cam.stopFollow();
-      cam.centerOn(state.player.x, centreY);
-      const toY = cam.scrollY;
+      cam.setBounds(0, Math.min(fromY, toY), this.floorW, viewH + FLOOR_HEIGHT);
       cam.setScroll(cam.scrollX, fromY);
       this.tweens.add({
         targets: cam,
         scrollY: toY,
         duration: 220,
         ease: 'Sine.easeOut',
-        onComplete: () => cam.startFollow(this.player, true, 0.15, 0.15),
+        onComplete: () => {
+          // 收回一层：站立态虚空永远滚不到。
+          cam.setBounds(0, standScrollY, this.floorW, FLOOR_HEIGHT);
+          cam.startFollow(this.player, true, 0.15, 0.15);
+        },
       });
       return;
     }
@@ -1023,7 +1109,7 @@ export class GameScene extends Phaser.Scene {
     // Centred on the player the moment the floor is drawn: a follow with
     // lerp 0.15 takes a third of a second to catch up, and during that time the
     // camera is still wherever the previous floor left it.
-    cam.centerOn(state.player.x, centreY);
+    cam.centerOn(state.player.x, PLAYER_FEET_Y);
   }
 
   // ── M1-1: the climb's camera room ────────────────────────────────────────
@@ -1048,10 +1134,13 @@ export class GameScene extends Phaser.Scene {
     // a black slide upward: you never saw where you came from or where you were
     // going.
     //
-    // Now the camera stops where it is — the cross-section already shows the
-    // floor above and the floor below — and only the climber moves inside that
-    // frame. The landing puts the follow back (drawFloor) and the refused
-    // landing puts it back by hand (resetCameraBounds).
+    // Now the camera stops where it is and only the climber moves inside that
+    // frame. AG-52: the standing bounds ARE one floor tall (the cross-section
+    // is gone), so the held frame is the standing frame — and the climb's
+    // target floor, drawn by syncClimbTargetFloor at exactly one FLOOR_HEIGHT
+    // above or below it, is what fills the other half of the viewport. The
+    // landing puts the follow back (drawFloor) and the refused landing puts it
+    // back by hand (resetCameraBounds).
     cam.stopFollow();
     cam.setBounds(0, standing.top, this.floorW, standing.bottom - standing.top);
     void direction;
@@ -1066,6 +1155,53 @@ export class GameScene extends Phaser.Scene {
     // The climb stopped the follow; a refused landing must hand it back or the
     // camera stays parked where the climb began.
     cam.startFollow(this.player, true, 0.15, 0.15);
+  }
+
+  // ── AG-52: the climb's target floor ───────────────────────────────────────
+  // Standing on a floor draws ONLY that floor (user: 「你只能看到你自己这一层」),
+  // but a climber is between two floors for a full second: without the floor
+  // they are climbing TO on screen, they walk into the void. So the target is
+  // drawn for the duration of the climb and taken down the moment it ends —
+  // the cross-section survives exactly as long as the stairs are in use.
+  //
+  // Driven from the scene's UPDATE event rather than from changeFloor /
+  // updateStairClimb: the stair section belongs to AG-50/AG-53, and one
+  // listener that reads this.stairClimb every frame covers both ends of the
+  // climb (start and finish) without touching it. On a successful landing
+  // clearFloor() has already destroyed the layer with the old floor by the
+  // time this runs, and the includes() guard turns that into a no-op.
+  private syncClimbTargetFloor(): void {
+    const climb = this.stairClimb;
+    if (climb) {
+      this.lastClimbDirection = climb.direction;
+      if (this.climbTargetFloor === climb.to) return;
+      this.destroyClimbTargetLayer();
+      // Only authored floors get drawn as a target — the same rule the old
+      // cross-section used, and stairNeighbour() already guarantees it.
+      if (!hasFloorContent(climb.to)) return;
+      const above = climb.direction === 1;
+      this.drawNeighbourFloor(climb.to, above ? -FLOOR_HEIGHT : FLOOR_HEIGHT, above, 1);
+      // drawNeighbourFloor pushes the layer as the LAST element of
+      // floorObjects; grab it there so a refused landing can take it down
+      // alone. (Its lifetime is ours from here: on success clearFloor's batch
+      // destroy reaches it through floorObjects as usual.)
+      this.climbTargetLayer = this.floorObjects[this.floorObjects.length - 1];
+      this.climbTargetFloor = climb.to;
+      return;
+    }
+    this.destroyClimbTargetLayer();
+  }
+
+  private destroyClimbTargetLayer(): void {
+    const layer = this.climbTargetLayer;
+    this.climbTargetLayer = undefined;
+    this.climbTargetFloor = undefined;
+    // A successful landing's clearFloor() already destroyed it and emptied
+    // floorObjects; a scene restart leaves a stale reference to a dead object.
+    // Either way it is no longer in the array, so there is nothing to destroy.
+    if (!layer || !this.floorObjects.includes(layer)) return;
+    this.floorObjects = this.floorObjects.filter((o) => o !== layer);
+    layer.destroy();
   }
 
   // OVERHAUL: plays a one-shot action clip and holds it for `ms`. The frame
@@ -2991,8 +3127,13 @@ export class GameScene extends Phaser.Scene {
         .rectangle(c.x, labelY, plateW, CONTAINER_LABEL_FONT + 8, PALETTE.ink, 0.94)
         .setOrigin(0.5)
         .setStrokeStyle(1, PALETTE.shadow);
+      // AG-52: the label is born in its stealth look — 18px, no plate. The
+      // per-frame fader below (containerLabelFor) owns its alpha from here on;
+      // the plate stays in the map at alpha 0 until a future selected look
+      // brings it back. The old always-on 22px nameplate is what the user
+      // rejected (「就不用写这个储物柜是啥啥啥的」).
       const label = this.add
-        .text(c.x, labelY, c.label, { fontFamily: FONT_FAMILY, fontSize: `${CONTAINER_LABEL_FONT}px`, color: hex(TEXT.primary) })
+        .text(c.x, labelY, c.label, { fontFamily: FONT_FAMILY, fontSize: `${CONTAINER_LABEL_STEALTH_FONT}px`, color: hex(TEXT.primary) })
         .setOrigin(0.5);
       // The labels are created early enough that later passes (neighbour floors,
       // the night overlay, the encounter markers) end up drawn over them — measured
@@ -3017,19 +3158,36 @@ export class GameScene extends Phaser.Scene {
       this.containerObjs.set(c.id, { box, label, plate });
       this.floorObjects.push(box, plate, label);
       this.setContainerEmptyVisual(c.id, c.items.length === 0);
+      // The first frame already wears the right look for where the player is
+      // standing — a label at the default alpha 1 would flash for the one
+      // frame before the fader's first run.
+      const born = containerLabelFor(c, { playerX: getGame().player.x });
+      label.setAlpha(born.alpha);
+      plate.setAlpha(born.plateAlpha);
     }
     // The proximity fade, registered once per floor build and replaced each
     // time (see CONTAINER_LABEL_FADERS). Runs on the scene's UPDATE event so it
     // reads the player's position after this frame's movement, and the WeakMap
     // guarantees exactly one live listener however many floors the run visits.
+    // AG-52: the fade INVERTED with the invisible-label rework — it used to
+    // hold a permanent 22px plate and fade it OUT under the player's chin;
+    // containerLabelFor now owns the whole three-look contract (nothing afar /
+    // 0.35 stealth near / full plate when selected) and this loop just paints
+    // it. The font size is only touched when the look changes it (the selected
+    // look's 22px, once that interaction exists), never per frame.
+    const appliedFont = new Map<string, number>();
     const fadeLabels = (): void => {
       const px = getGame().player.x;
       for (const c of this.floorView.containers) {
         const obj = this.containerObjs.get(c.id);
         if (!obj) continue;
-        const a = Phaser.Math.Clamp((Math.abs(px - c.x) - INTERACT_DISTANCE) / CONTAINER_LABEL_FADE_PX, 0, 1);
-        obj.label.setAlpha(a);
-        obj.plate.setAlpha(a * 0.94);
+        const look = containerLabelFor(c, { playerX: px });
+        obj.label.setAlpha(look.alpha);
+        obj.plate.setAlpha(look.plateAlpha);
+        if (appliedFont.get(c.id) !== look.fontSize) {
+          obj.label.setFontSize(look.fontSize);
+          appliedFont.set(c.id, look.fontSize);
+        }
       }
     };
     const previousFader = CONTAINER_LABEL_FADERS.get(this);

@@ -153,9 +153,13 @@ function drawStorage(ctx: CorridorContext): void {
   // (the art pack's props are scaled to a common standing height), so the stack
   // pitch has to come from the texture rather than the old 16px tile — stacking
   // at 16px would leave the crates floating apart with gaps between them.
-  // One or two, not two or three: the bay already has a shelf and a container,
-  // and a three-high stack is what made every storage room read as a depot.
-  const stack = 1 + variant(ctx.floor, room, 2);
+  // One bay in four has crates at all, and never more than two high.
+  //
+  // They used to be in every bay, twice as tall: with the shelf and the floor's
+  // own crate container, a store room ended up as eight or nine crates in a row,
+  // and the outside view of the floor below read as a warehouse. A dormitory
+  // stores things in corners, not in rows.
+  const stack = variant(ctx.floor, room, 7) === 0 ? 2 : 0;
   const crateH = ctx.scene.textures.get('furn_crate_wood').getSourceImage().height;
   for (let i = 0; i < stack; i++) {
     ctx.objects.push(ctx.scene.add.image(roomX + 100, floorY - i * crateH, 'furn_crate_wood').setOrigin(0.5, 1));

@@ -49,14 +49,26 @@ export class OllamaBrain implements NpcBrain {
 
   async decide(obs: NpcObservation): Promise<NpcActionProposal | null> {
     try {
-      const res = await this.fetchImpl(`${this.baseUrl}/v1/chat/completions`, {
+      // Native /api/chat, not /v1/chat/completions, because that is the only route
+      // that accepts `think: false` — and thinking is the whole cost here.
+      //
+      // Measured on Spark (npc-qwen:latest, 27B, same prompt, same machine):
+      //   /api/chat  without think : 14.4s, content "", done_reason "length"
+      //                               (thinking ate all 160 tokens)
+      //   /v1/chat/completions     : 10.3-15.3s, correct JSON, thinking dropped
+      //                               silently by the shim
+      //   /api/chat + think:false  :  2.8s, correct JSON, 53 tokens
+      // The compatible route works by accident; this one works on purpose and
+      // is 4-5x faster, which matters because the player is waiting on the line.
+      const res = await this.fetchImpl(`${this.baseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         signal: AbortSignal.timeout(this.timeoutMs),
         body: JSON.stringify({
           model: this.model,
           stream: false,
-          temperature: 0.7,
+          think: false,
+          options: { temperature: 0.7 },
           messages: [
             { role: 'system', content: buildSystemPrompt(obs) },
             { role: 'user', content: buildUserPrompt(obs) },
@@ -64,8 +76,8 @@ export class OllamaBrain implements NpcBrain {
         }),
       });
       if (!res.ok) return null;
-      const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-      const content = data.choices?.[0]?.message?.content;
+      const data = (await res.json()) as { message?: { content?: string } };
+      const content = data.message?.content;
       if (typeof content !== 'string') return null;
       return parseProposal(content);
     } catch {

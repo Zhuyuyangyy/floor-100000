@@ -78,6 +78,26 @@ describe('floor templates', () => {
   });
 });
 
+describe('probabilistic weapon drops preserve existing saved-floor rolls', () => {
+  it('appends each weapon after existing specs and keeps loot version 1', () => {
+    expect(LOOT_DATA_VERSION).toBe(1);
+    const additions = {
+      floor: 2,
+      container: 'shelf',
+      existing: ['bread'],
+      items: [
+        { itemId: 'dagger', min: 1, max: 1, probability: 0.2 },
+        { itemId: 'short_sword', min: 1, max: 1, probability: 0.15 },
+        { itemId: 'fire_axe', min: 1, max: 1, probability: 0.15 },
+        { itemId: 'cleaver', min: 1, max: 1, probability: 0.3 },
+      ],
+    } as const;
+    const loot = FLOOR_TEMPLATES[additions.floor].containers.find((entry) => entry.id === additions.container)!.loot;
+    expect(loot.slice(0, -additions.items.length).map((entry) => entry.itemId), `${additions.container} legacy order`).toEqual(additions.existing);
+    expect(loot.slice(-additions.items.length)).toEqual(additions.items);
+  });
+});
+
 // GHI-03 M1: keys must identify the item, not its slot in the template array.
 // Index-based keys meant inserting one ground supply made a saved run's
 // "already looted" marker point at the new item, so the old one respawned and

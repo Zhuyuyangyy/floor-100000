@@ -1,5 +1,6 @@
 import { GAME_CONFIG } from '../core/config';
 import type { GameState, ItemId } from '../core/gameTypes';
+import type { WeaponId } from '../data/weapons';
 import { modeScoreMult } from './modes';
 
 // OVERHAUL W3（docs/OVERHAUL_M1.md）：深度纪录与 run 计分。
@@ -32,13 +33,14 @@ export function recordDepth(state: GameState): void {
 // items.ts 没有 price 字段，而 W3 的文件所有权只有 progress.ts（不能改
 // data/items.ts），所以在这里维护一张本地表。数值故意压低：宝藏分只是
 // 「你确实刮了东西」的补贴，不是主食——消耗品和常见材料 1 分/件，医疗包 2、
-// 撬棍 3 是仅有的例外。关键是任何单件普通物品都 < 2 分，保证 depth+1 永远
+// 撬棍 3 是仅有的例外；新武器暂不计分。关键是任何单件普通物品都 < 2 分，保证 depth+1 永远
 // 多过一件战利品（progress.test.ts 用具体数字钉死这一点）。
 //
-// 用 Record<ItemId, number> 全量枚举而不是 Partial + 默认值：将来有人往
-// gameTypes.ts 加新道具时，这里会编译失败逼着补估价，而不是运行时算出
-// undefined/NaN 的脏分。
-const TREASURE_VALUE: Record<ItemId, number> = {
+// 对所有已计分物品使用完整 Record；四种新武器暂时不在类型范围内，也不
+// 增加宝藏分，待装备/战斗规则定案后再单独决定是否计分。
+type UnscoredWeaponId = Exclude<WeaponId, 'crowbar'>;
+type ScoredItemId = Exclude<ItemId, UnscoredWeaponId>;
+const TREASURE_VALUE: Record<ScoredItemId, number> = {
   clean_water: 1,
   dirty_water: 1,
   ration_pack: 1,
@@ -61,7 +63,8 @@ const TREASURE_VALUE: Record<ItemId, number> = {
 function treasureScore(state: GameState): number {
   let total = 0;
   for (const slot of state.player.inventory.slots) {
-    total += TREASURE_VALUE[slot.itemId] * slot.quantity;
+    const value = (TREASURE_VALUE as Partial<Record<ItemId, number>>)[slot.itemId] ?? 0;
+    total += value * slot.quantity;
   }
   return total;
 }

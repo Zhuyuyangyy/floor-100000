@@ -98,10 +98,14 @@ describe('prompt 构造', () => {
     expect(user).toContain('battery(电池)');
   });
 
-  it('itemVocabulary 覆盖全部 16 种物品且带中文名', () => {
+  it('itemVocabulary 覆盖全部 19 种物品且带中文名', () => {
     const vocab = itemVocabulary();
     expect(vocab).toContain('clean_water(净水)');
     expect(vocab).toContain('ration_pack(压缩口粮)');
-    expect(vocab.split('、').length).toBe(15);
+    expect(vocab).toContain('fire_axe(消防斧)');
+    expect(vocab).toContain('cleaver(砍刀)');
+    expect(vocab).toContain('short_sword(短剑)');
+    expect(vocab).toContain('dagger(匕首)');
+    expect(vocab.split('、').length).toBe(19);
   });
 });

@@ -5,6 +5,7 @@ import type Phaser from 'phaser';
 
 import type { CharacterKey } from './artpack';
 import { PALETTE } from './palette.ts';
+import { WEAPONS, WEAPON_IDS, type WeaponId } from '../data/weapons';
 // A side-view walk cycle for the corridor's characters.
 //
 // Every character in this game was drawn facing the camera. In a side-scroller
@@ -297,30 +298,11 @@ function plantedLegs(hip: Point, spread: number): { a: LegPose; b: LegPose } {
   return { a: legA, b: legB };
 }
 
-/** 攻击弓步的半距。10 与 11 都让腿恰好完全伸直，髋位随脚距精确反推。 */
-const ATTACK_STANCE = 10;
-
-export function attackPose(frame: number): Pose {
+export function attackPose(frame: number, weaponId: WeaponId = 'crowbar'): Pose {
   const f = ((frame % ATTACK_FRAMES) + ATTACK_FRAMES) % ATTACK_FRAMES;
-  // 三段：0 前摇（出拳手后引、躯干后仰，前伸量收到底）
-  //       1 出手（手臂到顶点 + 躯干前倾，前伸量最大）
-  //       2 回收过半（手臂回到半程，躯干仍略前倾）
-  // 站距在出手帧放宽 1px，髋随之降 0.3px——重心压上去的那一下。
-  //
-  // farSwing 是远臂自己的角：出手帧 −30°（收拳回腰），不是镜像的 −78°——
-  // 镜像会把手甩到 x≈5 贴死画布左缘（见 audit：attack f1 minX 曾为 5）。
-  const TABLE: ReadonlyArray<{
-    stance: number;
-    swing: number;
-    farSwing: number;
-    lean: number;
-    headDx: number;
-  }> = [
-    { stance: ATTACK_STANCE, swing: -50, farSwing: 25, lean: -1.5, headDx: -3 },
-    { stance: ATTACK_STANCE + 1, swing: 78, farSwing: -30, lean: 5, headDx: 4 },
-    { stance: ATTACK_STANCE, swing: 25, farSwing: -12, lean: 2.5, headDx: 1 },
-  ];
-  const t = TABLE[f];
+  // Each weapon has its own wind-up, strike and recovery pose. Legs stay planted
+  // while the weapon-specific arm angles and torso lean distinguish the swing.
+  const t = WEAPONS[weaponId].attack[f];
   const hip: Point = { x: HIP_X, y: stanceHipY(t.stance) };
   const { a, b } = plantedLegs(hip, t.stance);
   const shoulder: Point = { x: HIP_X, y: hip.y - TORSO };
@@ -331,7 +313,7 @@ export function attackPose(frame: number): Pose {
     a,
     b,
     near: 'b', // 前腿（+x）压在夹克前面，出拳的同侧臂才在最前面
-    armSwing: t.swing,
+    armSwing: t.armSwing,
     farSwing: t.farSwing,
     hipY: hip.y,
     lean: t.lean,
@@ -950,6 +932,14 @@ export function attackAnimKey(who: CharacterKey): string {
   return `attack-${who}`;
 }
 
+export function weaponAttackSheetKey(who: CharacterKey, weaponId: WeaponId): string {
+  return `char-${who}-attack-${weaponId}`;
+}
+
+export function weaponAttackAnimKey(who: CharacterKey, weaponId: WeaponId): string {
+  return `attack-${who}-${weaponId}`;
+}
+
 export function hurtAnimKey(who: CharacterKey): string {
   return `hurt-${who}`;
 }
@@ -1024,6 +1014,27 @@ export function bakeWalkSheets(scene: Phaser.Scene): void {
     ctx.putImageData(img, 0, 0);
     tex.refresh();
     for (let f = 0; f < total; f++) tex.add(f, 0, f * FRAME_W, 0, FRAME_W, FRAME_H);
+
+    // Separate three-frame attack sheets keep the existing walk-sheet layout
+    // stable while giving each weapon its own readable body/arm animation.
+    for (const weaponId of WEAPON_IDS) {
+      const attackKey = weaponAttackSheetKey(who, weaponId);
+      if (scene.textures.exists(attackKey)) continue;
+      const attackSheet = makeCanvas(FRAME_W * ATTACK_FRAMES, FRAME_H);
+      for (let f = 0; f < ATTACK_FRAMES; f++) {
+        drawPose(attackSheet, attackPose(f, weaponId), col, f * FRAME_W);
+      }
+      const attackTexture = scene.textures.createCanvas(attackKey, attackSheet.w, attackSheet.h);
+      if (!attackTexture) continue;
+      const attackCtx = attackTexture.context;
+      const attackImage = attackCtx.createImageData(attackSheet.w, attackSheet.h);
+      attackImage.data.set(attackSheet.px);
+      attackCtx.putImageData(attackImage, 0, 0);
+      attackTexture.refresh();
+      for (let f = 0; f < ATTACK_FRAMES; f++) {
+        attackTexture.add(f, 0, f * FRAME_W, 0, FRAME_W, FRAME_H);
+      }
+    }
   }
 }
 
@@ -1069,6 +1080,17 @@ export function createCharacterAnimations(scene: Phaser.Scene): void {
           start: ATTACK_FRAME_START,
           end: ATTACK_FRAME_START + ATTACK_FRAMES - 1,
         }),
+        frameRate: ATTACK_FRAME_RATE,
+        repeat: 0,
+      });
+    }
+    for (const weaponId of WEAPON_IDS) {
+      const weaponSheet = weaponAttackSheetKey(who, weaponId);
+      const weaponAttack = weaponAttackAnimKey(who, weaponId);
+      if (!scene.textures.exists(weaponSheet) || scene.anims.exists(weaponAttack)) continue;
+      scene.anims.create({
+        key: weaponAttack,
+        frames: scene.anims.generateFrameNumbers(weaponSheet, { start: 0, end: ATTACK_FRAMES - 1 }),
         frameRate: ATTACK_FRAME_RATE,
         repeat: 0,
       });

@@ -71,4 +71,13 @@ describe('runScore', () => {
     // 2×1 + 6 = 8：历史纪录与历史 bestScore 都不进本 run 的分数。
     expect(runScore(s)).toBe(8);
   });
+
+  it('new weapon items do not add treasure score before scoring rules are approved', () => {
+    const base = createNewGame(42);
+    const armed = createNewGame(42);
+    for (const itemId of ['dagger', 'short_sword', 'cleaver', 'fire_axe'] as const) {
+      addItem(armed.player.inventory, itemId, 1);
+    }
+    expect(runScore(armed)).toBe(runScore(base));
+  });
 });

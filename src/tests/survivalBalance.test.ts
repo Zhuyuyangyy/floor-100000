@@ -94,7 +94,7 @@ describe('the world supplies enough to build every upgrade (audit D2)', () => {
       const s = createNewGame(seed);
       lootMaterialFloors(s);
       const built: string[] = [];
-      for (const r of RECIPES) {
+      for (const r of RECIPES.filter((recipe) => recipe.kind === 'upgrade')) {
         if (craft(s, r.id).ok) built.push(r.id);
       }
       expect(built, `seed ${seed} could only build ${built.join('/')}`).toEqual(['lamp', 'reinforced_door', 'purifier']);
@@ -125,7 +125,7 @@ describe('the world supplies enough to build every upgrade (audit D2)', () => {
     s.player.inventory.slots = s.player.inventory.slots.filter((x) => x.itemId !== 'scrap_metal');
     addItem(s.player.inventory, 'scrap_metal', scrap - 1);
     const built: string[] = [];
-    for (const r of RECIPES) if (craft(s, r.id).ok) built.push(r.id);
+    for (const r of RECIPES.filter((recipe) => recipe.kind === 'upgrade')) if (craft(s, r.id).ok) built.push(r.id);
     expect(built).not.toContain('purifier');
     expect(built).toContain('lamp');
   });

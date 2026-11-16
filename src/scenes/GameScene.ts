@@ -144,7 +144,7 @@ import {
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
 import { HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
-import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
+import { RECIPES, getRecipe, type RecipeId, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
 import { trade } from '../systems/TradeSystem';
 import { aiNpcConfig, archetypeForNpcId, npcFactFromDef } from '../ai/config';
@@ -2521,7 +2521,7 @@ export class GameScene extends Phaser.Scene {
     // rows tinted), a fixed-cost column and a right-aligned status, so a row reads
     // like a row instead of a sentence.
     this.craftRows = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 8; i++) {
       const rowY = top + 30 + i * CRAFT_ROW_PITCH;
       const band = this.add.rectangle(left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.34).setDepth(PANEL_DEPTH.game.craft + 5);
       const name = this.add.text(left + 18, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
@@ -2537,8 +2537,8 @@ export class GameScene extends Phaser.Scene {
     for (const o of this.craftObjects) o.setVisible(false);
   }
 
-  private craftEntries(): Array<{ kind: 'recipe' | 'purify'; id?: UpgradeId }> {
-    const entries: Array<{ kind: 'recipe' | 'purify'; id?: UpgradeId }> = RECIPES.map((r) => ({ kind: 'recipe', id: r.id }));
+  private craftEntries(): Array<{ kind: 'recipe' | 'purify'; id?: RecipeId }> {
+    const entries: Array<{ kind: 'recipe' | 'purify'; id?: RecipeId }> = RECIPES.map((r) => ({ kind: 'recipe', id: r.id }));
     if (hasUpgrade(getGame(), 'purifier')) entries.push({ kind: 'purify' });
     return entries;
   }
@@ -2547,7 +2547,7 @@ export class GameScene extends Phaser.Scene {
     const state = getGame();
     const entries = this.craftEntries();
     if (this.craftSelected >= entries.length) this.craftSelected = Math.max(0, entries.length - 1);
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < this.craftRows.length; i++) {
       const row = this.craftRows[i];
       if (!row) continue;
       const entry = entries[i];
@@ -2567,10 +2567,10 @@ export class GameScene extends Phaser.Scene {
           .join(' ');
         row.name.setText(`${recipe.displayName}  ${cost}`);
         row.name.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
-        const built = hasUpgrade(state, entry.id!);
-        const ok = canCraft(state, entry.id!).ok;
-        row.status.setText(built ? '已建' : ok ? '可制作' : '材料不足');
-        row.status.setColor(built ? hex(PALETTE.clothHigh) : ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
+        const built = recipe.kind === 'upgrade' && hasUpgrade(state, recipe.id);
+        const craftCheck = canCraft(state, entry.id!);
+        row.status.setText(built ? '已建' : craftCheck.ok ? '可制作' : craftCheck.reason ?? '材料不足');
+        row.status.setColor(built ? hex(PALETTE.clothHigh) : craftCheck.ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
       } else {
         const can = countItem(state.player.inventory, 'dirty_water') >= 1;
         row.name.setText('净化  脏水→净水');
@@ -2688,7 +2688,8 @@ export class GameScene extends Phaser.Scene {
         // was a sound and a line of text with nothing on screen; the burst is
         // anchored to the station the player is standing at, not to the player.
         playFx(this, 'collect-burst', CRAFT_X, PLAYER_FEET_Y - 40, LIGHT_DEPTH);
-        this.flash(`建造了 ${getRecipe(entry.id!).displayName}（-${ACTION_COSTS.craft} 分钟）`);
+        const recipe = getRecipe(entry.id!);
+        this.flash(`${recipe.kind === 'upgrade' ? '建造了' : '制作了'} ${recipe.displayName}（-${ACTION_COSTS.craft} 分钟）`);
         this.chargeTime(ACTION_COSTS.craft);
       } else {
         this.flash(result.reason);

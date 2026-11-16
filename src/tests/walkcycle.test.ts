@@ -37,9 +37,11 @@ import {
   PLAYER_COLORS,
   WALK_CHARACTERS,
   walkSheetKey,
+  weaponAttackSheetKey,
   type PixelCanvas,
   type Pose,
 } from '../render/walkcycle';
+import { WEAPON_IDS } from '../data/weapons';
 
 // The corridor's characters are drawn facing the camera, so the only thing that
 // moves when the player walks is the x coordinate — a card sliding across a
@@ -378,6 +380,39 @@ describe('attackPose', () => {
   it('wraps the frame index like the other cycles do', () => {
     expect(attackPose(3)).toEqual(attackPose(0));
     expect(attackPose(-1)).toEqual(attackPose(2));
+  });
+});
+
+describe('weapon-specific attack preparation', () => {
+  it('bakes a three-frame attack sheet for every weapon and character', () => {
+    const baked = new Map(bakedTextures().map((texture) => [texture.key, texture]));
+    for (const who of WALK_CHARACTERS) {
+      for (const weaponId of WEAPON_IDS) {
+        expect(baked.get(weaponAttackSheetKey(who, weaponId))).toMatchObject({
+          width: FRAME_W * ATTACK_FRAMES,
+          height: FRAME_H,
+        });
+      }
+    }
+  });
+
+  it('gives each weapon a distinct on-canvas strike pose with feet planted', () => {
+    const frames = WEAPON_IDS.map((weaponId) => {
+      const canvas = makeCanvas(FRAME_W, FRAME_H);
+      const pose = attackPose(1, weaponId);
+      drawPose(canvas, pose, PLAYER_COLORS);
+      const box = boundingBox(canvas);
+      expect(box.minX, `${weaponId} left`).toBeGreaterThanOrEqual(0);
+      expect(box.maxX, `${weaponId} right`).toBeLessThan(FRAME_W);
+      expect(box.maxY, `${weaponId} feet`).toBeGreaterThanOrEqual(FRAME_H - 4);
+      for (const foot of bothFeet(pose)) expect(foot.y).toBeCloseTo(FOOT_GROUND, 6);
+      return canvas;
+    });
+    for (let i = 0; i < frames.length; i++) {
+      for (let j = i + 1; j < frames.length; j++) {
+        expect(differs(frames[i], frames[j]), `weapon strikes ${i}/${j}`).toBeGreaterThan(10);
+      }
+    }
   });
 });
 

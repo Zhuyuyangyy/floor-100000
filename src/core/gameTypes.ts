@@ -16,6 +16,10 @@ export type ItemId =
   | 'wire'
   | 'medkit'
   | 'crowbar'
+  | 'fire_axe'
+  | 'cleaver'
+  | 'short_sword'
+  | 'dagger'
   | 'fuse'
   | 'flashlight';
 

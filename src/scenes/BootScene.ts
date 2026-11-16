@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { generateAllPixelArt } from '../render/pixelArt';
 import { createCharacterAnimations, FRAME_H, FRAME_W, WALK_CHARACTERS, walkSheetKey } from '../render/walkcycle';
 import { createFxAnims, loadFx } from '../render/fx';
+import { WEAPONS, WEAPON_IDS } from '../data/weapons';
 
 // Drop-in painted art, resolved at BUILD time by Vite's glob so a folder that is
 // empty costs nothing and a missing file can never 404 in the loader.
@@ -54,6 +55,11 @@ export class BootScene extends Phaser.Scene {
 
     for (const [id, file] of Object.entries(ITEM_ICON_FILES)) {
       this.load.image(id, `assets/artpack/${file}`);
+    }
+
+    for (const weaponId of WEAPON_IDS) {
+      const weapon = WEAPONS[weaponId];
+      if (weapon.spriteFile) this.load.image(weapon.spriteKey, `assets/weapons/${weapon.spriteFile}`);
     }
 
     for (const [key, file] of Object.entries(FURNITURE_FILES)) {

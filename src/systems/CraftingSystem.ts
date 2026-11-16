@@ -1,4 +1,4 @@
-import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
+import { RECIPES, getRecipe, type RecipeId, type UpgradeId } from '../data/recipes';
 import { addItem, countItem, removeItem } from './InventorySystem';
 import { isNight } from './SurvivalSystem';
 import { STARTING_FLOOR } from '../core/constants';
@@ -18,33 +18,71 @@ export interface MissingMaterial {
   have: number;
 }
 
-export type CanCraftResult = { ok: true } | { ok: false; missing: MissingMaterial[] };
+export type CanCraftResult =
+  | { ok: true }
+  | { ok: false; missing: MissingMaterial[]; reason?: string };
 
-export function canCraft(state: GameState, id: UpgradeId): CanCraftResult {
+function slotsAfterCost(state: GameState, id: RecipeId): number {
+  const slots = state.player.inventory.slots.map((slot) => ({ ...slot }));
+  const recipe = getRecipe(id);
+  for (const [itemId, need] of Object.entries(recipe.cost) as Array<[ItemId, number]>) {
+    let remaining = need;
+    for (let i = slots.length - 1; i >= 0 && remaining > 0; i--) {
+      const slot = slots[i];
+      if (slot.itemId !== itemId) continue;
+      const take = Math.min(slot.quantity, remaining);
+      slot.quantity -= take;
+      remaining -= take;
+      if (slot.quantity === 0) slots.splice(i, 1);
+    }
+  }
+  return slots.length;
+}
+
+export function canCraft(state: GameState, id: RecipeId): CanCraftResult {
+  const recipe = getRecipe(id);
   const missing: MissingMaterial[] = [];
-  for (const [itemId, need] of Object.entries(getRecipe(id).cost) as Array<[ItemId, number]>) {
+  for (const [itemId, need] of Object.entries(recipe.cost) as Array<[ItemId, number]>) {
     const have = countItem(state.player.inventory, itemId);
     if (have < need) missing.push({ itemId, need, have });
   }
-  return missing.length === 0 ? { ok: true } : { ok: false, missing };
+  if (missing.length > 0) return { ok: false, missing };
+  if (recipe.kind === 'item' && slotsAfterCost(state, id) >= state.player.inventory.slotCount) {
+    return { ok: false, missing: [], reason: '背包空间不足' };
+  }
+  return { ok: true };
 }
 
-export type CraftResult = { ok: true; id: UpgradeId } | { ok: false; reason: string };
+export type CraftResult = { ok: true; id: RecipeId } | { ok: false; reason: string };
 
-// Crafts an upgrade: refuses (no deduction) if already built or materials are
-// short; otherwise deducts all materials atomically and records the upgrade.
-export function craft(state: GameState, id: UpgradeId): CraftResult {
+// Upgrades are recorded once in homeUpgrades; weapon recipes instead create a
+// non-stackable inventory item and may be crafted again if materials permit.
+export function craft(state: GameState, id: RecipeId): CraftResult {
   const recipe = getRecipe(id);
-  if (hasUpgrade(state, id)) return { ok: false, reason: `${recipe.displayName} 已建造` };
+  if (recipe.kind === 'upgrade' && hasUpgrade(state, recipe.id)) {
+    return { ok: false, reason: `${recipe.displayName} 已建造` };
+  }
   const check = canCraft(state, id);
   if (!check.ok) {
+    if (check.reason) return { ok: false, reason: check.reason };
     const detail = check.missing.map((m) => `${getItem(m.itemId).displayName} ${m.have}/${m.need}`).join('，');
     return { ok: false, reason: `材料不足：${detail}` };
   }
   for (const [itemId, need] of Object.entries(recipe.cost) as Array<[ItemId, number]>) {
     removeItem(state.player.inventory, itemId, need);
   }
-  state.player.homeUpgrades.push(id);
+  if (recipe.kind === 'upgrade') {
+    state.player.homeUpgrades.push(recipe.id);
+  } else {
+    const output = addItem(state.player.inventory, recipe.outputItemId, 1);
+    if (output.overflow > 0) {
+      removeItem(state.player.inventory, recipe.outputItemId, output.added);
+      for (const [itemId, need] of Object.entries(recipe.cost) as Array<[ItemId, number]>) {
+        addItem(state.player.inventory, itemId, need);
+      }
+      return { ok: false, reason: '背包空间不足' };
+    }
+  }
   return { ok: true, id };
 }
 

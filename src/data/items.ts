@@ -1,7 +1,6 @@
 import type { Item, ItemId } from '../core/gameTypes';
 
-// The 15 v0.1 items (docs/01_GDD.md §8). Every material referenced by a recipe
-// or floor must exist here, and every item must have a concrete source.
+// Every item referenced by a recipe, floor or encounter must exist here.
 export const ITEMS: Record<ItemId, Item> = {
   clean_water: { id: 'clean_water', displayName: '净水', category: 'consumable', stackable: true, maxStack: 99, effect: { stat: 'thirst', amount: 30 } },
   dirty_water: { id: 'dirty_water', displayName: '脏水', category: 'consumable', stackable: true, maxStack: 99 },
@@ -17,6 +16,10 @@ export const ITEMS: Record<ItemId, Item> = {
   wire: { id: 'wire', displayName: '电线', category: 'material', stackable: true, maxStack: 99 },
   fuse: { id: 'fuse', displayName: '保险丝', category: 'material', stackable: true, maxStack: 99 },
   crowbar: { id: 'crowbar', displayName: '撬棍', category: 'tool', stackable: false, maxStack: 1 },
+  fire_axe: { id: 'fire_axe', displayName: '消防斧', category: 'tool', stackable: false, maxStack: 1 },
+  cleaver: { id: 'cleaver', displayName: '砍刀', category: 'tool', stackable: false, maxStack: 1 },
+  short_sword: { id: 'short_sword', displayName: '短剑', category: 'tool', stackable: false, maxStack: 1 },
+  dagger: { id: 'dagger', displayName: '匕首', category: 'tool', stackable: false, maxStack: 1 },
   flashlight: { id: 'flashlight', displayName: '低电量手电', category: 'tool', stackable: false, maxStack: 1 },
 };
 

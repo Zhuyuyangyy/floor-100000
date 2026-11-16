@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { ITEM_IDS, getItem, isItemId } from '../data/items';
 
 describe('item table', () => {
-  it('defines exactly the 15 v0.1 items with unique ids', () => {
-    expect(ITEM_IDS).toHaveLength(15);
-    expect(new Set(ITEM_IDS).size).toBe(15);
+  it('defines the existing items and four new weapons with unique ids', () => {
+    expect(ITEM_IDS).toHaveLength(19);
+    expect(new Set(ITEM_IDS).size).toBe(19);
   });
 
   it('every item has a display name and sane stack config', () => {

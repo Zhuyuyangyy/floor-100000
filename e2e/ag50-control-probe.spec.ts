@@ -8,9 +8,11 @@ const VIEW_H = 720;
 // 场景句柄的窄接口（globals.d.ts 的宽松声明在此收窄）。
 interface SceneHandle {
   walkTarget: { x: number; interact: boolean; run: boolean } | null;
+  stairClimb: unknown;
   speedX: number;
   player: {
     x: number;
+    y: number;
     anims: { currentAnim?: { key: string }; timeScale: number };
     getBounds: () => { y: number; height: number };
   };
@@ -180,7 +182,8 @@ test('AG-50 探针：点击走 / 双击跑 / 跑动画 / 标记 / Shift / 爬梯
   console.log(`[ag50 run-anim] peak |speedX|=${Math.abs(peak.speedX).toFixed(0)} timeScale=${peak.timeScale} anim=${peak.anim}`);
   expect(Math.abs(peak.speedX), '双击跑达到跑速').toBeGreaterThan(200);
   expect(peak.timeScale, '跑动画 timeScale≈1.6').toBeGreaterThan(1.2);
-  expect(peak.anim).toBe('walk-player'); // 素材库无跑帧，AG-55 落地后这里会变成 run-player
+  // AG-55 已注册 run-{who}（与 walk 同帧、帧率 x1.6），跑单现在播的就是它。
+  expect(peak.anim).toBe('run-player');
   await waitArrive(page, runTarget3, 20_000);
 
   // ── D. 爬梯：帧健康度 + 可见性 + 落地弹跳 ───────────────────────────
@@ -196,7 +199,7 @@ test('AG-50 探针：点击走 / 双击跑 / 跑动画 / 标记 / Shift / 爬梯
 
   const sampling = page.evaluate(async () => {
       const sceneOf = (): SceneHandle => (window.__PHASER_GAME__ as unknown as Game).scene.getScene('Game') as SceneHandle;
-    const out: Array<{ t: number; scrollY: number; top: number; bottom: number; floor: number }> = [];
+    const out: Array<{ t: number; scrollY: number; top: number; bottom: number; floor: number; playerScreenY: number }> = [];
     const t0 = performance.now();
     while (performance.now() - t0 < 3200) {
       await new Promise((r) => requestAnimationFrame(() => r(null)));
@@ -209,6 +212,7 @@ test('AG-50 探针：点击走 / 双击跑 / 跑动画 / 标记 / Shift / 爬梯
         top: (b.y - s.cameras.main.scrollY) * s.cameras.main.zoom,
         bottom: (b.y + b.height - s.cameras.main.scrollY) * s.cameras.main.zoom,
         floor: st?.currentFloor ?? -1,
+        playerScreenY: (s.player.y - s.cameras.main.scrollY) * s.cameras.main.zoom,
       });
     }
     return out;
@@ -230,12 +234,26 @@ test('AG-50 探针：点击走 / 双击跑 / 跑动画 / 标记 / Shift / 爬梯
   expect(dtMax, '爬梯无掉帧尖峰').toBeLessThan(dtMed * 2.5);
   expect(worstTop, '头顶不出视口').toBeGreaterThanOrEqual(0);
   expect(worstBottom, '脚底不出视口').toBeLessThanOrEqual(VIEW_H);
+  // 落地连续性：内容在落地瞬间原地不动（AG-52 的设计意图）——爬梯末帧与
+  // 落地首帧的角色 screenY 应几乎一致。修前 Phaser setBounds 的当场钳位把
+  // 旧帧钳掉，内容先跳近两百 px 再被 220ms 缓动晃回来，就是用户那一下「卡」。
+  const lastClimbFrame = climb[climb.length - 1];
+  const firstLandFrame = after[0];
+  if (lastClimbFrame && firstLandFrame) {
+    const jump = Math.abs(firstLandFrame.playerScreenY - lastClimbFrame.playerScreenY);
+    console.log(
+      `[ag50 stair] landing continuity: playerScreenY ${lastClimbFrame.playerScreenY.toFixed(1)} -> ${firstLandFrame.playerScreenY.toFixed(1)} (jump=${jump.toFixed(1)}px)`,
+    );
+    expect(jump, '落地瞬间内容不跳帧').toBeLessThan(25);
+  }
   if (after.length > 1) {
     const min = Math.min(...after.map((f) => f.scrollY));
     const max = Math.max(...after.map((f) => f.scrollY));
     const last = after[after.length - 1].scrollY;
     console.log(`[ag50 stair] after-landing scrollY min=${min.toFixed(1)} max=${max.toFixed(1)} last=${last.toFixed(1)} range=${(max - min).toFixed(1)}`);
-    expect(max, '落地后相机不越过静止位（无弹跳）').toBeLessThanOrEqual(-200 + 5);
+    // 修后：相机从旧帧（≈-181）单调收敛到静止位 -200，不越过、不荡回。
+    expect(min, '落地后相机不越过静止位（无弹跳）').toBeGreaterThanOrEqual(-200 - 5);
+    expect(max, '落地首帧即旧帧，无 200px 预跳').toBeLessThanOrEqual(-175);
     expect(Math.abs(last - -200), '落地后停在 follow 静止位').toBeLessThan(10);
   }
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);

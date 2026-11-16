@@ -193,10 +193,16 @@ describe('GameScene control wiring (AG-50)', () => {
     expect(SCENE_SRC).toContain('private spawnClickMarker(x: number, y: number, run: boolean): void {');
   });
 
-  it('plays the run animation through the timeScale fallback or AG-55 run key', () => {
-    expect(SCENE_SRC).toContain("const RUN_ANIM_KEY = 'run-player';");
-    expect(SCENE_SRC).toContain('runActive && this.anims.exists(RUN_ANIM_KEY)');
+  it('plays the run animation through AG-55 run key per selected character', () => {
+    // AG-55 已在 walkcycle.ts 注册 run-{who}（与 walk 同帧、帧率 x1.6）。
+    // 断言钉的是「按当前角色取 key + 注册表里没有就回退 walk」的接线形态，
+    // 不再钉某个具体常量名。
+    expect(SCENE_SRC).toContain('const runKey = runAnimKey(who);');
+    expect(SCENE_SRC).toContain('runActive && this.anims.exists(runKey)');
     expect(SCENE_SRC).toContain('this.player.anims.timeScale = runActive ? MOVEMENT_BALANCE.runAnimTimeScale');
+    // runAnimKey 必须从 walkcycle 导入（AG-55 的命名约定），不是手搓字符串。
+    // \r?\n：仓库是 CRLF，读出来的源码行尾带 \r，写死 \n 会在 Windows 上假红。
+    expect(SCENE_SRC).toMatch(/\r?\n\s+runAnimKey,\r?\n/);
   });
 
   it('resets the click order on a new run (scene.stop, not scene.restart)', () => {

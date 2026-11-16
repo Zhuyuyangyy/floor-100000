@@ -148,6 +148,7 @@ import {
   idleAnimKey,
   joint,
   pickupAnimKey,
+  runAnimKey,
   searchAnimKey,
   walkAnimKey,
   walkSheetKey,
@@ -500,11 +501,6 @@ function readMovementBalance(): MovementBalance {
 /** 点击操控线的数值入口（AG-50）：GameScene 内不硬编码任何跑动参数。 */
 const MOVEMENT_BALANCE: MovementBalance = readMovementBalance();
 
-/**
- * 跑动画 key（AG-55 在 walkcycle.ts 注册 run-<who> 后这里自动改播它）。
- * 在那之前跑 = walk 帧 + timeScale 1.6，见 update() 里的选段注释。
- */
-const RUN_ANIM_KEY = 'run-player';
 /** 点击落点标记的深度：在地面物件（≤26）之上、HUD（100+）之下。 */
 const CLICK_MARKER_DEPTH = 40;
 
@@ -1132,6 +1128,13 @@ export class GameScene extends Phaser.Scene {
     const standScrollY = PLAYER_FEET_Y - viewH / 2;
     const topBound = standScrollY;
     const bottomBound = topBound + FLOOR_HEIGHT;
+    // 落地缓动要的「旧帧」必须在站立 bounds 落位之前抓：Phaser 的 setBounds
+    // 会当场把 scrollY 钳进新 bounds（BaseCamera.setBounds 的 else 分支），
+    // 一层高的站立 bounds 会把攀爬末帧的 scrollY 钳成 standScrollY——之后再算
+    // fromY 旧帧就丢了，落地瞬间内容先跳近两百 px、再被 220ms 缓动晃回来
+    // （实测 fromY=0：爬梯末帧 -381 被钳成 -200，+200 得 0）。AG-52 的注释
+    // 说要「内容在落地瞬间原地不动」，差的正是这一抓。
+    const climbEndScrollY = cam.scrollY;
     // The world width equals the design viewport width. Locking the horizontal
     // bounds to one floor keeps the full corridor visible when the player lands
     // at x=40 or x=1240; only the tower's vertical cross-section may scroll.
@@ -1151,7 +1154,9 @@ export class GameScene extends Phaser.Scene {
       // 两帧之间，回位后立刻收回一层之内（onComplete）。
       this.landingEase = false;
       const dir = this.lastClimbDirection ?? 1;
-      const fromY = cam.scrollY + FLOOR_HEIGHT * dir;
+      const fromY = climbEndScrollY + FLOOR_HEIGHT * dir;
+      console.log('[ag50-dbg] landing ease: cam.scrollY=', cam.scrollY, 'dir=', dir, 'fromY=', fromY, 'toY=', standScrollY);
+      console.log('[ag50-dbg] landing ease: cam.scrollY=', cam.scrollY, 'dir=', dir, 'fromY=', fromY, 'toY=', standScrollY);
       const toY = standScrollY;
       cam.stopFollow();
       cam.setBounds(0, Math.min(fromY, toY), this.floorW, viewH + FLOOR_HEIGHT);
@@ -1522,12 +1527,11 @@ export class GameScene extends Phaser.Scene {
             const m = this.spotMarkers.get('shop');
             if (m) m.x = trader.x;
           },
-          // AG-52 定位：onStart 有 active/anims 防护（dae028b 修行商 timer
-          // 泄漏时补的），onComplete 没有——换层时在飞 tween 完成后对已销毁
-          // 的 trader .play()，异常穿过 TweenManager 打断游戏循环，玩家直接
-          // 冻住（stairNavigation「下行 50010→50009」基线即红的真根因：
-          // 电梯到 100 层后冻在 x=640）。双保险，与 onStart 对称。
           onComplete: () => {
+            // AG-52 发现、AG-50 应用：换层（爬梯/电梯）时 clearFloor 销毁行商，
+            // 在飞的巡逻 tween 完成后对已销毁精灵调 .play()，异常穿过
+            // TweenManager 打断游戏循环，玩家冻住（stairNavigation 50010→50009
+            // 基线红：冻在电梯里）。onStart 早有同款防护，onComplete 补上。
             if (trader.active && trader.anims) trader.play(idleAnimKey('npc_alin'));
           },
         });
@@ -2888,11 +2892,10 @@ export class GameScene extends Phaser.Scene {
    * before you walk to them.
    */
   private drawStair(x: number, dir: 'up' | 'down', floor: number): void {
-    // AG-53 的楼梯重做（2D 阶梯 + 直梯，用户 2026-11-16 反馈「滑步走上去非常
-    // 难看」）。绘制全部在 corridors.ts 的 drawStairwell：阶梯是 6 级踏步木梯
-    // （Z 折返、梯脚钉在交互口 x 上），直梯是双轨+横档挂在楼层间；样式按楼层
-    // 段分派（stairArtStyleFor）。爬梯曲线 stairClimbPose 与这条几何同源，
-    // 角色因此永远走在画出来的踏面上，不再是正弦摆动的直线。
+    // AG-53 的楼梯美术（docs/plans/STAIRS.md）：阶梯是十级踏面折返、直梯是
+    // 一条垂线，样式按连接层段分派（tier 1/3 直梯，其余阶梯），绘制与
+    // stairClimbPose 同源——角色踩在画出来的每一级上。楼层建造时画一次，
+    // 爬梯期间随出发层留在屏上，正好跨到目标层梯口。
     const g = this.add.graphics();
     drawStairwell(g, { x, dir, floor });
     g.setDepth(ACTOR_DEPTH - 1);
@@ -6501,8 +6504,7 @@ export class GameScene extends Phaser.Scene {
     this.openClimbCameraRoom(direction);
     this.player.setFlipX(direction < 0);
     this.player.play(walkAnimKey(this.metaSelectedCharacter()), true);
-    // AG-53：首帧节奏也取 pose（阶梯 1.25 / 直梯 1.0），updateStairClimb 每帧
-    // 会覆写，但首帧就对齐可以避免爬梯第一帧闪一次错误速度。
+    // 首帧节奏与 updateStairClimb 同源：直梯 1.0 / 阶梯 1.25（AG-53 pose）。
     this.player.anims.timeScale = stairClimbPose(getGame().currentFloor, traversal, 0).animTimeScale;
     this.flash(direction === 1 ? '沿楼梯上行……' : '沿楼梯下行……');
   }
@@ -6512,10 +6514,11 @@ export class GameScene extends Phaser.Scene {
     const climb = this.stairClimb;
     if (!climb) return;
     climb.elapsedMs = Math.min(climb.durationMs, climb.elapsedMs + Math.max(0, delta));
-    // AG-53：位置/转身/节奏全部来自 stairClimbPose——它与 drawStairwell 的
-    // 几何同源，1000ms 切 10 片每片一级（x 线性、y ease-out，踏上踏面后顿住
-    // 半拍，平台处转身），所以角色是一级一级踩上去的，不再是正弦摆动的滑行。
-    // 直梯（ladder）x 钉死、y 线性，animTimeScale 1.0。
+    // AG-53 的爬梯曲线（stairClimbPose）：阶梯是一级一级踩上去的（y 逐级
+    // ease、x 线性过踏面，折返处 faceX 转身），直梯是一条垂线。节奏也由
+    // pose 给——阶梯 1.25、直梯 1.0，200px/s 的垂直速度配 1.25 会像 frantic
+    // scrabbling。floor 传出发层（落地前 currentFloor 不变），与 drawStairwell
+    // 的样式分派同一口径。
     const pose = stairClimbPose(getGame().currentFloor, climb, climb.elapsedMs);
     this.player.setPosition(pose.x, pose.y);
     this.player.setFlipX(pose.faceX < 0);
@@ -6734,16 +6737,14 @@ export class GameScene extends Phaser.Scene {
       const speedFraction = Math.abs(this.speedX) / PLAYER_SPEED;
       const moving = speedFraction > 0.03;
       const runActive = moving && runScale > 1;
-      // AG-50：跑动画。素材库没有跑的 GIF/sheet（幸存者八种动作里没有 run），
-      // 也不许新画美术、不许改 sheet 列号，所以跑 = walk 帧 + timeScale 倍率：
-      // 步频跟上步速，脚就不打滑。躯干前倾/身体起伏这类「身体语言」留给
-      // AG-55 的 run-player 动画（列号只能加在 15 列之后，见 walkcycle.ts 的
-      // 追加约定）——那个 key 一旦注册，这里自动改播它，本文件不用再动。
-      const want = moving
-        ? runActive && this.anims.exists(RUN_ANIM_KEY)
-          ? RUN_ANIM_KEY
-          : walkAnimKey('player')
-        : idleAnimKey('player');
+      // AG-50：跑动画。素材库没有对齐规格的跑 GIF（用户记忆里的那份在
+      // F:/new/floor100000_final_character_gifs_v1.zip，但 217-230 色 vs 项目
+      // 16 色板、帧数不一致，README 自述不能直接替换），所以 AG-55 让跑派生
+      // 自 walk：run-{who} 与 walk-{who} 同帧、帧率 ×1.6。这里按当前角色取
+      // key（与 changeFloor/NPC 同步同一口径），注册表里没有就回退 walk。
+      const who = this.metaSelectedCharacter();
+      const runKey = runAnimKey(who);
+      const want = moving ? (runActive && this.anims.exists(runKey) ? runKey : walkAnimKey(who)) : idleAnimKey(who);
       if (this.player.anims.currentAnim?.key !== want) this.player.play(want, true);
       this.player.anims.timeScale = runActive ? MOVEMENT_BALANCE.runAnimTimeScale : Math.max(0.2, Math.min(1, speedFraction));
     }

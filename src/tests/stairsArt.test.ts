@@ -19,7 +19,7 @@ import {
   type StairClimb,
 } from '../render/corridors';
 import { PALETTE, PALETTE_LIST } from '../render/palette';
-import { DOWN_EXIT_X, FLOOR_WIDTH, STAIR_RISE, STAIR_START_Y, STAIR_TRAVEL_MS, UP_EXIT_X } from '../core/constants';
+import { DOWN_EXIT_X, FLOOR_WIDTH, STAIR_RISE, STAIR_START_Y, STAIR_TRAVEL_MS, UP_EXIT_X, downExitXFor } from '../core/constants';
 import { createNewGame } from '../core/gameState';
 import { hasDownExit, hasUpExit, stairMouthZone, stairTraversalFor } from '../systems/FloorSystem';
 import { PLAYABLE_SEGMENTS, segmentOf } from '../core/segments';
@@ -247,18 +247,20 @@ describe('爬梯动画曲线：阶梯是一级一级踩上去的', () => {
     expect(over).toMatchObject({ x: UP_EXIT_X, y: STAIR_START_Y - STAIR_RISE, progress: 1 });
   });
 
-  it('下楼同构：从本层下楼口出发，y 单调递增，落回下楼口', () => {
-    // 102 是 tier2（宽楼层），下楼口在 downExitXFor(102)=1560 而不是常量
-    // DOWN_EXIT_X=1240——stairTraversalFor 的 startX/endX 已按楼层取
-    // （AG-53 诊断的宽楼层横跳修复）。断言钉真实梯口，不写死常量。
+  it('下楼同构：从梯口出发，y 单调递增，落回梯口', () => {
+    // 102 是 tier2 宽层（5 房 1600px），下楼口在 downExitXFor(102)=1560，
+    // 不是常量 DOWN_EXIT_X（1240，tier1 的值）。AG-50 把 stairTraversalFor 的
+    // 下楼 startX/endX 对齐到 downExitXFor 之前，这里钉的是旧的错位起点
+    // （画在 1560、爬从 1240 开始，角色先横跳 320px）——随修复一起改口径。
+    const mouthX = downExitXFor(102);
     const down = traversalFor(102, -1);
-    const downNodes = stairPath(-1, down.startX, STAIR_START_Y);
-    expect(stairClimbPose(102, down, 0)).toMatchObject({ x: down.startX, y: STAIR_START_Y, progress: 0 });
+    const downNodes = stairPath(-1, mouthX, STAIR_START_Y);
+    expect(stairClimbPose(102, down, 0)).toMatchObject({ x: mouthX, y: STAIR_START_Y, progress: 0 });
     const mid = stairClimbPose(102, down, down.durationMs / 2);
     expect(mid.x).toBeCloseTo(downNodes[STAIR_TREADS_PER_FLIGHT].x, 6);
     expect(mid.y).toBeCloseTo(downNodes[STAIR_TREADS_PER_FLIGHT].y, 6);
     const end = stairClimbPose(102, down, down.durationMs);
-    expect(end).toMatchObject({ x: down.startX, y: STAIR_START_Y + STAIR_RISE, progress: 1 });
+    expect(end).toMatchObject({ x: mouthX, y: STAIR_START_Y + STAIR_RISE, progress: 1 });
     let lastY = -Infinity;
     for (let ms = 0; ms <= down.durationMs; ms += 10) {
       const pose = stairClimbPose(102, down, ms);

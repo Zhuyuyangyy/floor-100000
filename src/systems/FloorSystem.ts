@@ -107,7 +107,7 @@ export function stairTraversalFor(state: GameState, direction: 1 | -1): StairTra
     // 下行起止点原来用常量 DOWN_EXIT_X(1240)，而宽楼层的下楼口在
     // downExitXFor(floor)（tier2=1560、tier3+ 更宽）——宽楼层按下楼 E，
     // 角色先横跳几百 px 才开爬，画（梯口）与爬（起点）脱节。上行侧本来就是
-    // UP_EXIT_X（不随楼层宽窄变），下行侧要按楼层取。
+    // UP_EXIT_X（不随楼层宽窄变），下行侧要按楼层取。楼梯从不跨段，段内同宽。
     startX: direction === 1 ? UP_EXIT_X : downExitXFor(state.currentFloor),
     endX: direction === 1 ? UP_EXIT_X : downExitXFor(state.currentFloor),
     startY: STAIR_START_Y,

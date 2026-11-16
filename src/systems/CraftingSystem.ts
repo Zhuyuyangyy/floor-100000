@@ -136,6 +136,17 @@ export type CanCraftResult =
   | { ok: false; missing: MissingMaterial[]; reason?: string; hints?: string[] };
 
 export function canCraft(state: GameState, id: UpgradeId): CanCraftResult {
+  // AG-45：已建造先行——与 craft() 共用同一道第一闸门。修前 canCraft 只查
+  // 前置与材料，对"已建造但材料又凑齐"的配方报 ok，而 craft() 正确地以
+  // "已建造"拒绝，语义分叉（AG-42 §5.2 记录，UI 靠"已建"列掩着）。统一
+  // 取"拒"：材料再齐，已建成的设施也没法再建一次，"能建吗"的诚实答案是
+  // 不能。拒绝走既有的可选 reason 字段（additive：missing 数组形状不变，
+  // craftingSystem.test.ts 的 toContainEqual 钉死不受影响；passChain /
+  // economyLoop / craftLoop 的既有断言全部落在未建造状态上，无需修改）。
+  // 顺序与 craft() 一致：先已建造，再前置，再材料。
+  if (hasUpgrade(state, id)) {
+    return { ok: false, missing: [], reason: `${getRecipe(id).displayName} 已建造` };
+  }
   // 前置资格 is checked before materials: a gated recipe the player cannot walk up
   // to yet must say so, rather than report 材料不足 and send them gathering.
   const recipe = getRecipe(id);

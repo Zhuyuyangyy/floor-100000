@@ -528,6 +528,11 @@ export class GameScene extends Phaser.Scene {
   // （dorm_bed_<x> / own_bed），与 visitedFloors 的 bunksearch:/bunkgone: 键
   // 一一对应——存档里记住的「翻过/拆过」重进楼层照得上。
   private bunkObjs = new Map<string, { x: number; own: boolean; objects: Phaser.GameObjects.GameObject[] }>();
+  // AG-51：家具名签（1 层工作台「工作台」+ 自己的床「床（睡觉）」）——AG-52
+  // 隐形化契约的同一条延申：与容器名签共用 containerLabelFor 的三段式（远看
+  // 不见/贴近 0.35 隐形字/选中全牌），由 buildContainers 的同一个逐帧 fader
+  // 驱动（见 fadeLabels 里的家具段），不另挂监听、不新增 WeakMap。
+  private furnitureLabels: Array<{ x: number; label: Phaser.GameObjects.Text }> = [];
   // AG-11: the neighbours on the NPC floor: sprite, shadow, name plate and name,
   // kept so syncNpcs can walk them along their schedule every frame.
   private npcObjs = new Map<string, { who: CharacterKey; sprite: Phaser.GameObjects.Sprite; shadow: Phaser.GameObjects.GameObject[]; label: Phaser.GameObjects.Text; plate: Phaser.GameObjects.Rectangle }>();
@@ -1292,6 +1297,7 @@ export class GameScene extends Phaser.Scene {
     this.speedX = 0;
     this.containerObjs.clear();
     this.bunkObjs.clear();
+    this.furnitureLabels = [];
     this.npcObjs.clear();
     this.groundObjs.clear();
     this.wanderer?.destroy();
@@ -3221,6 +3227,19 @@ export class GameScene extends Phaser.Scene {
           appliedFont.set(c.id, look.fontSize);
         }
       }
+      // AG-51：家具名签（工作台/自己的床）走同一条契约。containerLabelFor
+      // 不认容器不认家具，只认 (x, label)——所以两枚家具名签直接复用，远的
+      // 时候彻底看不见，贴近了才浮出 0.35 的隐形字。用户说过「你不用把字写
+      // 在上面」，储物柜改了名，家具不能还挂两块大牌。
+      for (const f of this.furnitureLabels) {
+        const look = containerLabelFor({ x: f.x, label: f.label.text }, { playerX: px });
+        f.label.setAlpha(look.alpha);
+        const fontKey = `furn:${f.x}`;
+        if (appliedFont.get(fontKey) !== look.fontSize) {
+          f.label.setFontSize(look.fontSize);
+          appliedFont.set(fontKey, look.fontSize);
+        }
+      }
     };
     const previousFader = CONTAINER_LABEL_FADERS.get(this);
     if (previousFader) this.events.off(Phaser.Scenes.Events.UPDATE, previousFader);
@@ -3484,7 +3503,9 @@ export class GameScene extends Phaser.Scene {
     // AG-51：1 层的床可搜刮/可拆解（interactive）。拆过的床不再画——重进楼层
     // 时 visitedFloors 的 bunkgone: 键说了算，所以「拆掉」是跨存档的。
     const drawBedAt = (x: number, back_: boolean, index: number): void => {
-      if (interactive && isBunkDismantled(getGame(), floor, `dorm_bed_${x}`)) return;
+      // 键带绝对层号：dorm_bed_<层>_<x>。与 LootSystem 的 bunkgone:/bunksearch:
+      // 键里的 ${floor} 对齐，多楼层同时注册也撞不到一起。
+      if (interactive && isBunkDismantled(getGame(), floor, `dorm_bed_${floor}_${x}`)) return;
       if (back_) {
         const bed = this.add.image(x, backY, 'env-bunk-sleeper').setOrigin(0.5, 1).setScale(0.72).setDepth(2);
         this.floorObjects.push(bed);
@@ -3494,7 +3515,7 @@ export class GameScene extends Phaser.Scene {
           .setDepth(3);
         this.floorObjects.push(z);
         this.dormSleepers.push({ z, baseY: z.y, phase: 3.4 + index * 1.3 });
-        if (interactive) this.bunkObjs.set(`dorm_bed_${x}`, { x, own: false, objects: [bed, z] });
+        if (interactive) this.bunkObjs.set(`dorm_bed_${floor}_${x}`, { x, own: false, objects: [bed, z] });
         return;
       }
       const bed = this.add.image(x, floorY, 'env-bunk-sleeper').setOrigin(0.5, 1).setDepth(4);
@@ -3519,7 +3540,7 @@ export class GameScene extends Phaser.Scene {
         .setDepth(3);
       this.floorObjects.push(label, z);
       this.dormSleepers.push({ z, baseY: z.y, phase: index * 1.7 });
-      if (interactive) this.bunkObjs.set(`dorm_bed_${x}`, { x, own: false, objects: [bed, ...shadow, label, z] });
+      if (interactive) this.bunkObjs.set(`dorm_bed_${floor}_${x}`, { x, own: false, objects: [bed, ...shadow, label, z] });
     };
 
     // Back row first, so the front row overlaps it.
@@ -3543,15 +3564,20 @@ export class GameScene extends Phaser.Scene {
     this.floorObjects.push(...addContactShadow(this, BED_X, floorY + 2, 70, 2, 0.35));
     // AG-11：depth 105 压在 HUD 上下文带（100）与其 chrome（101）之上。旧位置
     // 不设 depth 时整块落在带里，像素实测 max lum=33，22px 标签一个像素都不显。
+    // AG-51：字号改成隐形档（18px）并按距离出生——与容器名签同一条契约，
+    // 远了什么都没有，贴近了才浮出 0.35 的「床（睡觉）」。
     const bedLabel = this.add
-      .text(BED_X, floorY - 62, '床（睡觉）', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) })
+      .text(BED_X, floorY - 62, '床（睡觉）', { fontFamily: FONT_FAMILY, fontSize: `${CONTAINER_LABEL_STEALTH_FONT}px`, color: hex(TEXT.primary) })
       .setOrigin(0.5)
       .setDepth(105);
     this.floorObjects.push(bedLabel);
+    this.registerFurnitureLabel(BED_X, bedLabel);
     // AG-51：自己的床也进可交互床铺表——白天 E 翻床垫底下，夜里 E 照旧走
     // 睡觉（interactWithBunk 里 night 分支优先，睡眠是生存主干）。刻意不给
     // 拆：这是全塔唯一能睡觉的床，拆了夜间安排就没了着落。
-    this.bunkObjs.set('own_bed', { x: BED_X, own: true, objects: [g, bedLabel] });
+    // 键带绝对层号（own_bed_1）：与 LootSystem 键的 ${floor} 对齐，将来若有
+    // 别的楼层也注册床铺，两张床不会撞同一个键。
+    this.bunkObjs.set(`own_bed_${STARTING_FLOOR}`, { x: BED_X, own: true, objects: [g, bedLabel] });
   }
 
   // ── HUD & inventory UI ─────────────────────────────────────────────────
@@ -4160,7 +4186,9 @@ export class GameScene extends Phaser.Scene {
     const bench = this.add.image(CRAFT_X, y + 4, 'furn_workbench').setOrigin(0.5, 1);
     // AG-11: depth 0 → 105，与床标签、容器名签同线（同一个 HUD 上下文带吞字
     // 问题，UI.md 12b：工作台招牌旧实测 max lum=33，完全不可见）。
-    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5).setDepth(105);
+    // AG-51：与容器名签同一条隐形化契约——远处无字，贴近才浮出 0.35 隐形字。
+    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: FONT_FAMILY, fontSize: `${CONTAINER_LABEL_STEALTH_FONT}px`, color: hex(TEXT.primary) }).setOrigin(0.5).setDepth(105);
+    this.registerFurnitureLabel(CRAFT_X, benchLabel);
     this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
     this.floorObjects.push(bench, benchLabel, this.upgradeBoard);
     this.refreshUpgradeBoard();
@@ -5989,6 +6017,18 @@ export class GameScene extends Phaser.Scene {
     for (const o of bunk.objects) o.destroy();
     this.dormSleepers = this.dormSleepers.filter((s) => !bunk.objects.includes(s.z));
     this.bunkObjs.delete(id);
+  }
+
+  /**
+   * AG-51：把一枚家具名签接入 AG-52 的贴近渐隐。出生即穿当前距离该有的
+   * look（18px 隐形字 + 该有的 alpha）——否则第一帧会闪一下 22px 大牌，
+   * 与容器名签的 born look 同一用意（见 buildContainers 里的 born）。
+   */
+  private registerFurnitureLabel(x: number, label: Phaser.GameObjects.Text): void {
+    const look = containerLabelFor({ x, label: label.text }, { playerX: getGame().player.x });
+    label.setAlpha(look.alpha);
+    label.setFontSize(look.fontSize);
+    this.furnitureLabels.push({ x, label });
   }
 
   /** 底栏世界提示：床边说什么（null = 不在床边，交给后面的判官）。 */

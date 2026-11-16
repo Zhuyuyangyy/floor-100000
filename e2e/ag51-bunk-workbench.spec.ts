@@ -82,6 +82,17 @@ async function hudText(page: Page, name: string): Promise<string> {
   }, name);
 }
 
+/** 场景里文本完全等于 text 的那个 Text 的 alpha（家具名签隐形化断言用）。 */
+async function labelAlpha(page: Page, text: string): Promise<number> {
+  return page.evaluate((t) => {
+    const g = (window as unknown as {
+      __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; alpha?: number }> } } | null } };
+    }).__PHASER_GAME__;
+    const o = g?.scene.getScene('Game')?.children.list.find((x) => x.type === 'Text' && x.text === t);
+    return o?.alpha ?? -1;
+  }, text);
+}
+
 /** 设计画布坐标（1280x720）-> 页面坐标。 */
 async function toPage(page: Page, x: number, y: number): Promise<{ x: number; y: number }> {
   const canvas = await page.locator('canvas').boundingBox();
@@ -193,6 +204,14 @@ test('AG-51: clicking the workbench opens the crafting panel', async ({ page }) 
   await page.mouse.click(outside.x, outside.y);
   await expect.poll(async () => (await sceneFlags(page)).craftingOpen, { timeout: 5000 }).toBe(false);
 
+  // ── 4. 名签隐形化（AG-51 补充 A）：远了什么都没有，贴近才浮 0.35 隐形字 ──
+  await setX(page, 40); // 离工作台 440px
+  await expect.poll(async () => labelAlpha(page, '工作台'), { timeout: 5000 }).toBe(0);
+  await page.screenshot({ path: 'output/ag51/09-workbench-label-far.png' });
+  await setX(page, CRAFT_X);
+  await expect.poll(async () => labelAlpha(page, '工作台'), { timeout: 5000 }).toBeCloseTo(0.35, 2);
+  await page.screenshot({ path: 'output/ag51/10-workbench-label-near.png' });
+
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
 
@@ -221,7 +240,7 @@ test('AG-51: clicking a bunk searches it, then a crowbar dismantles it', async (
   expect(searchFlash, '床铺搜刮只出材料').not.toMatch(/净水|脏水|口粮|面包|医疗包/);
   // 翻过写进 visitedFloors（存档持久，重进楼层不算没翻）。
   const searched = await readState(page);
-  expect(searched.visitedFloors['1']?.lootedItems.some((k) => k.startsWith('bunksearch:1:dorm_bed_236'))).toBe(true);
+  expect(searched.visitedFloors['1']?.lootedItems.some((k) => k.startsWith('bunksearch:1:dorm_bed_1_236'))).toBe(true);
 
   // ── 2. 再点同一张床 -> 今天翻过了，不二次出货 ────────────────────────
   await setX(page, 40);
@@ -241,7 +260,7 @@ test('AG-51: clicking a bunk searches it, then a crowbar dismantles it', async (
   const after = await readState(page);
   expect(countInBagSync(after, 'wood') - woodBefore).toBeGreaterThanOrEqual(2);
   expect(countInBagSync(after, 'cloth') - clothBefore).toBeGreaterThanOrEqual(1);
-  expect(after.visitedFloors['1']?.lootedItems.some((k) => k === 'bunkgone:1:dorm_bed_236')).toBe(true);
+  expect(after.visitedFloors['1']?.lootedItems.some((k) => k === 'bunkgone:1:dorm_bed_1_236')).toBe(true);
   // 床从场景里注销：14 -> 13。
   await expect.poll(async () => (await sceneFlags(page)).bunkCount, { timeout: 5000 }).toBe(13);
   // 再点原址：236 拆掉后，站上去 E 命中的是 32px 外的后排邻居床
@@ -251,7 +270,7 @@ test('AG-51: clicking a bunk searches it, then a crowbar dismantles it', async (
   await clickWorld(page, DORM_BED, 640);
   await expect.poll(async () => hudText(page, 'hud-feedback'), { timeout: 15_000 }).toMatch(/翻到 .+|床垫下面只有灰|今天已经翻过/);
   const afterClick = await readState(page);
-  expect(afterClick.visitedFloors['1']?.lootedItems.some((k) => k.startsWith('bunksearch:1:dorm_bed_268'))).toBe(true);
+  expect(afterClick.visitedFloors['1']?.lootedItems.some((k) => k.startsWith('bunksearch:1:dorm_bed_1_268'))).toBe(true);
   // 全场 flash 里再没出现过第二次「拆了床」——一张床只拆得一次。
   expect(await hudText(page, 'hud-feedback')).not.toMatch(/拆了床/);
 
@@ -266,8 +285,13 @@ test('AG-51: the own bed still sleeps — the search does not eat the night', as
   await startGame(page, 42);
   await recordActionAnims(page);
 
+  // ── 0. 床名签隐形化：站在楼层左端时「床（睡觉）」四个字不存在 ─────────
+  await setX(page, 40);
+  await expect.poll(async () => labelAlpha(page, '床（睡觉）'), { timeout: 5000 }).toBe(0);
+
   // ── 1. 白天点自己的床 -> 翻床垫（新行为） ─────────────────────────────
   await setX(page, BED_X);
+  await expect.poll(async () => labelAlpha(page, '床（睡觉）'), { timeout: 5000 }).toBeCloseTo(0.35, 2);
   await expect.poll(async () => hudText(page, 'hud-hint'), { timeout: 5000 }).toBe('按 E 翻翻自己的床');
   await setX(page, 40);
   await clickWorld(page, BED_X, 640);

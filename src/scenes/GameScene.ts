@@ -5819,7 +5819,15 @@ export class GameScene extends Phaser.Scene {
   private openContainer(containerId: string): void {
     const state = getGame();
     const floor = state.currentFloor;
-    const label = this.floorView.containers.find((c) => c.id === containerId)?.label ?? containerId;
+    const target = this.floorView.containers.find((c) => c.id === containerId);
+    const label = target?.label ?? containerId;
+    // Tools unlock container TYPES rather than recipes: a locked safe is the
+    // reason to carry the crowbar you found on floor 3.
+    if (target?.needs && countItem(state.player.inventory, target.needs) === 0) {
+      const tool = getItem(target.needs).displayName;
+      this.flash(`${label}锁着，需要${tool}`);
+      return;
+    }
     const result = lootContainer(state, floor, containerId);
     saveToStorage(state);
     this.floorView = getFloorView(state, floor);

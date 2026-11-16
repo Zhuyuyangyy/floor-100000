@@ -352,6 +352,8 @@ export interface GeneratedContainer {
   label: string;
   x: number;
   items: InventoryStack[];
+  /** A tool you must be carrying to open it. Absent = opens by hand. */
+  needs?: ItemId;
 }
 
 // A loose item lying on the floor, picked up on contact.

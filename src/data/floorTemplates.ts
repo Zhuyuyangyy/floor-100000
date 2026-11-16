@@ -2624,6 +2624,10 @@ export function generateFloor(worldSeed: number, floorNumber: number): Generated
     label: c.label,
     x: c.x,
     items: withFallback(resolveLoot(c.loot, worldSeed, floorNumber, c.id)),
+    // A safe is a safe: without a crowbar you are only looking at the door.
+    // Crates, cabinets and beds stay open by hand — the tool gates the secure
+    // containers, it does not gate the floor.
+    ...(c.id === 'security_safe' ? { needs: 'crowbar' as const } : {}),
   }));
   for (const b of bunksFor(floorNumber, template.containers.map((c) => c.x))) {
     const id = `bunk_${b.n}`;

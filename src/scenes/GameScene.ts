@@ -2737,6 +2737,15 @@ export class GameScene extends Phaser.Scene {
       props.push(this.add.image(BED_X, wallH + 4, 'furn_bed').setOrigin(0.5, 1));
       props.push(this.add.image(CRAFT_X, wallH + 4, 'furn_workbench').setOrigin(0.5, 1));
     }
+    // The floor below is not an empty diorama: it sleeps as many as it would if
+    // the player were standing on it. Its own crowd density applies, so the
+    // bottom of the tower looks full from above as well as from inside.
+    const nbCrowd: Phaser.GameObjects.GameObject[] = [];
+    for (let r = 0; r < roomCountFor(floor); r++) {
+      drawCrowd(this, nbCrowd, { roomX: r * ROOM_WIDTH, floorY: wallH, floor, room: r });
+    }
+    for (const o of nbCrowd) layer.add(o);
+
     detail.setAlpha(0.68);
     // Props are tinted rather than alpha-faded. A prop drawn at full colour is
     // the brightest thing in the frame — a store-room crate in the floor two

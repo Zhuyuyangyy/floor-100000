@@ -1,5 +1,5 @@
 import type Phaser from 'phaser';
-import { ROOM_WIDTH, tierOfFloor } from '../core/constants';
+import { FLOOR_WIDTH, ROOM_WIDTH, STAIR_RISE, STAIR_START_Y, tierOfFloor } from '../core/constants';
 
 // Per-floor corridor art (docs/05_ART_GUIDE.md §3).
 //
@@ -695,4 +695,312 @@ export function stackNeighbours(
     if (f <= bounds.highest && hasContent(f)) out.push({ floor: f, distance: d, isAbove: false });
   }
   return out;
+}
+
+// ── the stairwells: 2D flights and ladders ─────────────────────────────────
+// The cross-section's stairwells, redrawn as art you can read the climb on.
+//
+// The user's note (2026-11-16): the old stair was a line the survivor SLID
+// along — "像你现在坐楼梯这样滑步走上去非常的难看". Two shapes replace it:
+//
+//   stairs  the default: a 2D switchback flight of ten visible treads — five
+//          up, a landing, five back — with a climb curve that steps from
+//          tread to tread, so the character WALKS up instead of sliding.
+//   ladder  a straight ladder — two rails and rungs — hung between the two
+//          floors like a line, climbed vertically. The slum's iron ladder
+//          (tier 1) and the industry's shaft ladder (tier 3) use it; every
+//          other tier climbs stairs.
+//
+// Everything here is pure geometry plus Graphics commands: no scene state, no
+// randomness, so the shapes, the dispatch and the climb curve are all
+// unit-testable in Node (src/tests/stairsArt.test.ts) and the drawing can be
+// driven from a browser probe without wiring the scene first.
+//
+// The geometry contract the scene relies on: both ends of every flight sit at
+// the stairwell mouth (startX), because that is where the interaction zone
+// (FloorSystem.stairMouthZone) and the traversal's landing (endX) already
+// are. A flight that wandered off the mouth would desync the art from the
+// rules — the failure the old sine-bend path courted by swinging ±96px.
+
+export type StairArtStyle = 'stairs' | 'ladder';
+
+/**
+ * Tiers whose connections are climbed on a ladder, not walked up stairs.
+ * Tier 1 is the slum (its iron ladder is the cheapest way between floors)
+ * and tier 3 is industry (the shaft ladder between plant rooms). Everything
+ * else — worker dorms, commercial, the privileged floors — has proper
+ * stairs, because someone paid for them.
+ */
+const LADDER_TIERS: ReadonlySet<number> = new Set([1, 3]);
+
+/**
+ * Which art a connection gets. The stair belongs to the CONNECTION, not to
+ * the direction you happen to walk: climbing 1->2 and descending 2->1 must
+ * draw and animate the same ladder, so the anchor is the pair's lower floor
+ * and the direction only decides which of the two it is.
+ */
+export function stairArtStyleFor(floor: number, direction: 1 | -1): StairArtStyle {
+  const anchor = direction === 1 ? floor : floor - 1;
+  const tier = segmentOf(anchor)?.id ?? 1;
+  return LADDER_TIERS.has(tier) ? 'ladder' : 'stairs';
+}
+
+/** Ten treads span one STAIR_RISE: five per flight, two flights. */
+export const STAIR_TREAD_COUNT = 10;
+export const STAIR_TREADS_PER_FLIGHT = 5;
+/** 20px — a fifth of a flight's rise, and one clear step at the tower zoom. */
+export const STAIR_STEP_RISE = STAIR_RISE / STAIR_TREAD_COUNT;
+/**
+ * 32px deep — a tread the 64px-wide survivor sheet stands on without
+ * hanging off either end, and the run that lets five treads turn the flight
+ * around inside the room (5 x 32 = 160px in, 160px back).
+ */
+export const STAIR_TREAD_DEPTH = 32;
+/** The ladder's rung pitch: same 20px, so a rung sits at every step height. */
+export const LADDER_RUNG_SPACING = STAIR_STEP_RISE;
+
+/**
+ * Anim pace while climbing. The scene already plays the walk cycle during a
+ * traversal; these only scale it. Stairs keep the brisk 1.25 the traversal
+ * had; a ladder is slower on purpose — 200px of vertical per second against
+ * a 130px/s walk would read as frantic scrabbling.
+ */
+export const STAIR_ANIM_TIME_SCALE = 1.25;
+export const LADDER_ANIM_TIME_SCALE = 1;
+
+/** The measured shape of one connection. Pure data, for tests and probes. */
+export interface StairGeometry {
+  style: StairArtStyle;
+  /** visible treads (stairs) or rungs (ladder) on the whole connection */
+  steps: number;
+  /** vertical rise of one tread, and the ladder's rung pitch */
+  rise: number;
+  /** tread depth (stairs); 0 for a ladder, which has no treads */
+  tread: number;
+}
+
+export function stairGeometry(floor: number, direction: 1 | -1): StairGeometry {
+  const style = stairArtStyleFor(floor, direction);
+  return {
+    style,
+    steps: STAIR_TREAD_COUNT,
+    rise: STAIR_STEP_RISE,
+    tread: style === 'stairs' ? STAIR_TREAD_DEPTH : 0,
+  };
+}
+
+export interface StairPathNode {
+  x: number;
+  y: number;
+}
+
+/**
+ * The polyline the character walks: mouth -> five treads in -> the landing
+ * -> five treads back -> the neighbour's mouth, one node per tread.
+ *
+ * The first flight heads toward the floor's middle so the switchback stays
+ * inside the room (up leaves the left stairwell, down the right one), and
+ * the second flight returns to `startX` — the mouth — which is what keeps
+ * the climb on the drawn steps from first tread to last.
+ */
+export function stairPath(direction: 1 | -1, startX: number, startY: number): StairPathNode[] {
+  const inward = startX < FLOOR_WIDTH / 2 ? 1 : -1;
+  const stepX = STAIR_TREAD_DEPTH * inward;
+  const stepY = -STAIR_STEP_RISE * direction; // up climbs toward -Y: the floor above sits at -FLOOR_HEIGHT
+  const nodes: StairPathNode[] = [{ x: startX, y: startY }];
+  for (let i = 1; i <= STAIR_TREADS_PER_FLIGHT; i++) {
+    nodes.push({ x: startX + stepX * i, y: startY + stepY * i });
+  }
+  for (let i = 1; i <= STAIR_TREADS_PER_FLIGHT; i++) {
+    nodes.push({ x: startX + stepX * (STAIR_TREADS_PER_FLIGHT - i), y: startY + stepY * (STAIR_TREADS_PER_FLIGHT + i) });
+  }
+  return nodes;
+}
+
+/**
+ * What the climb curve needs from a traversal. Structurally satisfied by
+ * FloorSystem's StairTraversal, so the scene can hand one over unchanged.
+ */
+export interface StairClimb {
+  direction: 1 | -1;
+  startX: number;
+  endX: number;
+  startY: number;
+  endY: number;
+  durationMs: number;
+}
+
+export interface StairClimbPose {
+  x: number;
+  y: number;
+  progress: number;
+  /** which way the survivor faces mid-climb (the switchback turns) */
+  faceX: 1 | -1;
+  /** anim timeScale for this style's climb */
+  animTimeScale: number;
+}
+
+const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+/**
+ * Per-tread ease: the foot plant. The rise is front-loaded so the survivor
+ * arrives ON each tread and settles there for the back of the slice — ten
+ * visible footfalls instead of one smooth slide. Linear-per-step would be
+ * constant-speed sliding (what the user rejected); ease-in-out per step
+ * would stall at both ends and read as hesitation.
+ */
+const easeOntoTread = (t: number): number => 1 - (1 - t) * (1 - t);
+
+/**
+ * Where the survivor is at `elapsedMs` into the climb.
+ *
+ * Stairs: the pose rides the stairPath polyline — x linear across each
+ * tread, y eased onto each tread — so it stands on every visible step and
+ * turns at the landing. Ladder: x pinned at the mouth, y linear, the
+ * straight vertical climb the user asked for ("相当于一条线一样").
+ *
+ * Endpoints are exact: pose(0) is the mouth, pose(durationMs) is the
+ * neighbour's mouth, and past the end the pose holds there.
+ */
+export function stairClimbPose(floor: number, climb: StairClimb, elapsedMs: number): StairClimbPose {
+  const style = stairArtStyleFor(floor, climb.direction);
+  const progress = clamp01(elapsedMs / climb.durationMs);
+  if (style === 'ladder') {
+    return {
+      x: climb.startX,
+      y: climb.startY + (climb.endY - climb.startY) * progress,
+      progress,
+      faceX: climb.direction === 1 ? 1 : -1,
+      animTimeScale: LADDER_ANIM_TIME_SCALE,
+    };
+  }
+  const nodes = stairPath(climb.direction, climb.startX, climb.startY);
+  const sliceMs = climb.durationMs / (nodes.length - 1);
+  const i = Math.min(nodes.length - 2, Math.max(0, Math.floor(elapsedMs / sliceMs)));
+  const t = clamp01((elapsedMs - i * sliceMs) / sliceMs);
+  const a = nodes[i];
+  const b = nodes[i + 1];
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * easeOntoTread(t),
+    progress,
+    faceX: b.x >= a.x ? 1 : -1,
+    animTimeScale: STAIR_ANIM_TIME_SCALE,
+  };
+}
+
+/**
+ * Every colour the stairwells are drawn in — each one a palette role, so the
+ * 16-colour gate holds by construction (asserted in stairsArt.test.ts).
+ */
+export const STAIR_COLORS = {
+  /** the walking surface of a tread */
+  tread: PALETTE.dust,
+  /** the alternate tread, so consecutive steps stay countable */
+  treadAlt: PALETTE.stoneLight,
+  /** the solid mass under the treads */
+  mass: PALETTE.stone,
+  /** the dark line under the landing's lip */
+  edge: PALETTE.shadow,
+  /** the handrail, faded so it never fights the treads */
+  rail: PALETTE.dust,
+  /** the sill set into each floor at the mouth */
+  sill: PALETTE.stone,
+  /** the slum's iron ladder: rusted rails, warm rungs */
+  ironRail: PALETTE.lightDeep,
+  ironRung: PALETTE.light,
+  /** the industry's shaft ladder: cold steel rails, pale rungs */
+  steelRail: PALETTE.stoneLight,
+  steelRung: PALETTE.dust,
+  /** where the rails enter the floors */
+  bracket: PALETTE.stone,
+} as const;
+
+/**
+ * One stairwell, drawn from this floor's band to the neighbour's.
+ *
+ * Drop-in for the scene's drawStair: it takes the Graphics the caller
+ * created (pushed at ACTOR_DEPTH - 1) and draws either shape from the same
+ * dispatch the climb curve uses, so the character can never leave the art.
+ */
+export function drawStairwell(
+  g: Phaser.GameObjects.Graphics,
+  opts: { x: number; dir: 'up' | 'down'; floor: number },
+): void {
+  const { x, dir, floor } = opts;
+  if (stairArtStyleFor(floor, dir === 'up' ? 1 : -1) === 'ladder') drawLadder(g, x, dir, floor);
+  else drawStairFlight(g, x, dir);
+}
+
+/**
+ * The 2D switchback: ten solid tread blocks in a Z, a landing at the turn,
+ * a handrail on the room side, sills at both mouths.
+ *
+ * Each tread is a block hanging from its cap down to the next tread's cap,
+ * so the flight reads as a staircase mass rather than floating slabs — the
+ * shape the user asked for ("2D 的，就是阶梯型的那种").
+ */
+function drawStairFlight(g: Phaser.GameObjects.Graphics, x: number, dir: 'up' | 'down'): void {
+  const direction = dir === 'up' ? 1 : -1;
+  const nodes = stairPath(direction, x, STAIR_START_Y);
+  const c = STAIR_COLORS;
+  const depth = Math.round(STAIR_STEP_RISE) + 2; // reach the next tread's cap, hairline-free
+  for (let i = 1; i < nodes.length; i++) {
+    // from 1: node 0 is the mouth on this floor's line — it gets a sill below,
+    // not a tread of its own.
+    const n = nodes[i];
+    const left = Math.round(n.x - STAIR_TREAD_DEPTH / 2);
+    const top = Math.round(n.y);
+    g.fillStyle(c.mass, 1);
+    g.fillRect(left, top, STAIR_TREAD_DEPTH, depth);
+    g.fillStyle(i % 2 === 0 ? c.tread : c.treadAlt, 0.95);
+    g.fillRect(left, top, STAIR_TREAD_DEPTH, 3);
+  }
+  // The landing: the middle tread, read wider so the turn is visible.
+  const turn = nodes[STAIR_TREADS_PER_FLIGHT];
+  g.fillStyle(c.tread, 1);
+  g.fillRect(Math.round(turn.x - 22), Math.round(turn.y - 2), 44, 4);
+  g.fillStyle(c.edge, 0.95);
+  g.fillRect(Math.round(turn.x - 22), Math.round(turn.y + 2), 44, 2);
+  // A handrail on the room side of the flight, ending at both mouths.
+  const railX = dir === 'up' ? 12 : -12;
+  g.lineStyle(2, c.rail, 0.7);
+  g.beginPath();
+  g.moveTo(nodes[0].x + railX, nodes[0].y - 8);
+  for (let i = 1; i < nodes.length; i++) g.lineTo(nodes[i].x + railX, nodes[i].y - 8);
+  g.strokePath();
+  // Sills at both mouths, so the flight reads as set into the floors.
+  g.fillStyle(c.sill, 1);
+  g.fillRect(Math.round(x - 24), Math.round(nodes[0].y - 3), 48, 4);
+  g.fillRect(Math.round(x - 24), Math.round(nodes[nodes.length - 1].y - 3), 48, 4);
+}
+
+/**
+ * The straight ladder: two rails hung past both floor lines — "直接挂在
+ * 这两个楼层上面" — with a rung at every step height and brackets where the
+ * rails enter the floors. Iron in the slum, steel in industry; both are
+ * palette values, and the rung pitch matches the stairs' rise so a ladder
+ * connection climbs at the same pace a flight would.
+ */
+function drawLadder(g: Phaser.GameObjects.Graphics, x: number, dir: 'up' | 'down', floor: number): void {
+  const direction = dir === 'up' ? 1 : -1;
+  const y0 = STAIR_START_Y;
+  const y1 = y0 - direction * STAIR_RISE;
+  const top = Math.min(y0, y1) - 10;
+  const bottom = Math.max(y0, y1) + 10;
+  const tier = segmentOf(floor)?.id ?? 1;
+  const c = STAIR_COLORS;
+  const rail = tier === 3 ? c.steelRail : c.ironRail;
+  const rung = tier === 3 ? c.steelRung : c.ironRung;
+  g.fillStyle(rail, 1);
+  g.fillRect(x - 5, top, 2, bottom - top);
+  g.fillRect(x + 3, top, 2, bottom - top);
+  g.fillStyle(rung, 1);
+  for (let i = 0; i <= STAIR_TREAD_COUNT; i++) {
+    const y = Math.round(y0 - direction * i * LADDER_RUNG_SPACING);
+    g.fillRect(x - 5, y, 10, 2);
+  }
+  g.fillStyle(c.bracket, 1);
+  g.fillRect(x - 8, top - 2, 16, 3);
+  g.fillRect(x - 8, bottom - 1, 16, 3);
 }

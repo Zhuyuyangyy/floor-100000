@@ -1201,7 +1201,11 @@ export class GameScene extends Phaser.Scene {
     // interact radius plus a body width from both the arrival point and any NPC.
     const floor = state.currentFloor;
     const shopTaken = [...taken, ENTRY_X];
-    const shopX = floor >= 2 ? placeClearX(state.runSeed, floor, 'trader', shopTaken, INTERACT_DISTANCE * 2) : null;
+    // A merchant you run into, not a shop on every floor. Two floors in three
+    // have one; the rest do not, and that is what makes the sight of him worth
+    // noticing. Seeded on the run so a reload does not reshuffle the tower.
+    const traderHere = floor >= 2 && (state.runSeed * 31 + floor * 17) % 3 !== 0;
+    const shopX = traderHere ? placeClearX(state.runSeed, floor, 'trader', shopTaken, INTERACT_DISTANCE * 2) : null;
     if (shopX !== null) taken.push(shopX);
     for (const spot of encounterSpots(state.runSeed, floor)) {
       if (shouldSkip(state, spot.id)) continue;

@@ -47,7 +47,7 @@ import {
   stepHorizontalSpeed,
   tryChangeFloor,
 } from '../systems/FloorSystem';
-import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
+import { BUNK_DISMANTLE_COST, BUNK_SEARCH_COST, bunkDismantleTool, dismantleBunk, getFloorView, isBunkDismantled, isBunkSearched, lootContainer, lootGround, recordFloorVisit, searchBunk } from '../systems/LootSystem';
 import { hasFloorContent } from '../data/floorTemplates';
 import { liftDirection, liftOutcome, liftRequirement, nextSegment, prevSegment, skippedFloors } from '../core/segments';
 import { crossingSummary } from '../core/worldgen';
@@ -414,6 +414,11 @@ export class GameScene extends Phaser.Scene {
 
   private floorView!: GeneratedFloor;
   private containerObjs = new Map<string, { box: Phaser.GameObjects.Graphics | Phaser.GameObjects.Image; label: Phaser.GameObjects.Text; plate: Phaser.GameObjects.Rectangle }>();
+  // AG-51：可交互床铺（1 层宿舍：自己的床 + 两排室友床）。drawBed/drawDormBeds
+  // 注册、interactWithBunk 消费、clearFloor 清空。id 是位置派生的稳定串
+  // （dorm_bed_<x> / own_bed），与 visitedFloors 的 bunksearch:/bunkgone: 键
+  // 一一对应——存档里记住的「翻过/拆过」重进楼层照得上。
+  private bunkObjs = new Map<string, { x: number; own: boolean; objects: Phaser.GameObjects.GameObject[] }>();
   // AG-11: the neighbours on the NPC floor: sprite, shadow, name plate and name,
   // kept so syncNpcs can walk them along their schedule every frame.
   private npcObjs = new Map<string, { who: CharacterKey; sprite: Phaser.GameObjects.Sprite; shadow: Phaser.GameObjects.GameObject[]; label: Phaser.GameObjects.Text; plate: Phaser.GameObjects.Rectangle }>();
@@ -928,7 +933,7 @@ export class GameScene extends Phaser.Scene {
         // It was the only floor with people in it and no furniture for them:
         // two NPCs standing in an empty corridor. The beds go in after the NPCs
         // so the walk sheets (ACTOR_DEPTH) keep drawing over the mattress.
-        this.drawDormBeds(NEIGHBOUR_FRONT_BEDS, DORM_BACK_BEDS);
+        this.drawDormBeds(NPC_FLOOR, NEIGHBOUR_FRONT_BEDS, DORM_BACK_BEDS);
       }
     }
     // OVERHAUL: the floor's question marks go up last, above the room.
@@ -1090,6 +1095,7 @@ export class GameScene extends Phaser.Scene {
     this.playerShadow = [];
     this.speedX = 0;
     this.containerObjs.clear();
+    this.bunkObjs.clear();
     this.npcObjs.clear();
     this.groundObjs.clear();
     this.wanderer?.destroy();
@@ -2449,7 +2455,7 @@ export class GameScene extends Phaser.Scene {
 
     // The other beds, with their sleeping roommates. Before this the room was
     // furniture the player uses and nothing that makes it a shared space.
-    this.drawDormBeds(DORM_FRONT_BEDS, DORM_BACK_BEDS);
+    this.drawDormBeds(STARTING_FLOOR, DORM_FRONT_BEDS, DORM_BACK_BEDS, true);
 
     // Floor 1 is the player's own room, and it is in the same tower as the other
     // 100000 floors: it sleeps as many as the rest of the tier. Drawn after the
@@ -3283,7 +3289,7 @@ export class GameScene extends Phaser.Scene {
   // a lying pose (the walk sheets are 64x96 standing side views) and rotating one
   // would resample it. A torso over lower legs, a fold, a lit edge and a head
   // read as "someone sleeping" at this size, which is the whole job.
-  private drawDormBeds(front: readonly number[], back: readonly number[]): void {
+  private drawDormBeds(floor: number, front: readonly number[], back: readonly number[], interactive = false): void {
     const floorY = FLOOR_HEIGHT - 60; // the front row's floor line
     const backY = floorY - 26; // the back row stands further from the camera
     const g = this.add.graphics().setDepth(4);
@@ -3291,21 +3297,26 @@ export class GameScene extends Phaser.Scene {
     const backG = this.add.graphics().setDepth(2);
     this.floorObjects.push(backG);
 
-    // Back row first, so the front row overlaps it.
-    // The beds are the art pack's now, not the procedural ones: the same bunk
-    // that stands in every corridor of the tower. The back row keeps its 0.72
-    // scale and its lower depth so the front row still overlaps it.
-    back.forEach((x) => {
-      const bed = this.add.image(x, backY, 'env-bunk-sleeper').setOrigin(0.5, 1).setScale(0.72).setDepth(2);
-      this.floorObjects.push(bed);
-    });
-
-    // Pitch 96, so the row is crowded - beds nearly touching.
-    front.forEach((x, i) => {
+    // AG-51：1 层的床可搜刮/可拆解（interactive）。拆过的床不再画——重进楼层
+    // 时 visitedFloors 的 bunkgone: 键说了算，所以「拆掉」是跨存档的。
+    const drawBedAt = (x: number, back_: boolean, index: number): void => {
+      if (interactive && isBunkDismantled(getGame(), floor, `dorm_bed_${x}`)) return;
+      if (back_) {
+        const bed = this.add.image(x, backY, 'env-bunk-sleeper').setOrigin(0.5, 1).setScale(0.72).setDepth(2);
+        this.floorObjects.push(bed);
+        const z = this.add
+          .text(x + 36, backY - 38, 'Z z', { fontFamily: FONT_FAMILY, fontSize: '14px', color: hex(TEXT.disabledDeep) })
+          .setOrigin(0.5)
+          .setDepth(3);
+        this.floorObjects.push(z);
+        this.dormSleepers.push({ z, baseY: z.y, phase: 3.4 + index * 1.3 });
+        if (interactive) this.bunkObjs.set(`dorm_bed_${x}`, { x, own: false, objects: [bed, z] });
+        return;
+      }
       const bed = this.add.image(x, floorY, 'env-bunk-sleeper').setOrigin(0.5, 1).setDepth(4);
       this.floorObjects.push(bed);
-      this.floorObjects.push(...addContactShadow(this, x + 40, floorY + 2, 70, 2, 0.35));
-
+      const shadow = addContactShadow(this, x + 40, floorY + 2, 70, 2, 0.35);
+      this.floorObjects.push(...shadow);
       // Label and Z sit above the headboard line and beside the head. Both are
       // placed against the bed's own top (floorY-58 for a sleeper), not against a
       // fixed offset from the floor: a taller bed pushed the label into the
@@ -3323,18 +3334,14 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0.5)
         .setDepth(3);
       this.floorObjects.push(label, z);
-      this.dormSleepers.push({ z, baseY: z.y, phase: i * 1.7 });
-    });
+      this.dormSleepers.push({ z, baseY: z.y, phase: index * 1.7 });
+      if (interactive) this.bunkObjs.set(`dorm_bed_${x}`, { x, own: false, objects: [bed, ...shadow, label, z] });
+    };
 
-    // The back row gets its labels too, dimmer, so the two rows do not compete.
-    back.forEach((x, i) => {
-      const z = this.add
-        .text(x + 36, backY - 38, 'Z z', { fontFamily: FONT_FAMILY, fontSize: '14px', color: hex(TEXT.disabledDeep) })
-        .setOrigin(0.5)
-        .setDepth(3);
-      this.floorObjects.push(z);
-      this.dormSleepers.push({ z, baseY: z.y, phase: 3.4 + i * 1.3 });
-    });
+    // Back row first, so the front row overlaps it.
+    back.forEach((x, i) => drawBedAt(x, true, i));
+    // Pitch 96, so the row is crowded - beds nearly touching.
+    front.forEach((x, i) => drawBedAt(x, false, i));
   }
 
   // The player's own bed, in the same 3/4 view as the roommates' so the row
@@ -3357,6 +3364,10 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(105);
     this.floorObjects.push(bedLabel);
+    // AG-51：自己的床也进可交互床铺表——白天 E 翻床垫底下，夜里 E 照旧走
+    // 睡觉（interactWithBunk 里 night 分支优先，睡眠是生存主干）。刻意不给
+    // 拆：这是全塔唯一能睡觉的床，拆了夜间安排就没了着落。
+    this.bunkObjs.set('own_bed', { x: BED_X, own: true, objects: [g, bedLabel] });
   }
 
   // ── HUD & inventory UI ─────────────────────────────────────────────────
@@ -5171,6 +5182,13 @@ export class GameScene extends Phaser.Scene {
     for (const marker of this.spotMarkers.values()) if (near(marker.x)) return true;
     if (near(UP_EXIT_X) || near(this.downExit)) return true;
     if (state.currentFloor === STARTING_FLOOR && near(BED_X)) return true;
+    // AG-51：工作台与室友床铺也要在这里报名。点击走位带的是
+    // interact=hasInteractableNear(x)——不报名，玩家点了工作台/床，人走到
+    // 了，onInteract 却永远不会被叫（用户原话：「我点击这个工作台它也
+    // 没有反应」）。半径与 E 判定同源（INTERACT_DISTANCE），点击与按键
+    // 因此是同一件事。
+    if (state.currentFloor === STARTING_FLOOR && near(CRAFT_X)) return true;
+    for (const bunk of this.bunkObjs.values()) if (near(bunk.x)) return true;
     return false;
   }
 
@@ -5481,6 +5499,23 @@ export class GameScene extends Phaser.Scene {
       this.openDialogue(npc);
       return;
     }
+    // AG-51：床铺（自己的床白天翻、夜里睡；室友床搜刮/拆解）与工作台
+    // （点它 = 开制作面板）。放在 NPC 之后、容器之前：床和台是家具，不该
+    // 被手边半空的柜子抢班。
+    const bunk = this.nearestInteractiveBunk();
+    if (bunk) {
+      this.interactWithBunk(state, bunk);
+      return;
+    }
+    if (this.nearCraftStation(state)) {
+      // 方案 A：点工作台 = 开制作面板。1 层的工作台本来就是纯家具（楼层
+      // 模板里没有它，楼层视图里没有它的一行，从来就搜不出东西），C 键
+      // 的入口只服务记得快捷键的人——E 与点击现在给所有人。其它层的
+      // workbench 是模板容器（值班台等），照旧搜刮，不受此分支影响
+      // （nearCraftStation 只在起始层为真）。
+      this.toggleCrafting();
+      return;
+    }
     if (this.nearBed(state)) {
       this.attemptSleep();
       return;
@@ -5619,6 +5654,114 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     this.openShelter();
+  }
+
+  // ── AG-51：床铺交互（搜刮 / 拆解） ─────────────────────────────────────
+  // 1 层宿舍的床不是容器（楼层视图里没有它们的一行），所以入口与搜柜分开：
+  // 点击或 E 走到床边触发。概率与产出全在 LootSystem 的纯函数里
+  // （seeded RNG：同 seed 同结果，禁 Math.random），场景只出动画、flash
+  // 与拆床后的清场。
+
+  /** 手边最近的一张可交互床（自己的床 + 室友床；拆过的不再算）。 */
+  private nearestInteractiveBunk(): { id: string; x: number; own: boolean } | null {
+    const state = getGame();
+    let best: { id: string; x: number; own: boolean } | null = null;
+    let bestDist = INTERACT_DISTANCE;
+    for (const [id, bunk] of this.bunkObjs) {
+      if (isBunkDismantled(state, state.currentFloor, id)) continue;
+      const d = Math.abs(bunk.x - state.player.x);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = { id, x: bunk.x, own: bunk.own };
+      }
+    }
+    return best;
+  }
+
+  private interactWithBunk(state: GameState, bunk: { id: string; x: number; own: boolean }): void {
+    if (bunk.own) {
+      // 自己的床：夜里睡觉优先——睡眠是生存主干（survivalBalance 钉着夜间
+      // 代谢与回血），搜刮不抢班；白天才翻床垫底下。
+      if (isNight(state.gameMinuteOfDay)) {
+        this.attemptSleep();
+        return;
+      }
+      this.runBunkSearch(state, bunk);
+      return;
+    }
+    if (isBunkSearched(state, state.currentFloor, bunk.id)) {
+      // 今天翻过了：包里得有一件能拆床的工具（撬棍/消防斧）才递得上拆解，
+      // 否则老实说明天再来——拆解是「翻过之后」的进阶动作，不是误触陷阱。
+      if (bunkDismantleTool(state.player.inventory)) {
+        this.runBunkDismantle(state, bunk);
+        return;
+      }
+      this.flash('这张床今天已经翻过了，明天再来');
+      return;
+    }
+    this.runBunkSearch(state, bunk);
+  }
+
+  private runBunkSearch(state: GameState, bunk: { id: string; x: number }): void {
+    const result = searchBunk(state, state.currentFloor, bunk.id);
+    if (result.already) {
+      this.flash('今天已经翻过这张床了');
+      return;
+    }
+    saveToStorage(state);
+    this.refreshInventory();
+    // 翻箱倒柜：walkcycle 的 search clip——与开柜同一个姿势、同一节奏，
+    // 用户要的「点击之后人物进入翻箱倒柜的状态」就是这一拍。
+    this.playActionAnim(searchAnimKey('player'), 420);
+    if (result.took.length > 0) {
+      playFx(this, 'collect-burst', bunk.x, PLAYER_FEET_Y - 50, LIGHT_DEPTH);
+      this.lootThisTrip += result.took.reduce((n, t) => n + t.quantity, 0);
+      this.flash(`翻到 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${BUNK_SEARCH_COST} 分钟）`);
+    } else if (result.full) {
+      this.flash('背包已满：翻出来的东西放不下，先腾包');
+    } else {
+      this.flash('床垫下面只有灰和一根断头发');
+    }
+    this.chargeTime(BUNK_SEARCH_COST);
+  }
+
+  private runBunkDismantle(state: GameState, bunk: { id: string; x: number }): void {
+    const result = dismantleBunk(state, state.currentFloor, bunk.id);
+    if (!result.ok) {
+      this.flash(result.reason ?? '拆不了这张床');
+      return;
+    }
+    saveToStorage(state);
+    this.refreshInventory();
+    this.removeBunk(bunk.id);
+    // 拆比翻重：search clip 拉长到 520ms，板件应声落地。床就此消失，
+    // 重进楼层也不会回来（bunkgone: 键住在存档里）。
+    this.playActionAnim(searchAnimKey('player'), 520);
+    playFx(this, 'collect-burst', bunk.x, PLAYER_FEET_Y - 40, LIGHT_DEPTH);
+    this.lootThisTrip += result.took.reduce((n, t) => n + t.quantity, 0);
+    this.flash(`拆了床，得到 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${BUNK_DISMANTLE_COST} 分钟）`);
+    this.chargeTime(BUNK_DISMANTLE_COST);
+  }
+
+  /** 床没了：销毁对象、把 Z 从呼吸队列里摘掉、注销交互热区。 */
+  private removeBunk(id: string): void {
+    const bunk = this.bunkObjs.get(id);
+    if (!bunk) return;
+    for (const o of bunk.objects) o.destroy();
+    this.dormSleepers = this.dormSleepers.filter((s) => !bunk.objects.includes(s.z));
+    this.bunkObjs.delete(id);
+  }
+
+  /** 底栏世界提示：床边说什么（null = 不在床边，交给后面的判官）。 */
+  private bunkHint(state: GameState): string | null {
+    const bunk = this.nearestInteractiveBunk();
+    if (!bunk) return null;
+    if (bunk.own) {
+      if (isNight(state.gameMinuteOfDay)) return '按 E 安排夜间行动';
+      return isBunkSearched(state, state.currentFloor, bunk.id) ? '自己的床今天翻过了' : '按 E 翻翻自己的床';
+    }
+    if (!isBunkSearched(state, state.currentFloor, bunk.id)) return '按 E 搜刮床铺';
+    return bunkDismantleTool(state.player.inventory) ? '按 E 拆解床铺' : '这张床今天翻过了';
   }
 
   private openShelter(): void {
@@ -6433,12 +6576,15 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    if (this.nearBed(state)) {
-      this.hintText.setText(isNight(state.gameMinuteOfDay) ? '按 E 安排夜间行动' : '床位 · 20:00 后可安排夜间行动');
+    // AG-51：床铺提示（含自己的床：夜里睡觉/白天翻床垫底下）先于工作台。
+    // 两件家具在 1 层东西两端，正常永远不会同时够到，顺序只是保险。
+    const bunkLine = this.bunkHint(state);
+    if (bunkLine !== null) {
+      this.hintText.setText(bunkLine);
       return;
     }
     if (this.nearCraftStation(state)) {
-      this.hintText.setText('按 C 制作');
+      this.hintText.setText('按 E 制作');
       return;
     }
     if (this.nearestNpc(state)) {

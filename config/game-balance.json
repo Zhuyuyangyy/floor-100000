@@ -17,6 +17,22 @@
   "dwellPressure": {
     "rollIntervalGameMinutes": 60
   },
+  "bunks": {
+    "_comment": "AG-51：1 层宿舍床铺的搜刮/拆解表。概率全部走 seeded RNG（deriveSeed/makeRng，docs/02_TECH_SPEC.md §3），禁 Math.random；同 (runSeed, 层, 床, 天) 同结果。材料 only——刻意不碰 survivalBalance 钉死的「每层恰好一瓶 guaranteed 水 + 一份食物」，床垫底下翻出来的东西不许改写生存曲线。",
+    "searchCostMinutes": 10,
+    "dismantleCostMinutes": 30,
+    "searchLoot": [
+      { "itemId": "cloth", "min": 1, "max": 2, "probability": 0.55 },
+      { "itemId": "scrap_metal", "min": 1, "max": 2, "probability": 0.4 },
+      { "itemId": "wood", "min": 1, "max": 2, "probability": 0.3 },
+      { "itemId": "tape", "min": 1, "max": 1, "probability": 0.2 }
+    ],
+    "dismantleTools": ["crowbar", "fire_axe"],
+    "dismantleYield": [
+      { "itemId": "wood", "min": 2, "max": 4 },
+      { "itemId": "cloth", "min": 1, "max": 3 }
+    ]
+  },
   "warmthSources": {
     "_comment": "AG-25 TickHeaters：每层热源（床/蜡烛/火把/火盆）。x 世界像素、radius 供暖半径、power 中心回温点数/游戏小时。零新增美术——candle/torch/brazier 的照明位置就是热源位置。",
     "1": [

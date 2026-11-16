@@ -1244,30 +1244,36 @@ export class GameScene extends Phaser.Scene {
         .setDepth(6);
       this.spotMarkers.set('shop', { x: shopX, isBoss: false, dot: trader as unknown as Phaser.GameObjects.Arc, label: tag });
 
-      // He walks. A merchant standing still under a floating label is a vending
-      // machine; one that paces the corridor is somebody you ran into.
+      // He walks the floor. A merchant standing still under a floating label is a
+      // vending machine; one that paces from the stairwell to the far wall and
+      // back is somebody you ran into.
       //
-      // The patrol is a tween rather than an update hook: it owns the sprite,
-      // the name tag and the contact shadow in one target list, and it keeps the
-      // marker in spotMarkers — which is what E and the click-to-walk use —
-      // pointed at wherever he currently is.
-      const patrolTo = shopX + 150;
+      // Waypoints rather than a there-and-back tween: a single yoyo leg reads as
+      // a pendulum. He visits three spots along the corridor, pauses at each, and
+      // the walk sheet flips to face the way he is going.
       const stick = traderShadow[0];
-      this.tweens.add({
-        targets: [trader, tag, stick],
-        x: patrolTo,
-        duration: 3600,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.InOut',
-        onStart: () => trader.play(walkAnimKey('npc_alin'), true),
-        onYoyo: () => trader.setFlipX(true),
-        onRepeat: () => trader.setFlipX(false),
-        onUpdate: () => {
-          const m = this.spotMarkers.get('shop');
-          if (m) m.x = trader.x;
-        },
-      });
+      const walk = walkAnimKey('npc_alin');
+      const waypoints = [shopX, shopX + 260, shopX + 90, shopX - 120];
+      let leg = 0;
+      const step = (): void => {
+        leg = (leg + 1) % waypoints.length;
+        const to = waypoints[leg];
+        trader.setFlipX(to < trader.x);
+        const ms = Math.max(900, Math.abs(to - trader.x) * 14);
+        this.tweens.add({
+          targets: [trader, tag, stick],
+          x: to,
+          duration: ms,
+          ease: 'Sine.InOut',
+          onStart: () => trader.play(walk, true),
+          onUpdate: () => {
+            const m = this.spotMarkers.get('shop');
+            if (m) m.x = trader.x;
+          },
+          onComplete: () => trader.play(idleAnimKey('npc_alin')),
+        });
+      };
+      this.time.addEvent({ delay: 2600, loop: true, callback: step });
     }
   }
 

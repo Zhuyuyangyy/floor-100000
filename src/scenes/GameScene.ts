@@ -1006,14 +1006,18 @@ export class GameScene extends Phaser.Scene {
     const cam = this.cameras.main;
     const standing = this.standingCamBounds;
     if (!standing) return;
-    // The follow target is the climber's feet minus half the viewport, in
-    // world units; at the far end of the rise the feet sit one STAIR_RISE
-    // above/below STAIR_START_Y. Let the bound reach that target.
-    const halfView = cam.displayHeight / 2;
-    const feetAtFarEnd = STAIR_START_Y + (direction === 1 ? -STAIR_RISE : STAIR_RISE);
-    const top = direction === 1 ? Math.min(standing.top, feetAtFarEnd - halfView) : standing.top;
-    const bottom = direction === 1 ? standing.bottom : Math.max(standing.bottom, feetAtFarEnd + halfView);
-    cam.setBounds(0, top, this.floorW, bottom - top);
+    // Hold the frame. The climb used to keep following the climber, which meant
+    // the floor they were leaving slid out of the viewport and the stairs read as
+    // a black slide upward: you never saw where you came from or where you were
+    // going.
+    //
+    // Now the camera stops where it is — the cross-section already shows the
+    // floor above and the floor below — and only the climber moves inside that
+    // frame. The landing puts the follow back (drawFloor) and the refused
+    // landing puts it back by hand (resetCameraBounds).
+    cam.stopFollow();
+    cam.setBounds(0, standing.top, this.floorW, standing.bottom - standing.top);
+    void direction;
   }
 
   /** Put the standing bounds back (a refused landing leaves the player put). */
@@ -1022,6 +1026,9 @@ export class GameScene extends Phaser.Scene {
     const standing = this.standingCamBounds;
     if (!standing) return;
     cam.setBounds(0, standing.top, this.floorW, standing.bottom - standing.top);
+    // The climb stopped the follow; a refused landing must hand it back or the
+    // camera stays parked where the climb began.
+    cam.startFollow(this.player, true, 0.15, 0.15);
   }
 
   // OVERHAUL: plays a one-shot action clip and holds it for `ms`. The frame

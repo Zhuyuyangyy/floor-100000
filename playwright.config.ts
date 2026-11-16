@@ -53,6 +53,16 @@ export default defineConfig({
     trace: { mode: 'retain-on-failure', screenshots: false, snapshots: true },
     screenshot: 'only-on-failure',
     video: 'off',
+    // RULE (AG-41 + AG-44, both measured): a spec that must mock network uses
+    // an IN-PAGE fetch stub installed with page.addInitScript — never
+    // page.route. On this Phaser page, page.route + trace recording deadlock
+    // each other and every test's teardown (tracing.stop / context.close)
+    // hangs for 120s until the timeout, with the test body long since green.
+    // The in-page stub never touches Playwright's network layer, so teardown
+    // is deterministic with tracing on or off. Working example and the full
+    // rationale: e2e/spark.spec.ts (top-of-file comment). If a future
+    // Playwright fixes the deadlock, this rule can be revisited — until then
+    // the stub version has no external dependency and is strictly more stable.
   },
   webServer: {
     // The port override is required because vite.config.ts pins 5173; the CLI

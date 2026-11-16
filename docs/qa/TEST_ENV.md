@@ -83,6 +83,15 @@ wrapper 不做任何清理动作，也不掩盖失败：带 `.env.local` 跑 `np
 | 全量（约定命令） | `VITE_NPC_MODEL= npx vitest run` | **84 文件 / 1528 测试全绿** |
 |  Remediation | 删除共享缓存中全部"烙入非空 VITE_NPC_MODEL"的条目 | 删 2 条（ag-41-spark-verify 的 `0f3da316…`、本次复现产生的 `b3a85a61…`），复扫 0 残留 |
 
+**Remediation 第二轮**（合入集成分支 `8df7178` 后复扫，2026-11-16 晚）：
+主工作区又出现 2 条烙入 `npc-qwen:latest` 的条目（其 `.env.local` 仍在，
+无前缀直跑产生），已删；留存的 `2a5b32ab` 只烙入 timeout/url、模型为空，
+是 `VITE_NPC_MODEL=` 前缀写法的正常产物，不删。删后复扫：烙入非空
+`VITE_NPC_MODEL` 的条目 **0 条**。
+
+**合入集成分支后**（`8df7178`，85 文件 / 1547）：`npm test` 与
+`VITE_NPC_MODEL= npx vitest run` 均 **85 文件 / 1547 全绿**，tsc 干净。
+
 ### 操作规则
 
 - **在带 `.env.local` 的 worktree 里，单元测试一律 `npm test`**；裸
@@ -163,6 +172,24 @@ trace viewer 完整复盘；丢的只是连续录帧（对断言游戏状态的�
 > 假失败（截图显示菜单、wake 截图显示游戏正常，据此定位到 reload）。
 > **e2e 跑着的时候别动工作区里的 `.env*` 文件。**
 
+### teardown 病态的两个独立成因（AG-47 + AG-41/AG-44，不要混为一谈）
+
+1. **screencast 全程录帧（本仓库 config 的默认行为，AG-47 定位）**：
+   字符串 `trace: 'retain-on-failure'` 继承 `screenshots: true` → 协议层
+   screencast。**不碰 page.route 的长 spec 也中招**（journey 即此），修法是
+   config 层关 screencast（上面的对象形式）。
+2. **`page.route` + trace 录制相互等待（AG-41 / AG-44 定位）**：在这台 Phaser
+   页面上，`page.route` 走 Playwright 网络层，与 trace 的网络录制相互等待，
+   每个测试的 teardown 挂死 120s（测试体 8s 就全过）。AG-44 实测：两个 e2e
+   全跑完单跑也要 90–130s，全绿时只写 1KB 的 `.last-run.json`——**不是 trace
+   体积，是这个组合本身**。
+
+**防御规定（已写入 `playwright.config.ts` use 块注释）**：spec 需要 mock 网络时，
+用 `page.addInitScript` 装**页内 fetch 桩**，**禁止用 `page.route`**。页内桩完全
+不碰 Playwright 网络层，trace 开或关都确定性通过。范例与完整理由：
+`e2e/spark.spec.ts` 顶部注释（AG-41 的原文）。Playwright 未来若修复该死锁，
+此规定可复议——在此之前桩版无外部依赖、严格更稳。
+
 ### 全量 e2e 回归（2026-11-16，修复后配置）
 
 33 个 spec / 123 个测试全部跑过（分批跑，每批独立起 dev server）：
@@ -180,7 +207,9 @@ trace viewer 完整复盘；丢的只是连续录帧（对断言游戏状态的�
      events+firstChapter+floor-environment 12/12、hudLayout+npc+npc-atoms 16/16）。
   2. 环境的 bulk-delete 守卫会拦截 Playwright 进程内的 artifact 清理
      （`SAFE_DELETE_BULK_CONFIRM_REQUIRED`，单进程删除满 50 次后触发），
-     长跑中段开始报 teardown 超时——单批短跑不受影响。
+     长跑中段开始报 teardown 超时——单批短跑不受影响。AG-44 同样连撞三次
+     （281 个文件），其规避手法是独立 `outputDir`（见
+     `e2e/playwright.ag44.config.ts` 注释）。
   长跑 e2e 建议分批（每批 3-5 个 spec），或接受 CI 的 `--workers=1 --retries=1`
   语义（continue-on-error 的既定决策见 docs/qa/ENV_NOTES.md §3）。
 

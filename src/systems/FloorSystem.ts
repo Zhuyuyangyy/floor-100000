@@ -1,5 +1,4 @@
 import {
-  DOWN_EXIT_X,
   ENTRY_X,
   INTERACT_DISTANCE,
   PLAYER_ACCELERATION,
@@ -104,8 +103,11 @@ export function stairTraversalFor(state: GameState, direction: 1 | -1): StairTra
     to,
     style,
     bendX: stairBendFor(direction, style),
-    startX: direction === 1 ? UP_EXIT_X : DOWN_EXIT_X,
-    endX: direction === 1 ? UP_EXIT_X : DOWN_EXIT_X,
+    // 下楼口在 downExitXFor（tier2=1560，tier3+ 更宽），不是常量 DOWN_EXIT_X
+    // （1240，tier1 的值）。用常量时宽楼层按下楼 E，角色先横跳 320px 才上梯，
+    // 画（梯子在 1560）与爬（路径起于 1240）脱节。楼梯从不跨段，段内同层宽。
+    startX: direction === 1 ? UP_EXIT_X : downExitXFor(state.currentFloor),
+    endX: direction === 1 ? UP_EXIT_X : downExitXFor(state.currentFloor),
     startY: STAIR_START_Y,
     endY: STAIR_START_Y + (direction === 1 ? -STAIR_RISE : STAIR_RISE),
     durationMs: STAIR_TRAVEL_MS,

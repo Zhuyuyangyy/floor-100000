@@ -118,9 +118,18 @@ async function walkToLift(page: Page): Promise<void> {
 }
 
 async function walkToDownExit(page: Page): Promise<void> {
-  // 下楼口 x=1240（reach 44）。必须先走出电梯 reach（1165+30=1195），否则 E
-  // 会去乘电梯；x>1200 之后直到 1272 都落在下楼窗口内。
-  await walkUntil(page, 'ArrowRight', 1200, true);
+  // 下楼口 = 本层右端 - 40（downExitXFor），随楼层宽度变：tier1 是 1240，但
+  // tier5（50010，8 房间）是 2520——本用例从 50010 出发，硬编码 1200 会停在
+  // 电梯与下楼口之间的空地上，脚注既不是电梯也不是下楼（基线即红的根因之一，
+  // 与 AG-53 的 stairTraversalFor 下行起点修复同源）。从场景读真实下楼口
+  // （GameScene.downExit），reach 44，走到口内 20px。
+  const downX = await page.evaluate(() => {
+    const g = (window.__PHASER_GAME__ as unknown as { scene: { getScene: (k: string) => { downExit?: number } | null } }).scene.getScene('Game');
+    return g?.downExit ?? 1240;
+  });
+  // 必须先走出电梯 reach（1165+30=1195），否则 E 会去乘电梯；宽楼层电梯远在
+  // 左端，走进下楼窗（downX-44 .. downX）即停。
+  await walkUntil(page, 'ArrowRight', Math.max(1200, downX - 20), true);
 }
 
 /** Press E and wait for exactly one floor of climb, retrying a dropped press. */

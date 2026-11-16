@@ -1,5 +1,4 @@
 import {
-  DOWN_EXIT_X,
   ENTRY_X,
   INTERACT_DISTANCE,
   PLAYER_ACCELERATION,
@@ -104,8 +103,13 @@ export function stairTraversalFor(state: GameState, direction: 1 | -1): StairTra
     to,
     style,
     bendX: stairBendFor(direction, style),
-    startX: direction === 1 ? UP_EXIT_X : DOWN_EXIT_X,
-    endX: direction === 1 ? UP_EXIT_X : DOWN_EXIT_X,
+    // AG-53 诊断（stairNavigation「下行 50010→50009」基线即红的一根杠杆）：
+    // 下行起止点原来用常量 DOWN_EXIT_X(1240)，而宽楼层的下楼口在
+    // downExitXFor(floor)（tier2=1560、tier3+ 更宽）——宽楼层按下楼 E，
+    // 角色先横跳几百 px 才开爬，画（梯口）与爬（起点）脱节。上行侧本来就是
+    // UP_EXIT_X（不随楼层宽窄变），下行侧要按楼层取。
+    startX: direction === 1 ? UP_EXIT_X : downExitXFor(state.currentFloor),
+    endX: direction === 1 ? UP_EXIT_X : downExitXFor(state.currentFloor),
     startY: STAIR_START_Y,
     endY: STAIR_START_Y + (direction === 1 ? -STAIR_RISE : STAIR_RISE),
     durationMs: STAIR_TRAVEL_MS,

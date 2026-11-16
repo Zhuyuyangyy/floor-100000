@@ -120,8 +120,8 @@ interface ClimbSample {
   screenBottom: number;
 }
 
-async function sampleClimb(page: Page): Promise<ClimbSample[]> {
-  return page.evaluate(async () => {
+async function sampleClimb(page: Page, fromFloor = 1): Promise<ClimbSample[]> {
+  return page.evaluate(async (startFloor) => {
     const g = window.__PHASER_GAME__ as unknown as {
       scene: {
         getScene: (k: string) => {
@@ -152,10 +152,10 @@ async function sampleClimb(page: Page): Promise<ClimbSample[]> {
         screenTop: (b.y - (cam?.scrollY ?? 0)) * zoom,
         screenBottom: (b.y + b.height - (cam?.scrollY ?? 0)) * zoom,
       });
-      if (s.currentFloor !== 1) break; // 落地即停
+      if (s.currentFloor !== startFloor) break; // 落地即停
     }
     return out;
-  });
+  }, fromFloor);
 }
 
 test.describe('AG-52 容器名签 + 只画本层', () => {
@@ -245,6 +245,57 @@ test.describe('AG-52 容器名签 + 只画本层', () => {
     if (EXPECT_AFTER) {
       expect(landed.neighbourLayers, '落地后收回本层').toBe(0);
       expect(landed.boundHeight, '落地后 bounds 仍是一层').toBeLessThanOrEqual(220);
+    }
+
+    expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+  });
+
+  test('下行爬梯 2→1：目标层在脚下、落地收回本层', async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+
+    await startGame(page, 42);
+    // 先上到 2 层（与上一例同一条路），再走下楼口。
+    await setX(page, 40);
+    await page.keyboard.press('E');
+    await expect
+      .poll(async () => (await probeScene(page)).floor, { timeout: 10_000 })
+      .toBe(2);
+    await setX(page, 1240); // 2 层下楼口（floorWidthFor(2)-40）
+
+    const sampling = sampleClimb(page, 2);
+    await page.keyboard.press('E');
+    const samples = await sampling;
+
+    const climbing = samples.filter((s) => s.floor === 2);
+    const worstTop = Math.min(...climbing.map((s) => s.screenTop));
+    const worstBottom = Math.max(...climbing.map((s) => s.screenBottom));
+    const climbNeighbours = Math.max(...climbing.map((s) => s.neighbourLayers));
+    console.log(
+      `[ag52 climb 2->1] samples=${climbing.length} ` +
+        `neighbourLayers(max)=${climbNeighbours} worstScreenTop=${worstTop.toFixed(1)} worstScreenBottom=${worstBottom.toFixed(1)} viewport=[0, ${VIEW_H}]`,
+    );
+    await testInfo.attach('climb-down-samples', { body: JSON.stringify(samples, null, 2), contentType: 'application/json' });
+
+    if (EXPECT_AFTER) {
+      expect(climbing.length, '下行攀爬被逐帧采样').toBeGreaterThan(20);
+      expect(climbNeighbours, '下行同样要画目标层').toBeGreaterThanOrEqual(1);
+      expect(worstTop, '头顶不出视口顶边').toBeGreaterThanOrEqual(0);
+      expect(worstBottom, '脚底不出视口底边').toBeLessThanOrEqual(VIEW_H);
+    }
+
+    await expect
+      .poll(async () => (await probeScene(page)).floor, { timeout: 10_000 })
+      .toBe(1);
+    await page.waitForTimeout(500); // 等落地缓动收回一层
+    const landed = await probeScene(page);
+    console.log(`[ag52 landed-1F] ${JSON.stringify(landed)}`);
+    if (EXPECT_AFTER) {
+      expect(landed.neighbourLayers, '落回 1F 也只画本层').toBe(0);
+      expect(landed.boundHeight, 'bounds 仍是一层').toBeLessThanOrEqual(220);
+      // 相机回到站立位：角色居中（脚在 PLAYER_FEET_Y=160 → 屏幕 360）。
+      expect(landed.playerScreenBottom).toBeCloseTo(360, 0);
     }
 
     expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);

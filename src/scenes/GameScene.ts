@@ -2364,6 +2364,15 @@ export class GameScene extends Phaser.Scene {
     // furniture the player uses and nothing that makes it a shared space.
     this.drawDormBeds(DORM_FRONT_BEDS, DORM_BACK_BEDS);
 
+    // Floor 1 is the player's own room, and it is in the same tower as the other
+    // 100000 floors: it sleeps as many as the rest of the tier. Drawn after the
+    // beds so the people in front read as lying among them.
+    const crowd: Phaser.GameObjects.GameObject[] = [];
+    for (let r = 0; r < ROOM_COUNT; r++) {
+      drawCrowd(this, crowd, { roomX: r * ROOM_WIDTH, floorY: FLOOR_HEIGHT - 60, floor: STARTING_FLOOR, room: r });
+    }
+    this.floorObjects.push(...crowd);
+
     // OVERHAUL Art Pass 2: ceiling shadow, baseboard seam, floor gradient and
     // reflections under the lights — the four cues that make a flat side view
     // read as a room with depth.

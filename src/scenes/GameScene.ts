@@ -115,7 +115,7 @@ import {
   drawStatBar,
   fontLineBox,
 } from '../render/uiKit';
-import { portraitKey } from '../render/artpack';
+import { characterKeyForNpc, portraitKey } from '../render/artpack';
 import { framedButton, hitRect } from '../render/pointer';
 import { drawHazardStripe, drawHudIcon, drawHudPlate, type HudIconName } from '../render/hudSkin';
 import {
@@ -871,13 +871,18 @@ export class GameScene extends Phaser.Scene {
       this.drawBed();
       this.drawWorkbench();
     }
-    if (floor === NPC_FLOOR) {
-      this.drawNpcs();
-      // The neighbours' dorm gets the same two rows as the player's own floor.
-      // It was the only floor with people in it and no furniture for them:
-      // two NPCs standing in an empty corridor. The beds go in after the NPCs
-      // so the walk sheets (ACTOR_DEPTH) keep drawing over the mattress.
-      this.drawDormBeds(NEIGHBOUR_FRONT_BEDS, DORM_BACK_BEDS);
+    // AG-46：楼层过滤从 NPC_FLOOR 常量改成 npcsOnFloor(floor)——首章五位
+    // 发布者（10/110/1010/10010 层）因此真的会出现在自己层上。2 层 additionally
+    // 摆两排邻居宿舍的床（唯一"有人没家具"的楼层），这段与 NPC 无关，保持原样。
+    if (npcsOnFloor(floor).length > 0) {
+      this.drawNpcs(floor);
+      if (floor === NPC_FLOOR) {
+        // The neighbours' dorm gets the same two rows as the player's own floor.
+        // It was the only floor with people in it and no furniture for them:
+        // two NPCs standing in an empty corridor. The beds go in after the NPCs
+        // so the walk sheets (ACTOR_DEPTH) keep drawing over the mattress.
+        this.drawDormBeds(NEIGHBOUR_FRONT_BEDS, DORM_BACK_BEDS);
+      }
     }
     // OVERHAUL: the floor's question marks go up last, above the room.
     this.buildEncounterSpots();
@@ -4128,9 +4133,13 @@ export class GameScene extends Phaser.Scene {
   // 96px 的居民不行——y=132 旧位置压在角色身上），depth 105/106（HUD 上下文
   // 带是 depth 100 的 0.94 alpha 面，低于它会被吞），距离比例渐隐
   // （贴近角色时不挡脸，信息交给底栏的「按 E 对话」）。
-  private drawNpcs(): void {
-    for (const npc of npcsOnFloor(NPC_FLOOR)) {
-      const who = npc.id === 'alin' ? 'npc_alin' : 'npc_xiaozhou';
+  private drawNpcs(floor: number): void {
+    for (const npc of npcsOnFloor(floor)) {
+      // AG-46：id -> 贴图 key 的翻译收在 artpack.characterKeyForNpc（加 NPC
+      // 只改那一处）。返回 null = 没有贴图的实体（core_terminal，active:false），
+      // 跳过不渲染——宁可少画一个，不要摆个 __MISSING 绿框在 100000 层。
+      const who = characterKeyForNpc(npc.id);
+      if (!who) continue;
       const sprite = this.add
         .sprite(npc.x, PLAYER_FEET_Y, walkSheetKey(who))
         .setOrigin(0.5, 1)
@@ -4178,8 +4187,10 @@ export class GameScene extends Phaser.Scene {
    * 只在 NPC 层调用；游戏时钟冻结时（面板打开）位置本来就不变。
    */
   private syncNpcs(state: GameState): void {
-    if (state.currentFloor !== NPC_FLOOR) return;
-    for (const npc of npcsOnFloor(NPC_FLOOR)) {
+    // AG-46：从"只在 2 层同步"改成按当前楼层——发布者层的居民也要按日程走。
+    const npcs = npcsOnFloor(state.currentFloor);
+    if (npcs.length === 0) return;
+    for (const npc of npcs) {
       const rec = this.npcObjs.get(npc.id);
       if (!rec) continue;
       const view = this.npcView(state, npc);
@@ -4197,8 +4208,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private nearestNpc(state: GameState): NpcDef | null {
-    if (state.currentFloor !== NPC_FLOOR) return null;
-    for (const npc of npcsOnFloor(NPC_FLOOR)) {
+    // AG-46：按当前楼层取可对话实体——10/110/1010/10010 层的发布者按 E 有话。
+    for (const npc of npcsOnFloor(state.currentFloor)) {
       // AG-11: 用自主视图的 x，不是 npc.x 静态坐标——居民会走，能对话的
       // 必须是眼里看见的那个位置。
       if (Math.abs(this.npcView(state, npc).x - state.player.x) <= INTERACT_DISTANCE) return npc;
@@ -4922,7 +4933,8 @@ export class GameScene extends Phaser.Scene {
     // so clicking her sprite walked the player over and then did nothing at all
     // — the click never armed interact, and only E worked. Containers and beds
     // are static, which is why they were fine.
-    if (state.currentFloor === NPC_FLOOR && npcsOnFloor(NPC_FLOOR).some((n) => near(this.npcView(state, n).x))) return true;
+    // AG-46：楼层常量换成当前楼层——发布者身边的"按 E 对话"提示不再缺席。
+    if (npcsOnFloor(state.currentFloor).some((n) => near(this.npcView(state, n).x))) return true;
     if (this.floorView.containers.some((c) => c.items.length > 0 && near(c.x))) return true;
     for (const marker of this.spotMarkers.values()) if (near(marker.x)) return true;
     if (near(UP_EXIT_X) || near(DOWN_EXIT_X)) return true;

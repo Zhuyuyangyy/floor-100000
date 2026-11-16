@@ -168,6 +168,18 @@ const LOCKED = [
   'artpack/char-alin.png',
   'artpack/char-xiaozhou.png',
   'artpack/char-wanderer.png',
+  // AG-46：首章四位发布者（data/npcs.ts）的静帧与头像。静帧是 walkcycle
+  // 同款 drawPose(idlePose(0)) 烘出后过 quantize-sheet.mjs（8-10 色、全在
+  // 板内、脚底 95 行）；头像是现有头像换主色派生（recolor-portrait.mjs，
+  // 8-12 色、二值 alpha）。推导链见 docs/assets/AG-46_PUBLISHER_ART.md。
+  'artpack/char-recruiter.png',
+  'artpack/char-blackmarket.png',
+  'artpack/char-lab_clerk.png',
+  'artpack/char-banquet_staff.png',
+  'ui/portraits/portrait-recruiter.png',
+  'ui/portraits/portrait-blackmarket.png',
+  'ui/portraits/portrait-lab_clerk.png',
+  'ui/portraits/portrait-banquet_staff.png',
 ];
 const STAGED = {
   'artpack/char-zhouhe.png': 'CHARACTER_FILES 单帧，待 artpack.ts 接线（walkcycle.ts COLORS 属 AG-09）',

@@ -1,9 +1,9 @@
 {
   "palette": 16,
   "summary": {
-    "files": 196,
-    "png": 180,
-    "locked": 91,
+    "files": 204,
+    "png": 188,
+    "locked": 99,
     "open": 84,
     "staged": 7,
     "aux": 14,
@@ -88,6 +88,66 @@
       "note": "16 色门禁适用"
     },
     {
+      "path": "artpack/char-banquet_staff.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "CHARACTER_FILES[npc_banquet_staff]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 8,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 4656,
+      "semiAlphaPx": 0,
+      "bytes": 517,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/char-blackmarket.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "CHARACTER_FILES[npc_blackmarket]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 9,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 4702,
+      "semiAlphaPx": 0,
+      "bytes": 551,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/char-lab_clerk.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "CHARACTER_FILES[npc_lab_clerk]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 10,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 4686,
+      "semiAlphaPx": 0,
+      "bytes": 551,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
       "path": "artpack/char-player-sheet.png",
       "refs": [],
       "width": 1280,
@@ -119,6 +179,26 @@
       "transparentPx": 3346,
       "semiAlphaPx": 0,
       "bytes": 1473,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "artpack/char-recruiter.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "CHARACTER_FILES[npc_recruiter]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 10,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 4582,
+      "semiAlphaPx": 0,
+      "bytes": 548,
       "class": "locked",
       "note": "16 色门禁适用"
     },
@@ -3594,6 +3674,66 @@
       "note": "16 色门禁适用"
     },
     {
+      "path": "ui/portraits/portrait-banquet_staff.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "PORTRAIT_FILES[npc_banquet_staff]"
+        }
+      ],
+      "width": 96,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 8,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 5416,
+      "semiAlphaPx": 0,
+      "bytes": 1824,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "ui/portraits/portrait-blackmarket.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "PORTRAIT_FILES[npc_blackmarket]"
+        }
+      ],
+      "width": 96,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 11,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 4646,
+      "semiAlphaPx": 0,
+      "bytes": 2351,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "ui/portraits/portrait-lab_clerk.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "PORTRAIT_FILES[npc_lab_clerk]"
+        }
+      ],
+      "width": 96,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 12,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 4655,
+      "semiAlphaPx": 0,
+      "bytes": 2538,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
       "path": "ui/portraits/portrait-player.png",
       "refs": [
         {
@@ -3610,6 +3750,26 @@
       "transparentPx": 4677,
       "semiAlphaPx": 0,
       "bytes": 3744,
+      "class": "locked",
+      "note": "16 色门禁适用"
+    },
+    {
+      "path": "ui/portraits/portrait-recruiter.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "PORTRAIT_FILES[npc_recruiter]"
+        }
+      ],
+      "width": 96,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 11,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 4677,
+      "semiAlphaPx": 0,
+      "bytes": 2152,
       "class": "locked",
       "note": "16 色门禁适用"
     },

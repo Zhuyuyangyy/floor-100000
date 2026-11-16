@@ -509,6 +509,84 @@ export const WANDERER_COLORS: CharacterColors = {
   packDark: [0x14, 0x0a, 0x0e],
 };
 
+// ── 首章四位发布者（AG-46）────────────────────────────────────────────
+//
+// 数据在 src/data/npcs.ts（AG-13）：recruiter@10、blackmarket@110、
+// lab_clerk@1010、banquet_staff@10010，core_terminal@100000 是
+// active:false（该段未做），所以这里也只有四位。
+//
+// 不新画美术：与 build-characters.mjs 当年"一个轮廓四种油漆"同手法——
+// 同一副骨架、同一套步态、同一条脚底基线（FOOT_GROUND=94，靴子占到
+// 95 行），只换三色。每件主色都避开所在楼层墙纸的同族值，免得人物
+// 融进墙里（10 层深蓝灰墙→琥珀、110 层蓝灰墙→深棕、1010 层深墙→
+// 亮青、10010 层棕色墙→近白）；名签与轮廓光（outlinePass 的 rim
+// light）是第二层兜底。
+export const RECRUITER_COLORS: CharacterColors = {
+  ...PLAYER_COLORS,
+  // 招工员：10 层货梯口的守门人。厚实，琥珀色工服——slum 深蓝灰墙上
+  // 唯一暖的点，认脸不认牌子那位。
+  bulk: 1.12,
+  cloth: rgb(PALETTE.light),
+  clothDark: rgb(PALETTE.lightDeep),
+  clothLight: rgb(PALETTE.lightHigh),
+  trouser: rgb(PALETTE.stone),
+  trouserDark: rgb(PALETTE.shadow),
+  boot: rgb(PALETTE.shadow),
+  hair: rgb(PALETTE.ink),
+  pack: rgb(PALETTE.stone),
+  packDark: rgb(PALETTE.shadow),
+};
+
+export const BLACKMARKET_COLORS: CharacterColors = {
+  ...PLAYER_COLORS,
+  // 黑市贩子：110 层的流动摊主。瘦，深棕夹克——dorm 蓝灰墙上的暖点，
+  // 比招工员的琥珀暗一档，隔着十条街也认得出不是同一个人。
+  bulk: 0.9,
+  cloth: rgb(PALETTE.lightDeep),
+  clothDark: rgb(PALETTE.shadow),
+  clothLight: rgb(PALETTE.light),
+  trouser: rgb(PALETTE.stone),
+  trouserDark: rgb(PALETTE.shadow),
+  boot: rgb(PALETTE.ink),
+  hair: rgb(PALETTE.shadow),
+  pack: rgb(PALETTE.lightDeep),
+  packDark: rgb(PALETTE.shadow),
+};
+
+export const LAB_CLERK_COLORS: CharacterColors = {
+  ...PLAYER_COLORS,
+  // 实验室文员：1010 层门禁室，archetype=ally（STORY.md §5 的
+  // 「ALLY→视分支」）。青绿制服与玩家同族但浅一档——ally 的视觉暗示，
+  // industry 深墙上最亮的不是灯是她。
+  bulk: 0.95,
+  cloth: rgb(PALETTE.clothLight),
+  clothDark: rgb(PALETTE.cloth),
+  clothLight: rgb(PALETTE.clothHigh),
+  trouser: rgb(PALETTE.stoneLight),
+  trouserDark: rgb(PALETTE.stone),
+  boot: rgb(PALETTE.shadow),
+  hair: rgb(PALETTE.shadow),
+  pack: rgb(PALETTE.cloth),
+  packDark: rgb(PALETTE.clothDeep),
+};
+
+export const BANQUET_STAFF_COLORS: CharacterColors = {
+  ...PLAYER_COLORS,
+  // 宴席侍者：10010 层宴会厅。近白衬衫（lightHot 已是板内最亮，没有
+  // 更亮的 highlight 可给——白衬衫本来就没有），dust 作暗部。commercial
+  // 的棕色墙上唯一的浅色。
+  bulk: 1,
+  cloth: rgb(PALETTE.lightHot),
+  clothDark: rgb(PALETTE.dust),
+  clothLight: rgb(PALETTE.lightHot),
+  trouser: rgb(PALETTE.shadow),
+  trouserDark: rgb(PALETTE.ink),
+  boot: rgb(PALETTE.ink),
+  hair: rgb(PALETTE.ink),
+  pack: rgb(PALETTE.dust),
+  packDark: rgb(PALETTE.stone),
+};
+
 // ── pixel canvas ──────────────────────────────────────────────────────────
 export interface PixelCanvas {
   w: number;
@@ -967,7 +1045,21 @@ export function pickupAnimKey(who: CharacterKey): string {
   return `pickup-${who}`;
 }
 
-export const WALK_CHARACTERS: readonly CharacterKey[] = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer', 'npc_zhouhe'];
+// AG-46：首章四位发布者进烘焙名单。bakeWalkSheets 按这份名单烘程序化
+// sheet（src/assets/characters/ 里没有它们的 PNG 覆盖时走这条），所以
+// WALK_CHARACTERS 一行就把四位接进了游戏——贴图文件（静帧/头像）另见
+// artpack.ts 的 CHARACTER_FILES / PORTRAIT_FILES。
+export const WALK_CHARACTERS: readonly CharacterKey[] = [
+  'player',
+  'npc_alin',
+  'npc_xiaozhou',
+  'wanderer',
+  'npc_zhouhe',
+  'npc_recruiter',
+  'npc_blackmarket',
+  'npc_lab_clerk',
+  'npc_banquet_staff',
+];
 
 // Frames per second for the walk playback. The scene scales timeScale by the
 // player's actual speed, so this is the rate at top speed — 4Hz matches the
@@ -1036,6 +1128,13 @@ const COLORS: Record<CharacterKey, CharacterColors> = {
   // 玩家配色让接线跑起来；bakeWalkSheets 会为他烘一张程序化 sheet， artpack
   // 的 char-zhouhe-sheet.png 落位后由 BootScene 的 CUSTOM_CHARACTER_SHEETS 覆盖。
   npc_zhouhe: PLAYER_COLORS,
+  // 首章四位发布者（AG-46）：数据在 data/npcs.ts，配色见上面的
+  // RECRUITER/BLACKMARKET/LAB_CLERK/BANQUET_STAFF_COLORS。core_terminal
+  // 缺席——active:false，100000 段未做，不烘也不画。
+  npc_recruiter: RECRUITER_COLORS,
+  npc_blackmarket: BLACKMARKET_COLORS,
+  npc_lab_clerk: LAB_CLERK_COLORS,
+  npc_banquet_staff: BANQUET_STAFF_COLORS,
 };
 
 // Registers the walk, idle and the W5 one-shot animations once. Guarded because

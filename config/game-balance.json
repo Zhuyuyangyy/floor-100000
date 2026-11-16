@@ -17,6 +17,13 @@
   "dwellPressure": {
     "rollIntervalGameMinutes": 60
   },
+  "movement": {
+    "_comment": "AG-50 点击操控线：鼠标/触屏点一下走、快速点两下跑；键盘 Shift+A/D（或 Shift+点击）同样跑。数值全部走这里，GameScene 不硬编码。",
+    "doubleClickWindowMs": 300,
+    "doubleClickMaxDistancePx": 40,
+    "runSpeedMultiplier": 2,
+    "runAnimTimeScale": 1.6
+  },
   "warmthSources": {
     "_comment": "AG-25 TickHeaters：每层热源（床/蜡烛/火把/火盆）。x 世界像素、radius 供暖半径、power 中心回温点数/游戏小时。零新增美术——candle/torch/brazier 的照明位置就是热源位置。",
     "1": [

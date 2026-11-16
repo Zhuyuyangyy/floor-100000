@@ -1,5 +1,6 @@
 import type { FurnitureKey } from './furniture';
 import type { ItemId } from '../core/gameTypes';
+import type { NpcId } from '../data/npcs';
 
 // Which file in public/assets/artpack holds each item's icon.
 //
@@ -36,7 +37,20 @@ export const ITEM_ICON_FILES: Record<ItemId, string> = {
 // Explicit rather than derived: the game asks for these four keys by literal
 // ('player', 'wanderer') or by expression (npc_alin / npc_xiaozhou), and a
 // missing entry has to be a compile error rather than a green placeholder box.
-export const CHARACTER_KEYS = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer', 'npc_zhouhe'] as const;
+// AG-46：首章四位发布者（data/npcs.ts，recruiter@10 / blackmarket@110 /
+// lab_clerk@1010 / banquet_staff@10010）。core_terminal 缺席——active:false，
+// 100000 段未做，没有贴图也不渲染（characterKeyForNpc 对它返回 null）。
+export const CHARACTER_KEYS = [
+  'player',
+  'npc_alin',
+  'npc_xiaozhou',
+  'wanderer',
+  'npc_zhouhe',
+  'npc_recruiter',
+  'npc_blackmarket',
+  'npc_lab_clerk',
+  'npc_banquet_staff',
+] as const;
 
 export type CharacterKey = (typeof CHARACTER_KEYS)[number];
 
@@ -46,6 +60,13 @@ export const CHARACTER_FILES: Record<CharacterKey, string> = {
   npc_xiaozhou: 'char-xiaozhou.png',
   wanderer: 'char-wanderer.png',
   npc_zhouhe: 'char-zhouhe.png',
+  // AG-46 四位发布者的 64x96 静帧：idle 首帧经 walkcycle 同款 drawPose
+  // 烘出，再走 tools/quantize-sheet.mjs 的 16 色吸附（推导链见
+  // docs/assets/AG-46_PUBLISHER_ART.md）。
+  npc_recruiter: 'char-recruiter.png',
+  npc_blackmarket: 'char-blackmarket.png',
+  npc_lab_clerk: 'char-lab_clerk.png',
+  npc_banquet_staff: 'char-banquet_staff.png',
 };
 
 // 96x96 dialogue busts, one per character, delivered 2026-11-14 as
@@ -64,11 +85,43 @@ export const PORTRAIT_FILES: Record<CharacterKey, string> = {
   npc_xiaozhou: 'portrait-xiaozhou.png',
   wanderer: 'portrait-wanderer.png',
   npc_zhouhe: 'portrait-zhouhe.png',
+  // AG-46 四位发布者的 96x96 对话头像：现有头像换主色派生（alin→招工员、
+  // player→黑市贩子、zhouhe→实验室文员、xiaozhou→宴席侍者），结构一像素
+  // 未动，只换服装族——与 AG-07 给头像换色同手法。
+  npc_recruiter: 'portrait-recruiter.png',
+  npc_blackmarket: 'portrait-blackmarket.png',
+  npc_lab_clerk: 'portrait-lab_clerk.png',
+  npc_banquet_staff: 'portrait-banquet_staff.png',
 };
 
 /** `npc_alin` -> `portrait-alin`, so both the roster ids and NpcIds work. */
 export function portraitKey(character: CharacterKey): string {
   return `portrait-${character.replace(/^npc_/, '')}`;
+}
+
+/**
+ * NPC id -> 行走图 key（AG-46）。场景按 npcsOnFloor(floor) 取当层实体，
+ * 每个实体经这里翻成 CHARACTER_KEYS 里的一个；没有贴图的实体返回 null，
+ * drawNpcs 跳过它——core_terminal（active:false，100000 段未做）走的就是
+ * 这条。加新 NPC 时这里少一行，比在 GameScene 里散落三元表达式安全。
+ */
+export function characterKeyForNpc(id: NpcId): CharacterKey | null {
+  switch (id) {
+    case 'alin':
+      return 'npc_alin';
+    case 'xiaozhou':
+      return 'npc_xiaozhou';
+    case 'recruiter':
+      return 'npc_recruiter';
+    case 'blackmarket':
+      return 'npc_blackmarket';
+    case 'lab_clerk':
+      return 'npc_lab_clerk';
+    case 'banquet_staff':
+      return 'npc_banquet_staff';
+    default:
+      return null;
+  }
 }
 
 // Texture keys for the rest of the pack, so a rename has one home.

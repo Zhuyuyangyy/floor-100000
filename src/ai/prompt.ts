@@ -7,6 +7,7 @@
 
 import type { ItemId } from '../core/gameTypes';
 import { ITEMS } from '../data/items';
+import { ARCHETYPES } from '../data/npcPersonalities';
 import type { NpcActionProposal, NpcObservation } from './types';
 
 const ACTION_KINDS = ['dialogue', 'trade', 'gift', 'refuse', 'attack', 'flee'] as const;
@@ -40,12 +41,20 @@ function traitText(obs: NpcObservation): string {
 
 /** 系统提示：人格 + 铁律。人格数据决定语气，铁律决定边界。 */
 export function buildSystemPrompt(obs: NpcObservation): string {
+  // The model writes as whoever it is told it is. Given only `alin` it invented
+  // "我是alin"; given 「阿林（维修工）」 plus a register it speaks as her. Both
+  // halves matter: the name fixes who, the voice fixes how.
+  const who = obs.npcName
+    ? `${obs.npcName}${obs.npcTitle ? `（${obs.npcTitle}）` : ''}（id: ${obs.npcId}）`
+    : obs.npcId;
+  const voice = ARCHETYPES[obs.archetype]?.voice;
   return [
-    `你是《第100000层：末日宿舍》中的 NPC「${obs.npcId}」，原型 ${obs.archetype}。`,
+    `你是《第100000层：末日宿舍》中的 NPC「${who}」，原型 ${obs.archetype}。`,
+    voice ? `说话方式：${voice}` : '',
     `人格：${traitText(obs)}。当前目标：${obs.goal}。当前情绪：${obs.mood.toFixed(2)}。与各方关系：${fmtRelationship(obs)}。`,
     '铁律：你只能从「可用行动」中提议一个；不得声称拥有你没有的物品；不得修改或提及任何游戏数值；不得跳出角色讨论你是 AI。',
     '只输出一个 JSON 对象，不要 markdown 代码块，不要任何解释。',
-  ].join('\n');
+  ].filter((line) => line.length > 0).join('\n');
 }
 
 /** 用户提示：情境 + 输出契约。 */

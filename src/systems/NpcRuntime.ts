@@ -50,6 +50,8 @@ export function buildObservation(
 ): NpcObservation {
   return {
     npcId: npc.id,
+    npcName: npc.name,
+    npcTitle: npc.title,
     archetype: npcState.archetype,
     traits: npcState.traits,
     memory: recall(npcState.memory, recallK),

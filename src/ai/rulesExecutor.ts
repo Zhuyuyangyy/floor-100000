@@ -30,6 +30,10 @@ export interface NpcEventFact {
 /** NPC 在执行器眼中的最小事实集，由调用方从 data/npcs.ts 等处填充。 */
 export interface NpcFact {
   id: string;
+  /** 玩家看到的名字与职称。执行器不读它们，只用于 prompt —— 只给 id 的话
+   *  模型会照着 id 自称（实测说出过「我是alin」）。 */
+  name?: string;
+  title?: string;
   archetype: NpcArchetype;
   floor: number;
   x: number;

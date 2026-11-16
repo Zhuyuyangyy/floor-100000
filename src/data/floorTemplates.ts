@@ -2591,7 +2591,9 @@ function bunksFor(floorNumber: number, taken: readonly number[]): Array<{ x: num
   if (!DENSE_TIERS.has(tierOfFloor(floorNumber))) return [];
   const out: Array<{ x: number; n: number }> = [];
   const width = roomCountFor(floorNumber) * 320;
-  const slots = Math.min(4, Math.floor(width / 320));
+  // Two, not four: with three authored containers a floor should end up with
+  // four or five things to open, not eight.
+  const slots = Math.min(2, Math.floor(width / 320));
   for (let i = 0; i < slots; i++) {
     const x = 300 + i * (width - 600) / Math.max(1, slots - 1 || 1);
     if (taken.some((t) => Math.abs(t - x) < 90)) continue;
@@ -2605,7 +2607,13 @@ export function generateFloor(worldSeed: number, floorNumber: number): Generated
   if (!template) {
     throw new Error(`no floor template for floor ${floorNumber}`);
   }
-  const containers: GeneratedContainer[] = template.containers.map((c) => ({
+  // Fewer things to open per floor. A floor with eight containers turns the
+  // corridor into a checklist — walk, press E, walk, press E — and the art has
+  // already been cut back for the same reason. Three is the budget above tier 1;
+  // floors 1-10 are left alone because their contents are the pinned early-game
+  // basket (craftLoop / survivalBalance).
+  const authored = tierOfFloor(floorNumber) === 1 ? template.containers : template.containers.slice(0, 3);
+  const containers: GeneratedContainer[] = authored.map((c) => ({
     id: c.id,
     label: c.label,
     x: c.x,

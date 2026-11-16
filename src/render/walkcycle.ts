@@ -1005,6 +1005,12 @@ export function idleAnimKey(who: CharacterKey): string {
   return `idle-${who}`;
 }
 
+// AG-55：跑。命名与 walk-/idle- 同构，GameScene 直接 import。帧与 walk 相同
+// （见 createCharacterAnimations 里的注册），区别只有帧率。
+export function runAnimKey(who: CharacterKey): string {
+  return `run-${who}`;
+}
+
 // W5 新增的三个一次性动作 key。命名与 walk-/idle- 同构，GameScene 直接 import。
 export function attackAnimKey(who: CharacterKey): string {
   return `attack-${who}`;
@@ -1069,6 +1075,23 @@ export const SEARCH_FRAME_RATE = 6;
 // 拾取 8fps ⇒ 2 帧 250ms，和攻击同长，因为是"伸手-拿到"的一个动作。
 export const DIE_FRAME_RATE = 6;
 export const PICKUP_FRAME_RATE = 8;
+
+// AG-55：跑。用户 2026-11-16 晚反馈「点两下应该是跑，不是有跑的 GIF 吗」。
+//
+// GIF 确实有——F:/new/floor100000_final_character_gifs_v1.zip 里三名角色各一份
+// run.gif（v3 透明背景跑步候选），runtime_trial_sheets/ 里还有 64×96 的试验
+// 图集。但它们对不上运行时契约（完整量化见 docs/plans/RUN_ANIM.md）：
+//   · GIF 画布 313×627~506×508、256 色，每角色帧数 6~8（v4 试验 9~12）不一；
+//   · 试验图集虽是 64×96/帧，却有 217~230 个颜色、与项目 15 色板零重合，
+//     脚底基线差 1px（94 vs 95），横向边界 [3,62] 对不上项目板的 [8,55]；
+//   · 交付包 README 原话：「仍不能直接替换……需要美术复核、统一缩放和基线」。
+// 所以在对齐素材过审之前，跑动画走路 C 派生：复用 walk 的帧（列 0..5），帧率
+// ×1.6。这是派生不是新素材——不新画一个像素、列号钉死不动（TOTAL_FRAMES
+// 仍是 20，walkcycle.test.ts 的断言原样绿）、不碰 16 色门禁（没有新贴图）。
+// 对齐素材就位后，只需把 createCharacterAnimations 里 run 段的 frames 换成
+// run 段列号，anim key 与调用方一字不用改。
+export const RUN_SPEED_MULTIPLIER = 1.6;
+export const RUN_FRAME_RATE = WALK_FRAME_RATE * RUN_SPEED_MULTIPLIER;
 
 // Bakes every character's frames into one horizontal sheet per character.
 //
@@ -1161,6 +1184,20 @@ export function createCharacterAnimations(scene: Phaser.Scene): void {
         key: walk,
         frames: scene.anims.generateFrameNumbers(sheet, { start: 0, end: WALK_FRAMES - 1 }),
         frameRate: WALK_FRAME_RATE,
+        repeat: -1,
+      });
+    }
+    // AG-55：跑动。帧与行走完全相同（同一批列 0..WALK_FRAMES-1），区别只有
+    // 帧率 ×1.6——步频上去即"跑"，观感上与走可区分，而 sheet 列号一字未动
+    // （TOTAL_FRAMES 仍是 20）。这是派生不是新素材：找到的 run GIF/试验图集
+    // 与运行时契约不对齐（色板/基线/帧数，见 docs/plans/RUN_ANIM.md），在美术
+    // 对齐过审前先顶上。对齐素材就位后只改这段的 frames，key 不变。
+    const run = runAnimKey(who);
+    if (!scene.anims.exists(run)) {
+      scene.anims.create({
+        key: run,
+        frames: scene.anims.generateFrameNumbers(sheet, { start: 0, end: WALK_FRAMES - 1 }),
+        frameRate: RUN_FRAME_RATE,
         repeat: -1,
       });
     }

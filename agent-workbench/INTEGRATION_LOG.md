@@ -463,3 +463,41 @@ trader 上抛 anims undefined，异常打断爬梯落地流程。三处修复 + 
 safe-delete 守卫现在会拦 Playwright 对 test-results 的清空（genie-trash
 ETIMEDOUT）——连跑第二个 spec 就挂，必须逐个 spec 跑 + 跑前 find -delete。
 比 AG-47 记录的更严了。
+
+## 第八轮完结（2026-11-17 凌晨）——用户试玩反馈六条全落地，6/6 合入
+
+**集成：91 测试文件 / 1666 测试全绿，tsc 干净，已推送（dcd297e）。**
+e2e 冒烟：stairNavigation 6/6、firstChapter 6/6、ag50-control 1/1、ag50-climb 1/1、
+ag51 3/3、ag52 3/3、gameplay 1/1。
+
+| Agent | 提交 | 交付 |
+|---|---|---|
+| AG-50 | 8bdc3b2+735db9e（二轮） | 双击跑（300ms/±40px/×2 速）、点击跑单、键盘 Shift 跑、爬梯卡顿根修（落地相机弹跳）、全角色跑动画接线、落地跳帧根修（climbEndScrollY） |
+| AG-51 | 489a75e+5d58102+3e4c8ea+cda0910 | 工作台点击开制作面板、床搜刮/撬棍拆解、名签隐形化、bunkObjs 键带层号 |
+| AG-52 | 832cdf6+267ad2f+271a422 | 容器名牌三档 alpha、只画本层、下行为主可见性、行商 onComplete 冻住定位 |
+| AG-53 | b037b31（+f75c394 丢失由总控代应用） | 2D 阶梯（Z 折返十级）+ 直梯（双轨+横档+竖井）、stairClimbPose 逐级步进曲线、帧时间无回归 |
+| AG-54 | cd9c945+18367a6 | 四联圆环 HUD（12 段/环心实时数值/低值变红），概念图穷尽搜索未找到、按现有语言自设 |
+| AG-55 | 20e891d | run-{who} 派生 anim（帧率×1.6）+ 9 角色全注册；GIF 搜索结论：zip 里真有但色板零重合接不了 |
+
+### 集成侧修的产品问题（本轮总控直接修）
+1. **行商 onComplete 冻住**（AG-52 定位）：换层时在飞 tween 完成后对已销毁 trader .play()，异常穿过 TweenManager 打断游戏循环，玩家冻住——stairNavigation「下行 50010→50009」基线即红的真根因之一
+2. **电梯被容器抢班**（两处）：hint 链与 onInteract 的 nearLift 都排容器后面，中产区多层容器（x=1140/1160）压在电梯窗（1135..1195）上——站在电梯口脚注读「按 E 打开 安保柜」、按 E 开箱子
+3. **宽楼层下楼口**：stairTraversalFor 下行 startX/endX 用常量 1240（tier1 值），tier5 实际在 2520——角色横跳 1320px；e2e walkToDownExit 同步改读 this.downExit
+4. **AG-53 的 f75c394 直梯悬空修复丢失**（reflog 查无此提交）：总控按其消息里的精确 diff 代应用（STAIR_SHAFT_DROP 110px + drawLadderShaft）
+5. **AG-50 未做 AG-53 接线**（派工后无响应）：总控按 STAIRS.md §4 代做（四处替换）
+6. control.test.ts 的 CRLF 脆弱断言（仓库 CRLF，写死 \n 在 Windows 假红）
+
+### 累计八轮
+| 轮次 | Agent | 测试数 |
+|---|---|---|
+| 一轮 | 10/10 | 840 → 1080 |
+| 二轮 | 7/7 | 1080 → 1173 |
+| 三轮 | 5/5（1 网络失败打捞） | 1173 → 1252 |
+| 四轮（TWOM 对齐） | 8/8 | 1252 → 1457 |
+| 五轮（Spark/合成/物资） | 4/4 | 1457 → 1528 |
+| 六轮（维护） | 4/4 | 1528 → 1547 |
+| 七轮（武器分支） | 用户分支 | 1547 → 1587 |
+| 八轮（试玩反馈） | 6/6 | 1587 → 1666 |
+
+### 待用户
+美术提示词清单在 docs/plans/ART_PROMPTS.md（P0 跑步——zip 里 run.gif 色板零重合需按规格重出；P0 圆环 HUD 概念图——AG-54 没找到原图按现有语言自设了，等确认）。

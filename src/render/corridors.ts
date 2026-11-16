@@ -455,7 +455,14 @@ function themeFor(floor: number): number | null {
 // top floors have nobody at all. This is the cheapest honest way to say it —
 // four shapes in blanket colours, drawn behind the furniture so they never fight
 // the props for space.
-const CROWD_BY_TIER: Record<number, number> = { 1: 4, 2: 3, 3: 2, 4: 1, 5: 1, 6: 0 };
+// Crowded on purpose: the bottom of a 100000-storey dormitory is not a corridor
+// with a few sleepers in it, it is a corridor somebody had to step over people
+// to walk down.
+const CROWD_BY_TIER: Record<number, number> = { 1: 7, 2: 5, 3: 3, 4: 2, 5: 1, 6: 0 };
+
+// Decorative bunks (bunk-sleeper), one per this many bays. They are furniture,
+// not containers: the searchable beds are placed by the loot system.
+const BUNK_BY_TIER: Record<number, number> = { 1: 2, 2: 2, 3: 1, 4: 0, 5: 0, 6: 0 };
 
 export function crowdFor(floor: number): number {
   return CROWD_BY_TIER[tierOfFloor(floor)] ?? 0;
@@ -472,10 +479,18 @@ export function drawCrowd(
 ): void {
   const { roomX, floorY, floor, room } = opts;
   const count = crowdFor(floor);
-  if (count === 0) return;
+  const bunks = BUNK_BY_TIER[tierOfFloor(floor)] ?? 0;
+  if (count === 0 && bunks === 0) return;
+  // Bunks first, so the people lying in front of them draw over their frames.
+  for (let b = 0; b < bunks; b++) {
+    const bx = roomX + 168 + b * 96;
+    if (scene.textures.exists('env-bunk-sleeper')) {
+      objects.push(scene.add.image(bx, floorY, 'env-bunk-sleeper').setOrigin(0.5, 1));
+    }
+  }
   for (let i = 0; i < count; i++) {
-    const slot = (room * 7 + i * 3) % 4;
-    const x = roomX + 70 + slot * 60 + (i % 2) * 10;
+    const slot = (room * 7 + i * 3) % 6;
+    const x = roomX + 52 + slot * 42 + (i % 2) * 8;
     const variant = (room + i) % 2;
     const lying = (room + i) % 3 !== 0;
     const key = lying ? (variant ? 'env-sleep-b' : 'env-sleep-a') : (variant ? 'env-sit-b' : 'env-sit-a');

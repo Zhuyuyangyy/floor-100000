@@ -2852,6 +2852,14 @@ export class GameScene extends Phaser.Scene {
       // is unchanged either way — hit detection still goes through c.x and
       // INTERACT_DISTANCE.
       this.floorObjects.push(...addContactShadow(this, c.x, y, 44, 2, 0.45));
+      // A searchable bunk has junk under it: the pile is drawn first, so the bed
+      // stands in front of it and the player reads "something shoved underneath".
+      if (c.id.startsWith('bunk')) {
+        const junk = this.textures.exists('env-underbed-a') && Math.abs(c.x) % 2 === 0 ? 'env-underbed-a' : 'env-underbed-b';
+        if (this.textures.exists(junk)) {
+          this.floorObjects.push(this.add.image(c.x + 10, y - 2, junk).setOrigin(0.5, 1).setAlpha(0.95));
+        }
+      }
       const box = this.add.image(c.x, y - 4, key ?? '').setOrigin(0.5, 1);
       // A backing plate behind the name. The wall art is a busy grid of pinned
       // notices and service pipes, and 22px text straight on top of it reads as

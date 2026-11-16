@@ -35,7 +35,22 @@ export default defineConfig({
     // of stale traces across runs (BUG-QA-03), and Playwright wipes outputDir
     // at startup. Clean the directory between rounds; the CI job keeps its own
     // copies as artifacts for 7 days, so local traces have no lasting value.
-    trace: 'retain-on-failure',
+    //
+    // AG-47 (BUG-QA-05 root fix): the object form turns screencast recording
+    // OFF (screenshots: false). The plain string 'retain-on-failure' inherits
+    // Playwright's defaultTraceOptions, whose screenshots: true maps to
+    // `screencast` on the wire — continuous frame capture for the whole test
+    // (measured: 941 frames / 42MB for one 18s tower test; 1252 frames /
+    // 125MB for one journey test). Teardown has to tear that screencast
+    // session down while the Phaser page is still rendering at 60fps, and
+    // that is what hung: the journey body passed in ~4min, then context close
+    // never completed inside the 600s test timeout (14m19s total; same
+    // symptom in AG-03's STALE_E2E.md — 346s of teardown budget, page still
+    // running, never finished). Diagnostics do not lose anything that
+    // matters: DOM snapshots (snapshots: true), network, console, sources and
+    // the failure screenshot (screenshot: only-on-failure) all remain, so a
+    // retained trace.zip is still fully replayable in the trace viewer.
+    trace: { mode: 'retain-on-failure', screenshots: false, snapshots: true },
     screenshot: 'only-on-failure',
     video: 'off',
   },

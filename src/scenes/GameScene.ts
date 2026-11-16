@@ -160,7 +160,7 @@ import {
 import { WEAPON_GRIP_X, WEAPON_GRIP_Y, WEAPON_H, WEAPON_KEY, WEAPON_W } from '../render/weapon.ts';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
-import { corridorTint, drawCorridorRoom, floorKeyFor, placeDoor, placeWindow, wallKeyFor } from '../render/corridors';
+import { corridorTint, drawCorridorRoom, drawCrowd, floorKeyFor, placeDoor, placeWindow, wallKeyFor } from '../render/corridors';
 import {
   ACTOR_DEPTH,
   DUST_DEPTH,
@@ -2433,6 +2433,15 @@ export class GameScene extends Phaser.Scene {
     const g = this.add.graphics();
     g.fillStyle(0x0b0f12, 1);
     g.fillRect(0, 0, this.floorW, 8);
+
+    // The people who never left. Drawn on their own layer between the wall and
+    // the props, so a body under a blanket is behind the shelves instead of on
+    // top of them.
+    const crowd = this.add.graphics();
+    for (let r = 0; r < roomCountFor(floor); r++) {
+      drawCrowd(crowd, { roomX: r * ROOM_WIDTH, floorY: wallH, floor, room: r });
+    }
+    this.floorObjects.push(crowd);
 
     // Props, room by room. Each theme decides its own dressing; the loop only
     // supplies the room's position so nothing has to recompute the layout.

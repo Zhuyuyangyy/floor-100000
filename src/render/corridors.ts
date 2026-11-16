@@ -1,5 +1,5 @@
 import type Phaser from 'phaser';
-import { ROOM_WIDTH } from '../core/constants';
+import { ROOM_WIDTH, tierOfFloor } from '../core/constants';
 
 // Per-floor corridor art (docs/05_ART_GUIDE.md §3).
 //
@@ -153,7 +153,9 @@ function drawStorage(ctx: CorridorContext): void {
   // (the art pack's props are scaled to a common standing height), so the stack
   // pitch has to come from the texture rather than the old 16px tile — stacking
   // at 16px would leave the crates floating apart with gaps between them.
-  const stack = 2 + variant(ctx.floor, room, 2);
+  // One or two, not two or three: the bay already has a shelf and a container,
+  // and a three-high stack is what made every storage room read as a depot.
+  const stack = 1 + variant(ctx.floor, room, 2);
   const crateH = ctx.scene.textures.get('furn_crate_wood').getSourceImage().height;
   for (let i = 0; i < stack; i++) {
     ctx.objects.push(ctx.scene.add.image(roomX + 100, floorY - i * crateH, 'furn_crate_wood').setOrigin(0.5, 1));
@@ -424,7 +426,11 @@ const THEMES: Record<number, (ctx: CorridorContext) => void> = {
 // takes a theme from its tier, alternating by parity so two neighbouring floors
 // never furnish the same way.
 const TIER_THEMES: Record<number, readonly number[]> = {
-  1: [3, 4], // slum: storage bays and maintenance runs
+  // Tier 1 is a dormitory, not a warehouse: half its floors are bunk rooms with
+  // a door, a doormat and laundry, and only the other half are storage bays.
+  // Before this it alternated storage/maintenance, which is why every slum floor
+  // read as stacks of crates.
+  1: [2, 3],
   2: [2, 3], // worker housing, then its store rooms
   3: [3, 4], // industrial: storage and plant
   4: [4, 5], // commercial: plant and canteens
@@ -437,6 +443,78 @@ function themeFor(floor: number): number | null {
   const tier = segmentOf(floor)?.id ?? 1;
   const list = TIER_THEMES[tier] ?? TIER_THEMES[1];
   return list[Math.abs(Math.trunc(floor)) % list.length];
+}
+
+// ── how many people sleep on this floor ────────────────────────────────────
+// The tower held a hundred thousand people. The bottom is where they still are:
+// every bay has bodies on the floor, and the number falls as you climb until the
+// top floors have nobody at all. This is the cheapest honest way to say it —
+// four shapes in blanket colours, drawn behind the furniture so they never fight
+// the props for space.
+const CROWD_BY_TIER: Record<number, number> = { 1: 4, 2: 3, 3: 2, 4: 1, 5: 1, 6: 0 };
+
+export function crowdFor(floor: number): number {
+  return CROWD_BY_TIER[tierOfFloor(floor)] ?? 0;
+}
+
+/**
+ * The people who never left. Drawn on their own graphics layer at the wall base,
+ * behind everything the theme puts in the room.
+ */
+export function drawCrowd(
+  g: Phaser.GameObjects.Graphics,
+  opts: { roomX: number; floorY: number; floor: number; room: number },
+): void {
+  const { roomX, floorY, floor, room } = opts;
+  const count = crowdFor(floor);
+  // Ink bodies with a coloured blanket over them. The first pass used blanket
+  // colours close to the wall's own teal and vanished into it at 1x — the tower's
+  // palette is narrow enough that only the darkest value reads against the wall.
+  const blankets = [PALETTE.cloth, PALETTE.clothLight, PALETTE.clothDeep, PALETTE.cloth];
+  for (let i = 0; i < count; i++) {
+    const slot = (room * 7 + i * 3) % 4;
+    const x = roomX + 64 + slot * 62 + (i % 2) * 12;
+    const blanket = blankets[(room + i) % blankets.length];
+    const lying = (room + i) % 3 !== 0;
+
+    if (lying) {
+      // On the floor, head on a folded jacket, one arm out of the blanket.
+      g.fillStyle(PALETTE.ink, 0.6);
+      g.fillEllipse(x, floorY - 4, 78, 9);
+      g.fillStyle(PALETTE.ink, 1);
+      g.fillEllipse(x + 4, floorY - 15, 66, 22);
+      g.fillStyle(blanket, 1);
+      g.fillEllipse(x + 8, floorY - 16, 56, 16);
+      g.fillStyle(blanket, 0.55);
+      g.fillRect(x + 8, floorY - 24, 26, 5);
+      // head + shoulder, in skin, outlined dark so it separates at 1x
+      // pillow, then the head clear of the body so the silhouette reads "person"
+      g.fillStyle(PALETTE.dust, 0.9);
+      g.fillRect(x - 44, floorY - 12, 20, 6);
+      g.fillStyle(PALETTE.ink, 1);
+      g.fillRect(x - 40, floorY - 32, 18, 18);
+      g.fillStyle(PALETTE.skinLight, 1);
+      g.fillRect(x - 38, floorY - 30, 14, 14);
+      g.fillStyle(PALETTE.skinDeep, 1);
+      g.fillRect(x - 38, floorY - 22, 14, 3);
+    } else {
+      // Sitting up against the wall, knees drawn in, watching.
+      g.fillStyle(PALETTE.ink, 0.55);
+      g.fillEllipse(x, floorY - 2, 40, 7);
+      g.fillStyle(PALETTE.ink, 1);
+      g.fillRect(x - 15, floorY - 42, 30, 40);
+      g.fillStyle(blanket, 1);
+      g.fillRect(x - 12, floorY - 36, 24, 30);
+      g.fillStyle(PALETTE.ink, 1);
+      g.fillRect(x - 9, floorY - 56, 18, 17);
+      g.fillStyle(PALETTE.skinDeep, 1);
+      g.fillRect(x - 8, floorY - 55, 16, 15);
+      g.fillStyle(PALETTE.skin, 1);
+      g.fillRect(x - 6, floorY - 53, 11, 10);
+      g.fillStyle(PALETTE.ink, 0.35);
+      g.fillRect(x - 12, floorY - 16, 24, 2);
+    }
+  }
 }
 
 /** Draws one room of a corridor floor into the shared detail layer. */

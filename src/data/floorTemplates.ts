@@ -4,6 +4,7 @@ import { segmentOf } from '../core/segments';
 // Type-only: constants.ts will read FLOOR_TEMPLATES at runtime once AG-25 wires
 // the template overlay into environmentFor (TWOM_ALIGNMENT.md §2), but a type
 // import is erased at compile time, so no module cycle exists either way.
+import { roomCountFor, tierOfFloor } from '../core/constants';
 import type { FloorEnvironment } from '../core/constants';
 
 // 楼层容器 id 复用既有家具贴图（cabinet/shelf/crate_wood/crate_metal/fuse_box/
@@ -2553,6 +2554,52 @@ export function hasFloorContent(floorNumber: number): boolean {
   return FLOOR_TEMPLATES[floorNumber] !== undefined;
 }
 
+// What is actually under a bunk in a dormitory: cloth, tape, a spare battery,
+// somebody's water. Small, personal, and nothing like a supply crate.
+// Materials only, no food and no water: the balance tests pin "one drink, one
+// meal" per floor above the legacy five, and a bunk that also fed you would
+// quietly rewrite the survival curve. What is under a mattress is cloth, tape,
+// a spare battery, a bent piece of scrap.
+const UNDER_BED_LOOT: LootSpec[] = [
+  { itemId: 'cloth', min: 1, max: 1, probability: 1, guaranteed: true },
+  { itemId: 'tape', min: 1, max: 1, probability: 0.4 },
+  { itemId: 'battery', min: 1, max: 1, probability: 0.25 },
+  { itemId: 'scrap_metal', min: 1, max: 1, probability: 0.3 },
+];
+
+// A hundred thousand people lived stacked in this tower, and the crowded floors
+// are the bottom ones. Where people slept, the thing worth searching is the bunk
+// they slept in — not another supply crate.
+//
+// These are ADDED to the floor rather than swapped for its crates: the crates on
+// floors 3-4 are the guaranteed early-game material basket (craftLoop pins it),
+// and taking them away breaks the first hour of crafting. A bunk is extra loot
+// on the floors that are supposed to be full of people.
+// Tier 1 gets no searchable bunks at all. Its crates are the guaranteed
+// early-game basket (scrap 3 / wood 2 / tape 1 / fuse 1 / filter 1 / wire 2,
+// pinned by craftLoop), and the credential chain is deliberately NOT completable
+// from tier 1 — "climbing is the real source". Four bunks of cloth and tape on
+// floors 5-10 broke both of those, and the 7-day survival sim with them.
+//
+// The crowded feeling down there comes from the crowd layer instead (people
+// asleep on the floor in every bay), which costs the balance nothing.
+const DENSE_TIERS = new Set([2, 3]);
+
+// Two per bay at most: a floor 4 bays long gets 4 bunks, and they sit between
+// the authored containers rather than on top of them.
+function bunksFor(floorNumber: number, taken: readonly number[]): Array<{ x: number; n: number }> {
+  if (!DENSE_TIERS.has(tierOfFloor(floorNumber))) return [];
+  const out: Array<{ x: number; n: number }> = [];
+  const width = roomCountFor(floorNumber) * 320;
+  const slots = Math.min(4, Math.floor(width / 320));
+  for (let i = 0; i < slots; i++) {
+    const x = 300 + i * (width - 600) / Math.max(1, slots - 1 || 1);
+    if (taken.some((t) => Math.abs(t - x) < 90)) continue;
+    out.push({ x: Math.round(x), n: out.length + 1 });
+  }
+  return out;
+}
+
 export function generateFloor(worldSeed: number, floorNumber: number): GeneratedFloor {
   const template = getFloorTemplate(floorNumber);
   if (!template) {
@@ -2564,6 +2611,15 @@ export function generateFloor(worldSeed: number, floorNumber: number): Generated
     x: c.x,
     items: resolveLoot(c.loot, worldSeed, floorNumber, c.id),
   }));
+  for (const b of bunksFor(floorNumber, template.containers.map((c) => c.x))) {
+    const id = `bunk_${b.n}`;
+    containers.push({
+      id,
+      label: '床铺',
+      x: b.x,
+      items: resolveLoot(UNDER_BED_LOOT, worldSeed, floorNumber, id),
+    });
+  }
   const groundItems: GroundItem[] = template.ground.map((g) => ({
     key: groundItemKey(g.itemId, g.x),
     itemId: g.itemId,

@@ -432,6 +432,50 @@ export function invest(state: GameState, ventureId: string): InvestResult {
   return { ok: true, gold: state.player.gold, message: `入股 ${def.displayName}（-${def.cost} 金）` };
 }
 
+// ── 撤资（AG-45：AG-14 §10.2 遗留的流动出口）────────────────────────────
+//
+// 修前：invest() 有、撤资没有——金币投进去就出不来， investedGold 只进不出，
+// 终局路线 B 的账本因此是单行道。本节补上出口，四条设计决策：
+//
+// 1. 回收价 = 入股成本 × 70%（DIVEST_REFUND_RATE），不是全价。全价撤资会把
+//    产业退化成零成本期权：任何一天的倒塌/亏损都能用"进—撤—进"绕开（倒塌
+//    前一刻撤出即无损），AG-14 的全部风险参数在数学上作废。30% 的流动性
+//    损耗同时是防刷的成本：invest→divest→invest 每圈固定烧 30% 本金
+//    （12/24/36 金），想靠循环刷财富经验必须真金白银地烧（见
+//    econBalance.test.ts 的钉桩）。折价幅度的既有语义锚：商品 round-trip
+//    损耗 50%（买 12 卖 6），撤资取 30%——撤资是主动管理，不是走投无路的
+//    半价甩卖；倒塌的 100% 全损仍在更下面，三档损失界限分明。
+// 2. 幂等：不在册（从未入股 / 已撤 / 已倒塌出局）一律拒绝且分文不动，
+//    重复调用不会重复退款；未知 id 同样拒绝（与 invest 同口径，存档里
+//    的幽灵 id 不清账——settleInvestments 也是这个宽容度）。
+// 3. 不给经验：契约 §5 只登记"完成一笔产业投资 +50"，撤资是流动性操作
+//    不是交易达成；与"亏损/倒塌不喂经验"同一哲学——经验只奖励正向完成。
+// 4. 撤资后可重新入股（一种一门的限制只在册时生效）：卖出水摊再盘一间
+//    是合理动作，30% 折价就是这个选项的价格；蒙特卡洛证明"立即撤资"
+//    （0.7×成本）在任何一门都被"持有 30 日"严格优于（econBalance.test.ts
+//    钉死），撤资因此是应急出口而不是占优策略。
+export const DIVEST_REFUND_RATE = 0.7;
+
+export type DivestResult =
+  | { ok: true; gold: number; refund: number; message: string }
+  | { ok: false; reason: string };
+
+// 撤出一门在册产业： ventures 除名、investedGold 减记成本、按 70% 退回金币。
+// 原子——被拒时金币、账本一律不动。
+export function divest(state: GameState, ventureId: string): DivestResult {
+  const def = VENTURES.find((v) => v.id === ventureId);
+  if (!def) return { ok: false, reason: '没有这门生意' };
+  const growth = ensureGrowth(state);
+  const idx = growth.ventures.indexOf(ventureId);
+  if (idx < 0) return { ok: false, reason: '没有入股这门生意' };
+  growth.ventures.splice(idx, 1);
+  growth.investedGold = Math.max(0, growth.investedGold - def.cost);
+  // 40/80/120 × 0.7 = 28/56/84（IEEE754 下精确整数，无舍入争议）。
+  const refund = Math.floor(def.cost * DIVEST_REFUND_RATE);
+  state.player.gold += refund;
+  return { ok: true, gold: state.player.gold, refund, message: `撤出 ${def.displayName}（退回 ${refund} 金）` };
+}
+
 // Config hook so the shop's existence is tunable from the balance file.
 export const SHOP_ENABLED = GAME_CONFIG.overhaul.dailyGoalRewardScore >= 0;
 

@@ -20,6 +20,7 @@ import {
   INTERACT_DISTANCE,
   PLAYABLE_FLOORS_V01,
   PLAYER_FEET_Y,
+  PLAYER_DECELERATION,
   PLAYER_SPEED,
   ROOM_COUNT,
   ROOM_WIDTH,
@@ -470,12 +471,55 @@ const DORM_BACK_BEDS: readonly number[] = [268, 372, 640, 744, 848];
 // there instead of the player's bed.
 const NEIGHBOUR_FRONT_BEDS: readonly number[] = [140, ...DORM_FRONT_BEDS];
 
+// ── AG-50：点击操控的平衡值 ────────────────────────────────────────────
+// 双击判定窗/容差、跑速倍率、跑动画帧率倍率全部走 config/game-balance.json
+// 的 movement 块。core/config.ts 的校验只查必填键，扩展块与 warmthSources
+// 等同款按 Record 读；缺字段回退默认值，旧配置文件照样能跑。
+interface MovementBalance {
+  doubleClickWindowMs: number;
+  doubleClickMaxDistancePx: number;
+  runSpeedMultiplier: number;
+  runAnimTimeScale: number;
+}
+
+const MOVEMENT_DEFAULTS: MovementBalance = {
+  doubleClickWindowMs: 300,
+  doubleClickMaxDistancePx: 40,
+  runSpeedMultiplier: 2,
+  runAnimTimeScale: 1.6,
+};
+
+function readMovementBalance(): MovementBalance {
+  const raw = (GAME_CONFIG as unknown as { movement?: Partial<MovementBalance> }).movement ?? {};
+  const num = (v: unknown, fallback: number): number =>
+    typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+  return {
+    doubleClickWindowMs: num(raw.doubleClickWindowMs, MOVEMENT_DEFAULTS.doubleClickWindowMs),
+    doubleClickMaxDistancePx: num(raw.doubleClickMaxDistancePx, MOVEMENT_DEFAULTS.doubleClickMaxDistancePx),
+    runSpeedMultiplier: num(raw.runSpeedMultiplier, MOVEMENT_DEFAULTS.runSpeedMultiplier),
+    runAnimTimeScale: num(raw.runAnimTimeScale, MOVEMENT_DEFAULTS.runAnimTimeScale),
+  };
+}
+
+/** 点击操控线的数值入口（AG-50）：GameScene 内不硬编码任何跑动参数。 */
+const MOVEMENT_BALANCE: MovementBalance = readMovementBalance();
+
+/**
+ * 跑动画 key（AG-55 在 walkcycle.ts 注册 run-<who> 后这里自动改播它）。
+ * 在那之前跑 = walk 帧 + timeScale 1.6，见 update() 里的选段注释。
+ */
+const RUN_ANIM_KEY = 'run-player';
+/** 点击落点标记的深度：在地面物件（≤26）之上、HUD（100+）之下。 */
+const CLICK_MARKER_DEPTH = 40;
+
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
   /** The crowbar in the survivor's hand. Follows the attack pose's fist. */
   private weapon?: Phaser.GameObjects.Image;
   private cursors!: DirKeys;
   private wasd!: { left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key };
+  /** AG-50：Shift = 跑（与鼠标双击跑同一倍率）。轮询 isDown，无 keydown 回调。 */
+  private keyShift?: Phaser.Input.Keyboard.Key;
   private keyE!: Phaser.Input.Keyboard.Key;
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private keyI!: Phaser.Input.Keyboard.Key;
@@ -741,7 +785,11 @@ export class GameScene extends Phaser.Scene {
   // Mouse state. `walkTarget` is the click-to-walk order the update loop steps
   // toward; `panelBox` is the rectangle of the most recently built panel, so a
   // click outside it can close the panel the way ESC does.
-  private walkTarget: { x: number; interact: boolean } | null = null;
+  private walkTarget: { x: number; interact: boolean; run: boolean } | null = null;
+  // AG-50：上一次点击的世界 x 与场景时间，双击跑判定用。create() 里重置——
+  // 重新开始走的是 scene.start('MetaSelect')（停场景而非重建实例），字段
+  // 初始化器不会重跑，旧判定状态会漏进新跑局。
+  private lastClick?: { x: number; at: number };
   // The dorm's sleeping roommates: the floating Z is animated from update(), so it
   // lives here rather than in a tween that would outlive the floor it belongs to.
   private dormSleepers: Array<{ z: Phaser.GameObjects.Text; baseY: number; phase: number }> = [];
@@ -828,6 +876,11 @@ export class GameScene extends Phaser.Scene {
     this.wandererEventKey = '';
     this.wandererLastEncounter = '';
     this.stairClimb = undefined;
+    // AG-50：点击操控的订单与双击判定状态随新跑局清空。重新开始是
+    // scene.start('MetaSelect')——同一个 GameScene 实例被停掉再回来，
+    // 字段初始化器不重跑，旧 walkTarget 会让新角色自己先走两步。
+    this.walkTarget = null;
+    this.lastClick = undefined;
     this.lastClock = '';
     this.lastStats = '';
 
@@ -1082,6 +1135,10 @@ export class GameScene extends Phaser.Scene {
     // at x=40 or x=1240; only the tower's vertical cross-section may scroll.
     cam.setBounds(0, topBound, this.floorW, bottomBound - topBound);
     this.standingCamBounds = { top: topBound, bottom: bottomBound };
+    // AG-50 原本在这里补一个 centreY（落地静止位取玩家居中而不是楼层带中心，
+    // 修「爬梯末尾先冲过去再荡回来」的那一下卡）。AG-52 的 standScrollY 重写
+    // 已经把落地位定义成 PLAYER_FEET_Y - viewH/2——正是玩家居中的那一点，
+    // 同一个修复由两路独立落地，centreY 因此是死代码，删。
     if (this.landingEase) {
       // 落地不跳帧。换层会把本层内容从「目标层的世界坐标」挪回「本层坐标」
       // ——整整一个 FLOOR_HEIGHT。相机若已经站在新层的站立位，内容和角色会
@@ -1133,21 +1190,27 @@ export class GameScene extends Phaser.Scene {
   private openClimbCameraRoom(direction: 1 | -1): void {
     const cam = this.cameras.main;
     const standing = this.standingCamBounds;
-    if (!standing) return;
-    // Hold the frame. The climb used to keep following the climber, which meant
-    // the floor they were leaving slid out of the viewport and the stairs read as
-    // a black slide upward: you never saw where you came from or where you were
-    // going.
+    const climb = this.stairClimb;
+    if (!standing || !climb) return;
+    // 攀爬期间相机跟着攀爬者走。修前这里 stopFollow 把相机钉死在旧层的站立位：
+    // 塔沿楼层的站立 bounds 比视口矮，Phaser 的 clampY 会把 scrollY 压在同
+    // 一个点上（1→2 上行实测全程钉在 -102），角色头顶在落地前越过视口顶边
+    // 34px——e2e stairNavigation「上行攀爬全程角色完整可见」基线即红。
     //
-    // Now the camera stops where it is and only the climber moves inside that
-    // frame. AG-52: the standing bounds ARE one floor tall (the cross-section
-    // is gone), so the held frame is the standing frame — and the climb's
-    // target floor, drawn by syncClimbTargetFloor at exactly one FLOOR_HEIGHT
-    // above or below it, is what fills the other half of the viewport. The
-    // landing puts the follow back (drawFloor) and the refused landing puts it
-    // back by hand (resetCameraBounds).
-    cam.stopFollow();
-    cam.setBounds(0, standing.top, this.floorW, standing.bottom - standing.top);
+    // bounds 按 follow 的行程放宽：攀爬起止两点各自居中所对应的 scrollY 是
+    // [lo, hi]，顶沿放到 lo（不低于站立顶沿）、底沿放到 hi + 视口高（站立
+    // 底沿已经够高就不动）。follow 因此全程有路可走、攀爬者始终居中；反方向
+    // 一格不收紧，塔沿之外的虚空在站立时仍然藏着。落地由 drawFloor 的
+    // landingEase 接棒（单向缓动到站立位），拒绝落地由 resetCameraBounds 接棒。
+    const camH = cam.height;
+    const nearScroll = climb.startY - camH / 2;
+    const farScroll = climb.endY - camH / 2;
+    const lo = Math.min(nearScroll, farScroll);
+    const hi = Math.max(nearScroll, farScroll);
+    const top = Math.min(standing.top, lo);
+    const bottom = Math.max(standing.bottom, hi + camH);
+    cam.setBounds(0, top, this.floorW, bottom - top);
+    cam.startFollow(this.player, true, 0.15, 0.15);
     void direction;
   }
 
@@ -5157,6 +5220,8 @@ export class GameScene extends Phaser.Scene {
     if (!keyboard) return;
     this.cursors = keyboard.addKeys({ up: 'UP', down: 'DOWN', left: 'LEFT', right: 'RIGHT' }) as DirKeys;
     this.wasd = keyboard.addKeys({ left: 'A', right: 'D' }) as typeof this.wasd;
+    // AG-50：Shift = 跑。轮询 isDown（移动段每帧读），不需要 keydown 回调。
+    this.keyShift = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
     this.keyE = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
     this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.keyI = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I);
@@ -5388,7 +5453,47 @@ export class GameScene extends Phaser.Scene {
     if (pointer.y < HUD_LAYOUT.contextBottom) return;
     const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
     const x = Phaser.Math.Clamp(world.x, 8, this.floorW - 8);
-    this.walkTarget = { x, interact: this.hasInteractableNear(x) };
+    // AG-50：双击跑。同一落点附近（±doubleClickMaxDistancePx）在
+    // doubleClickWindowMs 内的第二次点击 = 跑单；Shift 按住时单击也是跑单。
+    // 第一下永远只是走单——「点一下走、快速点两下跑」，不存在猜错的第一下，
+    // 第二下落在旁边（>40px）或超时（>300ms）也退回走单。
+    const now = this.time.now;
+    const last = this.lastClick;
+    const run =
+      this.keyShift?.isDown === true ||
+      (!!last &&
+        now - last.at <= MOVEMENT_BALANCE.doubleClickWindowMs &&
+        Math.abs(x - last.x) <= MOVEMENT_BALANCE.doubleClickMaxDistancePx);
+    this.lastClick = { x, at: now };
+    this.walkTarget = { x, interact: this.hasInteractableNear(x), run };
+    // 落点标记让玩家在角色动起来之前就看清自己下的是跑单还是走单。
+    this.spawnClickMarker(world.x, world.y, run);
+  }
+
+  // AG-50：点击落点标记。走 = 灰点；跑 = 暖点 + 两粒往角色方向拖的残影。
+  // 全部 tween 自动销毁，不建字段、不进 floorObjects——标记的寿命（≤320ms）
+  // 比任何一次换层都短，残影越过换层边界也只是一粒正在淡出的点。
+  private spawnClickMarker(x: number, y: number, run: boolean): void {
+    const dot = this.add.graphics().setDepth(CLICK_MARKER_DEPTH);
+    if (run) {
+      dot.fillStyle(PALETTE.lightHot, 0.85);
+      dot.fillCircle(x, y, 4);
+      dot.lineStyle(2, PALETTE.lightHot, 0.7);
+      dot.strokeCircle(x, y, 7);
+      // 残影：从落点沿「角色→落点」的反方向拖两粒渐小渐淡的点，读作冲过去。
+      const back = x >= getGame().player.x ? -1 : 1;
+      for (let i = 1; i <= 2; i++) {
+        const ghost = this.add
+          .circle(x + back * i * 12, y, 3 - i, PALETTE.lightHot, 0.45 - i * 0.15)
+          .setDepth(CLICK_MARKER_DEPTH);
+        this.tweens.add({ targets: ghost, alpha: 0, delay: i * 50, duration: 240, onComplete: () => ghost.destroy() });
+      }
+      this.tweens.add({ targets: dot, alpha: 0, scale: 1.5, duration: 320, onComplete: () => dot.destroy() });
+    } else {
+      dot.fillStyle(PALETTE.stone, 0.5);
+      dot.fillCircle(x, y, 3);
+      this.tweens.add({ targets: dot, alpha: 0, duration: 240, onComplete: () => dot.destroy() });
+    }
   }
 
   private onEsc(): void {
@@ -6555,6 +6660,11 @@ export class GameScene extends Phaser.Scene {
     let dir = 0;
     if (this.cursors?.left.isDown || this.wasd?.left.isDown) dir -= 1;
     if (this.cursors?.right.isDown || this.wasd?.right.isDown) dir += 1;
+    // AG-50：Shift 按住 = 跑。键盘路径选 Shift+方向键而不是双击方向键：双击
+    // 会和「按住方向键取消 walkTarget」的既定规则打架（第二下要么取消订单
+    // 要么触发跑，语义重叠），Shift 则是「更快变体」的通用修饰键，与鼠标
+    // 双击跑、Shift+单击跑共用同一个 runSpeedMultiplier。
+    const shiftRun = this.keyShift?.isDown === true;
     // Click-to-walk. A held key cancels the order rather than fighting it, so the
     // player never feels the mouse and the keyboard pulling opposite ways.
     if (this.walkTarget) {
@@ -6572,13 +6682,29 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
+    // 跑单生效：走单自带 run 标记（双击/Shift+单击下的单）或 Shift+方向键。
+    // 倍率作用在斜坡的目标速度上——先把当前速度折算回步速空间再 ramp：起步
+    // 是从当前真实速度连续加速（跑有「起步重量」），而不是 130→260 瞬跳。
+    const runScale = (shiftRun || this.walkTarget?.run === true) && dir !== 0 ? MOVEMENT_BALANCE.runSpeedMultiplier : 1;
     // The speed is ramped rather than switched, so a tap of the key moves a
     // shorter distance than it used to and the run feels like it has weight.
     // OVERHAUL: an empty energy tank slows the walk (0.75x), so "how far can I
     // get" is budgeted by food and rest. Wave B3's swift-feet relic then makes
     // the corridors 15% shorter. The factors apply to the ramped speed, not to
     // dx, so the anim's speedFraction follows the real walk.
-    this.speedX = stepHorizontalSpeed(this.speedX, dir, delta) * moveSpeedFactor(state.player) * moveSpeedMult(state.relics ?? []);
+    let rampSpeed = this.speedX / runScale;
+    // 松跑回落：stepHorizontalSpeed 只在与目标同向时把速度钳到目标——松跑
+    // 那一帧会把 260 瞬按回 130。这里整段接管：超出步速的部分按刹车率衰减，
+    // 衰减期间不碰斜坡，落回步速后才交还。松跑也是「刹住」，与起步的加速
+    // 对偶；反向仍然走 stepHorizontalSpeed 自己的刹车率。
+    let stepped: number;
+    if (runScale === 1 && dir !== 0 && Math.abs(rampSpeed) > PLAYER_SPEED) {
+      const decay = PLAYER_DECELERATION * (delta / 1000);
+      stepped = Math.sign(rampSpeed) * Math.max(PLAYER_SPEED, Math.abs(rampSpeed) - decay);
+    } else {
+      stepped = stepHorizontalSpeed(rampSpeed, dir, delta);
+    }
+    this.speedX = stepped * runScale * moveSpeedFactor(state.player) * moveSpeedMult(state.relics ?? []);
     const dx = this.speedX * (delta / 1000);
     if (dx !== 0) movePlayerX(state, dx);
     this.syncPlayerWorldObjects(state.player.x, STAIR_START_Y);
@@ -6594,9 +6720,20 @@ export class GameScene extends Phaser.Scene {
       // clip still playing
     } else {
       const speedFraction = Math.abs(this.speedX) / PLAYER_SPEED;
-      const want = speedFraction > 0.03 ? walkAnimKey('player') : idleAnimKey('player');
+      const moving = speedFraction > 0.03;
+      const runActive = moving && runScale > 1;
+      // AG-50：跑动画。素材库没有跑的 GIF/sheet（幸存者八种动作里没有 run），
+      // 也不许新画美术、不许改 sheet 列号，所以跑 = walk 帧 + timeScale 倍率：
+      // 步频跟上步速，脚就不打滑。躯干前倾/身体起伏这类「身体语言」留给
+      // AG-55 的 run-player 动画（列号只能加在 15 列之后，见 walkcycle.ts 的
+      // 追加约定）——那个 key 一旦注册，这里自动改播它，本文件不用再动。
+      const want = moving
+        ? runActive && this.anims.exists(RUN_ANIM_KEY)
+          ? RUN_ANIM_KEY
+          : walkAnimKey('player')
+        : idleAnimKey('player');
       if (this.player.anims.currentAnim?.key !== want) this.player.play(want, true);
-      this.player.anims.timeScale = Math.max(0.2, Math.min(1, speedFraction));
+      this.player.anims.timeScale = runActive ? MOVEMENT_BALANCE.runAnimTimeScale : Math.max(0.2, Math.min(1, speedFraction));
     }
 
     // AG-20: 帧循环跨日时产业结算在 advanceTime 内部发生。前后对比账本，

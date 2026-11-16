@@ -245,3 +245,44 @@ startX/endX 用常量 `DOWN_EXIT_X`（=1280-40=1240），而交互区
    （preserveDrawingBuffer=false），探针的途中截帧改走「等 y 过阈值 →
    loop.pause() → page.screenshot → loop.resume()」；这是探针手法备注，
    不影响交付物。
+
+## 9. 集成耦合核实（对照 integrate/sprint-01-merge：AG-52 = 832cdf6、AG-50 = 8bdc3b2）
+
+总控转来 AG-52 的两个耦合点，对照集成分支的实际代码逐条核完：
+
+**耦合点 1（爬梯态目标层）——无需改动，且旧代码的不一致被这次修掉。**
+集成版 `drawExits(floor)` 只从 `drawFloor` 调用（GameScene.ts:1049），传的
+就是「本层 + 方向」；AG-52 的 `syncClimbTargetFloor` 走的是
+`drawNeighbourFloor(climb.to, ±FLOOR_HEIGHT, above, 1)`——**画房间但不画
+楼梯**（drawExits 不在邻居路径上），所以不存在「目标层只有楼梯」或同一部
+楼梯被两头各画一遍。目标层地板线上只有一块楼梯口面板（drawNeighbourFloor
+的 44x10 opening slab，x=UP_EXIT_X），正好落在本阶梯的上端门坎上——就是
+旧代码的同一分工，我的 drawStairwell 直接沿用。方向判定：我的
+`stairArtStyleFor(floor, direction)` 按「连接的较低层」锚定，同一处连接从
+哪头画都是同一部楼梯——旧 `stairStyleFor` 在两头会给不同答案（1→2 是
+vertical、2→1 是 steep，floorSystem.test.ts:420-423 钉着这个不一致），
+这次顺带修掉。
+
+**耦合点 2（相机 bounds）——无需放宽，AG-50 的 follow 已覆盖。**
+AG-50（8bdc3b2，晚于 AG-52 合入）把 `openClimbCameraRoom` 改成攀爬期
+`startFollow` + bounds 按行程放宽 `[min(nearScroll,farScroll),
+max(...)+camH]`，行程就是 climb.startY/endY。我的曲线 y 范围正好是
+[startY, endY]（160→-40 / 160→360，±FLOOR_HEIGHT），一寸不差地在 bounds
+内；Z 形折返的 x 行程（最多向内 160px，旧 steep 摆 96px 同量级）由
+follow 跟着相机走，不裁切。站立态（AG-52 的 [0, FLOOR_HEIGHT]）下阶梯
+顶端 40px 探出天花板线、落进（现在不画邻居的）黑色空间——旧美术同样如此，
+读作「楼梯继续往上」，不构成回归。**不需要 AG-52 动 bounds。**
+
+**AG-22 的历史坐标——已过期，现行锚点以常量为准。** X=20/X=1236 是 AG-22
+时代的旧值；现行 `drawExits` 用 `UP_EXIT_X`（40）和 `this.downExit`
+（downExitXFor，逐层宽）。我的几何直接收传入的 x：stairMouthZone 的
+±44 判定与第一级踏面对得上（上梯踏面 24..56 vs 判定区 0..84；tier 1 下梯
+踏面 1224..1256 vs 判定区 1196..1284）。
+
+**AG-50 的提交信息误记已澄清**（6f08410）：「攀爬态钉死 x=44」没有落盘，
+实际修的是落地相机弹跳与攀爬 follow——我的 Z 形 x 位移不与任何既有修正
+冲突。集成版 `updateStairClimb` 仍用旧 `stairPosition`，本文件第 4 节的
+diff 仍是待应用状态；应用时请连同第 7 节的 FloorSystem 一行一起合入
+（宽楼层下楼 traversal 起点 1240 vs 楼梯口 downExitXFor 的不一致，在
+AG-50 的 follow 相机动起来之后会更明显：角色会朝着 1560 的美术爬一条
+1240 的隐形梯）。

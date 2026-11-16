@@ -2613,11 +2613,17 @@ export function generateFloor(worldSeed: number, floorNumber: number): Generated
   // floors 1-10 are left alone because their contents are the pinned early-game
   // basket (craftLoop / survivalBalance).
   const authored = tierOfFloor(floorNumber) === 1 ? template.containers : template.containers.slice(0, 3);
+  // Nothing opens to nothing. Every authored loot table has a chance to roll
+  // empty, and an empty cabinet costs the player the walk, the keypress and the
+  // hope — three times in a row is when they stop opening things. The fallback
+  // stays materials-only so it cannot move the one-drink-one-meal curve.
+  const withFallback = (items: InventoryStack[]): InventoryStack[] =>
+    items.length > 0 ? items : [{ itemId: 'scrap_metal', quantity: 1 }] as InventoryStack[];
   const containers: GeneratedContainer[] = authored.map((c) => ({
     id: c.id,
     label: c.label,
     x: c.x,
-    items: resolveLoot(c.loot, worldSeed, floorNumber, c.id),
+    items: withFallback(resolveLoot(c.loot, worldSeed, floorNumber, c.id)),
   }));
   for (const b of bunksFor(floorNumber, template.containers.map((c) => c.x))) {
     const id = `bunk_${b.n}`;

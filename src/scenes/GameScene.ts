@@ -8,6 +8,9 @@ import {
   BED_X,
   CRAFT_X,
   DOWN_EXIT_X,
+  downExitXFor,
+  floorWidthFor,
+  roomCountFor,
   environmentFor,
   FLOOR_VIEW_ZOOM,
   ENTRY_X,
@@ -418,6 +421,12 @@ export class GameScene extends Phaser.Scene {
   private debuffFx?: Phaser.GameObjects.Sprite;
   /** every flame on this floor, so a blackout can put them out */
   private lightFixtures: Phaser.GameObjects.Sprite[] = [];
+
+  // Length of the floor currently drawn. Tiers have different lengths (see
+  // floorWidthFor), so nothing may assume FLOOR_WIDTH: the camera bounds, the
+  // wall tiling, the room loop and the stair mouths all read these two.
+  private floorW = FLOOR_WIDTH;
+  private downExit = DOWN_EXIT_X;
   private wasBlackout = false;
   private blackoutAt = 0;
   private wandererHitAt = Number.NEGATIVE_INFINITY;
@@ -853,6 +862,8 @@ export class GameScene extends Phaser.Scene {
     // the single place the player arrives — new game, continue, dev entry and
     // every stairwell — so recording here covers all of them at once.
     recordFloorVisit(state, floor);
+    this.floorW = floorWidthFor(floor);
+    this.downExit = downExitXFor(floor);
     this.floorView = getFloorView(state, floor);
 
     if (floor === STARTING_FLOOR) {
@@ -969,7 +980,7 @@ export class GameScene extends Phaser.Scene {
     // The world width equals the design viewport width. Locking the horizontal
     // bounds to one floor keeps the full corridor visible when the player lands
     // at x=40 or x=1240; only the tower's vertical cross-section may scroll.
-    cam.setBounds(0, topBound, FLOOR_WIDTH, bottomBound - topBound);
+    cam.setBounds(0, topBound, this.floorW, bottomBound - topBound);
     this.standingCamBounds = { top: topBound, bottom: bottomBound };
     cam.startFollow(this.player, true, 0.15, 0.15);
     // Centred on the player the moment the floor is drawn: a follow with
@@ -1002,7 +1013,7 @@ export class GameScene extends Phaser.Scene {
     const feetAtFarEnd = STAIR_START_Y + (direction === 1 ? -STAIR_RISE : STAIR_RISE);
     const top = direction === 1 ? Math.min(standing.top, feetAtFarEnd - halfView) : standing.top;
     const bottom = direction === 1 ? standing.bottom : Math.max(standing.bottom, feetAtFarEnd + halfView);
-    cam.setBounds(0, top, FLOOR_WIDTH, bottom - top);
+    cam.setBounds(0, top, this.floorW, bottom - top);
   }
 
   /** Put the standing bounds back (a refused landing leaves the player put). */
@@ -1010,7 +1021,7 @@ export class GameScene extends Phaser.Scene {
     const cam = this.cameras.main;
     const standing = this.standingCamBounds;
     if (!standing) return;
-    cam.setBounds(0, standing.top, FLOOR_WIDTH, standing.bottom - standing.top);
+    cam.setBounds(0, standing.top, this.floorW, standing.bottom - standing.top);
   }
 
   // OVERHAUL: plays a one-shot action clip and holds it for `ms`. The frame
@@ -1173,7 +1184,7 @@ export class GameScene extends Phaser.Scene {
     // Everything E already reaches for on this floor. A marker inside any of
     // their radii would hijack the key (measured: it silently broke the NPC
     // trade and the journey specs), so each spot is nudged clear first.
-    const taken: number[] = [UP_EXIT_X, DOWN_EXIT_X, ...this.floorView.containers.map((c) => c.x)];
+    const taken: number[] = [UP_EXIT_X, this.downExit, ...this.floorView.containers.map((c) => c.x)];
     if (state.currentFloor === NPC_FLOOR) taken.push(...NPCS.map((n) => n.x));
     // OVERHAUL Wave C1: the trader joins the taken list so nothing lands on
     // top of him, and he is drawn after the spots so he reads above them.
@@ -2408,45 +2419,47 @@ export class GameScene extends Phaser.Scene {
     const wallH = FLOOR_HEIGHT - FLOOR_BAND;
     const tint = corridorTint(floor);
 
-    // The wall belongs to the tier, not to the floor: see wallKeyFor.
-    const wall = this.add.image(0, 8, wallKeyFor(floor)).setOrigin(0, 0);
-    const floorBand = this.add.image(0, wallH, floorKeyFor(floor)).setOrigin(0, 0);
+    // The wall belongs to the tier, not to the floor: see wallKeyFor. It is
+    // tiled rather than placed: a floor is 4 to 9 bays long, and a floor longer
+    // than one 1280-wide tile would end in mid-air.
+    const wall = this.add.tileSprite(0, 8, this.floorW, 128, wallKeyFor(floor)).setOrigin(0, 0);
+    const floorBand = this.add.tileSprite(0, wallH, this.floorW, 64, floorKeyFor(floor)).setOrigin(0, 0);
     this.floorObjects.push(wall, floorBand);
 
     if (tint) {
-      this.floorObjects.push(this.add.rectangle(FLOOR_WIDTH / 2, 8 + (wallH - 8) / 2, FLOOR_WIDTH, wallH - 8, tint.color, tint.alpha));
+      this.floorObjects.push(this.add.rectangle(this.floorW / 2, 8 + (wallH - 8) / 2, this.floorW, wallH - 8, tint.color, tint.alpha));
     }
 
     const g = this.add.graphics();
     g.fillStyle(0x0b0f12, 1);
-    g.fillRect(0, 0, FLOOR_WIDTH, 8);
+    g.fillRect(0, 0, this.floorW, 8);
 
     // Props, room by room. Each theme decides its own dressing; the loop only
     // supplies the room's position so nothing has to recompute the layout.
     const props: Phaser.GameObjects.GameObject[] = [];
-    for (let r = 0; r < ROOM_COUNT; r++) {
+    for (let r = 0; r < roomCountFor(floor); r++) {
       drawCorridorRoom({ scene: this, g, floor, roomX: r * ROOM_WIDTH, floorY: wallH, room: r, objects: props, fixtures: this.lightFixtures });
     }
     this.floorObjects.push(g, ...props);
 
     this.floorObjects.push(
-      ...buildForeground(this, { width: FLOOR_WIDTH, height: FLOOR_HEIGHT, wallBottom: wallH, seed: floor * 31 }),
+      ...buildForeground(this, { width: this.floorW, height: FLOOR_HEIGHT, wallBottom: wallH, seed: floor * 31 }),
     );
 
     // OVERHAUL Art Pass 2: the same depth cues as the dorm, with the
     // stairwells as this floor's light sources.
     this.floorObjects.push(
       ...buildRoomDepth(this, {
-        width: FLOOR_WIDTH,
+        width: this.floorW,
         wallBottom: wallH,
         height: FLOOR_HEIGHT,
-        lightXs: [40, 1240],
+        lightXs: [40, this.floorW - 40],
       }),
-      ...buildSurfaceDetail(this, { width: FLOOR_WIDTH, wallBottom: wallH, height: FLOOR_HEIGHT, seed: floor * 17 }),
-      ...buildCeilingLights(this, { width: FLOOR_WIDTH, seed: floor * 13, top: 16, fixtures: this.lightFixtures }),
-      ...buildAerialHaze(this, { width: FLOOR_WIDTH, wallBottom: wallH, hazeColor: ambienceFor(floor).color, strength: 0.34 }),
-      ...buildWallDressing(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
-      ...buildFloorClutter(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
+      ...buildSurfaceDetail(this, { width: this.floorW, wallBottom: wallH, height: FLOOR_HEIGHT, seed: floor * 17 }),
+      ...buildCeilingLights(this, { width: this.floorW, seed: floor * 13, top: 16, fixtures: this.lightFixtures }),
+      ...buildAerialHaze(this, { width: this.floorW, wallBottom: wallH, hazeColor: ambienceFor(floor).color, strength: 0.34 }),
+      ...buildWallDressing(this, { width: this.floorW, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, this.downExit] }),
+      ...buildFloorClutter(this, { width: this.floorW, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, this.downExit] }),
       // A flooding floor looks like one. Held on the scene so the effect can be
       // torn down when the event clears instead of stacking a second set.
       ...this.refreshLeakEffect(floor),
@@ -2480,8 +2493,8 @@ export class GameScene extends Phaser.Scene {
       this.floorObjects.push(upLabel);
     }
     if (hasDownExit(floor)) {
-      this.drawStair(DOWN_EXIT_X, 'down', floor);
-      const downLabel = this.add.text(DOWN_EXIT_X, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
+      this.drawStair(this.downExit, 'down', floor);
+      const downLabel = this.add.text(this.downExit, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
       this.floorObjects.push(downLabel);
     }
   }
@@ -2632,6 +2645,9 @@ export class GameScene extends Phaser.Scene {
   private drawNeighbourFloor(floor: number, yOffset: number, isAbove: boolean, distance: number): void {
     const wallH = FLOOR_HEIGHT - FLOOR_BAND;
     const tint = corridorTint(floor);
+    // A neighbour is drawn at ITS length, not the player's: tiers differ, and a
+    // 1600-wide floor seen from a 1280 one would otherwise end in black.
+    const nbW = floorWidthFor(floor);
     // A container in floor-local coordinates: the shared renderers build the
     // floor unchanged and one depth keeps all of it behind the playable floor.
     const preexisting = new Set<Phaser.GameObjects.GameObject>(this.children.list);
@@ -2641,12 +2657,12 @@ export class GameScene extends Phaser.Scene {
     };
 
     // Base art. Same wall and floor band as every other floor of the tower.
-    add(this.add.image(0, 8, wallKeyFor(floor)).setOrigin(0, 0));
-    add(this.add.image(0, wallH, floorKeyFor(floor)).setOrigin(0, 0));
-    if (tint) add(this.add.rectangle(FLOOR_WIDTH / 2, 8 + (wallH - 8) / 2, FLOOR_WIDTH, wallH - 8, tint.color, tint.alpha));
+    add(this.add.tileSprite(0, 8, nbW, 128, wallKeyFor(floor)).setOrigin(0, 0));
+    add(this.add.tileSprite(0, wallH, nbW, 64, floorKeyFor(floor)).setOrigin(0, 0));
+    if (tint) add(this.add.rectangle(nbW / 2, 8 + (wallH - 8) / 2, nbW, wallH - 8, tint.color, tint.alpha));
     const ceilingSeam = this.add.graphics();
     ceilingSeam.fillStyle(0x0b0f12, 1);
-    ceilingSeam.fillRect(0, 0, FLOOR_WIDTH, 8);
+    ceilingSeam.fillRect(0, 0, nbW, 8);
     add(ceilingSeam);
 
     // The same two-band ambient wash the live floor's light layer lays down,
@@ -2660,12 +2676,12 @@ export class GameScene extends Phaser.Scene {
     const floorTop = FLOOR_HEIGHT * 0.62;
     add(
       this.add
-        .rectangle(FLOOR_WIDTH / 2, (clearY + floorTop) / 2, FLOOR_WIDTH, floorTop - clearY, amb.color)
+        .rectangle(nbW / 2, (clearY + floorTop) / 2, nbW, floorTop - clearY, amb.color)
         .setAlpha(Math.min(0.55, amb.wallAlpha * 1.45)),
     );
     add(
       this.add
-        .rectangle(FLOOR_WIDTH / 2, (floorTop + FLOOR_HEIGHT) / 2, FLOOR_WIDTH, FLOOR_HEIGHT - floorTop, amb.color)
+        .rectangle(nbW / 2, (floorTop + FLOOR_HEIGHT) / 2, nbW, FLOOR_HEIGHT - floorTop, amb.color)
         .setAlpha(Math.min(0.62, amb.floorAlpha * 1.45)),
     );
 
@@ -2678,12 +2694,12 @@ export class GameScene extends Phaser.Scene {
     // purpose: two floors down they are two pixels of noise, and they were 120 of
     // the neighbour's ~250 objects. What survives is what carries meaning at this
     // distance — the room's furniture, its doors, its lights.
-    add(...buildRoomDepth(this, { width: FLOOR_WIDTH, wallBottom: wallH, height: FLOOR_HEIGHT, lightXs: [40, 1240] }));
-    add(...buildWallDressing(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }));
+    add(...buildRoomDepth(this, { width: nbW, wallBottom: wallH, height: FLOOR_HEIGHT, lightXs: [40, nbW - 40] }));
+    add(...buildWallDressing(this, { width: nbW, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, downExitXFor(floor)] }));
 
     // Haze sits behind the props, as it does on the live floor (depth 2), and is
     // the thing that still separates "next floor down" from "the floor after".
-    add(...buildAerialHaze(this, { width: FLOOR_WIDTH, wallBottom: wallH, hazeColor: ambienceFor(floor).color, strength: 0.2 }));
+    add(...buildAerialHaze(this, { width: nbW, wallBottom: wallH, hazeColor: ambienceFor(floor).color, strength: 0.2 }));
 
     // Room props, by the same theme renderer. Floor 2 is worker housing and floor
     // 3 a store room whether the player is standing on them or looking at them.
@@ -2753,7 +2769,7 @@ export class GameScene extends Phaser.Scene {
     // The stairwell opening, so the flight arriving from the player's floor has
     // somewhere to land. Drawn after the props because it is a hole in the
     // floor, not something standing on it.
-    const stairX = isAbove ? UP_EXIT_X : DOWN_EXIT_X;
+    const stairX = isAbove ? UP_EXIT_X : downExitXFor(floor);
     const g = this.add.graphics();
     g.fillStyle(PALETTE.ink, 0.85);
     g.fillRect(stairX - 22, STAIR_START_Y - 10, 44, 10);
@@ -3785,7 +3801,7 @@ export class GameScene extends Phaser.Scene {
     if (event?.type !== 'leak' || event.floor !== floor) return [];
     // The puddles sit on the floor line, which the wall height tells us.
     const floorY = FLOOR_HEIGHT - FLOOR_BAND;
-    this.leakObjects = buildLeakEffect(this, { width: FLOOR_WIDTH, floorY, seed: floor * 31 });
+    this.leakObjects = buildLeakEffect(this, { width: this.floorW, floorY, seed: floor * 31 });
     // remember where the puddles are, so the drips can land in them
     this.leakPuddleXs = [];
     for (let i = 0; i < 7; i++) {
@@ -3793,7 +3809,7 @@ export class GameScene extends Phaser.Scene {
         const v = Math.sin(floor * 31 + i * 7.7 + n) * 10000;
         return v - Math.floor(v);
       };
-      this.leakPuddleXs.push(60 + hh(1) * (FLOOR_WIDTH - 120));
+      this.leakPuddleXs.push(60 + hh(1) * (this.floorW - 120));
     }
     // AND IT IS STILL COMING DOWN. The puddles were the whole event: a flooded
     // floor with water that never moved, which reads as a texture rather than as
@@ -5028,7 +5044,7 @@ export class GameScene extends Phaser.Scene {
     if (npcsOnFloor(state.currentFloor).some((n) => near(this.npcView(state, n).x))) return true;
     if (this.floorView.containers.some((c) => c.items.length > 0 && near(c.x))) return true;
     for (const marker of this.spotMarkers.values()) if (near(marker.x)) return true;
-    if (near(UP_EXIT_X) || near(DOWN_EXIT_X)) return true;
+    if (near(UP_EXIT_X) || near(this.downExit)) return true;
     if (state.currentFloor === STARTING_FLOOR && near(BED_X)) return true;
     return false;
   }
@@ -5060,7 +5076,7 @@ export class GameScene extends Phaser.Scene {
     // send the player walking to a spot behind it.
     if (pointer.y < HUD_LAYOUT.contextBottom) return;
     const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-    const x = Phaser.Math.Clamp(world.x, 8, FLOOR_WIDTH - 8);
+    const x = Phaser.Math.Clamp(world.x, 8, this.floorW - 8);
     this.walkTarget = { x, interact: this.hasInteractableNear(x) };
   }
 
@@ -6337,7 +6353,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private wandererSituation(state: GameState, event: ActiveEvent): WandererSituation {
-    const x = this.wanderer?.x ?? (state.player.x < FLOOR_WIDTH / 2 ? FLOOR_WIDTH - 48 : 48);
+    const x = this.wanderer?.x ?? (state.player.x < this.floorW / 2 ? this.floorW - 48 : 48);
     const ai = this.wandererAI;
     return {
       eventType: 'wanderer',
@@ -6461,7 +6477,7 @@ export class GameScene extends Phaser.Scene {
     const step = stepWandererAI(ai, state.player.x, delta, this.wandererIntent);
     const toward = Math.sign(state.player.x - this.wanderer!.x);
     const dir = step.direction === 'away-from-player' ? -toward : toward;
-    if (dir !== 0) this.wanderer!.x = Math.max(0, Math.min(FLOOR_WIDTH, this.wanderer!.x + dir * WANDERER_SPEED * step.speedMultiplier * (delta / 1000)));
+    if (dir !== 0) this.wanderer!.x = Math.max(0, Math.min(this.floorW, this.wanderer!.x + dir * WANDERER_SPEED * step.speedMultiplier * (delta / 1000)));
     if (dir !== 0) this.wanderer!.setFlipX(dir < 0);
 
     if (this.wandererIntent === 'flee') {

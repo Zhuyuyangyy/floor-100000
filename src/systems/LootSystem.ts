@@ -2,6 +2,7 @@ import { containerItemKey, generateFloor, getFloorTemplate } from '../data/floor
 import { addItem, removeItem } from './InventorySystem';
 import { getItem } from '../data/items';
 import type { GameState, GeneratedFloor, InventoryStack } from '../core/gameTypes';
+import { FLOOR_WIDTH, floorWidthFor } from '../core/constants';
 
 // Turns looting into GameState so a saved + reloaded game never re-spawns loot
 // (docs/03_TASKS.md#p0-03). visitedFloors[floor].lootedItems stores stable keys;
@@ -32,10 +33,17 @@ export function getFloorView(state: GameState, floor: number): GeneratedFloor {
   const leakHere = event?.type === 'leak' && event.floor === floor;
   const visit = state.visitedFloors[floor];
   const looted = visit ? new Set(visit.lootedItems) : null;
+  // Templates author their x on the base 1280 grid; a longer floor spreads them
+  // across its own width so the last bay is not empty. Scaled here, once, so
+  // every consumer (drawing, interaction, labels) sees the same number.
+  const k = floorWidthFor(floor) / FLOOR_WIDTH;
+  const sx = (x: number): number => (k === 1 ? x : Math.round(x * k));
   return {
     ...base,
-    containers: base.containers.map((c) => ({ ...c, items: containerLooted(c.id, c.items, looted) })),
-    groundItems: base.groundItems.filter((g) => !looted?.has(g.key) && !leakHere),
+    containers: base.containers.map((c) => ({ ...c, x: sx(c.x), items: containerLooted(c.id, c.items, looted) })),
+    groundItems: base.groundItems
+      .filter((g) => !looted?.has(g.key) && !leakHere)
+      .map((g) => ({ ...g, x: sx(g.x) })),
   };
 }
 

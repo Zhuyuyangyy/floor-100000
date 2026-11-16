@@ -1,7 +1,6 @@
 import {
   DOWN_EXIT_X,
   ENTRY_X,
-  FLOOR_WIDTH,
   INTERACT_DISTANCE,
   PLAYER_ACCELERATION,
   PLAYER_DECELERATION,
@@ -11,6 +10,8 @@ import {
   STAIR_TRAVEL_MS,
   UP_EXIT_X,
   PLAYABLE_FLOORS_V01,
+  downExitXFor,
+  floorWidthFor,
 } from '../core/constants';
 import { getFloorTemplate } from '../data/floorTemplates';
 import { segmentOf } from '../core/segments';
@@ -151,7 +152,9 @@ export function tryChangeFloor(state: GameState, direction: 1 | -1): FloorChange
 // Clamped horizontal movement within the corridor. Pure so it can be unit-tested.
 export function movePlayerX(state: GameState, deltaX: number): void {
   const min = 8;
-  const max = FLOOR_WIDTH - 8;
+  // Per floor: on a nine-bay floor the right-hand stair is 3000px away, and
+  // clamping to the base width would make the last bays unreachable.
+  const max = floorWidthFor(state.currentFloor) - 8;
   state.player.x = Math.max(min, Math.min(max, state.player.x + deltaX));
 }
 
@@ -193,7 +196,7 @@ export function currentInteractionZone(state: GameState): InteractionZone {
   if (hasUpExit(state.currentFloor) && Math.abs(state.player.x - UP_EXIT_X) <= INTERACT_DISTANCE) {
     return 'up';
   }
-  if (hasDownExit(state.currentFloor) && Math.abs(state.player.x - DOWN_EXIT_X) <= INTERACT_DISTANCE) {
+  if (hasDownExit(state.currentFloor) && Math.abs(state.player.x - downExitXFor(state.currentFloor)) <= INTERACT_DISTANCE) {
     return 'down';
   }
   return null;
@@ -214,6 +217,6 @@ export function currentInteractionZone(state: GameState): InteractionZone {
  */
 export function stairMouthZone(state: GameState): InteractionZone {
   if (Math.abs(state.player.x - UP_EXIT_X) <= INTERACT_DISTANCE) return 'up';
-  if (Math.abs(state.player.x - DOWN_EXIT_X) <= INTERACT_DISTANCE) return 'down';
+  if (Math.abs(state.player.x - downExitXFor(state.currentFloor)) <= INTERACT_DISTANCE) return 'down';
   return null;
 }

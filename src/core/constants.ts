@@ -57,6 +57,41 @@ export const WALL_HEIGHT = FLOOR_HEIGHT - FLOOR_BAND;
 
 export const ROOM_COUNT = 4;
 export const ROOM_WIDTH = FLOOR_WIDTH / ROOM_COUNT;
+
+// ── how long a floor is ────────────────────────────────────────────────────
+// Not every floor is the same length. The lower tiers are cramped — four bays,
+// you cross them in a few seconds — and the higher ones have room to waste. It
+// buys the climb something wallpaper cannot: the floor you arrive on FEELS
+// different to walk, and the distance between the stairs is part of the cost of
+// going up.
+//
+// Expressed as rooms, not pixels: every bay stays 320 wide so the corridor
+// themes, the container grid and the stair mouths keep their existing maths.
+const ROOMS_BY_TIER: Record<number, number> = { 1: 4, 2: 5, 3: 6, 4: 7, 5: 8, 6: 9 };
+
+/** Which tier a floor belongs to, by the tower's own numbering. */
+export function tierOfFloor(floor: number): number {
+  if (floor >= 100000) return 6;
+  if (floor >= 50000) return 5;
+  if (floor >= 10000) return 4;
+  if (floor >= 1000) return 3;
+  if (floor >= 100) return 2;
+  return 1;
+}
+
+export function roomCountFor(floor: number): number {
+  return ROOMS_BY_TIER[tierOfFloor(floor)] ?? ROOM_COUNT;
+}
+
+/** Physical length of a floor, in pixels. */
+export function floorWidthFor(floor: number): number {
+  return roomCountFor(floor) * ROOM_WIDTH;
+}
+
+/** The down stairwell sits at the right end, whatever the floor's length. */
+export function downExitXFor(floor: number): number {
+  return floorWidthFor(floor) - 40;
+}
 export const PLAYER_SPEED = 130; // px / second
 // Where the player's feet sit. The props are bottom-aligned further back in the
 // band so the player reads as standing in front of them; this is that offset.

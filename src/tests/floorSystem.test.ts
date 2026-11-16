@@ -7,6 +7,7 @@ import {
   DOWN_EXIT_X,
   ENTRY_X,
   FLOOR_WIDTH,
+  downExitXFor,
   STAIR_RISE,
   STAIR_START_Y,
   PLAYER_ACCELERATION,
@@ -592,7 +593,7 @@ describe('stairMouthZone', () => {
     }
     for (const floor of [100, 1000, 10000, 50000]) {
       s.currentFloor = floor;
-      s.player.x = DOWN_EXIT_X;
+      s.player.x = downExitXFor(floor);
       expect(hasDownExit(floor), `no down stair at ${floor}`).toBe(false);
       expect(currentInteractionZone(s), `no stair zone at ${floor}`).toBeNull();
       expect(stairMouthZone(s), `but the mouth is there at ${floor}`).toBe('down');
@@ -610,7 +611,7 @@ describe('stairMouthZone', () => {
         expect(stairMouthZone(s)).toBe('up');
       }
       if (hasDownExit(floor)) {
-        s.player.x = DOWN_EXIT_X;
+        s.player.x = downExitXFor(floor);
         expect(stairMouthZone(s), `down mouth at ${floor}`).toBe(currentInteractionZone(s));
         expect(stairMouthZone(s)).toBe('down');
       }

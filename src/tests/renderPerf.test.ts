@@ -4,7 +4,9 @@ import {
   CORRIDOR_TINT,
   drawCorridorRoom,
   stackNeighbours,
+  doorKeyFor,
   floorKeyFor,
+  windowKeyFor,
   wallKeyFor,
   type CorridorContext,
 } from '../render/corridors';
@@ -136,6 +138,13 @@ class FakeObject {
   setOrigin(x: number, y: number): this {
     this.originX = x;
     this.originY = y;
+    return this;
+  }
+  // placeDoor/placeWindow size their art to the old tile's opaque height; the
+  // fake only has to record the call, not honour it.
+  setDisplaySize(w: number, h: number): this {
+    this.width = w;
+    this.height = h;
     return this;
   }
   setAlpha(a: number): this {
@@ -616,6 +625,31 @@ describe('wallKeyFor 阶层分支', () => {
       const key = wallKeyFor(floor);
       expect(ENV_FILES[key], `${floor} -> ${key}`).toBeTruthy();
     }
+  });
+
+  // The tower's doors and windows used to be one texture each: 55 floors of the
+  // same 44x104 slab. They now resolve per tier, so a floor's door has to be
+  // both correct and loadable.
+  it('六个阶层的门窗键都是真实存在的资源', () => {
+    for (const floor of [1, 5, 100, 1005, 10000, 50000, 100000]) {
+      const door = doorKeyFor(floor);
+      const win = windowKeyFor(floor);
+      expect(ENV_FILES[door], `${floor} -> ${door}`).toBeTruthy();
+      expect(ENV_FILES[win], `${floor} -> ${win}`).toBeTruthy();
+    }
+  });
+
+  it('同阶层相邻楼层的门不会全都一样', () => {
+    // floor 1 is the reinforced one (the door the player can upgrade), 5 is a
+    // kicked-in dorm door; everything else in between is the plain dorm door.
+    expect(doorKeyFor(1)).toBe('env-door-slum-reinforced');
+    expect(doorKeyFor(5)).toBe('env-door-slum');
+    expect(doorKeyFor(101)).toBe('env-door-dorm');
+    expect(doorKeyFor(105)).toBe('env-door-dorm-broken');
+    expect(doorKeyFor(10000)).toBe('env-door-commercial');
+    expect(windowKeyFor(1)).toBe('env-window-slum');
+    expect(windowKeyFor(105)).toBe('env-window-dorm');
+    expect(windowKeyFor(50000)).toBe('env-window-commercial');
   });
 
   it('地板同样按阶层分，缺档回落旧地板', () => {

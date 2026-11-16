@@ -23,12 +23,15 @@ export interface AiNpcConfig {
 }
 
 function envValue(key: string): string | undefined {
-  // Node / vitest：process.env（vi.stubEnv 也只改这里）。
-  if (typeof process !== 'undefined' && typeof process.env?.[key] === 'string') {
-    return process.env[key];
+  // Two channels, and whichever runtime we are in decides the only one that
+  // counts — never both. In Node (vitest included) `process.env` is the truth:
+  // falling through to import.meta.env made the 「no config → AI off」 test
+  // unfalsifiable, because deleting the key from process.env left Vitest's copy
+  // of .env.local sitting in import.meta.env and the model stayed configured.
+  if (typeof process !== 'undefined' && process.env) {
+    return typeof process.env[key] === 'string' ? process.env[key] : undefined;
   }
-  // 浏览器构建：Vite 把 import.meta.env 序列化进包，动态取值同样有效。
-  // 不依赖 vite/client 类型，纯 Node 下 import.meta.env 不存在时走 undefined。
+  // Browser build: Vite serialises import.meta.env into the bundle.
   const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
   return env?.[key];
 }
@@ -84,6 +87,8 @@ export function npcInventoryFromDef(npc: NpcDef): InventoryStack[] {
 export function npcFactFromDef(npc: NpcDef, hp = 30, inventory?: InventoryStack[]): NpcFact {
   return {
     id: npc.id,
+    name: npc.name,
+    title: npc.title,
     archetype: archetypeForNpcId(npc.id),
     floor: 2, // NPC_FLOOR；此处不 import 常量，避免配置模块牵连场景层
     x: npc.x,

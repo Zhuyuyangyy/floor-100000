@@ -1,9 +1,9 @@
 {
   "palette": 16,
   "summary": {
-    "files": 204,
-    "png": 188,
-    "locked": 99,
+    "files": 216,
+    "png": 200,
+    "locked": 111,
     "open": 84,
     "staged": 7,
     "aux": 14,
@@ -1226,6 +1226,246 @@
       "bytes": 111247,
       "class": "open",
       "note": "墙面特写，255–335px 1:1 显示，不量化"
+    },
+    {
+      "path": "env/crates/crate-broken.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-crate-broken]"
+        }
+      ],
+      "width": 48,
+      "height": 40,
+      "channels": 4,
+      "opaqueColours": 4,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 534,
+      "semiAlphaPx": 0,
+      "bytes": 462,
+      "class": "locked",
+      "note": "阶层门窗与箱子状态图，16 色门禁适用"
+    },
+    {
+      "path": "env/crates/crate-forced.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-crate-forced]"
+        }
+      ],
+      "width": 48,
+      "height": 40,
+      "channels": 4,
+      "opaqueColours": 5,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 534,
+      "semiAlphaPx": 0,
+      "bytes": 490,
+      "class": "locked",
+      "note": "阶层门窗与箱子状态图，16 色门禁适用"
+    },
+    {
+      "path": "env/crates/crate-intact.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-crate-intact]"
+        }
+      ],
+      "width": 48,
+      "height": 40,
+      "channels": 4,
+      "opaqueColours": 5,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 534,
+      "semiAlphaPx": 0,
+      "bytes": 469,
+      "class": "locked",
+      "note": "阶层门窗与箱子状态图，16 色门禁适用"
+    },
+    {
+      "path": "env/doors/door-commercial.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-door-commercial]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 7,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 880,
+      "semiAlphaPx": 0,
+      "bytes": 485,
+      "class": "locked",
+      "note": "阶层门窗与箱子状态图，16 色门禁适用"
+    },
+    {
+      "path": "env/doors/door-dorm-broken.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-door-dorm-broken]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 7,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 1308,
+      "semiAlphaPx": 0,
+      "bytes": 705,
+      "class": "locked",
+      "note": "阶层门窗与箱子状态图，16 色门禁适用"
+    },
+    {
+      "path": "env/doors/door-dorm.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-door-dorm]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 6,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 1308,
+      "semiAlphaPx": 0,
+      "bytes": 533,
+      "class": "locked",
+      "note": "阶层门窗与箱子状态图，16 色门禁适用"
+    },
+    {
+      "path": "env/doors/door-slum-reinforced.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-door-slum-reinforced]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 6,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 1118,
+      "semiAlphaPx": 0,
+      "bytes": 857,
+      "class": "locked",
+      "note": "阶层门窗与箱子状态图，16 色门禁适用"
+    },
+    {
+      "path": "env/doors/door-slum.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-door-slum]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 6,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 1582,
+      "semiAlphaPx": 0,
+      "bytes": 527,
+      "class": "locked",
+      "note": "阶层门窗与箱子状态图，16 色门禁适用"
+    },
+    {
+      "path": "env/doors/window-commercial-cracked.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-window-commercial-cracked]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 4,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 1446,
+      "semiAlphaPx": 0,
+      "bytes": 671,
+      "class": "locked",
+      "note": "阶层门窗与箱子状态图，16 色门禁适用"
+    },
+    {
+      "path": "env/doors/window-commercial.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-window-commercial]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 4,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 1446,
+      "semiAlphaPx": 0,
+      "bytes": 434,
+      "class": "locked",
+      "note": "阶层门窗与箱子状态图，16 色门禁适用"
+    },
+    {
+      "path": "env/doors/window-dorm.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-window-dorm]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 3,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 2008,
+      "semiAlphaPx": 0,
+      "bytes": 357,
+      "class": "locked",
+      "note": "阶层门窗与箱子状态图，16 色门禁适用"
+    },
+    {
+      "path": "env/doors/window-slum.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-window-slum]"
+        }
+      ],
+      "width": 64,
+      "height": 96,
+      "channels": 4,
+      "opaqueColours": 4,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 3176,
+      "semiAlphaPx": 0,
+      "bytes": 415,
+      "class": "locked",
+      "note": "阶层门窗与箱子状态图，16 色门禁适用"
     },
     {
       "path": "env/fixtures/bracket.png",

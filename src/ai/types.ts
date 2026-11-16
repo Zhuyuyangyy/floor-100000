@@ -90,6 +90,9 @@ export interface NpcPersistedState {
 /** 出站观察快照：游戏 → AI。只读，不含任何可直接改状态的句柄。 */
 export interface NpcObservation {
   npcId: string;
+  /** 显示名与职称（如「阿林（维修工）」）。缺省时 prompt 回落 npcId。 */
+  npcName?: string;
+  npcTitle?: string;
   archetype: NpcArchetype;
   traits: PersonalityTraits;
   /** 检索后的相关记忆（有预算上限，不是全量） */

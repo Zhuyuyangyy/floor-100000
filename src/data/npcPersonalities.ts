@@ -15,6 +15,9 @@ export interface ArchetypeDef {
   traits: PersonalityTraits;
   /** 初始目标（纯文本，进 prompt） */
   goal: string;
+  /** 说话方式（进 prompt）。没有它，模型只看到五个百分数，台词会退化成
+  *  一般化的自我介绍——实测说出过「早。我是alin。这层楼的线路得守住」。 */
+  voice: string;
   /** 该原型的记忆条目上限；敌对型记得更久，伺机报复 */
   memoryLimit: number;
   /** 夜间自主游荡时的仇恨范围（像素）。hostile 之外无意义。 */
@@ -24,6 +27,7 @@ export interface ArchetypeDef {
 export const ARCHETYPES: Record<NpcArchetype, ArchetypeDef> = {
   ally: {
     archetype: 'ally',
+    voice: '短句、务实，用手上的活和具体的物件说话；不客套，不说教，不自报家门。',
     npcId: 'alin',
     displayName: '阿林',
     // 高利他 + 记恩：玩家的帮助会被放大回报
@@ -33,6 +37,7 @@ export const ARCHETYPES: Record<NpcArchetype, ArchetypeDef> = {
   },
   neutral: {
     archetype: 'neutral',
+    voice: '话里带算盘，先估对方手里有什么；不白给，也不撕破脸。',
     npcId: 'xiaozhou',
     displayName: '小周',
     // 务实计算：关系跟着利益走，不主动结盟也不主动为敌
@@ -42,6 +47,7 @@ export const ARCHETYPES: Record<NpcArchetype, ArchetypeDef> = {
   },
   hostile: {
     archetype: 'hostile',
+    voice: '冷、防备，句子短；不解释自己的动机。',
     npcId: 'wanderer',
     displayName: '流浪者',
     // 高攻击 + 低利他：夜间窗口的威胁源

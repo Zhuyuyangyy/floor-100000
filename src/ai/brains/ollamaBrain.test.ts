@@ -33,7 +33,7 @@ describe('OllamaBrain：transport 层', () => {
       const body = JSON.parse(String(init?.body));
       expect(body.model).toBe('qwen3:8b');
       expect(body.messages).toHaveLength(2);
-      return jsonResponse({ choices: [{ message: { content: '{"action":{"type":"dialogue","text":"早"},"confidence":0.9}' } }] });
+      return jsonResponse({ message: { content: '{"action":{"type":"dialogue","text":"早"},"confidence":0.9}' } });
     }) as typeof fetch;
     const brain = new OllamaBrain({ model: 'qwen3:8b', fetchImpl });
     const p = await brain.decide(obs);
@@ -51,11 +51,11 @@ describe('OllamaBrain：transport 层', () => {
   });
 
   it('decide：模型返回非契约内容 → null', async () => {
-    const fetchImpl = (async () => jsonResponse({ choices: [{ message: { content: '你好呀朋友' } }] })) as typeof fetch;
+    const fetchImpl = (async () => jsonResponse({ message: { content: '你好呀朋友' } })) as typeof fetch;
     expect(await new OllamaBrain({ model: 'm', fetchImpl }).decide(obs)).toBeNull();
   });
 
-  it('decide：响应缺 choices → null', async () => {
+  it('decide：响应缺 message → null', async () => {
     const fetchImpl = (async () => jsonResponse({ error: 'model not found' })) as typeof fetch;
     expect(await new OllamaBrain({ model: 'm', fetchImpl }).decide(obs)).toBeNull();
   });

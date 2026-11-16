@@ -49,7 +49,7 @@ import { hasFloorContent } from '../data/floorTemplates';
 import { liftDirection, liftOutcome, liftRequirement, nextSegment, prevSegment, skippedFloors } from '../core/segments';
 import { crossingSummary } from '../core/worldgen';
 import { countItem, isBagFull, removeItem, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
-import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
+import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater, recipePreview } from '../systems/CraftingSystem';
 import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, isNight, spendTime } from '../systems/SurvivalSystem';
 import { ensureNightEvent, eventStatus, setEventStatus } from '../systems/EventSystem';
 import { armNextRoll, dwellRollDue, ensureDwell, isDwellExempt, rollDwellEvent, tickDwell } from '../systems/dwellPressure';
@@ -157,7 +157,7 @@ import {
 import { WEAPON_GRIP_X, WEAPON_GRIP_Y, WEAPON_H, WEAPON_KEY, WEAPON_W } from '../render/weapon.ts';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
-import { corridorTint, drawCorridorRoom, floorKeyFor, wallKeyFor } from '../render/corridors';
+import { corridorTint, drawCorridorRoom, floorKeyFor, placeDoor, placeWindow, wallKeyFor } from '../render/corridors';
 import {
   ACTOR_DEPTH,
   DUST_DEPTH,
@@ -223,6 +223,14 @@ const CRAFT_ROW_PITCH = fontLineBox(TYPE.body);
 // and a fixed four rows would have let the selection walk off the bottom of the
 // list (Enter would have crafted an entry nobody could see).
 const CRAFT_ROWS = RECIPES.length;
+// AG-44：详情块（效果/档位/去哪拿）的垂直预算。最坏流：效果 2 行（加固门的
+// effect 在 494px 栏宽里换行）+ 档位/前置 1 行 + 缺料 hints 4 行（三样料、
+// 每条三列出处）= 7 行 × fontLineBox(caption) = 175，加两块间距 12，余量给
+// Phaser 真实换行比 wrapText 估计多咬一行的情形。这是行数预算不是魔法数字：
+// 改动文案后先跑 e2e/ag44-scene-wire.spec.ts 量真实 bounds。
+const CRAFT_DETAIL_H = 200;
+/** 详情块三行之间的透气。 */
+const CRAFT_DETAIL_GAP = 6;
 // AG-20：终局层（统治核心）。这一层的三个容器是终局演出入口
 // （docs/plans/FINALE_UX.md §2 契约，EndgameScene 归 AG-21）。
 const FINALE_FLOOR = 100000;
@@ -526,8 +534,19 @@ export class GameScene extends Phaser.Scene {
   private craftObjects: PanelObject[] = [];
   private craftRows: Array<{ band: Phaser.GameObjects.Rectangle; name: Phaser.GameObjects.Text; status: Phaser.GameObjects.Text }> = [];
   private craftMarker!: Phaser.GameObjects.Image;
-  /** "前置：X" line for the selected recipe; sits in the space under the rows */
-  private craftReqText!: Phaser.GameObjects.Text;
+  /**
+   * AG-44：选中行的详情块（原 craftReqText 单行「前置：X」的位置）。三行各司其职：
+   * effect 是「做出来会怎样」（recipePreview.effect），tier 是档位读数 + 前置
+   * （recipePreview.tierNote + requires），hints 是缺料时的「去哪拿」
+   * （canCraft().hints）。数据全部来自 AG-42 的 CraftingSystem，场景只排版。
+   */
+  private craftDetailTexts!: {
+    effect: Phaser.GameObjects.Text;
+    tier: Phaser.GameObjects.Text;
+    hints: Phaser.GameObjects.Text;
+  };
+  /** 详情块第一行的 y（buildCraftPanel 时算定，refreshCraft 流式排布用）。 */
+  private craftDetailY = 0;
   private craftSelected = 0;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
   /** the warm pool the player carries; only visible once night falls */
@@ -2292,7 +2311,7 @@ export class GameScene extends Phaser.Scene {
       const shaft = addGlow(this, cx - 8, 168, 52, 0.34, LIGHT_DEPTH);
       shaft.setScale(0.42, 1.55);
       this.floorObjects.push(shaft);
-      this.floorObjects.push(this.add.image(cx - 8, 116, 'tile_window').setOrigin(0.5));
+      this.floorObjects.push(placeWindow(this, cx - 8, 116, STARTING_FLOOR));
     }
 
     // Wall lamps between the windows, each with its own small pool of light —
@@ -2325,7 +2344,7 @@ export class GameScene extends Phaser.Scene {
 
     // Doors on the room boundaries, standing on the floor line.
     for (let i = 1; i < ROOM_COUNT; i++) {
-      this.floorObjects.push(this.add.image(i * ROOM_WIDTH, wallH, 'tile_door').setOrigin(0.5, 1));
+      this.floorObjects.push(placeDoor(this, i * ROOM_WIDTH, wallH, STARTING_FLOOR));
     }
 
     this.floorObjects.push(wall, floor, g);
@@ -2679,7 +2698,7 @@ export class GameScene extends Phaser.Scene {
     // windows — the player should be able to look back down at their own room.
     if (floor === STARTING_FLOOR) {
       for (let r = 0; r < ROOM_COUNT; r++) {
-        props.push(this.add.image(r * ROOM_WIDTH + ROOM_WIDTH / 2 - 8, 116, 'tile_window').setOrigin(0.5));
+        props.push(placeWindow(this, r * ROOM_WIDTH + ROOM_WIDTH / 2 - 8, 116, floor));
       }
       props.push(this.add.image(BED_X, wallH + 4, 'furn_bed').setOrigin(0.5, 1));
       props.push(this.add.image(CRAFT_X, wallH + 4, 'furn_workbench').setOrigin(0.5, 1));
@@ -2798,7 +2817,11 @@ export class GameScene extends Phaser.Scene {
   private buildContainers(): void {
     for (const c of this.floorView.containers) {
       const y = FLOOR_HEIGHT - 64;
-      const key = containerTextureKey(c.id);
+      // Crates use the 2026-11-15 set for all three states, so a full crate and
+      // its forced/broken counterparts are the same drawing at the same scale.
+      // The old crate art is 56px tall against this set's 40 — mixing them made
+      // a crate appear to shrink the moment it was looted.
+      const key = c.id === 'crate_wood' || c.id === 'crate_metal' ? 'env-crate-intact' : containerTextureKey(c.id);
       // Every container has art now, so the Graphics fallback is gone: a missing
       // key would be an invisible container, not a plain one. The interaction box
       // is unchanged either way — hit detection still goes through c.x and
@@ -2880,8 +2903,22 @@ export class GameScene extends Phaser.Scene {
   private setContainerEmptyVisual(id: string, empty: boolean): void {
     const obj = this.containerObjs.get(id);
     if (!obj) return;
-    const label = this.floorView.containers.find((c) => c.id === id)?.label ?? id;
-    obj.box.setAlpha(empty ? 0.35 : 1);
+    const c = this.floorView.containers.find((x) => x.id === id);
+    const label = c?.label ?? id;
+    // Crates get real art for their opened state. Fading to 0.35 was the only
+    // signal a crate had been looted, and at 0.35 a crate reads as a rendering
+    // bug rather than as a crate someone got to first.
+    const isCrate = id === 'crate_wood' || id === 'crate_metal';
+    if (isCrate && obj.box instanceof Phaser.GameObjects.Image) {
+      const opened = getGame().currentFloor % 3 === 0 ? 'env-crate-broken' : 'env-crate-forced';
+      const key = empty ? opened : 'env-crate-intact';
+      if (key && this.textures.exists(key)) {
+        obj.box.setTexture(key);
+        obj.box.setAlpha(1);
+      }
+    } else {
+      obj.box.setAlpha(empty ? 0.35 : 1);
+    }
     obj.label.setText(empty ? `${label}（空）` : label);
     // The plate is fitted to the text, so "（空）" has to re-fit it or the extra
     // two glyphs hang off the edge of the backing.
@@ -3805,10 +3842,14 @@ export class GameScene extends Phaser.Scene {
     // plus three materials, and at 460 it ran under the right-aligned status
     // column (screenshot: 核心权限's cost sat on top of 缺前置).
     const panelW = 530;
-    // 30 header + CRAFT_ROWS rows at the font's line box + footer clearance.
+    // 30 header + CRAFT_ROWS rows at the font's line box + the AG-44 detail
+    // block (effect / tier / hints) + footer clearance.
     // This was 300, sized when the pitch was 24; at the measured 30 the last
-    // row and the footer ran past the bottom edge.
-    const panelH = 30 + CRAFT_ROWS * CRAFT_ROW_PITCH + 40;
+    // row and the footer ran past the bottom edge. AG-44 added the detail
+    // block below the rows, so the panel grew by CRAFT_DETAIL_H (its comment
+    // carries the line budget) — the whole card still clears the HUD bands
+    // (60 top / 40 foot) inside the 720 canvas.
+    const panelH = 30 + CRAFT_ROWS * CRAFT_ROW_PITCH + 12 + CRAFT_DETAIL_H + 40;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -3857,21 +3898,34 @@ export class GameScene extends Phaser.Scene {
         }),
       );
     }
-    // The pass chain gates one recipe behind another, so the selected row needs a
-    // line that says which credential it wants. It goes under the last band (the
-    // list never reached this far when it was four rows) rather than in the row:
-    // the row is already 名称 + 材料 and a third column would collide with the
-    // right-aligned status at this panel width.
-    this.craftReqText = this.add
-      // Anchored under the LAST recipe row, not at a fixed 246: RECIPES grew to
-      // nine with the economy pass, so row 9's band (top+222..244) sat on top of
-      // a label pinned at 246. 30 is the list's own top inset and 12 is the gap
-      // the label wants under the list.
-      .text(left + 18, top + 30 + CRAFT_ROWS * CRAFT_ROW_PITCH + 12, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
-      .setOrigin(0, 0.5)
-      .setDepth(PANEL_DEPTH.game.craft + 6);
+    // AG-44：详情块——效果预览、档位/前置读数、缺料出处。修前面板只有
+    // 名称+材料，玩家在按 Enter 前看不到「做出来会怎样」（effect）、
+    // 「这条属于更高档位」（tierNote）、「差的料去哪拿」（hints）。
+    // 三份数据都由 AG-42 的 recipePreview / canCraft 打包好（docs/plans/
+    // CRAFT.md §5 的交接），这里只负责排版：行内起点在最后一行 band 之下
+    // 12px（与旧 craftReqText 同一锚点），宽度吃面板内边距 18px。
+    const detailX = left + 18;
+    const detailW = panelW - 36;
+    const detailY = top + 30 + CRAFT_ROWS * CRAFT_ROW_PITCH + 12;
+    this.craftDetailY = detailY;
+    const detailText = (color: string): Phaser.GameObjects.Text =>
+      this.add
+        .text(detailX, detailY, '', {
+          fontFamily: FONT_FAMILY,
+          fontSize: `${TYPE.caption}px`,
+          color,
+          wordWrap: { width: detailW, useAdvancedWrap: true },
+        })
+        .setOrigin(0, 0)
+        .setDepth(PANEL_DEPTH.game.craft + 6);
+    this.craftDetailTexts = {
+      effect: detailText(hex(TEXT.primary)),
+      tier: detailText(hex(TEXT.dim)),
+      hints: detailText(hex(TEXT.warn)),
+    };
+    this.craftObjects.push(this.craftDetailTexts.effect, this.craftDetailTexts.tier, this.craftDetailTexts.hints);
     const footer = this.add.text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-    this.craftObjects.push(this.craftReqText, footer, this.craftMarker);
+    this.craftObjects.push(footer, this.craftMarker);
 
     applyPanelDepth(this.craftObjects, PANEL_DEPTH.game.craft);
     this.assertPanelContent('craft', this.craftObjects);
@@ -3939,16 +3993,53 @@ export class GameScene extends Phaser.Scene {
         row.status.setColor(selected ? hex(PALETTE.ink) : can ? hex(PALETTE.clothHigh) : hex(TEXT.dim));
       }
     }
-    // "前置：X" for the row the cursor is on. Met reads as quiet grey; unmet is
-    // the warning colour so the locked rung explains itself before Enter does.
+    // AG-44：详情块——「做出来会怎样」（effect）、「这条属于第几档 / 前置拿没拿」
+    // （tierNote + requires）、「差的料去哪拿」（hints）。数据全部来自 AG-42 的
+    // recipePreview / canCraft（CRAFT.md §5 的交接契约），本场景只排版：
+    // 三行从最后一行 band 之下 12px 起流式排布，行高取 Text 自己的测量值
+    // （GameSans 的真实行盒），空行不占位。
     const selectedEntry = entries[this.craftSelected];
-    const requires = selectedEntry?.kind === 'recipe' ? getRecipe(selectedEntry.id!).requires : undefined;
-    if (requires) {
-      const met = hasUpgrade(state, requires);
-      this.craftReqText.setText(`前置：${getRecipe(requires).displayName} · ${met ? '已获得' : '未获得'}`);
-      this.craftReqText.setColor(met ? hex(TEXT.dim) : hex(TEXT.warn));
-    } else {
-      this.craftReqText.setText('');
+    const detail = this.craftDetailTexts;
+    let effectLine = '';
+    let tierLine = '';
+    let hintsLine = '';
+    let tierColor = hex(TEXT.dim);
+    if (selectedEntry?.kind === 'recipe') {
+      const preview = recipePreview(state, selectedEntry.id!);
+      effectLine = `效果：${preview.effect}`;
+      // tierNote 与前置合并成一行：两者都是「这条配方现在够不够格」的读数，
+      // 分两行会在 4 行 hints 之外再吃掉 25px 的详情预算。
+      tierLine = preview.tierNote ?? '';
+      if (preview.requires) {
+        const req = `前置：${preview.requires.displayName} ${preview.requires.met ? '已获得' : '未获得'}`;
+        tierLine = tierLine ? `${tierLine} · ${req}` : req;
+      }
+      // 未达档位 / 未获前置都走警告色：进度感与卡点都要在按 Enter 前可见。
+      tierColor = preview.tierLocked || (preview.requires && !preview.requires.met) ? hex(TEXT.warn) : hex(TEXT.dim);
+      if (preview.hints && preview.hints.length > 0) {
+        // hints 的每条是「材料：出处」。分隔符用「；」而不是默认的逗号，免得
+        // 出处里的「6/7/9/10层概率」被读成同一处的并列。
+        hintsLine = `去哪拿：${preview.hints.join('；')}`;
+      }
+    } else if (selectedEntry?.kind === 'purify') {
+      // 净化行的效果文案取净水器配方自己的 effect（数据唯一来源，不另写一套）；
+      // purify 条目只在净水器已建造时存在，所以这里永远读得到。
+      effectLine = `效果：${getRecipe('purifier').effect}`;
+    }
+    detail.effect.setText(effectLine);
+    detail.tier.setText(tierLine);
+    detail.tier.setColor(tierColor);
+    detail.hints.setText(hintsLine);
+    // 流式布局：每行按自己的真实高度占位，空行收起。
+    let dy = this.craftDetailY;
+    for (const t of [detail.effect, detail.tier, detail.hints]) {
+      if (t.text) {
+        t.setPosition(t.x, dy);
+        t.setVisible(true);
+        dy += t.height + CRAFT_DETAIL_GAP;
+      } else {
+        t.setVisible(false);
+      }
     }
     const selectedRow = this.craftRows[this.craftSelected - first];
     this.craftMarker.setVisible(entries[this.craftSelected] !== undefined && selectedRow !== undefined);
@@ -4944,6 +5035,13 @@ export class GameScene extends Phaser.Scene {
 
   private onPointerDown(pointer: Phaser.Input.Pointer, currentlyOver: unknown[]): void {
     if (this.stairClimb) return;
+    // AG-44：任务面板是 launch 覆盖在本场景上的（Game 不停），它的指针交互
+    // （行点击/分支点击/面板外点击关闭）自己管；这里直接让位。修前没有这一条：
+    // 点任务面板里的行会穿过面板在本场景设一个 walkTarget（anyPanelOpen 不含
+    // questsOpen），玩家选完任务莫名走两步。也不能把 questsOpen 并进
+    // anyPanelOpen 的那个分支——那会走到 onEsc()，在只有任务面板开着时把暂停
+    // 菜单顶起来。
+    if (this.questsOpen) return;
     // A row or a button already took this press.
     if (currentlyOver.length > 0) return;
 

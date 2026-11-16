@@ -45,7 +45,7 @@ export interface CorridorContext {
 // palette role or a named mix of two, so a crate, a pipe and the wall behind it
 // all belong to the same value structure.
 import { PALETTE } from './palette.ts';
-import { ENV_FILES, ENV_FLOOR_KEY, ENV_WALL_KEY } from './artpack';
+import { ENV_FILES, ENV_FLOOR_KEY, ENV_WALL_KEY, TILE_DOOR_KEY, TILE_WINDOW_KEY } from './artpack';
 import { LIGHT_DEPTH } from './lighting';
 import { segmentOf } from '../core/segments';
 import { startFxLoop } from './fx';
@@ -103,7 +103,7 @@ function drawWorkerDorms(ctx: CorridorContext): void {
   const { g, roomX, floorY, room } = ctx;
   const doorX = roomX + 52;
 
-  ctx.objects.push(ctx.scene.add.image(doorX, floorY, 'tile_door').setOrigin(0.5, 1));
+  ctx.objects.push(placeDoor(ctx.scene, doorX, floorY, ctx.floor));
   // Number plate above the door. Its offset is the door's height plus a gap, not a
   // fixed 36 — the door used to be 16px and the plate sat well clear of it, but at
   // 56px a fixed 36 puts the plate printed across the door.
@@ -172,6 +172,10 @@ function drawStorage(ctx: CorridorContext): void {
     g.fillStyle(RUST_LIGHT, 1);
     g.fillRect(cx - 4, floorY - 9, 10, 2);
   }
+
+  // A door out of the bay, at the room boundary. Storage rooms had none, which
+  // meant the tier's door art only ever appeared on floors 1 and 2.
+  ctx.objects.push(placeDoor(ctx.scene, roomX + 290, floorY, ctx.floor));
 
   // Cobweb in the room's top corner.
   const wx = roomX + (room % 2 === 0 ? 8 : ROOM_WIDTH - 8);
@@ -261,6 +265,9 @@ function drawMaintenance(ctx: CorridorContext): void {
   g.fillRect(roomX + 40, 150, 3, 14);
   g.fillRect(roomX + 47, 150, 3, 14);
   g.fillRect(roomX + 40, 157, 10, 3);
+
+  // The plant room's door, between the two cabinet banks.
+  ctx.objects.push(placeDoor(ctx.scene, roomX + 166, floorY, ctx.floor));
 
   lamp(ctx, roomX + 200, 0.8);
 }
@@ -384,6 +391,9 @@ function drawCanteen(ctx: CorridorContext): void {
   g.fillRect(roomX + 258, 166, 22, 2);
   g.fillRect(roomX + 258, 172, 26, 2);
 
+  // The canteen's own door, on the service side of the room.
+  ctx.objects.push(placeDoor(ctx.scene, roomX + 300, floorY, ctx.floor));
+
   lamp(ctx, roomX + 160, 0.7);
 }
 
@@ -406,9 +416,34 @@ const THEMES: Record<number, (ctx: CorridorContext) => void> = {
   5: drawCanteen,
 };
 
+// Rooms above floor 5 used to be empty: drawCorridorRoom dispatched on the floor
+// number, and only 2/3/4/5 were keys. That left 51 of the 55 playable floors as
+// a wall, a floor band and nothing else — the art was there, the room was not.
+//
+// Floors 2-5 keep their hand-authored theme exactly as before. Everything else
+// takes a theme from its tier, alternating by parity so two neighbouring floors
+// never furnish the same way.
+const TIER_THEMES: Record<number, readonly number[]> = {
+  1: [3, 4], // slum: storage bays and maintenance runs
+  2: [2, 3], // worker housing, then its store rooms
+  3: [3, 4], // industrial: storage and plant
+  4: [4, 5], // commercial: plant and canteens
+  5: [5, 4], // privileged: canteens and plant
+  6: [4, 5], // core: plant
+};
+
+function themeFor(floor: number): number | null {
+  if (THEMES[floor]) return floor;
+  const tier = segmentOf(floor)?.id ?? 1;
+  const list = TIER_THEMES[tier] ?? TIER_THEMES[1];
+  return list[Math.abs(Math.trunc(floor)) % list.length];
+}
+
 /** Draws one room of a corridor floor into the shared detail layer. */
 export function drawCorridorRoom(ctx: CorridorContext): void {
-  THEMES[ctx.floor]?.(ctx);
+  const theme = themeFor(ctx.floor);
+  if (theme === null) return;
+  THEMES[theme]?.(ctx);
 }
 
 // Per-segment wash, applied where a floor has no tint of its own. The tower
@@ -449,6 +484,72 @@ export const SEGMENT_TINT: Record<number, { color: number; alpha: number }> = {
 // disk, so a mapped-but-missing PNG fails the suite instead of shipping green.
 export const ENV_WALL_COMMERCIAL_KEY = 'env-wall-commercial';
 export const ENV_WALL_VIP_KEY = 'env-wall-vip';
+
+// ── doors and windows ──────────────────────────────────────────────────────
+// The pack ships one door per tier plus broken/cracked variants. The old
+// tile-door was 44x104 with 91px of opaque art, so the new 64x96 doors are
+// drawn 91px tall: same footprint, same floor line, no relayout of the door
+// numbers and doormats that sit above them.
+const DOOR_HEIGHT = 91;
+const WINDOW_HEIGHT = 54;
+
+export function doorKeyFor(floor: number): string {
+  const tier = segmentOf(floor)?.id ?? 1;
+  let key: string;
+  if (tier === 1) {
+    // Floor 1 is the room whose door the player can reinforce at the bench, so
+    // it is the one door in the tower that is visibly reinforced.
+    key = floor === 1 ? 'env-door-slum-reinforced' : 'env-door-slum';
+  } else if (tier === 2) {
+    // One dorm door in five has been kicked in — the same 1-in-5 the loot
+    // tables use for a raided room.
+    key = floor % 5 === 0 ? 'env-door-dorm-broken' : 'env-door-dorm';
+  } else if (tier === 6) {
+    key = 'env-door-commercial';
+  } else {
+    key = 'env-door-commercial';
+  }
+  return ENV_FILES[key] ? key : TILE_DOOR_KEY;
+}
+
+export function windowKeyFor(floor: number): string {
+  const tier = segmentOf(floor)?.id ?? 1;
+  let key: string;
+  if (tier === 1) key = 'env-window-slum';
+  else if (tier === 2 || tier === 3) key = 'env-window-dorm';
+  else key = 'env-window-commercial';
+  return ENV_FILES[key] ? key : TILE_WINDOW_KEY;
+}
+
+/** Place a door standing on `floorY`. Sizes to the old door's opaque height. */
+export function placeDoor(
+  scene: Phaser.Scene,
+  x: number,
+  floorY: number,
+  floor: number,
+): Phaser.GameObjects.Image {
+  const key = doorKeyFor(floor);
+  const img = scene.add.image(x, floorY, key).setOrigin(0.5, 1);
+  const src = scene.textures.get(key).getSourceImage() as { width: number; height: number };
+  const scale = DOOR_HEIGHT / src.height;
+  img.setDisplaySize(Math.round(src.width * scale), DOOR_HEIGHT);
+  return img;
+}
+
+/** Place a window centred on `y`. Sizes to the old window's opaque height. */
+export function placeWindow(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  floor: number,
+): Phaser.GameObjects.Image {
+  const key = windowKeyFor(floor);
+  const img = scene.add.image(x, y, key).setOrigin(0.5);
+  const src = scene.textures.get(key).getSourceImage() as { width: number; height: number };
+  const scale = WINDOW_HEIGHT / src.height;
+  img.setDisplaySize(Math.round(src.width * scale), WINDOW_HEIGHT);
+  return img;
+}
 
 /**
  * Which wall a floor stands in front of. Tiers 2 and 3 have their own art; the

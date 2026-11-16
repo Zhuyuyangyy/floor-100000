@@ -33,7 +33,7 @@ interface FetchSpy {
   calls: Array<{ url: string; init?: RequestInit }>;
 }
 
-/** 按 URL 分派的假 fetch：/api/tags 给 health，/v1/chat/completions 给 decide。 */
+/** 按 URL 分派的假 fetch：/api/tags 给 health，/api/chat 给 decide。 */
 function fakeFetch(handlers: {
   tags?: (url: string, init?: RequestInit) => Response | Promise<Response>;
   chat?: (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -43,7 +43,7 @@ function fakeFetch(handlers: {
     const url = String(input);
     calls.push({ url, init });
     if (url.endsWith('/api/tags')) return handlers.tags ? handlers.tags(url, init) : jsonResponse({ models: [{ name: 'npc-qwen:latest' }] });
-    if (url.endsWith('/v1/chat/completions')) {
+    if (url.endsWith('/api/chat')) {
       if (!handlers.chat) throw new Error(`fakeFetch: 没有 chat handler（${url}）`);
       return handlers.chat(url, init);
     }
@@ -56,7 +56,7 @@ function fakeFetch(handlers: {
 /** 模型的一句合规回复（走 prompt.ts 的输出契约）。 */
 function chatReply(utterance: string): Response {
   return jsonResponse({
-    choices: [{ message: { content: `{"utterance":${JSON.stringify(utterance)},"action":{"type":"dialogue","text":${JSON.stringify(utterance)}},"confidence":0.9}` } }],
+    message: { content: `{"utterance":${JSON.stringify(utterance)},"action":{"type":"dialogue","text":${JSON.stringify(utterance)}},"confidence":0.9}` },
   });
 }
 
@@ -130,8 +130,8 @@ describe('sparkWiring：模型可达时 decideNpcAction 走通', () => {
       }
     }
     // 请求真的走了 .env.local 配的地址与模型（护栏 4：地址/模型名不入库）
-    const chat = fetchImpl.calls.find((c) => c.url.endsWith('/v1/chat/completions'));
-    expect(chat?.url).toBe('http://127.0.0.1:11434/v1/chat/completions');
+    const chat = fetchImpl.calls.find((c) => c.url.endsWith('/api/chat'));
+    expect(chat?.url).toBe('http://127.0.0.1:11434/api/chat');
     expect(JSON.parse(String(chat?.init?.body)).model).toBe('npc-qwen:latest');
     expect(fetchImpl.calls.some((c) => c.url.endsWith('/api/tags'))).toBe(true); // 先探活再推理
   });
@@ -144,13 +144,9 @@ describe('sparkWiring：模型可达时 decideNpcAction 走通', () => {
     const fetchImpl = fakeFetch({
       chat: async () =>
         jsonResponse({
-          choices: [
-            {
-              message: {
-                content: '{"action":{"type":"trade","give":{"itemId":"wire","quantity":1},"get":{"itemId":"scrap_metal","quantity":1}},"confidence":0.9}',
-              },
-            },
-          ],
+          message: {
+            content: '{"action":{"type":"trade","give":{"itemId":"wire","quantity":1},"get":{"itemId":"scrap_metal","quantity":1}},"confidence":0.9}',
+          },
         }),
     });
     const runtime = runtimeForScene(ALIN_LINE, fetchImpl)!;
@@ -273,13 +269,9 @@ describe('sparkWiring：npcFactFor 喂给执行器的是真实库存', () => {
     const fetchImpl = fakeFetch({
       chat: async () =>
         jsonResponse({
-          choices: [
-            {
-              message: {
-                content: '{"action":{"type":"trade","give":{"itemId":"wire","quantity":1},"get":{"itemId":"scrap_metal","quantity":1}},"confidence":0.9}',
-              },
-            },
-          ],
+          message: {
+            content: '{"action":{"type":"trade","give":{"itemId":"wire","quantity":1},"get":{"itemId":"scrap_metal","quantity":1}},"confidence":0.9}',
+          },
         }),
     });
     // 不传 allowedActions → 用 ally 原型全集（含 trade），让库存校验真正上场。
@@ -301,13 +293,9 @@ describe('sparkWiring：npcFactFor 喂给执行器的是真实库存', () => {
     const fetchImpl = fakeFetch({
       chat: async () =>
         jsonResponse({
-          choices: [
-            {
-              message: {
-                content: '{"action":{"type":"trade","give":{"itemId":"wire","quantity":1},"get":{"itemId":"scrap_metal","quantity":1}},"confidence":0.9}',
-              },
-            },
-          ],
+          message: {
+            content: '{"action":{"type":"trade","give":{"itemId":"wire","quantity":1},"get":{"itemId":"scrap_metal","quantity":1}},"confidence":0.9}',
+          },
         }),
     });
     const runtime: NpcRuntimeConfig = {

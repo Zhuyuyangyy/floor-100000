@@ -1234,7 +1234,8 @@ export class GameScene extends Phaser.Scene {
     if (shopX !== null) {
       // The trader: a pack and a price tag, drawn as the walk sheet's own
       // silhouette so he belongs to the same world.
-      this.floorObjects.push(...addContactShadow(this, shopX, PLAYER_FEET_Y + 2, 26, 2, 0.5));
+      const traderShadow = addContactShadow(this, shopX, PLAYER_FEET_Y + 2, 26, 2, 0.5);
+      this.floorObjects.push(...traderShadow);
       const trader = this.add.sprite(shopX, PLAYER_FEET_Y, walkSheetKey('npc_alin')).setOrigin(0.5, 1).setDepth(5);
       trader.play(idleAnimKey('npc_alin'));
       const tag = this.add
@@ -1242,6 +1243,31 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0.5)
         .setDepth(6);
       this.spotMarkers.set('shop', { x: shopX, isBoss: false, dot: trader as unknown as Phaser.GameObjects.Arc, label: tag });
+
+      // He walks. A merchant standing still under a floating label is a vending
+      // machine; one that paces the corridor is somebody you ran into.
+      //
+      // The patrol is a tween rather than an update hook: it owns the sprite,
+      // the name tag and the contact shadow in one target list, and it keeps the
+      // marker in spotMarkers — which is what E and the click-to-walk use —
+      // pointed at wherever he currently is.
+      const patrolTo = shopX + 150;
+      const stick = traderShadow[0];
+      this.tweens.add({
+        targets: [trader, tag, stick],
+        x: patrolTo,
+        duration: 3600,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.InOut',
+        onStart: () => trader.play(walkAnimKey('npc_alin'), true),
+        onYoyo: () => trader.setFlipX(true),
+        onRepeat: () => trader.setFlipX(false),
+        onUpdate: () => {
+          const m = this.spotMarkers.get('shop');
+          if (m) m.x = trader.x;
+        },
+      });
     }
   }
 

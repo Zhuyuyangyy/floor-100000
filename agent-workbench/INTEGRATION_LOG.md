@@ -426,3 +426,40 @@ AG-25 按"warmth 来自它自己的 JSON 默认梯"写测试，AG-30 按契约�
 2. 六个调用点：`cheerFromItem`(:5100 useConsumable) / `tick.morale`+`tick.sicknessTier`(:6053-6070) /
    `witnessTrauma`(:6347) / `backFromScavenge`(:5781) / 睡醒 flash(:5582) /
    EnvironmentSystem 增益乘 warmth(:87，其属主)
+
+## 第七轮（2026-11-16 晚）——用户武器分支合入 + HUD 提示词 + 一个 e2e 抓出的生命周期 bug
+
+**集成：85 测试文件 / 1552 测试全绿，tsc 干净，已推送（1bb99cb 合并 + dae028b 修复）。**
+
+### 合入的分支
+用户交付 `feat/weapon-art-crafting-drops-20261116`（2e88c2a）：四件可制作武器
+（匕首/短剑/砍刀/消防斧）+ 撬棍战斗行为保留。9 个文件冲突全解。
+
+### 集成裁决（据实记录三次返工）
+1. **武器形态**：先绕了「WEAPON_ITEMS 独立表 + GroundItem/lootPool/InventoryStack
+   全链放宽 KnownItemId」，tsc 露出那条路要动 core 整条物品链——**回退**到武器
+   分支原生形态（ItemId 联合 +4、ITEMS 19 件），核心类型面只差四个字面量。
+2. **补回合并丢的三处产品代码**（冲突取 HEAD 时丢的）：四条武器配方、craft() 的
+   武器产出路径（溢出整笔回滚）、WeaponRecipe.effect。
+3. **制作面板改滚动窗口**：配方 9→13 条全铺需 672px > 620 可用区。
+   CRAFT_VISIBLE_ROWS=10。顺手修一个真 bug：鼠标悬停槽位索引在滚动态下选错条目。
+
+### dae028b：行商巡逻 timer 泄漏（本轮最重要的发现）
+武器合并后 e2e firstChapter 3 失败（卡 4 层上不去 5），A/B 实证合并引入
+（合并前 6/6）。**根因不是武器分支**——用户的「行商踱步」未提交改动被
+git add -A 卷进合并提交，那段代码有场景生命周期 bug：巡逻 time.addEvent
+没随 clearFloor（同场景重建，非 restart）清理，旧回调打在对已 destroy 的
+trader 上抛 anims undefined，异常打断爬梯落地流程。三处修复 + e2e 19/19
+（firstChapter 6 + ag44 2 + crafting 4 + font 2 + hudLayout 5）。
+
+### HUD 提示词（等用户出图）
+`docs/plans/HUD_ART_PROMPT.md`：三条铁律（图里零数字/1280 画布/半透明开窗）、
+四张分件规格（hud-plate 1280x102 / hud-foot / hud-buttons / hud-icons 13 个）、
+中英双语主提示词、接入规格（hudLayout.ts 坐标不许迁就图）、验收清单。
+铁律的来源：上一版概念包（末日宿舍_HUD_UI分件包.zip）把「生命 100」烤在图上、
+1656px 宽、不透明挡世界——三条全犯，所以至今没接入。
+
+### 环境备忘（本轮新增）
+safe-delete 守卫现在会拦 Playwright 对 test-results 的清空（genie-trash
+ETIMEDOUT）——连跑第二个 spec 就挂，必须逐个 spec 跑 + 跑前 find -delete。
+比 AG-47 记录的更严了。

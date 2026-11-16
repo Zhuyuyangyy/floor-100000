@@ -120,7 +120,7 @@ import {
 } from '../render/uiKit';
 import { characterKeyForNpc, portraitKey } from '../render/artpack';
 import { framedButton, hitRect } from '../render/pointer';
-import { drawHazardStripe, drawHudIcon, drawHudPlate, type HudIconName } from '../render/hudSkin';
+import { drawHazardStripe, drawHudIcon, drawHudPlate, drawStatRing, type HudIconName } from '../render/hudSkin';
 import {
   estimateTextWidth,
   DIALOG_PADDING,
@@ -3423,7 +3423,12 @@ export class GameScene extends Phaser.Scene {
       const names: HudIconName[] = ['thermo', 'wind', 'drop', 'moon'];
       icon(names[i], cx, hud.environmentY - 4, i === 0 ? PALETTE.light : TEXT.secondary);
     });
-    STAT_BARS.forEach((stat, i) => icon(stat.icon, hud.statX + i * hud.statPitch, hud.row1Y, STAT_COLORS[stat.key]));
+    // AG-54: the four stat bars became four stat rings. Each group is the
+    // ring, its pixel icon and its label; the value sits in the ring's well.
+    STAT_BARS.forEach((stat, i) => {
+      const gx = hud.statX + i * hud.statPitch;
+      icon(stat.icon, gx + hud.ringR * 2 + 8, hud.ringCY - 8, STAT_COLORS[stat.key]);
+    });
 
     this.floorBadge = this.add.text(46, hud.row1Y - 2, '', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.lightHigh) })
       .setName('hud-floor').setScrollFactor(0).setDepth(103);
@@ -3431,13 +3436,15 @@ export class GameScene extends Phaser.Scene {
       .setName('hud-clock').setScrollFactor(0).setDepth(103);
     this.refreshClock();
 
-    this.barsGfx = this.add.graphics().setName('hud-stat-bars').setScrollFactor(0).setDepth(103);
+    this.barsGfx = this.add.graphics().setName('hud-stat-rings').setScrollFactor(0).setDepth(103);
     STAT_BARS.forEach((stat, i) => {
-      const x = hud.statX + i * hud.statPitch;
-      this.statLabels.push(this.add.text(x + 24, hud.row1Y, stat.label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
+      const gx = hud.statX + i * hud.statPitch;
+      this.statLabels.push(this.add.text(gx + hud.ringR * 2 + 30, hud.statLabelY, stat.label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
         .setName(`hud-stat-${stat.key}`).setScrollFactor(0).setDepth(103));
-      this.statValues.push(this.add.text(x + hud.statWidth, hud.row1Y, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
-        .setOrigin(1, 0).setName(`hud-value-${stat.key}`).setScrollFactor(0).setDepth(103));
+      // The value rides in the ring's centre, origin half/half, so the dial
+      // reads as one instrument: gauge around, number inside.
+      this.statValues.push(this.add.text(gx + hud.ringR, hud.ringCY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+        .setOrigin(0.5, 0.5).setName(`hud-value-${stat.key}`).setScrollFactor(0).setDepth(103));
     });
     this.refreshStats();
 
@@ -3627,12 +3634,15 @@ export class GameScene extends Phaser.Scene {
     this.lastStats = key;
     this.barsGfx.clear();
     values.forEach((v, i) => {
-      const x = HUD_LAYOUT.statX + i * HUD_LAYOUT.statPitch;
+      const gx = HUD_LAYOUT.statX + i * HUD_LAYOUT.statPitch;
+      const frac = v / 100;
       const color = STAT_COLORS[STAT_BARS[i].key] ?? UI.good;
-      // 10 segments at 10px: the concept sheet's bar, which reads as discrete
-      // pips rather than one continuous fill.
-      drawStatBar(this.barsGfx, x, HUD_LAYOUT.barY, HUD_LAYOUT.statWidth, HUD_LAYOUT.barH, v / 100, color, HUD_LAYOUT.barSegments);
+      // 12 pips at 30 degrees: the concept sheet's bar, turned into a ring.
+      // A stat running out lights danger red whatever its own colour is, the
+      // same <=20% rule the bar had; its number goes warn with it.
+      drawStatRing(this.barsGfx, gx + HUD_LAYOUT.ringR, HUD_LAYOUT.ringCY, HUD_LAYOUT.ringR, frac, frac <= 0.2 ? UI.danger : color, { stroke: HUD_LAYOUT.ringStroke });
       this.statValues[i]?.setText(String(Math.round(v)));
+      this.statValues[i]?.setColor(frac <= 0.2 ? hex(TEXT.warn) : hex(TEXT.primary));
     });
     // The most urgent bar's label turns red, so the critical slot is findable
     // without reading four numbers.

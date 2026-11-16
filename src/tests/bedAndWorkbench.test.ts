@@ -28,8 +28,10 @@ import type { GameState, ItemId } from '../core/gameTypes';
 //   4. survivalBalance 硬边界：床铺只出材料，一滴水一份食都不碰——每层
 //      恰好一瓶 guaranteed 水 + 一份食物不许被床改写。
 
-const DORM_BED = 'dorm_bed_236'; // 1 层前排第一张室友床（DORM_FRONT_BEDS[0]）
-const OWN_BED = 'own_bed';
+// 键带绝对层号（AG-51 补充 B）：与 LootSystem 的 bunksearch:/bunkgone: 键里
+// 的 ${floor} 对齐——场景侧的身份串也带层号，多楼层注册撞不到键。
+const DORM_BED = 'dorm_bed_1_236'; // 1 层前排第一张室友床（DORM_FRONT_BEDS[0]）
+const OWN_BED = 'own_bed_1';
 
 function give(state: GameState, items: Array<[ItemId, number]>): void {
   for (const [id, n] of items) addItem(state.player.inventory, id, n);

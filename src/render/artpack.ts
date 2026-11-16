@@ -25,6 +25,10 @@ export const ITEM_ICON_FILES: Record<ItemId, string> = {
   wire: 'item-wire.png',
   fuse: 'item-fuse.png',
   crowbar: 'item-crowbar.png',
+  fire_axe: 'item-fire_axe.png',
+  cleaver: 'item-cleaver.png',
+  short_sword: 'item-short_sword.png',
+  dagger: 'item-dagger.png',
   flashlight: 'item-flashlight.png',
 };
 

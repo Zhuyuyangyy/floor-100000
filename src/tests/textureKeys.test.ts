@@ -4,8 +4,9 @@ import { describe, expect, it } from 'vitest';
 import { bakedTextures } from './bakeProbe';
 import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHARACTER_KEYS, ENV_FILES, ITEM_ICON_FILES } from '../render/artpack';
 import { FURNITURE_KEYS } from '../render/furniture';
-import { WALK_CHARACTERS, walkSheetKey } from '../render/walkcycle';
+import { WALK_CHARACTERS, walkSheetKey, weaponAttackSheetKey } from '../render/walkcycle';
 import { WEAPON_KEY } from '../render/weapon';
+import { WEAPONS, WEAPON_IDS } from '../data/weapons';
 
 // Phaser answers a texture key it does not have with __MISSING — a green
 // placeholder box — and says nothing. That is how a renamed furniture key turned
@@ -30,6 +31,7 @@ const SELF_BAKED_KEYS = ['title-tower'];
 function loadedKeys(): string[] {
   return [
     ...Object.keys(ITEM_ICON_FILES),
+    ...WEAPON_IDS.filter((id) => Boolean(WEAPONS[id].spriteFile)).map((id) => WEAPONS[id].spriteKey),
     ...FURNITURE_KEYS,
     // The four characters are loaded from PNGs drawn by build-characters.mjs.
     ...CHARACTER_KEYS,
@@ -71,6 +73,8 @@ const DYNAMIC_KEYS = [
   ...Object.keys(ITEM_ICON_FILES),
   ...FURNITURE_KEYS,
   ...WALK_CHARACTERS.map(walkSheetKey),
+  ...WALK_CHARACTERS.flatMap((who) => WEAPON_IDS.map((id) => weaponAttackSheetKey(who, id))),
+  ...WEAPON_IDS.filter((id) => Boolean(WEAPONS[id].spriteFile)).map((id) => WEAPONS[id].spriteKey),
 ];
 
 function sourceFiles(dir: string): string[] {

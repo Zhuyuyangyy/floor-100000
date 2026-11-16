@@ -1,10 +1,10 @@
 {
   "palette": 16,
   "summary": {
-    "files": 225,
-    "png": 209,
+    "files": 235,
+    "png": 218,
     "locked": 120,
-    "open": 84,
+    "open": 94,
     "staged": 7,
     "aux": 14,
     "unclassified": 0,
@@ -828,6 +828,26 @@
       "note": "既有未量化资产（面积平均降尺/绘制产物）"
     },
     {
+      "path": "artpack/item-cleaver.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[cleaver]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 41,
+      "strayColours": 41,
+      "inPalette": false,
+      "transparentPx": 213,
+      "semiAlphaPx": 43,
+      "bytes": 277,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
       "path": "artpack/item-cloth.png",
       "refs": [
         {
@@ -868,6 +888,26 @@
       "note": "既有未量化资产（面积平均降尺/绘制产物）"
     },
     {
+      "path": "artpack/item-dagger.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[dagger]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 20,
+      "strayColours": 20,
+      "inPalette": false,
+      "transparentPx": 232,
+      "semiAlphaPx": 24,
+      "bytes": 185,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
       "path": "artpack/item-dirty_water.png",
       "refs": [
         {
@@ -904,6 +944,26 @@
       "transparentPx": 78,
       "semiAlphaPx": 0,
       "bytes": 919,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-fire_axe.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[fire_axe]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 36,
+      "strayColours": 36,
+      "inPalette": false,
+      "transparentPx": 212,
+      "semiAlphaPx": 44,
+      "bytes": 289,
       "class": "open",
       "note": "既有未量化资产（面积平均降尺/绘制产物）"
     },
@@ -1004,6 +1064,26 @@
       "transparentPx": 111,
       "semiAlphaPx": 0,
       "bytes": 779,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "artpack/item-short_sword.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ITEM_ICON_FILES[short_sword]"
+        }
+      ],
+      "width": 16,
+      "height": 16,
+      "channels": 4,
+      "opaqueColours": 25,
+      "strayColours": 25,
+      "inPalette": false,
+      "transparentPx": 229,
+      "semiAlphaPx": 27,
+      "bytes": 214,
       "class": "open",
       "note": "既有未量化资产（面积平均降尺/绘制产物）"
     },
@@ -2973,6 +3053,37 @@
       "note": "pixelfx 特效图集，未过 16 色门禁"
     },
     {
+      "path": "fx/melee/heavy-cleave/heavy-cleave.json",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[heavy-cleave]"
+        }
+      ],
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
+      "path": "fx/melee/heavy-cleave/heavy-cleave.png",
+      "refs": [
+        {
+          "module": "src/render/fx.ts",
+          "detail": "FX[heavy-cleave]"
+        }
+      ],
+      "width": 680,
+      "height": 520,
+      "channels": 4,
+      "opaqueColours": 12478,
+      "strayColours": 12478,
+      "inPalette": false,
+      "transparentPx": 274348,
+      "semiAlphaPx": 78943,
+      "bytes": 159343,
+      "class": "open",
+      "note": "pixelfx 特效图集，未过 16 色门禁"
+    },
+    {
       "path": "fx/melee/sword-slash/sword-slash.json",
       "refs": [
         {
@@ -4270,6 +4381,86 @@
       "transparentPx": 84,
       "semiAlphaPx": 0,
       "bytes": 1188,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "weapons/cleaver.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "assets/weapons/cleaver.png"
+        }
+      ],
+      "width": 46,
+      "height": 18,
+      "channels": 4,
+      "opaqueColours": 320,
+      "strayColours": 320,
+      "inPalette": false,
+      "transparentPx": 389,
+      "semiAlphaPx": 439,
+      "bytes": 1380,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "weapons/dagger.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "assets/weapons/dagger.png"
+        }
+      ],
+      "width": 46,
+      "height": 18,
+      "channels": 4,
+      "opaqueColours": 113,
+      "strayColours": 113,
+      "inPalette": false,
+      "transparentPx": 663,
+      "semiAlphaPx": 165,
+      "bytes": 671,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "weapons/fire_axe.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "assets/weapons/fire_axe.png"
+        }
+      ],
+      "width": 46,
+      "height": 18,
+      "channels": 4,
+      "opaqueColours": 255,
+      "strayColours": 255,
+      "inPalette": false,
+      "transparentPx": 459,
+      "semiAlphaPx": 369,
+      "bytes": 1316,
+      "class": "open",
+      "note": "既有未量化资产（面积平均降尺/绘制产物）"
+    },
+    {
+      "path": "weapons/short_sword.png",
+      "refs": [
+        {
+          "module": "src/scenes/BootScene.ts",
+          "detail": "assets/weapons/short_sword.png"
+        }
+      ],
+      "width": 46,
+      "height": 18,
+      "channels": 4,
+      "opaqueColours": 182,
+      "strayColours": 182,
+      "inPalette": false,
+      "transparentPx": 549,
+      "semiAlphaPx": 279,
+      "bytes": 950,
       "class": "open",
       "note": "既有未量化资产（面积平均降尺/绘制产物）"
     }

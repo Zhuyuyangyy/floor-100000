@@ -1,4 +1,10 @@
 import type { ItemId } from '../core/gameTypes';
+import type { WeaponId } from './weapons';
+
+// AG-武器分支：四件可制作武器的配方 id 与武器 id 的联合。UpgradeId 见下方
+// （设施 + 五张凭证）。RecipeId 是两侧的并集——制作面板的 entries 用它遍历。
+export type WeaponRecipeId = 'craft_dagger' | 'craft_short_sword' | 'craft_cleaver' | 'craft_fire_axe';
+export type RecipeId = UpgradeId | WeaponRecipeId;
 
 // Dorm crafting recipes (docs/01_GDD.md §8). Every material must have a concrete
 // source in the world — none of these are dead-end requirements.
@@ -21,9 +27,7 @@ export type UpgradeId =
   | 'permit'
   | 'vip_card'
   | 'core_key';
-
-export interface Recipe {
-  id: UpgradeId;
+interface RecipeBase {
   displayName: string;
   description: string;
   cost: Partial<Record<ItemId, number>>;
@@ -52,29 +56,51 @@ export interface Recipe {
   effect: string;
 }
 
+export interface UpgradeRecipe extends RecipeBase {
+  kind: 'upgrade';
+  id: UpgradeId;
+}
+
+export interface WeaponRecipe extends RecipeBase {
+  kind: 'item';
+  id: WeaponRecipeId;
+  outputItemId: WeaponId;
+  /** 效果预览：武器进背包即可装备，战斗读取见 data/weapons.ts 的 WEAPONS。 */
+  effect: string;
+}
+
+export type Recipe = UpgradeRecipe | WeaponRecipe;
+
 export const RECIPES: Recipe[] = [
-  { id: 'lamp', displayName: '照明灯', description: '宿舍夜间照亮，免用手电维持基础光', cost: { battery: 1, wire: 1, scrap_metal: 1 }, tier: 1, effect: '宿舍夜照 alpha 0.16，夜里不再全黑' },
-  // The description now matches what it does. It used to claim it lowered the
+  { kind: 'upgrade', id: 'lamp', displayName: '照明灯', description: '宿舍夜间照亮，免用手电维持基础光', cost: { battery: 1, wire: 1, scrap_metal: 1 }, tier: 1, effect: '宿舍夜照 alpha 0.16，夜里不再全黑' },  // The description now matches what it does. It used to claim it lowered the
   // night threat's chance of entering the dorm, which was never true — the
   // wanderer never spawns on the dorm floor at all — and nothing read the
   // upgrade, so it cost materials and did nothing.
-  { id: 'reinforced_door', displayName: '加固门', description: '封住宿舍漏风口，夜间不再全黑', cost: { wood: 2, tape: 1 }, tier: 1, effect: '封住漏风口，宿舍夜照 alpha 0.42（弱于灯，不互替）' },
-  { id: 'purifier', displayName: '简易净水器', description: '把脏水一次全炼成净水', cost: { scrap_metal: 2, filter: 1, wire: 1 }, tier: 1, effect: '一次把整袋脏水炼成净水（小周只肯 1:1 换）' },
+  { kind: 'upgrade', id: 'reinforced_door', displayName: '加固门', description: '封住宿舍漏风口，夜间不再全黑', cost: { wood: 2, tape: 1 }, tier: 1, effect: '封住漏风口，宿舍夜照 alpha 0.42（弱于灯，不互替）' },
+  { kind: 'upgrade', id: 'purifier', displayName: '简易净水器', description: '把脏水一次全炼成净水', cost: { scrap_metal: 2, filter: 1, wire: 1 }, tier: 1, effect: '一次把整袋脏水炼成净水（小周只肯 1:1 换）' },
   // 置物架：+2 格持久背包容量（见 UpgradeId 上方注释）。效果不是占位 flag——
   // craft() 成功即把 inventory.slotCount 从 12 抬到 14，addItem/isBagFull/
   // lootContainer/shop.buy 全部既有调用方无需改签名就吃到容量。
-  { id: 'storage_rack', displayName: '置物架', description: '木板绷布搭的置物架，背包多带 2 格', cost: { wood: 2, cloth: 1, crowbar: 1 }, tier: 1, effect: '背包 12 → 14 格，持久生效随存档' },
+  { kind: 'upgrade', id: 'storage_rack', displayName: '置物架', description: '木板绷布搭的置物架，背包多带 2 格', cost: { wood: 2, cloth: 1, crowbar: 1 }, tier: 1, effect: '背包 12 → 14 格，持久生效随存档' },
 
   // 跨阶层通行凭证. Each rung is useless on its own and only opens the gate the
   // next one needs, so the chain is walked in order: work_badge → pass_sticker →
   // permit → vip_card → core_key. `requires` is enforced by canCraft/craft, not
   // only displayed — a gated recipe cannot be built out of order even with the
   // materials in hand.
-  { id: 'work_badge', displayName: '工牌', description: '仿一块工人宿舍区的胸卡，能过第一道岗', cost: { scrap_metal: 1, cloth: 1, tape: 1 }, tier: 2, effect: '开 100-110 段电梯；权力线 +100' },
-  { id: 'pass_sticker', displayName: '通行贴', description: '贴在门禁读头上的通行贴，靠短接门禁线路生效', cost: { wire: 2, tape: 1, battery: 1 }, requires: 'work_badge', tier: 3, effect: '开 1000-1010 段电梯；权力线 +200' },
-  { id: 'permit', displayName: '许可证', description: '中产区的通行许可，靠电池和滤芯打点换来', cost: { battery: 2, filter: 1, cloth: 1 }, requires: 'pass_sticker', tier: 4, effect: '开 10000-10010 段电梯；权力线 +300' },
-  { id: 'vip_card', displayName: '贵宾卡', description: '富人区只认体面。一身像样的衣服和一份礼物', cost: { scrap_metal: 1, cloth: 2, battery: 1 }, requires: 'permit', tier: 5, effect: '开 50000-50010 段电梯；权力线 +400' },
-  { id: 'core_key', displayName: '核心权限', description: '接进塔务系统的临时权限，代价是配电房最后一只保险丝', cost: { fuse: 1, wire: 2, scrap_metal: 1 }, requires: 'vip_card', tier: 6, effect: '开 100000 段电梯；权力线 +500' },
+  { kind: 'upgrade', id: 'work_badge', displayName: '工牌', description: '仿一块工人宿舍区的胸卡，能过第一道岗', cost: { scrap_metal: 1, cloth: 1, tape: 1 }, tier: 2, effect: '开 100-110 段电梯；权力线 +100' },
+  { kind: 'upgrade', id: 'pass_sticker', displayName: '通行贴', description: '贴在门禁读头上的通行贴，靠短接门禁线路生效', cost: { wire: 2, tape: 1, battery: 1 }, requires: 'work_badge', tier: 3, effect: '开 1000-1010 段电梯；权力线 +200' },
+  { kind: 'upgrade', id: 'permit', displayName: '许可证', description: '中产区的通行许可，靠电池和滤芯打点换来', cost: { battery: 2, filter: 1, cloth: 1 }, requires: 'pass_sticker', tier: 4, effect: '开 10000-10010 段电梯；权力线 +300' },
+  { kind: 'upgrade', id: 'vip_card', displayName: '贵宾卡', description: '富人区只认体面。一身像样的衣服和一份礼物', cost: { scrap_metal: 1, cloth: 2, battery: 1 }, requires: 'permit', tier: 5, effect: '开 50000-50010 段电梯；权力线 +400' },
+  { kind: 'upgrade', id: 'core_key', displayName: '核心权限', description: '接进塔务系统的临时权限，代价是配电房最后一只保险丝', cost: { fuse: 1, wire: 2, scrap_metal: 1 }, requires: 'vip_card', tier: 6, effect: '开 100000 段电梯；权力线 +500' },
+
+  // 四件可制作武器（AG-武器分支）。与 upgrade 分开：没有 tier、没有 requires、
+  // 没有"已建造"闸门——武器是做出实物、可重复做，产出进背包（outputItemId）。
+  // 撬棍不在其列：它是 v0.1 就在册的工具，也是置物架配方的成本。
+  { kind: 'item', id: 'craft_dagger', outputItemId: 'dagger', displayName: '匕首', description: '用废金属和布料制作一把短匕首', cost: { scrap_metal: 1, cloth: 1 } , effect: '背包里多一把匕首，战斗可装备（轻武器，攻速快）' },
+  { kind: 'item', id: 'craft_short_sword', outputItemId: 'short_sword', displayName: '短剑', description: '用金属、木材和胶带制作短剑', cost: { scrap_metal: 1, wood: 1, tape: 1 } , effect: '背包里多一把短剑，战斗可装备（攻守均衡）' },
+  { kind: 'item', id: 'craft_cleaver', outputItemId: 'cleaver', displayName: '砍刀', description: '用废金属、木柄和胶带制作砍刀', cost: { scrap_metal: 2, wood: 1, tape: 1 } , effect: '背包里多一把砍刀，战斗可装备（重武器，单发高伤）' },
+  { kind: 'item', id: 'craft_fire_axe', outputItemId: 'fire_axe', displayName: '消防斧', description: '用废金属、木柄和布料改制消防斧', cost: { scrap_metal: 2, wood: 2, cloth: 1 } , effect: '背包里多一把消防斧，战斗可装备（最重，一下一个）' },
 ];
 
 // The pass chain is stored in homeUpgrades, but a credential is not a facility:
@@ -86,7 +112,7 @@ export function isPassUpgrade(id: string): boolean {
   return (PASS_UPGRADE_IDS as readonly string[]).includes(id);
 }
 
-export function getRecipe(id: UpgradeId): Recipe {
+export function getRecipe(id: RecipeId): Recipe {
   const recipe = RECIPES.find((r) => r.id === id);
   if (!recipe) throw new Error(`unknown recipe: ${id}`);
   return recipe;

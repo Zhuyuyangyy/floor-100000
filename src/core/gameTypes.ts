@@ -6,6 +6,11 @@
 // no runtime cycle (gameTypes exports types only, it has no runtime bindings).
 import type { DiaryEntry } from '../systems/DiarySystem';
 
+// ItemId 是 v0.1 的 15 件 + AG-29 的四件精神向物品（见 items.ts 的
+// MORALE_ITEMS 与 ALL_ITEMS 合并语义）。四件可制作武器（fire_axe/cleaver/
+// short_sword/dagger）不在这里——它们在 data/items.ts 的 WEAPON_ITEMS，
+// 用独立的 WeaponItemId，读取侧由 ALL_ITEMS 合并。分开是为了让"原 15 件
+// 一件不动"与"武器不混进 v0.1 表"两类断言都有处可钉。
 export type ItemId =
   | 'clean_water'
   | 'dirty_water'
@@ -20,6 +25,15 @@ export type ItemId =
   | 'wire'
   | 'medkit'
   | 'crowbar'
+  // AG-武器分支：四件可制作/掉落武器直接进 ItemId 联合（与撬棍、手电同为
+  // tool 类）。为什么不走独立 WeaponItemId + KnownItemId 放宽链：那条路要动
+  // GroundItem / InventoryStack / worldgen lootPool / InventorySystem 一整串
+  // 签名，而核心类型面只差这四个字面量。它们有真实来源（制作配方 + 楼层
+  // 掉落 + 商人），满足 items.test.ts 的"无死物品"裁决。
+  | 'fire_axe'
+  | 'cleaver'
+  | 'short_sword'
+  | 'dagger'
   | 'fuse'
   | 'flashlight';
 

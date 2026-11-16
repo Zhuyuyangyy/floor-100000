@@ -185,7 +185,7 @@ import {
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
 import { CONTAINER_LABEL_DROP, HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
-import { RECIPES, getRecipe, isPassUpgrade, type UpgradeId } from '../data/recipes';
+import { RECIPES, getRecipe, isPassUpgrade, type RecipeId, type UpgradeId } from '../data/recipes';
 import { WALL_DECO } from '../data/wallDeco';
 import { NPCS, NPC_FLOOR, getNpc, npcsOnFloor, type BarterOffer, type NpcDef, type NpcId } from '../data/npcs';
 import { QUEST_FLAG, QUESTS } from '../data/quests';
@@ -193,8 +193,7 @@ import { bumpFlag, clearFlag, flagCount, hasFlag, setFlag } from '../systems/Wor
 import { availableOffers, claimGift, executeBarter, giftOffer, receiveGift, reputationOf } from '../ai/npcEconomy';
 import { stockOf, syncNpcInventory } from '../ai/npcInventory';
 import { npcAutonomyFor, type NpcAutonomyView } from '../ai/npcSchedule';
-import { aiNpcConfig, archetypeForNpcId, npcFactFor } from '../ai/config';
-import { OllamaBrain } from '../ai/brains/ollamaBrain';
+import { aiNpcConfig, archetypeForNpcId, npcFactFor } from '../ai/config';import { OllamaBrain } from '../ai/brains/ollamaBrain';
 import { OptionTreeBrain } from '../ai/brains/optionTreeBrain';
 import { createNpcState } from '../data/npcPersonalities';
 import { loadNpcState, recordMemory, saveNpcState } from '../systems/NpcMemory';
@@ -225,7 +224,13 @@ const CRAFT_ROW_PITCH = fontLineBox(TYPE.body);
 // workbench had three recipes and a purify entry — the pass chain adds five more,
 // and a fixed four rows would have let the selection walk off the bottom of the
 // list (Enter would have crafted an entry nobody could see).
-const CRAFT_ROWS = RECIPES.length;
+// AG-武器分支：配方从 9 条涨到 13 条（+四件武器），全部铺开需要
+// 30 + 13×30 + 12 + 200 + 40 = 672px，超出「720 画布 - HUD 60 - foot 40」的
+// 620 可用区。列表因此是滚动窗口：只画 CRAFT_VISIBLE_ROWS 行，选择走出窗口
+// 时 refreshCraft 的 first 滑动（那套逻辑 AG-44 接入时就有，见 refreshCraft
+// 的 first = Math.max(0, Math.min(...))）。10 行 = 582px 面板，居中后
+// top=69 清开 HUD 带、bottom=651 清开 foot 带。
+const CRAFT_VISIBLE_ROWS = 10;
 // AG-44：详情块（效果/档位/去哪拿）的垂直预算。最坏流：效果 2 行（加固门的
 // effect 在 494px 栏宽里换行）+ 档位/前置 1 行 + 缺料 hints 4 行（三样料、
 // 每条三列出处）= 7 行 × fontLineBox(caption) = 175，加两块间距 12，余量给
@@ -427,6 +432,8 @@ export class GameScene extends Phaser.Scene {
   // wall tiling, the room loop and the stair mouths all read these two.
   private floorW = FLOOR_WIDTH;
   private downExit = DOWN_EXIT_X;
+  /** Set when a stair climb lands, so the camera can ease instead of snapping. */
+  private landingEase = false;
   private wasBlackout = false;
   private blackoutAt = 0;
   private wandererHitAt = Number.NEGATIVE_INFINITY;
@@ -557,6 +564,10 @@ export class GameScene extends Phaser.Scene {
   /** 详情块第一行的 y（buildCraftPanel 时算定，refreshCraft 流式排布用）。 */
   private craftDetailY = 0;
   private craftSelected = 0;
+  // 当前滚动窗口的首个配方下标。鼠标悬停/点击拿到的是槽位 i，真实条目是
+  // craftFirst + i——AG-44 接入时槽位即条目（列表短于窗口），配方涨到 13 条
+  // 后这个换算是必须的，否则滚动态下悬停第 3 行选中的是第 3 条而不是第 3+first 条。
+  private craftFirst = 0;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
   /** the warm pool the player carries; only visible once night falls */
   private playerLight?: Phaser.GameObjects.Image;
@@ -982,11 +993,31 @@ export class GameScene extends Phaser.Scene {
     // at x=40 or x=1240; only the tower's vertical cross-section may scroll.
     cam.setBounds(0, topBound, this.floorW, bottomBound - topBound);
     this.standingCamBounds = { top: topBound, bottom: bottomBound };
+    const centreY = Math.max(topBound + 180, Math.min(bottomBound - 180, PLAYER_FEET_Y - FLOOR_HEIGHT * 0.5));
+    if (this.landingEase) {
+      // Landing used to snap: setBounds clamps the scroll the instant the climb
+      // bounds come off, so a descent jumped 104px in one frame. Ease into the
+      // standing position over 220ms instead, then hand the follow back.
+      this.landingEase = false;
+      const fromY = cam.scrollY;
+      cam.stopFollow();
+      cam.centerOn(state.player.x, centreY);
+      const toY = cam.scrollY;
+      cam.setScroll(cam.scrollX, fromY);
+      this.tweens.add({
+        targets: cam,
+        scrollY: toY,
+        duration: 220,
+        ease: 'Sine.easeOut',
+        onComplete: () => cam.startFollow(this.player, true, 0.15, 0.15),
+      });
+      return;
+    }
     cam.startFollow(this.player, true, 0.15, 0.15);
     // Centred on the player the moment the floor is drawn: a follow with
     // lerp 0.15 takes a third of a second to catch up, and during that time the
     // camera is still wherever the previous floor left it.
-    cam.centerOn(state.player.x, Math.max(topBound + 180, Math.min(bottomBound - 180, PLAYER_FEET_Y - FLOOR_HEIGHT * 0.5)));
+    cam.centerOn(state.player.x, centreY);
   }
 
   // ── M1-1: the climb's camera room ────────────────────────────────────────
@@ -3943,7 +3974,7 @@ export class GameScene extends Phaser.Scene {
     // block below the rows, so the panel grew by CRAFT_DETAIL_H (its comment
     // carries the line budget) — the whole card still clears the HUD bands
     // (60 top / 40 foot) inside the 720 canvas.
-    const panelH = 30 + CRAFT_ROWS * CRAFT_ROW_PITCH + 12 + CRAFT_DETAIL_H + 40;
+    const panelH = 30 + CRAFT_VISIBLE_ROWS * CRAFT_ROW_PITCH + 12 + CRAFT_DETAIL_H + 40;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -3964,8 +3995,7 @@ export class GameScene extends Phaser.Scene {
     // rows tinted), a fixed-cost column and a right-aligned status, so a row reads
     // like a row instead of a sentence.
     this.craftRows = [];
-    for (let i = 0; i < CRAFT_ROWS; i++) {
-      const rowY = top + 30 + i * CRAFT_ROW_PITCH;
+    for (let i = 0; i < CRAFT_VISIBLE_ROWS; i++) {      const rowY = top + 30 + i * CRAFT_ROW_PITCH;
       const band = this.add.rectangle(left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.34).setDepth(PANEL_DEPTH.game.craft + 5);
       // Centre on the row, not on a hand-tuned offset: the row IS the font's
       // line box now, so the middle of the pitch is the middle of the text.
@@ -3976,13 +4006,15 @@ export class GameScene extends Phaser.Scene {
       this.craftObjects.push(
         this.panelHit( left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, PANEL_DEPTH.game.craft + 7, {
           onOver: () => {
-            if (this.craftSelected === i) return;
-            this.craftSelected = i;
+            const index = this.craftFirst + i;
+            if (this.craftSelected === index) return;
+            this.craftSelected = index;
             this.refreshCraft();
           },
           onClick: () => {
-            if (this.craftSelected !== i) {
-              this.craftSelected = i;
+            const index = this.craftFirst + i;
+            if (this.craftSelected !== index) {
+              this.craftSelected = index;
               this.refreshCraft();
               playSfx('click');
               return;
@@ -4000,7 +4032,7 @@ export class GameScene extends Phaser.Scene {
     // 12px（与旧 craftReqText 同一锚点），宽度吃面板内边距 18px。
     const detailX = left + 18;
     const detailW = panelW - 36;
-    const detailY = top + 30 + CRAFT_ROWS * CRAFT_ROW_PITCH + 12;
+    const detailY = top + 30 + CRAFT_VISIBLE_ROWS * CRAFT_ROW_PITCH + 12;
     this.craftDetailY = detailY;
     const detailText = (color: string): Phaser.GameObjects.Text =>
       this.add
@@ -4026,8 +4058,8 @@ export class GameScene extends Phaser.Scene {
     for (const o of this.craftObjects) o.setVisible(false);
   }
 
-  private craftEntries(): Array<{ kind: 'recipe' | 'purify'; id?: UpgradeId }> {
-    const entries: Array<{ kind: 'recipe' | 'purify'; id?: UpgradeId }> = RECIPES.map((r) => ({ kind: 'recipe', id: r.id }));
+  private craftEntries(): Array<{ kind: 'recipe' | 'purify'; id?: RecipeId }> {
+    const entries: Array<{ kind: 'recipe' | 'purify'; id?: RecipeId }> = RECIPES.map((r) => ({ kind: 'recipe', id: r.id }));
     if (hasUpgrade(getGame(), 'purifier')) entries.push({ kind: 'purify' });
     return entries;
   }
@@ -4041,8 +4073,8 @@ export class GameScene extends Phaser.Scene {
     // selection sit on a row that is not drawn.
     const rows = this.craftRows.length;
     const first = Math.max(0, Math.min(this.craftSelected - rows + 1, entries.length - rows));
-    for (let i = 0; i < rows; i++) {
-      const row = this.craftRows[i];
+    this.craftFirst = first;
+    for (let i = 0; i < rows; i++) {      const row = this.craftRows[i];
       if (!row) continue;
       const index = first + i;
       const entry = entries[index];
@@ -4067,14 +4099,15 @@ export class GameScene extends Phaser.Scene {
         // The selected band is the warm accent, so light text on it read as a
         // smear. Dark ink is the only colour in the palette with contrast on it.
         row.name.setColor(selected ? hex(PALETTE.ink) : hex(TEXT.primary));
-        const built = hasUpgrade(state, entry.id!);
+        // 武器不是设施，没有"已建造"——只有 upgrade 才查 homeUpgrades。
+        // entry.kind 是面板自己的分类（recipe/purify），配方的 kind 要另取。
+        const built = entry.id !== undefined && getRecipe(entry.id).kind === 'upgrade' && hasUpgrade(state, entry.id as UpgradeId);
         const check = canCraft(state, entry.id!);
         // A missing credential is not a materials problem: say 缺前置 instead of
         // 材料不足, or the player gathers what they already have enough of.
         const gated = !check.ok && check.reason !== undefined;
         row.status.setText(built ? '已建' : gated ? '缺前置' : check.ok ? '可制作' : '材料不足');
-        row.status.setColor(selected ? hex(PALETTE.ink) : built ? hex(PALETTE.clothHigh) : gated ? hex(TEXT.warn) : check.ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
-      } else {
+        row.status.setColor(selected ? hex(PALETTE.ink) : built ? hex(PALETTE.clothHigh) : gated ? hex(TEXT.warn) : check.ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));      } else {
         // AG-11: waterPurifierRuns 的显示语义。purifyWater 一次炼光整袋脏水，
         // 没有"次数"状态可读——诚实的"剩余"是下一次开机能炼多少瓶。批次化
         // 是这个升级的价值所在（小周 1:1 免费换，净水器赢在回来时满载），
@@ -4264,7 +4297,8 @@ export class GameScene extends Phaser.Scene {
         // was a sound and a line of text with nothing on screen; the burst is
         // anchored to the station the player is standing at, not to the player.
         playFx(this, 'collect-burst', CRAFT_X, PLAYER_FEET_Y - 40, LIGHT_DEPTH);
-        this.flash(`建造了 ${getRecipe(entry.id!).displayName}（-${ACTION_COSTS.craft} 分钟）`);
+        const recipe = getRecipe(entry.id!);
+        this.flash(`${recipe.kind === 'upgrade' ? '建造了' : '制作了'} ${recipe.displayName}（-${ACTION_COSTS.craft} 分钟）`);
         this.chargeTime(ACTION_COSTS.craft);
       } else {
         this.flash(result.reason);
@@ -6058,6 +6092,7 @@ export class GameScene extends Phaser.Scene {
     const state = getGame();
     const result = completeStairTraversal(state, climb);
     this.stairClimb = undefined;
+    if (result.ok) this.landingEase = true;
     if (!result.ok) {
       // The widened climb bounds go back to the standing ones: drawFloor only
       // re-sets them on the success path, and a refused landing leaves the

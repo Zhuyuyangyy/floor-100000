@@ -65,6 +65,10 @@ export type FloorEnvironmentOverride = Partial<FloorEnvironment> & { warmth?: nu
 // bump this whenever the loot tables change so a tuned table produces a
 // deliberately different world instead of silently reshuffling an existing one
 // (GHI-03 M2). Old saves keep their runSeed and simply roll fresh contents.
+// Keep the version for append-only loot additions: new specs are placed after
+// existing entries, preserving every prior roll for existing saved worlds. Bump only
+// when an intentional reroll/reset of existing contents is approved.
+
 export const LOOT_DATA_VERSION = 1;
 
 // Stable identity for one loot entry. Keys must name the item, never its slot
@@ -136,7 +140,13 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         id: 'shelf',
         label: '邻居货架',
         x: 1120,
-        loot: [{ itemId: 'bread', min: 1, max: 2, probability: 0.5 }],
+        loot: [
+          { itemId: 'bread', min: 1, max: 2, probability: 0.5 },
+          { itemId: 'dagger', min: 1, max: 1, probability: 0.2 },
+          { itemId: 'short_sword', min: 1, max: 1, probability: 0.15 },
+          { itemId: 'fire_axe', min: 1, max: 1, probability: 0.15 },
+          { itemId: 'cleaver', min: 1, max: 1, probability: 0.3 },
+        ],
       },
     ],
     ground: [],

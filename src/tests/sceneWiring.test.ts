@@ -26,12 +26,15 @@ import type { ItemId } from '../core/gameTypes';
 // ── 合成面板详情块（GameScene.buildCraftPanel / refreshCraft 的镜像）────────
 
 const CRAFT_PANEL_W = 530;
-const CRAFT_ROWS = RECIPES.length;
+// AG-武器分支：配方 9 → 13 条后面板改滚动窗口，这里镜像的是可见窗口而不是
+// 总条数（GameScene.CRAFT_VISIBLE_ROWS）。总条数仍可从 RECIPES.length 读，
+// 面板几何只由可见窗口决定。
+const CRAFT_ROWS = 10; // CRAFT_VISIBLE_ROWS
 const CRAFT_ROW_PITCH = fontLineBox(TYPE.body);
 const CRAFT_DETAIL_H = 200;
 const CRAFT_DETAIL_GAP = 6;
 const CRAFT_DETAIL_W = CRAFT_PANEL_W - 36;
-/** 详情块第一行距面板顶：30 header + 9 行 + 12 gap。 */
+/** 详情块第一行距面板顶：30 header + 10 行可见窗口 + 12 gap。 */
 const CRAFT_DETAIL_TOP = 30 + CRAFT_ROWS * CRAFT_ROW_PITCH + 12;
 const CRAFT_PANEL_H = 30 + CRAFT_ROWS * CRAFT_ROW_PITCH + 12 + CRAFT_DETAIL_H + 40;
 

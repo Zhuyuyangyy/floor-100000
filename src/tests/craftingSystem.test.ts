@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { addItem, countItem } from '../systems/InventorySystem';
+import { RECIPES } from '../data/recipes';
 import {
   canCraft,
   craft,
@@ -61,6 +62,35 @@ describe('craft', () => {
     give(s, [['wood', 2], ['tape', 1], ['wood', 2], ['tape', 1]]);
     expect(craft(s, 'reinforced_door').ok).toBe(true);
     expect(craft(s, 'reinforced_door').ok).toBe(false);
+  });
+
+  it('crafts each weapon into inventory without equipping it or changing upgrades', () => {
+    for (const recipe of RECIPES.filter((entry) => entry.kind === 'item')) {
+      const s = createNewGame(1);
+      for (const [itemId, quantity] of Object.entries(recipe.cost) as Array<[ItemId, number]>) {
+        addItem(s.player.inventory, itemId, quantity);
+      }
+      const result = craft(s, recipe.id);
+      expect(result.ok, recipe.id).toBe(true);
+      expect(countItem(s.player.inventory, recipe.outputItemId), recipe.outputItemId).toBe(1);
+      expect(s.player.equipped).toBeNull();
+      expect(s.player.homeUpgrades).toEqual([]);
+    }
+  });
+
+  it('refuses weapon crafting in a full bag without consuming materials', () => {
+    const s = createNewGame(1);
+    s.player.inventory.slots = [];
+    const fullBag: ItemId[] = [
+      'clean_water', 'dirty_water', 'ration_pack', 'bread', 'medkit', 'battery',
+      'scrap_metal', 'wood', 'cloth', 'tape', 'filter', 'wire',
+    ];
+    for (const itemId of fullBag) addItem(s.player.inventory, itemId, 5);
+    const result = craft(s, 'craft_dagger');
+    expect(result).toEqual({ ok: false, reason: '背包空间不足' });
+    expect(countItem(s.player.inventory, 'scrap_metal')).toBe(5);
+    expect(countItem(s.player.inventory, 'cloth')).toBe(5);
+    expect(countItem(s.player.inventory, 'dagger')).toBe(0);
   });
 });
 

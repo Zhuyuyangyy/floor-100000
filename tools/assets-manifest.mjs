@@ -75,8 +75,17 @@ function parseFxTable() {
   return out;
 }
 
+// AG-武器分支：四件武器精灵由 BootScene 按 `assets/weapons/${weapon.spriteFile}`
+// 动态加载（模板拼接，静态扫不到），和 FX 的 path 拼接同一形状，所以同一手法
+// 登记。撬棍没有 spriteFile（用程序绘制），不登记。
+function parseWeaponSprites() {
+  const src = readFileSync(join(ROOT, 'src/data/weapons.ts'), 'utf8');
+  return [...src.matchAll(/spriteFile:\s*'([^']+)'/g)].map((m) => m[1]);
+}
+
 const ARTPACK = parseArtpackTables();
 const FX = parseFxTable();
+const WEAPON_SPRITES = parseWeaponSprites();
 
 // Where each artpack table's files live, and which dir the keys are loaded from.
 const ARTPACK_DIRS = {
@@ -103,6 +112,9 @@ function buildRefs() {
   for (const [id, path] of Object.entries(FX)) {
     add(`fx/${path}/${id}.png`, 'src/render/fx.ts', `FX[${id}]`);
     add(`fx/${path}/${id}.json`, 'src/render/fx.ts', `FX[${id}]`);
+  }
+  for (const file of WEAPON_SPRITES) {
+    add(`weapons/${file}`, 'src/scenes/BootScene.ts', `assets/weapons/${file}`);
   }
   // BootScene loads these by literal path rather than through a table.
   add('ui/marker.png', 'src/scenes/BootScene.ts', "load.image('ui-marker')");

@@ -23,6 +23,7 @@ import { deserialize, serialize, validateGameState } from '../systems/SaveSystem
 import { grantGrowthXp, GROWTH_MAX_LEVEL } from '../core/growth';
 import { NPCS } from '../data/npcs';
 import { ITEM_IDS, getItem } from '../data/items';
+import { WEAPON_IDS } from '../data/weapons';
 import { RECIPES } from '../data/recipes';
 import type { GameState, ItemId } from '../core/gameTypes';
 
@@ -155,6 +156,10 @@ describe('the loop closes end to end (B5 break: the chain used to stop at the wo
       if (sellPrice(id, 2) > 1) continue; // 商人收购
       // 剩下的工具必须有效果读取方，否则就是死物品
       if (id === 'flashlight') continue; // nightOverlayAlpha 读它（blackout 照明）
+      // AG-武器分支：四件武器的出口是战斗——data/weapons.ts 的 WEAPONS 定义
+      // 攻速/伤害/动作，GameScene 的装备与攻击读它们。它们不是配方消耗品
+      // （是配方产出），也不进商店收购，但每件都有真实读取方，与手电同性质。
+      if (WEAPON_IDS.includes(id as (typeof WEAPON_IDS)[number])) continue;
       orphan.push(`${id}（无配方、无收购价、无效果）`);
     }
     expect(orphan).toEqual([]);

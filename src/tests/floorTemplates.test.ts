@@ -466,8 +466,7 @@ describe('the ruling core (100000)', () => {
       const food = items.filter((i) => i.itemId === 'ration_pack' || i.itemId === 'bread');
       expect(water.length, `seed ${seed} summit hands out no water`).toBeGreaterThan(0);
       expect(food.length, `seed ${seed} summit hands out no food`).toBeGreaterThan(0);
-    }
-  });
+    }  });
 });
 
 // GHI-03 M1: keys must identify the item, not its slot in the template array.

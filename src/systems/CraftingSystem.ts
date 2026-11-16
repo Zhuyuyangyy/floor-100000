@@ -1,4 +1,4 @@
-import { RECIPES, getRecipe, isPassUpgrade, materialSourceHint, type UpgradeId } from '../data/recipes';
+import { RECIPES, getRecipe, isPassUpgrade, materialSourceHint, type RecipeId, type UpgradeId } from '../data/recipes';
 import { addItem, countItem, removeItem } from './InventorySystem';
 import { isNight } from './SurvivalSystem';
 import { STARTING_FLOOR } from '../core/constants';
@@ -36,7 +36,7 @@ export const STORAGE_RACK_SLOTS = 2;
 // The field and this reader exist so the tier data is real and wired the day
 // the lead wants to open the gate (with a power XP source that does not depend
 // on the gate).
-export function recipeTierLocked(state: GameState, id: UpgradeId): boolean {
+export function recipeTierLocked(state: GameState, id: RecipeId): boolean {
   const tier = getRecipe(id).tier;
   if (tier === undefined) return false;
   return recipeAccessTier(ensureGrowth(state)) < tier;
@@ -54,7 +54,7 @@ export function recipeTierLocked(state: GameState, id: UpgradeId): boolean {
  * passChain"材料齐全必可建"两条既有约束钉死，economyLoop.test.ts 有断言），
  * 档位是给玩家看的进度感，不是准入。
  */
-export function recipeTierNote(state: GameState, id: UpgradeId): string | undefined {
+export function recipeTierNote(state: GameState, id: RecipeId): string | undefined {
   const tier = getRecipe(id).tier;
   if (tier === undefined) return undefined;
   const access = recipeAccessTier(ensureGrowth(state));
@@ -71,7 +71,7 @@ export interface RecipeCostView {
 }
 
 export interface RecipePreview {
-  id: UpgradeId;
+  id: RecipeId;
   displayName: string;
   /** 效果预览（recipes.ts 的 effect 字段）：做出来会怎样。 */
   effect: string;
@@ -95,7 +95,7 @@ export interface RecipePreview {
  * "差的料去哪拿"（cost.source/hints）。GameScene 的 buildCraftPanel 归
  * AG-11；本函数把三样新信息打包成它可以直接渲染的形状。
  */
-export function recipePreview(state: GameState, id: UpgradeId): RecipePreview {
+export function recipePreview(state: GameState, id: RecipeId): RecipePreview {
   const recipe = getRecipe(id);
   const check = canCraft(state, id);
   const cost: RecipeCostView[] = (Object.entries(recipe.cost) as Array<[ItemId, number]>).map(([itemId, need]) => ({
@@ -105,7 +105,8 @@ export function recipePreview(state: GameState, id: UpgradeId): RecipePreview {
     have: countItem(state.player.inventory, itemId),
     source: materialSourceHint(itemId),
   }));
-  const requires = recipe.requires
+  // 武器配方没有前置（requires 只属于 upgrade）。
+  const requires = recipe.kind === 'upgrade' && recipe.requires
     ? { id: recipe.requires, displayName: getRecipe(recipe.requires).displayName, met: hasUpgrade(state, recipe.requires) }
     : undefined;
   return {
@@ -116,9 +117,9 @@ export function recipePreview(state: GameState, id: UpgradeId): RecipePreview {
     cost,
     requires,
     tier: recipe.tier,
-    tierLocked: recipeTierLocked(state, id),
+    tierLocked: recipe.kind === 'upgrade' && recipeTierLocked(state, id),
     tierNote: recipeTierNote(state, id),
-    built: hasUpgrade(state, id),
+    built: recipe.kind === 'upgrade' && hasUpgrade(state, recipe.id),
     canCraft: check.ok,
     missing: check.ok ? [] : check.missing,
     hints: check.ok ? undefined : check.hints,
@@ -135,7 +136,7 @@ export type CanCraftResult =
   | { ok: true }
   | { ok: false; missing: MissingMaterial[]; reason?: string; hints?: string[] };
 
-export function canCraft(state: GameState, id: UpgradeId): CanCraftResult {
+export function canCraft(state: GameState, id: RecipeId): CanCraftResult {
   // AG-45：已建造先行——与 craft() 共用同一道第一闸门。修前 canCraft 只查
   // 前置与材料，对"已建造但材料又凑齐"的配方报 ok，而 craft() 正确地以
   // "已建造"拒绝，语义分叉（AG-42 §5.2 记录，UI 靠"已建"列掩着）。统一
@@ -144,13 +145,14 @@ export function canCraft(state: GameState, id: UpgradeId): CanCraftResult {
   // craftingSystem.test.ts 的 toContainEqual 钉死不受影响；passChain /
   // economyLoop / craftLoop 的既有断言全部落在未建造状态上，无需修改）。
   // 顺序与 craft() 一致：先已建造，再前置，再材料。
-  if (hasUpgrade(state, id)) {
-    return { ok: false, missing: [], reason: `${getRecipe(id).displayName} 已建造` };
+  const recipe = getRecipe(id);
+  // 武器不是"建造"，是做出实物，可重复制作——已建造闸门只对 upgrade 生效。
+  if (recipe.kind === 'upgrade' && hasUpgrade(state, recipe.id)) {
+    return { ok: false, missing: [], reason: `${recipe.displayName} 已建造` };
   }
   // 前置资格 is checked before materials: a gated recipe the player cannot walk up
   // to yet must say so, rather than report 材料不足 and send them gathering.
-  const recipe = getRecipe(id);
-  if (recipe.requires && !hasUpgrade(state, recipe.requires)) {
+  if (recipe.kind === 'upgrade' && recipe.requires && !hasUpgrade(state, recipe.requires)) {
     return { ok: false, missing: [], reason: `需要先获得${getRecipe(recipe.requires).displayName}` };
   }
   const missing: MissingMaterial[] = [];
@@ -169,16 +171,17 @@ export function canCraft(state: GameState, id: UpgradeId): CanCraftResult {
       return hint ? `${getItem(m.itemId).displayName}：${hint}` : undefined;
     })
     .filter((h): h is string => h !== undefined);
-  return { ok: false, missing, hints: hints.length > 0 ? hints : undefined };
-}
+  return { ok: false, missing, hints: hints.length > 0 ? hints : undefined };}
 
-export type CraftResult = { ok: true; id: UpgradeId } | { ok: false; reason: string };
+export type CraftResult = { ok: true; id: RecipeId } | { ok: false; reason: string };
 
-// Crafts an upgrade: refuses (no deduction) if already built or materials are
-// short; otherwise deducts all materials atomically and records the upgrade.
-export function craft(state: GameState, id: UpgradeId): CraftResult {
+// Upgrades are recorded once in homeUpgrades; weapon recipes instead create a
+// non-stackable inventory item and may be crafted again if materials permit.
+export function craft(state: GameState, id: RecipeId): CraftResult {
   const recipe = getRecipe(id);
-  if (hasUpgrade(state, id)) return { ok: false, reason: `${recipe.displayName} 已建造` };
+  if (recipe.kind === 'upgrade' && hasUpgrade(state, recipe.id)) {
+    return { ok: false, reason: `${recipe.displayName} 已建造` };
+  }
   const check = canCraft(state, id);
   if (!check.ok) {
     // A missing prerequisite must never be reported as (or bypassed by) a
@@ -189,11 +192,23 @@ export function craft(state: GameState, id: UpgradeId): CraftResult {
         const hint = materialSourceHint(m.itemId);
         return `${getItem(m.itemId).displayName} ${m.have}/${m.need}${hint ? `（${hint}）` : ''}`;
       })
-      .join('，');
-    return { ok: false, reason: `材料不足：${detail}` };
+      .join('，');    return { ok: false, reason: `材料不足：${detail}` };
   }
   for (const [itemId, need] of Object.entries(recipe.cost) as Array<[ItemId, number]>) {
     removeItem(state.player.inventory, itemId, need);
+  }
+  // AG-武器分支：武器是"做出实物"而不是"建造设施"——扣料之后进背包，满了就
+  // 整笔回滚（材料一件不少地还回去），与 upgrade 的 homeUpgrades 路径分开。
+  if (recipe.kind === 'item') {
+    const output = addItem(state.player.inventory, recipe.outputItemId, 1);
+    if (output.overflow > 0) {
+      removeItem(state.player.inventory, recipe.outputItemId, output.added);
+      for (const [itemId, need] of Object.entries(recipe.cost) as Array<[ItemId, number]>) {
+        addItem(state.player.inventory, itemId, need);
+      }
+      return { ok: false, reason: '背包空间不足' };
+    }
+    return { ok: true, id };
   }
   state.player.homeUpgrades.push(id);
   // B5: the power line's producer is the credential chain — "拿到新凭证

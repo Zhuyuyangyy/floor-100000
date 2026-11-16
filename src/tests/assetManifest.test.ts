@@ -79,6 +79,10 @@ const byPath = new Map(manifest.files.map((f) => [f.path, f]));
 // stops matching the file, these two disagree and the test fails.
 function expectedRefs(): Map<string, string[]> {
   const refs = new Map<string, string[]>();
+  // AG-武器分支：weapons.ts 里每个 spriteFile: 'xxx.png' 都是一张运行时加载的
+  // 武器精灵（撬棍没有 spriteFile，程序绘制）。
+  const weaponsSrc = readFileSync(join(process.cwd(), 'src/data/weapons.ts'), 'utf8');
+  const WEAPON_SPRITE_FILES = [...weaponsSrc.matchAll(/spriteFile:\s*'([^']+)'/g)].map((m) => m[1]);
   const add = (path: string, module: string) => {
     const list = refs.get(path) ?? [];
     if (!list.includes(module)) list.push(module);
@@ -99,6 +103,10 @@ function expectedRefs(): Map<string, string[]> {
     add(`fx/${fx.path}/${fx.id}.png`, 'src/render/fx.ts');
     add(`fx/${fx.path}/${fx.id}.json`, 'src/render/fx.ts');
   }
+  // AG-武器分支：武器精灵由 BootScene 按 `assets/weapons/${weapon.spriteFile}`
+  // 模板拼接加载（不是字面路径），所以上面那条 'assets/...' 字面扫描收不到——
+  // 与 tools/assets-manifest.mjs 的 parseWeaponSprites 同手法镜像一遍。
+  for (const file of WEAPON_SPRITE_FILES) add(`weapons/${file}`, 'src/scenes/BootScene.ts');
   // BootScene's own loads. The table-driven ones are covered by the artpack
   // parse above; what is left is (a) every 'assets/...' path written as a plain
   // literal — marker, slot, the banners, the title backdrop — and (b) the panel

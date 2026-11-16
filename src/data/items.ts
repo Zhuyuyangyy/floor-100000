@@ -24,6 +24,7 @@ declare module '../core/gameTypes' {
 // AG-29：给四件"能被使用"的消耗品配了心情字段（见下方 MORALE 注释）。
 // ITEMS 本身一件不减一件不加——items.test.ts 钉死 15 件，survivalBalance
 // 的"每件物品都有世界来源"与 economyLoop 的"无死物品"也都按这 15 件裁决。
+// Every item referenced by a recipe, floor or encounter must exist here.
 export const ITEMS: Record<ItemId, Item> = {
   // MORALE 字段（契约第四节）。数值标尺：生存刚需（水/食）2~3 点，疗伤 4 点，
   // 精神向专物 6~12 点（见 MORALE_ITEMS）。morale 点数池归 AG-25（契约第一节），
@@ -55,8 +56,17 @@ export const ITEMS: Record<ItemId, Item> = {
   wire: { id: 'wire', displayName: '电线', category: 'material', stackable: true, maxStack: 99 },
   fuse: { id: 'fuse', displayName: '保险丝', category: 'material', stackable: true, maxStack: 99 },
   crowbar: { id: 'crowbar', displayName: '撬棍', category: 'tool', stackable: false, maxStack: 1 },
+  // AG-武器分支：四件可制作武器。直接进 ITEMS 而不是独立表——ItemId 联合
+  // （gameTypes.ts）已含它们，InventoryStack/GroundItem/lootPool 因此天然
+  // 收得下，不用把整条物品链放宽到 KnownItemId。撬棍保持 v0.1 原状：
+  // 它是置物架配方的成本，也是最初的战斗工具。
+  fire_axe: { id: 'fire_axe', displayName: '消防斧', category: 'tool', stackable: false, maxStack: 1 },
+  cleaver: { id: 'cleaver', displayName: '砍刀', category: 'tool', stackable: false, maxStack: 1 },
+  short_sword: { id: 'short_sword', displayName: '短剑', category: 'tool', stackable: false, maxStack: 1 },
+  dagger: { id: 'dagger', displayName: '匕首', category: 'tool', stackable: false, maxStack: 1 },
   flashlight: { id: 'flashlight', displayName: '低电量手电', category: 'tool', stackable: false, maxStack: 1 },
 };
+
 
 // ── 精神向物品（AG-29 新增）────────────────────────────────────────────
 //
@@ -119,7 +129,9 @@ export const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
 
 export const MORALE_ITEM_IDS = Object.keys(MORALE_ITEMS) as MoraleItemId[];
 
-// 全表：原 15 件 + 精神向新物品。getItem/isItemId 只认这一张表。
+// 全表：ITEMS（v0.1 的 15 件 + AG-武器分支的四件武器）+ 精神向新物品。
+// getItem/isItemId 只认这一张表。MORALE_ITEMS 仍然独立成表——"v0.1 的 15 件
+// 一件不动"这类断言按 ITEMS 裁决（见 moraleItems.test.ts 的断言语义）。
 export const ALL_ITEMS: Record<KnownItemId, Item> = { ...ITEMS, ...MORALE_ITEMS };
 
 export const ALL_ITEM_IDS = Object.keys(ALL_ITEMS) as KnownItemId[];

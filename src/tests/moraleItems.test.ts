@@ -276,18 +276,27 @@ describe('a morale item can actually be consumed', () => {
 
 describe('survivalBalance and the item gates are untouched', () => {
   it('the 15 v0.1 ids are exactly what they were', () => {
-    expect(ITEM_IDS).toHaveLength(15);
-    expect(new Set(ITEM_IDS).size).toBe(15);
-    // 精神向新物品单独成表，不进 ITEM_IDS——items.test.ts /
-    // survivalBalance / economyLoop 都按这 15 件裁决"有来源、无死物品"。
+    // AG-武器分支合入后 ITEM_IDS = 19：v0.1 的 15 件 + 四件可制作武器。这个
+    // 断言保护的从来是"v0.1 那 15 件一件不动"（items.test.ts / survivalBalance /
+    // economyLoop 按它们裁决"有来源、无死物品"），不是钉总数——总数归
+    // items.test.ts（19）。武器有真实来源（配方 + 掉落 + 战斗读取），
+    // 满足同一套裁决，所以进 ITEMS 而不是独立表。
+    const v01: ItemId[] = ['clean_water', 'dirty_water', 'ration_pack', 'bread', 'medkit', 'battery', 'scrap_metal', 'wood', 'cloth', 'tape', 'filter', 'wire', 'fuse', 'crowbar', 'flashlight'];
+    for (const id of v01) expect(ITEM_IDS).toContain(id);
+    expect(ITEM_IDS).toHaveLength(19); // 15 v0.1 + 4 武器
+    expect(new Set(ITEM_IDS).size).toBe(19);
+    // 精神向新物品仍然单独成表，不进 ITEM_IDS。
     for (const id of MORALE_ITEM_IDS) expect(ITEM_IDS).not.toContain(asItemId(id));
   });
 
   it('the merged table covers everything exactly once', () => {
     expect(ALL_ITEM_IDS).toHaveLength(ITEM_IDS.length + MORALE_ITEM_IDS.length);
     expect(new Set(ALL_ITEM_IDS).size).toBe(ALL_ITEM_IDS.length);
+    expect(Object.keys(ALL_ITEMS)).toHaveLength(23);
     for (const id of ALL_ITEM_IDS) expect(getItem(id).id).toBe(id);
-    expect(Object.keys(ALL_ITEMS)).toHaveLength(19);
+    // 23 = ITEMS 的 19 件（v0.1 15 + 武器 4）+ MORALE_ITEMS 的 4 件。
+    // 武器在 ITEMS 里（见 economyLoop 的死物品审计），精神向物品在合并表里
+    // 但不在 ITEMS——两套身份并存，正是这个断言要钉的。
   });
 
   it('the artpack icon table still matches ITEM_IDS exactly (no new ids leaked in)', () => {

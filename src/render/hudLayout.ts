@@ -6,6 +6,12 @@ import { DESIGN_WIDTH } from '../core/design';
 // Geometry of the 2026-11-14 HUD skin (see render/hudSkin.ts). Three rows on one
 // plate: instruments, the day's objective, the environment readout.
 //
+// AG-54: the instrument row's four segmented bars became four segmented rings
+// (the user's "圆环的那种"). Same row, same pitch, same money lane:
+// statX/statPitch/statWidth describe the four ring groups, ringCY/ringR/
+// ringStroke the gauge itself, and the value lives in the ring's centre as a
+// Text. barY/barH/barSegments are gone with the bars they described.
+//
 // The plate was 132 tall and the wall band starts at y=8 inside a 200px floor:
 // at zoom 0.5 with the camera pinned to -64, 60 of the wall's 128 rows sat above
 // the plate and 34 more sat behind it — 46.9% of every wall in the game was
@@ -17,7 +23,10 @@ export const HUD_LAYOUT = {
   contextBottom: 102,
   statX: 292,
   statPitch: 192,
-  statWidth: 172,
+  // AG-54: 172 -> 120. The bar groups were a 172px bar under the label; a ring
+  // group is the 46px ring plus its icon and label, so 120 holds it with the
+  // pitch untouched. hudLayout.test.ts pins the block's end against moneyX.
+  statWidth: 120,
   // AG-23: goalY stays 52 — the objective row's box (52..77 at 20px GameSans)
   // already clears the environment row (80), and hudLayout.test.ts pins that
   // 28px lane gap. The clock/goal collision is fixed from the clock's side
@@ -38,9 +47,17 @@ export const HUD_LAYOUT = {
   // gap, and the environment row cannot move down without crossing the plate's
   // bottom edge (contextBottom 102, AG-20's compaction).
   row1Y: 2,
-  barY: 28,
-  barH: 8,
-  barSegments: 10,
+  // The ring gauge (AG-54): centred in row 1, a 12-pip segmented circle. R=23
+  // with a 5px stroke leaves a 36px well for the value Text, and the ring's
+  // 2..48 band clears both the plate's top hairline and the row separator at
+  // topHeight. A running-out stat (<=20%) lights its pips in UI.danger
+  // instead, exactly where the old bar went red.
+  ringCY: 25,
+  ringR: 23,
+  ringStroke: 5,
+  // The label's row, vertically centred on the ring for a 20px caption (a 25px
+  // GameSans line box, so 25 - 12).
+  statLabelY: 13,
   // Where the money group starts; the stat block has to end before this.
   //
   // AG-23: 1080 → 1056. The money texts open at moneyX+24 and grow rightwards

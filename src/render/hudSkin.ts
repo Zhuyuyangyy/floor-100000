@@ -1,4 +1,4 @@
-import Phaser from 'phaser';
+import type Phaser from 'phaser';
 
 // The HUD skin, drawn from the 2026-11-14 concept sheet
 // (F:/new/末日宿舍_HUD_UI分件包.zip, shipped as reference in
@@ -11,7 +11,12 @@ import Phaser from 'phaser';
 // concept values, hide the world behind opaque plates, and resample 1656 -> 1280
 // through a nearest-neighbour filter. So the sheet is the spec, not the asset:
 // same three rows, same dark riveted plate, same hazard stripe, same segmented
-// bars — drawn here so the values are real.
+// gauges — drawn here so the values are real.
+//
+// AG-54（用户 2026-11-16 晚反馈「之前不是有那种圆环的那种」：概念图全库搜过
+// 一遍——HUD概念图目录、F:/new 分件包、git 全部分支历史里都没有圆环 HUD，
+// 旧的四联分段条是唯一存在过的样式。按现有语言重画：10 段横条变成 12 段
+// 圆环（drawStatRing），板/铆钉/斜纹/三行结构全部不动，读数一个不丢。
 //
 // Every glyph is on an 8x8 grid at 2px units, so a 16px icon is 8 integer cells
 // and stays crisp at pixelArt:true.
@@ -50,9 +55,14 @@ export function drawHudIcon(
     g.fillStyle(color, 1);
     g.fillRect(X(cx), Y(cy), W(cw), W(ch));
   };
+  // Plain {x, y} points, not Phaser.Math.Vector2: fillPoints only reads the
+  // two coordinates, and a type-only Phaser import keeps this module loadable
+  // in the Node unit tests (vitest has no window, and phaser.esm.js touches it
+  // at module scope). The cast satisfies the Vector2[] signature.
   const poly = (points: Array<[number, number]>): void => {
     g.fillStyle(color, 1);
-    g.fillPoints(points.map(([px, py]) => new Phaser.Math.Vector2(X(px), Y(py))), true, true);
+    const vectors = points.map(([px, py]) => ({ x: X(px), y: Y(py) }));
+    g.fillPoints(vectors as Phaser.Math.Vector2[], true, true);
   };
 
   switch (name) {
@@ -207,5 +217,55 @@ export function drawHazardStripe(g: Phaser.GameObjects.Graphics, x: number, y: n
   g.fillStyle(color, 0.5);
   for (let i = -h; i < w; i += 8) {
     g.fillRect(x + i, y, 4, h);
+  }
+}
+
+/** How many pips a stat ring is cut into. Twelve divides the circle into 30
+ *  degree slots, so a pip is readable as "a twelfth" the way the old bar's pips
+ *  read as "a tenth". */
+export const RING_SEGMENTS = 12;
+
+/** Radians of dark between two pips, so the ring reads as pips and not as one
+ *  continuous stroke with tick marks. */
+const RING_GAP = 0.07;
+
+/**
+ * A stat as a ring: a dark track with `frac` of it lit in pips, clockwise from
+ * the top. This is the 2026-11-14 skin's segmented bar turned 90 degrees into
+ * a circle — the AG-54 answer to "圆环的那种" — and it keeps the bar's whole
+ * contract: the pips are discrete (a player budgets with "7 of 12", not with a
+ * smooth 58%), a running-out stat goes danger red at 20% whatever its own
+ * colour is, and the trough is the palette ink.
+ *
+ * The number itself is NOT drawn here: it lives in the ring's centre as a Text
+ * (see GameScene.buildHud), so the value stays live.
+ */
+export function drawStatRing(
+  g: Phaser.GameObjects.Graphics,
+  cx: number,
+  cy: number,
+  r: number,
+  frac: number,
+  color: number,
+  options: { segments?: number; stroke?: number } = {},
+): void {
+  const f = Math.max(0, Math.min(1, frac));
+  const segments = options.segments ?? RING_SEGMENTS;
+  const stroke = options.stroke ?? 5;
+  // The track: one full circle of trough ink, drawn under the lit pips so the
+  // gaps between pips and the unlit remainder read as the same slot.
+  g.lineStyle(stroke, 0x05080b, 1);
+  g.strokeCircle(cx, cy, r);
+  const slot = (Math.PI * 2) / segments;
+  const lit = Math.round(f * segments);
+  for (let i = 0; i < lit; i++) {
+    // Pip i sweeps from the top (-PI/2) clockwise, trimmed by the gap on both
+    // ends so neighbours never touch.
+    const a0 = -Math.PI / 2 + i * slot + RING_GAP / 2;
+    const a1 = -Math.PI / 2 + (i + 1) * slot - RING_GAP / 2;
+    g.lineStyle(stroke, color, 1);
+    g.beginPath();
+    g.arc(cx, cy, r, a0, a1);
+    g.strokePath();
   }
 }

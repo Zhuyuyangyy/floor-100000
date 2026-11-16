@@ -2437,11 +2437,11 @@ export class GameScene extends Phaser.Scene {
     // The people who never left. Drawn on their own layer between the wall and
     // the props, so a body under a blanket is behind the shelves instead of on
     // top of them.
-    const crowd = this.add.graphics();
+    const crowd: Phaser.GameObjects.GameObject[] = [];
     for (let r = 0; r < roomCountFor(floor); r++) {
-      drawCrowd(crowd, { roomX: r * ROOM_WIDTH, floorY: wallH, floor, room: r });
+      drawCrowd(this, crowd, { roomX: r * ROOM_WIDTH, floorY: wallH, floor, room: r });
     }
-    this.floorObjects.push(crowd);
+    this.floorObjects.push(...crowd);
 
     // Props, room by room. Each theme decides its own dressing; the loop only
     // supplies the room's position so nothing has to recompute the layout.
@@ -2933,6 +2933,11 @@ export class GameScene extends Phaser.Scene {
     // Crates get real art for their opened state. Fading to 0.35 was the only
     // signal a crate had been looted, and at 0.35 a crate reads as a rendering
     // bug rather than as a crate someone got to first.
+    if (id.startsWith('bunk') && obj.box instanceof Phaser.GameObjects.Image) {
+      // A searched bunk keeps its frame and loses its kit.
+      obj.box.setTexture(empty ? 'env-bunk-empty' : 'env-bunk-loaded');
+      obj.box.setAlpha(1);
+    }
     const isCrate = id === 'crate_wood' || id === 'crate_metal';
     if (isCrate && obj.box instanceof Phaser.GameObjects.Image) {
       const opened = getGame().currentFloor % 3 === 0 ? 'env-crate-broken' : 'env-crate-forced';

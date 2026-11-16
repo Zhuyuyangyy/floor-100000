@@ -34,10 +34,14 @@ export const FURNITURE_KEYS = [
 
 export type FurnitureKey = (typeof FURNITURE_KEYS)[number];
 
-export function containerTextureKey(containerId: string): FurnitureKey | null {
-  // Bunks are generated per floor (`bunk_1`, `bunk_2`, …), so the id is a
-  // prefix rather than a fixed name: a 100000-storey dormitory has beds in it.
-  if (containerId.startsWith('bunk')) return 'furn_bunk_bed';
+export function containerTextureKey(containerId: string): string | null {
+  // Bunks are generated per floor (`bunk_1`, `bunk_2`, …), so the id is a prefix
+  // rather than a fixed name. A bunk you can search is a bunk with somebody's
+  // kit on it, so it draws the loaded state and switches to the stripped frame
+  // once it has been looted.
+  // Only the generated ones (bunk_1, bunk_2 …). The three authored ids —
+  // bunk_bed / bunk_top / bunk_bottom — keep their old furniture art.
+  if (/^bunk_\d+$/.test(containerId)) return 'env-bunk-loaded';
   switch (containerId) {
     // `bed` is both a room fixture (the one you sleep in) and, from the 100-110
     // segment, a lootable container — a dorm bunk with someone's kit stuffed under

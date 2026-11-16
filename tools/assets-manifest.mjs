@@ -236,6 +236,9 @@ function classify(path) {
   if (path.startsWith('ui/frame-dialogue/') || path.startsWith('ui/frame-item/') || path.startsWith('ui/frame-tower/')) {
     return { class: 'locked', note: '2026-11-15 三套面板框（八片），16 色门禁适用' };
   }
+  if (path.startsWith('env/dorm/')) {
+    return { class: 'locked', note: '睡姿/坐姿/双层床/床底杂物，16 色门禁适用' };
+  }
   if (path.startsWith('env/doors/') || path.startsWith('env/crates/')) {
     return { class: 'locked', note: '阶层门窗与箱子状态图，16 色门禁适用' };
   }

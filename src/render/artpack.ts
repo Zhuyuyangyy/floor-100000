@@ -233,6 +233,18 @@ export const ENV_FILES: Record<string, string> = {
   'env-window-commercial': 'doors/window-commercial.png',
   'env-window-commercial-cracked': 'doors/window-commercial-cracked.png',
 
+  // The nine dorm pieces drawn to the 2026-11-16 brief: two sleepers, two
+  // sitters, three bunk states, two piles of under-bed junk.
+  'env-sleep-a': 'dorm/sleep-side-a.png',
+  'env-sleep-b': 'dorm/sleep-side-b.png',
+  'env-sit-a': 'dorm/sit-a.png',
+  'env-sit-b': 'dorm/sit-b.png',
+  'env-bunk-empty': 'dorm/bunk-empty.png',
+  'env-bunk-sleeper': 'dorm/bunk-sleeper.png',
+  'env-bunk-loaded': 'dorm/bunk-loaded.png',
+  'env-underbed-a': 'dorm/underbed-a.png',
+  'env-underbed-b': 'dorm/underbed-b.png',
+
   // Crate states. The container's own art is the full crate; these replace it
   // once the loot is gone, so an empty crate looks forced rather than merely
   // faded — the label already says （空）, the art now agrees with it.

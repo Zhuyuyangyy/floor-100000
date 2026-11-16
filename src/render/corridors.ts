@@ -466,58 +466,25 @@ export function crowdFor(floor: number): number {
  * behind everything the theme puts in the room.
  */
 export function drawCrowd(
-  g: Phaser.GameObjects.Graphics,
+  scene: Phaser.Scene,
+  objects: Phaser.GameObjects.GameObject[],
   opts: { roomX: number; floorY: number; floor: number; room: number },
 ): void {
   const { roomX, floorY, floor, room } = opts;
   const count = crowdFor(floor);
-  // Ink bodies with a coloured blanket over them. The first pass used blanket
-  // colours close to the wall's own teal and vanished into it at 1x — the tower's
-  // palette is narrow enough that only the darkest value reads against the wall.
-  const blankets = [PALETTE.cloth, PALETTE.clothLight, PALETTE.clothDeep, PALETTE.cloth];
+  if (count === 0) return;
   for (let i = 0; i < count; i++) {
     const slot = (room * 7 + i * 3) % 4;
-    const x = roomX + 64 + slot * 62 + (i % 2) * 12;
-    const blanket = blankets[(room + i) % blankets.length];
+    const x = roomX + 70 + slot * 60 + (i % 2) * 10;
+    const variant = (room + i) % 2;
     const lying = (room + i) % 3 !== 0;
-
-    if (lying) {
-      // On the floor, head on a folded jacket, one arm out of the blanket.
-      g.fillStyle(PALETTE.ink, 0.6);
-      g.fillEllipse(x, floorY - 4, 78, 9);
-      g.fillStyle(PALETTE.ink, 1);
-      g.fillEllipse(x + 4, floorY - 15, 66, 22);
-      g.fillStyle(blanket, 1);
-      g.fillEllipse(x + 8, floorY - 16, 56, 16);
-      g.fillStyle(blanket, 0.55);
-      g.fillRect(x + 8, floorY - 24, 26, 5);
-      // head + shoulder, in skin, outlined dark so it separates at 1x
-      // pillow, then the head clear of the body so the silhouette reads "person"
-      g.fillStyle(PALETTE.dust, 0.9);
-      g.fillRect(x - 44, floorY - 12, 20, 6);
-      g.fillStyle(PALETTE.ink, 1);
-      g.fillRect(x - 40, floorY - 32, 18, 18);
-      g.fillStyle(PALETTE.skinLight, 1);
-      g.fillRect(x - 38, floorY - 30, 14, 14);
-      g.fillStyle(PALETTE.skinDeep, 1);
-      g.fillRect(x - 38, floorY - 22, 14, 3);
-    } else {
-      // Sitting up against the wall, knees drawn in, watching.
-      g.fillStyle(PALETTE.ink, 0.55);
-      g.fillEllipse(x, floorY - 2, 40, 7);
-      g.fillStyle(PALETTE.ink, 1);
-      g.fillRect(x - 15, floorY - 42, 30, 40);
-      g.fillStyle(blanket, 1);
-      g.fillRect(x - 12, floorY - 36, 24, 30);
-      g.fillStyle(PALETTE.ink, 1);
-      g.fillRect(x - 9, floorY - 56, 18, 17);
-      g.fillStyle(PALETTE.skinDeep, 1);
-      g.fillRect(x - 8, floorY - 55, 16, 15);
-      g.fillStyle(PALETTE.skin, 1);
-      g.fillRect(x - 6, floorY - 53, 11, 10);
-      g.fillStyle(PALETTE.ink, 0.35);
-      g.fillRect(x - 12, floorY - 16, 24, 2);
-    }
+    const key = lying ? (variant ? 'env-sleep-b' : 'env-sleep-a') : (variant ? 'env-sit-b' : 'env-sit-a');
+    if (!scene.textures.exists(key)) continue;
+    // Feet on the floor line: both sheets are drawn with the figure sitting on
+    // the bottom edge of the canvas, so origin-bottom is the whole alignment.
+    const img = scene.add.image(x, floorY, key).setOrigin(0.5, 1);
+    if (lying) img.setAlpha(0.96);
+    objects.push(img);
   }
 }
 

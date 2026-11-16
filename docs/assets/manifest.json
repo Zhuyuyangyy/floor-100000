@@ -1,9 +1,9 @@
 {
   "palette": 16,
   "summary": {
-    "files": 216,
-    "png": 200,
-    "locked": 111,
+    "files": 225,
+    "png": 209,
+    "locked": 120,
     "open": 84,
     "staged": 7,
     "aux": 14,
@@ -1466,6 +1466,186 @@
       "bytes": 415,
       "class": "locked",
       "note": "阶层门窗与箱子状态图，16 色门禁适用"
+    },
+    {
+      "path": "env/dorm/bunk-empty.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-bunk-empty]"
+        }
+      ],
+      "width": 96,
+      "height": 64,
+      "channels": 4,
+      "opaqueColours": 7,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 3504,
+      "semiAlphaPx": 0,
+      "bytes": 1250,
+      "class": "locked",
+      "note": "睡姿/坐姿/双层床/床底杂物，16 色门禁适用"
+    },
+    {
+      "path": "env/dorm/bunk-loaded.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-bunk-loaded]"
+        }
+      ],
+      "width": 96,
+      "height": 64,
+      "channels": 4,
+      "opaqueColours": 15,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 2659,
+      "semiAlphaPx": 0,
+      "bytes": 2358,
+      "class": "locked",
+      "note": "睡姿/坐姿/双层床/床底杂物，16 色门禁适用"
+    },
+    {
+      "path": "env/dorm/bunk-sleeper.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-bunk-sleeper]"
+        }
+      ],
+      "width": 96,
+      "height": 64,
+      "channels": 4,
+      "opaqueColours": 12,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 2895,
+      "semiAlphaPx": 0,
+      "bytes": 1320,
+      "class": "locked",
+      "note": "睡姿/坐姿/双层床/床底杂物，16 色门禁适用"
+    },
+    {
+      "path": "env/dorm/sit-a.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-sit-a]"
+        }
+      ],
+      "width": 48,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 12,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 1508,
+      "semiAlphaPx": 0,
+      "bytes": 1595,
+      "class": "locked",
+      "note": "睡姿/坐姿/双层床/床底杂物，16 色门禁适用"
+    },
+    {
+      "path": "env/dorm/sit-b.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-sit-b]"
+        }
+      ],
+      "width": 48,
+      "height": 56,
+      "channels": 4,
+      "opaqueColours": 10,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 1440,
+      "semiAlphaPx": 0,
+      "bytes": 1227,
+      "class": "locked",
+      "note": "睡姿/坐姿/双层床/床底杂物，16 色门禁适用"
+    },
+    {
+      "path": "env/dorm/sleep-side-a.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-sleep-a]"
+        }
+      ],
+      "width": 64,
+      "height": 32,
+      "channels": 4,
+      "opaqueColours": 13,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 1437,
+      "semiAlphaPx": 0,
+      "bytes": 1070,
+      "class": "locked",
+      "note": "睡姿/坐姿/双层床/床底杂物，16 色门禁适用"
+    },
+    {
+      "path": "env/dorm/sleep-side-b.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-sleep-b]"
+        }
+      ],
+      "width": 64,
+      "height": 32,
+      "channels": 4,
+      "opaqueColours": 11,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 1392,
+      "semiAlphaPx": 0,
+      "bytes": 1015,
+      "class": "locked",
+      "note": "睡姿/坐姿/双层床/床底杂物，16 色门禁适用"
+    },
+    {
+      "path": "env/dorm/underbed-a.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-underbed-a]"
+        }
+      ],
+      "width": 48,
+      "height": 24,
+      "channels": 4,
+      "opaqueColours": 15,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 389,
+      "semiAlphaPx": 0,
+      "bytes": 1018,
+      "class": "locked",
+      "note": "睡姿/坐姿/双层床/床底杂物，16 色门禁适用"
+    },
+    {
+      "path": "env/dorm/underbed-b.png",
+      "refs": [
+        {
+          "module": "src/render/artpack.ts",
+          "detail": "ENV_FILES[env-underbed-b]"
+        }
+      ],
+      "width": 48,
+      "height": 24,
+      "channels": 4,
+      "opaqueColours": 13,
+      "strayColours": 0,
+      "inPalette": true,
+      "transparentPx": 394,
+      "semiAlphaPx": 0,
+      "bytes": 1148,
+      "class": "locked",
+      "note": "睡姿/坐姿/双层床/床底杂物，16 色门禁适用"
     },
     {
       "path": "env/fixtures/bracket.png",

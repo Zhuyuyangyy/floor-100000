@@ -568,6 +568,12 @@ export class GameScene extends Phaser.Scene {
   // craftFirst + i——AG-44 接入时槽位即条目（列表短于窗口），配方涨到 13 条
   // 后这个换算是必须的，否则滚动态下悬停第 3 行选中的是第 3 条而不是第 3+first 条。
   private craftFirst = 0;
+  // 行商巡逻的 loop timer。buildEncounterSpots 每次楼层重建都会新建一个，
+  // clearEncounterSpots 必须 remove 掉——爬梯走 clearFloor（同场景重建，不是
+  // scene.restart），旧 timer 活着而旧 trader 已 destroy，回调打上去就是
+  // `Cannot read properties of undefined (reading 'play')`，异常还会把爬梯
+  // 落地流程打断（e2e firstChapter：卡在 4 层上不去 5）。
+  private traderPatrolTimer?: Phaser.Time.TimerEvent;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
   /** the warm pool the player carries; only visible once night falls */
   private playerLight?: Phaser.GameObjects.Image;
@@ -1208,6 +1214,9 @@ export class GameScene extends Phaser.Scene {
   // Resolved spots are not drawn at all — the floor visibly empties as the
   // player works it, which is the "this place is picked over" read.
   private clearEncounterSpots(): void {
+    // 先收巡逻 timer：它闭包里握着本层的 trader，而下面就要把它 destroy。
+    this.traderPatrolTimer?.remove();
+    this.traderPatrolTimer = undefined;
     for (const m of this.spotMarkers.values()) {
       m.dot.destroy();
       m.label.destroy();
@@ -1296,7 +1305,11 @@ export class GameScene extends Phaser.Scene {
           x: to,
           duration: ms,
           ease: 'Sine.InOut',
-          onStart: () => trader.play(walk, true),
+          // active/anims 双保险：timer 已收但 tween 恰好在队的这一帧，
+          // 旧 trader 已 destroy，anims 组件随之移除——不打这个防护就会抛。
+          onStart: () => {
+            if (trader.active && trader.anims) trader.play(walk, true);
+          },
           onUpdate: () => {
             const m = this.spotMarkers.get('shop');
             if (m) m.x = trader.x;
@@ -1304,7 +1317,7 @@ export class GameScene extends Phaser.Scene {
           onComplete: () => trader.play(idleAnimKey('npc_alin')),
         });
       };
-      this.time.addEvent({ delay: 2600, loop: true, callback: step });
+      this.traderPatrolTimer = this.time.addEvent({ delay: 2600, loop: true, callback: step });
     }
   }
 

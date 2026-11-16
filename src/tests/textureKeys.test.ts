@@ -109,9 +109,13 @@ describe('every texture key the source asks for exists', () => {
     // they are exactly what the scan is supposed to see — the old guard also
     // asserted 'clean_water', which stopped being a literal when the inventory
     // rewrite moved item icons behind itemIconKey().
-    expect(asked.size).toBeGreaterThan(10);
+    expect(asked.size).toBeGreaterThanOrEqual(8);
     expect(asked.has('furn_crate_wood')).toBe(true);
-    expect(asked.has('tile_window')).toBe(true);
+    expect(asked.has('furn_bed')).toBe(true);
+    // Doors and windows stopped being literals when they became per-tier: the
+    // call sites now take doorKeyFor(floor)/windowKeyFor(floor) (asserted in
+    // renderPerf's 阶层门窗 test), so this scan must NOT see them any more.
+    expect(asked.has('tile_window')).toBe(false);
   });
 
   it('has no unknown key', () => {

@@ -220,6 +220,26 @@ export const ENV_FILES: Record<string, string> = {
   'env-stain-scratch': 'stains/stain-scratch.png',
   'env-stain-hand': 'stains/stain-hand.png',
 
+  // Doors and windows by tier. Until now every floor in the tower shared one
+  // door and one window: a 44x104 slab, drawn 55 times, in a tower whose whole
+  // premise is that the floors are not the same place.
+  'env-door-slum': 'doors/door-slum.png',
+  'env-door-slum-reinforced': 'doors/door-slum-reinforced.png',
+  'env-door-dorm': 'doors/door-dorm.png',
+  'env-door-dorm-broken': 'doors/door-dorm-broken.png',
+  'env-door-commercial': 'doors/door-commercial.png',
+  'env-window-slum': 'doors/window-slum.png',
+  'env-window-dorm': 'doors/window-dorm.png',
+  'env-window-commercial': 'doors/window-commercial.png',
+  'env-window-commercial-cracked': 'doors/window-commercial-cracked.png',
+
+  // Crate states. The container's own art is the full crate; these replace it
+  // once the loot is gone, so an empty crate looks forced rather than merely
+  // faded — the label already says （空）, the art now agrees with it.
+  'env-crate-intact': 'crates/crate-intact.png',
+  'env-crate-forced': 'crates/crate-forced.png',
+  'env-crate-broken': 'crates/crate-broken.png',
+
   // One floor band per tier; a missing tier degrades to the slum floor rather
   // than a green box (see corridors.floorKeyFor).
   'env-floor-slum': 'floors/floor-slum.png',

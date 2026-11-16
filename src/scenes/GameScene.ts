@@ -157,7 +157,7 @@ import {
 import { WEAPON_GRIP_X, WEAPON_GRIP_Y, WEAPON_H, WEAPON_KEY, WEAPON_W } from '../render/weapon.ts';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
-import { corridorTint, drawCorridorRoom, floorKeyFor, wallKeyFor } from '../render/corridors';
+import { corridorTint, drawCorridorRoom, floorKeyFor, placeDoor, placeWindow, wallKeyFor } from '../render/corridors';
 import {
   ACTOR_DEPTH,
   DUST_DEPTH,
@@ -2292,7 +2292,7 @@ export class GameScene extends Phaser.Scene {
       const shaft = addGlow(this, cx - 8, 168, 52, 0.34, LIGHT_DEPTH);
       shaft.setScale(0.42, 1.55);
       this.floorObjects.push(shaft);
-      this.floorObjects.push(this.add.image(cx - 8, 116, 'tile_window').setOrigin(0.5));
+      this.floorObjects.push(placeWindow(this, cx - 8, 116, STARTING_FLOOR));
     }
 
     // Wall lamps between the windows, each with its own small pool of light —
@@ -2325,7 +2325,7 @@ export class GameScene extends Phaser.Scene {
 
     // Doors on the room boundaries, standing on the floor line.
     for (let i = 1; i < ROOM_COUNT; i++) {
-      this.floorObjects.push(this.add.image(i * ROOM_WIDTH, wallH, 'tile_door').setOrigin(0.5, 1));
+      this.floorObjects.push(placeDoor(this, i * ROOM_WIDTH, wallH, STARTING_FLOOR));
     }
 
     this.floorObjects.push(wall, floor, g);
@@ -2679,7 +2679,7 @@ export class GameScene extends Phaser.Scene {
     // windows — the player should be able to look back down at their own room.
     if (floor === STARTING_FLOOR) {
       for (let r = 0; r < ROOM_COUNT; r++) {
-        props.push(this.add.image(r * ROOM_WIDTH + ROOM_WIDTH / 2 - 8, 116, 'tile_window').setOrigin(0.5));
+        props.push(placeWindow(this, r * ROOM_WIDTH + ROOM_WIDTH / 2 - 8, 116, floor));
       }
       props.push(this.add.image(BED_X, wallH + 4, 'furn_bed').setOrigin(0.5, 1));
       props.push(this.add.image(CRAFT_X, wallH + 4, 'furn_workbench').setOrigin(0.5, 1));
@@ -2880,8 +2880,22 @@ export class GameScene extends Phaser.Scene {
   private setContainerEmptyVisual(id: string, empty: boolean): void {
     const obj = this.containerObjs.get(id);
     if (!obj) return;
-    const label = this.floorView.containers.find((c) => c.id === id)?.label ?? id;
-    obj.box.setAlpha(empty ? 0.35 : 1);
+    const c = this.floorView.containers.find((x) => x.id === id);
+    const label = c?.label ?? id;
+    // Crates get real art for their opened state. Fading to 0.35 was the only
+    // signal a crate had been looted, and at 0.35 a crate reads as a rendering
+    // bug rather than as a crate someone got to first.
+    const isCrate = id === 'crate_wood' || id === 'crate_metal';
+    if (isCrate && obj.box instanceof Phaser.GameObjects.Image) {
+      const opened = getGame().currentFloor % 3 === 0 ? 'env-crate-broken' : 'env-crate-forced';
+      const key = empty ? opened : containerTextureKey(id);
+      if (key && this.textures.exists(key)) {
+        obj.box.setTexture(key);
+        obj.box.setAlpha(1);
+      }
+    } else {
+      obj.box.setAlpha(empty ? 0.35 : 1);
+    }
     obj.label.setText(empty ? `${label}（空）` : label);
     // The plate is fitted to the text, so "（空）" has to re-fit it or the extra
     // two glyphs hang off the edge of the backing.

@@ -2798,7 +2798,11 @@ export class GameScene extends Phaser.Scene {
   private buildContainers(): void {
     for (const c of this.floorView.containers) {
       const y = FLOOR_HEIGHT - 64;
-      const key = containerTextureKey(c.id);
+      // Crates use the 2026-11-15 set for all three states, so a full crate and
+      // its forced/broken counterparts are the same drawing at the same scale.
+      // The old crate art is 56px tall against this set's 40 — mixing them made
+      // a crate appear to shrink the moment it was looted.
+      const key = c.id === 'crate_wood' || c.id === 'crate_metal' ? 'env-crate-intact' : containerTextureKey(c.id);
       // Every container has art now, so the Graphics fallback is gone: a missing
       // key would be an invisible container, not a plain one. The interaction box
       // is unchanged either way — hit detection still goes through c.x and
@@ -2888,7 +2892,7 @@ export class GameScene extends Phaser.Scene {
     const isCrate = id === 'crate_wood' || id === 'crate_metal';
     if (isCrate && obj.box instanceof Phaser.GameObjects.Image) {
       const opened = getGame().currentFloor % 3 === 0 ? 'env-crate-broken' : 'env-crate-forced';
-      const key = empty ? opened : containerTextureKey(id);
+      const key = empty ? opened : 'env-crate-intact';
       if (key && this.textures.exists(key)) {
         obj.box.setTexture(key);
         obj.box.setAlpha(1);

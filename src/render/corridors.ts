@@ -1,5 +1,6 @@
 import type Phaser from 'phaser';
-import { FLOOR_WIDTH, ROOM_WIDTH, STAIR_RISE, STAIR_START_Y, tierOfFloor } from '../core/constants';
+import { FLOOR_HEIGHT, FLOOR_WIDTH, ROOM_WIDTH, STAIR_RISE, STAIR_START_Y, tierOfFloor } from '../core/constants';
+import { hasFloorContent } from '../data/floorTemplates';
 
 // Per-floor corridor art (docs/05_ART_GUIDE.md §3).
 //
@@ -928,7 +929,15 @@ export function drawStairwell(
   opts: { x: number; dir: 'up' | 'down'; floor: number },
 ): void {
   const { x, dir, floor } = opts;
-  if (stairArtStyleFor(floor, dir === 'up' ? 1 : -1) === 'ladder') drawLadder(g, x, dir, floor);
+  if (stairArtStyleFor(floor, dir === 'up' ? 1 : -1) === 'ladder') {
+    // 竖井落差：楼层带只有 STAIR_RISE(90) 高，而两层楼板相差一个
+    // FLOOR_HEIGHT(200)——悬空的直梯轨在梯口下方 10px 断掉，角色爬出去时
+    // 下半身留在楼层墙里（AG-53 实测：50009→50010 爬出去时下半身消失）。
+    // 未创作层（邻居）也标 ladder 但没有楼层带可画，竖井只管已经创作的目标层。
+    const neighbour = floor + (dir === 'up' ? 1 : -1);
+    const drop = hasFloorContent(neighbour) ? STAIR_SHAFT_DROP : 0;
+    drawLadder(g, x, dir, floor, drop);
+  }
   else drawStairFlight(g, x, dir);
 }
 
@@ -982,12 +991,41 @@ function drawStairFlight(g: Phaser.GameObjects.Graphics, x: number, dir: 'up' | 
  * palette values, and the rung pitch matches the stairs' rise so a ladder
  * connection climbs at the same pace a flight would.
  */
-function drawLadder(g: Phaser.GameObjects.Graphics, x: number, dir: 'up' | 'down', floor: number): void {
+/**
+ * How far the ladder rails reach past the stair mouth so a rider who climbs
+ * out is never standing inside the floor's wall: the gap between two floor
+ * bands is FLOOR_HEIGHT - STAIR_RISE, and the shaft has to bridge all of it.
+ */
+const STAIR_SHAFT_DROP = FLOOR_HEIGHT - STAIR_RISE;
+
+/**
+ * The two rails continued past the mouths to the neighbouring floor's line,
+ * with a rung every step. The shaft is what makes a vertical ladder read as
+ * hanging between two floors ("一条线挂在这两个楼层上面") instead of floating
+ * in mid-air — without it the rails stop 10px past the mouth and the climber's
+ * lower half stays inside the wall on the way out.
+ */
+function drawLadderShaft(g: Phaser.GameObjects.Graphics, x: number, direction: number, top: number, bottom: number): void {
+  const c = STAIR_COLORS;
+  const far = direction === 1 ? bottom + STAIR_SHAFT_DROP : top - STAIR_SHAFT_DROP;
+  const railTop = Math.min(top, far);
+  const railBottom = Math.max(bottom, far);
+  g.fillStyle(c.ironRail, 1);
+  g.fillRect(Math.round(x - 11), Math.round(railTop), 3, Math.round(railBottom - railTop));
+  g.fillRect(Math.round(x + 8), Math.round(railTop), 3, Math.round(railBottom - railTop));
+  g.fillStyle(c.ironRung, 1);
+  for (let y = railTop + 8; y < railBottom - 4; y += 14) {
+    g.fillRect(Math.round(x - 11), Math.round(y), 22, 3);
+  }
+}
+
+function drawLadder(g: Phaser.GameObjects.Graphics, x: number, dir: 'up' | 'down', floor: number, shaftDrop = 0): void {
   const direction = dir === 'up' ? 1 : -1;
   const y0 = STAIR_START_Y;
   const y1 = y0 - direction * STAIR_RISE;
   const top = Math.min(y0, y1) - 10;
   const bottom = Math.max(y0, y1) + 10;
+  if (shaftDrop > 0) drawLadderShaft(g, x, direction, top, bottom);
   const tier = segmentOf(floor)?.id ?? 1;
   const c = STAIR_COLORS;
   const rail = tier === 3 ? c.steelRail : c.ironRail;

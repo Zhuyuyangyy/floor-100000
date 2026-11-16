@@ -25,7 +25,6 @@ import {
   ROOM_COUNT,
   ROOM_WIDTH,
   STARTING_FLOOR,
-  STAIR_RISE,
   STAIR_START_Y,
   UP_EXIT_X,
   WANDERER_DAMAGE,
@@ -38,10 +37,7 @@ import {
   hasDownExit,
   hasUpExit,
   movePlayerX,
-  stairBendFor,
   stairMouthZone,
-  stairPosition,
-  stairStyleFor,
   stairTraversalFor,
   stepHorizontalSpeed,
   tryChangeFloor,
@@ -159,7 +155,7 @@ import {
 import { WEAPON_GRIP_X, WEAPON_GRIP_Y, WEAPON_H, WEAPON_KEY, WEAPON_W } from '../render/weapon.ts';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
-import { corridorTint, drawCorridorRoom, drawCrowd, floorKeyFor, placeDoor, placeWindow, wallKeyFor } from '../render/corridors';
+import { corridorTint, drawCorridorRoom, drawCrowd, drawStairwell, floorKeyFor, placeDoor, placeWindow, stairClimbPose, wallKeyFor } from '../render/corridors';
 import {
   ACTOR_DEPTH,
   DUST_DEPTH,
@@ -1520,7 +1516,14 @@ export class GameScene extends Phaser.Scene {
             const m = this.spotMarkers.get('shop');
             if (m) m.x = trader.x;
           },
-          onComplete: () => trader.play(idleAnimKey('npc_alin')),
+          // AG-52 定位：onStart 有 active/anims 防护（dae028b 修行商 timer
+          // 泄漏时补的），onComplete 没有——换层时在飞 tween 完成后对已销毁
+          // 的 trader .play()，异常穿过 TweenManager 打断游戏循环，玩家直接
+          // 冻住（stairNavigation「下行 50010→50009」基线即红的真根因：
+          // 电梯到 100 层后冻在 x=640）。双保险，与 onStart 对称。
+          onComplete: () => {
+            if (trader.active && trader.anims) trader.play(idleAnimKey('npc_alin'));
+          },
         });
       };
       this.traderPatrolTimer = this.time.addEvent({ delay: 2600, loop: true, callback: step });
@@ -2879,54 +2882,13 @@ export class GameScene extends Phaser.Scene {
    * before you walk to them.
    */
   private drawStair(x: number, dir: 'up' | 'down', floor: number): void {
-    // Some connections are vertical shafts; the industrial middle connections
-    // use a steep switchback with a small landing. Both shapes share the same
-    // deterministic path as stairPosition(), so the character never leaves the
-    // drawn steps.
-    const y0 = STAIR_START_Y;
-    const y1 = y0 + (dir === 'up' ? -STAIR_RISE : STAIR_RISE);
-    const style = stairStyleFor(floor, dir === 'up' ? 1 : -1);
-    const bendX = stairBendFor(dir === 'up' ? 1 : -1, style);
-
+    // AG-53 的楼梯重做（2D 阶梯 + 直梯，用户 2026-11-16 反馈「滑步走上去非常
+    // 难看」）。绘制全部在 corridors.ts 的 drawStairwell：阶梯是 6 级踏步木梯
+    // （Z 折返、梯脚钉在交互口 x 上），直梯是双轨+横档挂在楼层间；样式按楼层
+    // 段分派（stairArtStyleFor）。爬梯曲线 stairClimbPose 与这条几何同源，
+    // 角色因此永远走在画出来的踏面上，不再是正弦摆动的直线。
     const g = this.add.graphics();
-    const steps = 18;
-    const xAt = (t: number): number => x + bendX * Math.sin(Math.PI * t);
-    const yAt = (t: number): number => y0 + (y1 - y0) * t;
-    // A dark stringer gives the shaft or switchback a readable silhouette.
-    g.lineStyle(9, PALETTE.shadow, 0.95);
-    g.beginPath();
-    g.moveTo(x, y0);
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      g.lineTo(xAt(t), yAt(t));
-    }
-    g.strokePath();
-    // Individual treads make the route legible at the zoomed-out tower view.
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps;
-      const px = xAt(t);
-      const py = yAt(t);
-      g.fillStyle(i % 2 === 0 ? PALETTE.stone : PALETTE.dust, 0.95);
-      g.fillRect(Math.round(px - 15), Math.round(py - 2), 30, 4);
-    }
-    if (style === 'steep') {
-      const midX = xAt(0.5);
-      const midY = yAt(0.5);
-      g.fillStyle(PALETTE.stone, 1);
-      g.fillRect(Math.round(midX - 28), Math.round(midY - 3), 56, 6);
-    }
-    // A handrail follows the same path and ends at both landings.
-    g.lineStyle(2, PALETTE.dust, 0.7);
-    g.beginPath();
-    g.moveTo(x + (dir === 'up' ? 12 : -12), y0 - 8);
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      g.lineTo(xAt(t) + (dir === 'up' ? 12 : -12), yAt(t) - 8);
-    }
-    g.strokePath();
-    g.fillStyle(PALETTE.stone, 1);
-    g.fillRect(Math.round(x - 24), Math.round(y1 - 3), 48, 4);
-
+    drawStairwell(g, { x, dir, floor });
     g.setDepth(ACTOR_DEPTH - 1);
     this.floorObjects.push(g);
   }
@@ -5801,6 +5763,15 @@ export class GameScene extends Phaser.Scene {
     // EndgameScene（handoff 语义，它自己 scene.start('Game') 回来）。
     // 终局层走不滤空的最近容器判定（见 nearestFinaleContainer）：第二段
     // 交互的就是被舔光的空箱子。
+    // Before containers, not after: 中产区多个层的容器正好压在电梯窗上
+    // （10004/10005/10006 的安保柜 x=1140、收银台 x=1160，电梯窗 1135..1195，
+    // 容器判定半径 44），修前站在电梯口按 E 开的是手边的箱子而不是电梯——
+    // 与 hint 链同一个修复（nearLift 提前），E 与脚注必须说同一件事。
+    // 100000 终局层没有电梯（nearLift 恒 false），finaleContainer 不受影响。
+    if (this.nearLift(state)) {
+      this.takeLift();
+      return;
+    }
     const finaleContainer = this.nearestFinaleContainer();
     const container = finaleContainer ?? this.nearestContainer();
     if (container) {
@@ -5810,12 +5781,6 @@ export class GameScene extends Phaser.Scene {
         return;
       }
       this.openContainer(container.id);
-      return;
-    }
-    // Before the stairwell zone, not after: the lift only exists where the up
-    // stairs do not, so the two never compete for the same press.
-    if (this.nearLift(state)) {
-      this.takeLift();
       return;
     }
     // M1-4: a stairwell MOUTH is a question even where no stair stands behind
@@ -6496,7 +6461,9 @@ export class GameScene extends Phaser.Scene {
     this.openClimbCameraRoom(direction);
     this.player.setFlipX(direction < 0);
     this.player.play(walkAnimKey(this.metaSelectedCharacter()), true);
-    this.player.anims.timeScale = 1.25;
+    // AG-53：首帧节奏也取 pose（阶梯 1.25 / 直梯 1.0），updateStairClimb 每帧
+    // 会覆写，但首帧就对齐可以避免爬梯第一帧闪一次错误速度。
+    this.player.anims.timeScale = stairClimbPose(getGame().currentFloor, traversal, 0).animTimeScale;
     this.flash(direction === 1 ? '沿楼梯上行……' : '沿楼梯下行……');
   }
 
@@ -6505,10 +6472,14 @@ export class GameScene extends Phaser.Scene {
     const climb = this.stairClimb;
     if (!climb) return;
     climb.elapsedMs = Math.min(climb.durationMs, climb.elapsedMs + Math.max(0, delta));
-    const pose = stairPosition(climb, climb.elapsedMs);
+    // AG-53：位置/转身/节奏全部来自 stairClimbPose——它与 drawStairwell 的
+    // 几何同源，1000ms 切 10 片每片一级（x 线性、y ease-out，踏上踏面后顿住
+    // 半拍，平台处转身），所以角色是一级一级踩上去的，不再是正弦摆动的滑行。
+    // 直梯（ladder）x 钉死、y 线性，animTimeScale 1.0。
+    const pose = stairClimbPose(getGame().currentFloor, climb, climb.elapsedMs);
     this.player.setPosition(pose.x, pose.y);
-    this.player.setFlipX(climb.direction < 0);
-    this.player.anims.timeScale = 1.25;
+    this.player.setFlipX(pose.faceX < 0);
+    this.player.anims.timeScale = pose.animTimeScale;
     for (const shadow of this.playerShadow) {
       (shadow as Phaser.GameObjects.Rectangle).setPosition(pose.x, pose.y + 2);
     }
@@ -6905,13 +6876,18 @@ export class GameScene extends Phaser.Scene {
     const container = this.nearestContainer();
     const zone = currentInteractionZone(state);
     if (this.nearestEncounterSpot()) this.hintText.setText('按 E 查看问号点');
+    // The lift outranks containers on the hint chain. 中产区多个层的容器正好
+    // 压在电梯窗上（10004/10005/10006 的安保柜 x=1140、收银台 x=1160，
+    // 电梯窗 1135..1195），修前站在电梯口脚注读的是「按 E 打开 安保柜」——
+    // 垂直交通是这一层的主通道，脚注必须先说电梯（stairNavigation 下行
+    // 50010→50009 基线即红：rideLiftUp 在 10010 读不到电梯脚注）。
+    else if (this.nearLift(state)) this.hintText.setText('按 E 乘货运电梯');
     else if (finaleContainer) {
       // AG-20：终局层的容器开过之后，E 进的是演出不是搜刮——提示要说得准。
       // 用不滤空的判定：被舔光的空箱子也要告诉玩家还能再看它一眼。
       this.hintText.setText(this.finaleEntryFor(finaleContainer.id) ? `按 E 查看${finaleContainer.label}` : `按 E 打开 ${finaleContainer.label}`);
     }
     else if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
-    else if (this.nearLift(state)) this.hintText.setText('按 E 乘货运电梯');
     // OVERHAUL Wave C2: the up stairwell advertises the paid shortcut, priced
     // live so the player can decide before spending. The price comes from the
     // same plan the charge spends (M1-3), so the prompt cannot overpromise a

@@ -436,6 +436,82 @@ export function containerLabelFor(
  * 头顶算，否则名签压在角色身上（旧位置 y=FLOOR_HEIGHT-68=132，正在躯干上）。
  */
 const NPC_LABEL_Y = PLAYER_FEET_Y - FRAME_H - CONTAINER_LABEL_DROP;
+
+// ── AG-63：战斗脚注与 debuff 提示的纯函数契约 ─────────────────────────────
+//
+// 用户原话：「攻击者从那个地方出来我们对打的时候我需要看到我们的页面然后
+// 左下角提示那啥用什么来攻击等等」「这个绿色的我不知道是什么好像是 Bug
+// 你修改下」。两件事都落在提示层，且都值得被单测钉住：战斗脚注回答「拿
+// 什么打、按什么键」，debuff 文案给那片绿光一个名字。纯函数 + Phaser-free，
+// combatHud.test.ts 直 import（场景模块 import Phaser，Node 下跑不了，
+// 测试用 vi.mock('phaser') 桩——与 labelsAndView.test.ts 同款）。
+
+/**
+ * 战斗脚注的武器优先序。撬棍排第一不是审美：playerCombatant 的伤害口径
+ * 只有它（+3），幸存者手里挥的也是它；四件刃具（消防斧/砍刀/短剑/匕首）
+ * 在 lootPool 与配方里，但装备系统是 v0.2 的预留（gameTypes.player.equipped
+ * 至今无人读写），伤害仍按空手算。名字照实说最重的那件，伤害照实报引擎的
+ * 数——两个数对不上时，玩家至少没被谎话敷衍。
+ */
+const COMBAT_WEAPON_PRIORITY: readonly ItemId[] = ['crowbar', 'fire_axe', 'cleaver', 'short_sword', 'dagger'];
+
+/** 包里有什么武器决定脚注怎么回答「用什么攻击」。一件都没有 → 空手。 */
+export function combatWeaponLabel(slots: ReadonlyArray<{ itemId: string }>): string {
+  for (const id of COMBAT_WEAPON_PRIORITY) {
+    if (slots.some((slot) => slot.itemId === id)) return getItem(id).displayName;
+  }
+  return '空手';
+}
+
+/**
+ * 左下角战斗提示。先答「用什么攻击」（用户点名要的），再给三个动作的键。
+ * 面板里也有这三行，但面板是模态、脚注是常驻——玩家余光扫到底部就知道
+ * 这一仗怎么打，不用等面板刷出来。
+ */
+export function combatFootHint(weaponLabel: string, damage: number): string {
+  return `当前武器：${weaponLabel}（伤害 ${damage}）· Enter 出招 · ↑/↓ 选择 · ESC 撤退`;
+}
+
+/**
+ * 敌人的行为标签：面板血条行末尾那两个字。七种行为（monsters.ts）翻译成
+ * 玩家能拿去决策的词——「怯战」意味着残血它会自己跑，「伏击」意味着见面
+ * 先挨一下。default 收 normal 与任何未知值。
+ */
+export function combatBehaviorLabel(behavior: string): string {
+  switch (behavior) {
+    case 'fast':
+      return '迅捷';
+    case 'slow':
+      return '笨重';
+    case 'ranged':
+      return '远程';
+    case 'ambusher':
+      return '伏击';
+    case 'coward':
+      return '怯战';
+    case 'brute':
+      return '蛮力';
+    default:
+      return '普通';
+  }
+}
+
+/** debuff 阈值内那句 flash：给绿光起名字，并说该去干什么。 */
+export function debuffEnterMessage(hungry: boolean, parched: boolean): string {
+  if (hungry && parched) return '又饿又渴，眼前泛起点点绿光——去找点吃的喝的';
+  if (hungry) return '饥肠辘辘，眼前泛起点点绿光——去找点吃的';
+  return '喉咙干得冒烟，眼前泛起点点绿光——去找点水喝';
+}
+
+/** 绿光消退那句 flash。与体温的「缓过来了」同一声调，不同的事。 */
+export const DEBUFF_CLEARED_MESSAGE = '绿光退了，身体缓过来了';
+
+/** 左下角常驻小标记的文案：debuff 期间它一直挂在脚注条上方。 */
+export function debuffMarkLabel(hungry: boolean, parched: boolean): string {
+  if (hungry && parched) return '状态：又饿又渴';
+  if (hungry) return '状态：饥饿';
+  return '状态：干渴';
+}
 /**
  * One fade listener per scene, replaced on every floor build. Registering per
  * build without removing the previous one stacks listeners that all drive the
@@ -757,6 +833,13 @@ export class GameScene extends Phaser.Scene {
   private wandererGlow?: Phaser.GameObjects.Image;
   /** the hunger/thirst debuff on the player's body, present only while critical */
   private debuffFx?: Phaser.GameObjects.Sprite;
+  /**
+   * AG-63: 绿光的进/出边沿。debuff fx 出现的那一帧 flash 一条消息、消失的
+   * 那一帧再 flash 一条——边沿记在这里而不是 fx 的存在性上：startFxLoop
+   * 拿不到动画时返回 null，那时没有光也得有话；场景重启后 Phaser 已销毁旧
+   * sprite，字段还指着它，更新段会把它当不存在并给这条边沿重新上膛。
+   */
+  private debuffAnnounced = false;
   /** every flame on this floor, so a blackout can put them out */
   private lightFixtures: Phaser.GameObjects.Sprite[] = [];
 
@@ -875,6 +958,12 @@ export class GameScene extends Phaser.Scene {
   private tutorialSkipParts: Phaser.GameObjects.GameObject[] = [];
   /** 按钮当前可见性，免得每帧 setVisible。 */
   private tutorialSkipShown = false;
+  /**
+   * AG-63: 饥饿/干渴 debuff 期间左下角的常驻小标记（「状态：饥饿」）。绿光
+   * 在身上跑的时候，脚注条上方始终有一行字说它是什么——用户把这片光报成
+   * bug，缺的就是这个名字。平时不可见；坐标在 hudLayout 的 debuffMark 键。
+   */
+  private debuffMark?: Phaser.GameObjects.Text;
   private feedbackText!: Phaser.GameObjects.Text;
   // B3-02 §4.2: a full bag used to be a 1.6s flash, so a player who filled the
   // bag on floor 3 arrived on floor 4 with no reminder and lost the next
@@ -2796,8 +2885,12 @@ export class GameScene extends Phaser.Scene {
     // 按钮或按 ESC。点敌人剪影出手走 buildCombatStage 的世界热区。
     this.panelBox = { x: 0, y: 0, w: DESIGN_WIDTH, h: DESIGN_HEIGHT };
 
+    // 裁决记录（merge ag-63）：HEAD 侧为 AG-70 底部动作条（更新的演化），
+    // ag-63 侧的中央文字面板为其旧基线，整段让位；ag-63 的语义增量移植到
+    // 动作条上——攻击备注不再说「武器伤害」这种废话，实报手里那件与它的
+    // 伤害数（口径同战斗脚注：combatWeaponLabel + playerCombatant）。
     const actions: ReadonlyArray<{ label: string; note: string; icon: 'attack' | 'guard' | 'flee' }> = [
-      { label: '攻击', note: '武器伤害', icon: 'attack' },
+      { label: '攻击', note: `${combatWeaponLabel(state.player.inventory.slots)} · 伤害 ${playerCombatant(state).damage}`, icon: 'attack' },
       { label: '格挡', note: '受伤减半', icon: 'guard' },
       { label: '撤退', note: '可能失败', icon: 'flee' },
     ];
@@ -2854,9 +2947,12 @@ export class GameScene extends Phaser.Scene {
     });
 
     // 「第 N 回合」：动作条上方居中，半透明——节奏感不抢戏。
+    // 裁决记录（merge ag-63）：ag-63 把行为标签放在中央面板的血条读数行，
+    // AG-70 已无该面板；标签移植到此行——「伏击」「怯战」是 monsters.ts 名册
+    // 的设计意图，玩家看见一只怪就知道这回合该怎么打。
     this.encounterObjects.push(
       this.add
-        .text(DESIGN_WIDTH / 2, bar.turnY, `第 ${combat.turn} 回合`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
+        .text(DESIGN_WIDTH / 2, bar.turnY, `第 ${combat.turn} 回合 · ${combatBehaviorLabel(combat.monster.behavior)}`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
         .setOrigin(0.5, 0.5)
         .setAlpha(0.8)
         .setDepth(depth),
@@ -4528,6 +4624,15 @@ export class GameScene extends Phaser.Scene {
       .text(8, DESIGN_HEIGHT - HUD_FOOT_H / 2, WORLD_DEFAULT_HINT, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
       .setOrigin(0, 0.5).setName('hud-hint').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
     this.buildNavBar();
+    // 裁决记录（merge ag-63）：HEAD 侧为 AG-71 导航条版 hud-hint（退居不可见
+    // 状态对象），ag-63 侧的旧可见 hintText 让位；debuffMark 创建移植到此，
+    // 与 hud-hint 同深度同热区纪律，平时不可见。
+    // AG-63: the debuff's standing marker, one line above the hint. Invisible
+    // until hunger or thirst crosses 25%; the fx block in update() drives it.
+    // hudLayout pins the y between the bag-full lane and the foot bar.
+    this.debuffMark = this.add
+      .text(HUD_LAYOUT.debuffMarkX, HUD_LAYOUT.debuffMarkY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn) })
+      .setOrigin(0, 0.5).setName('hud-debuff-mark').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
 
     // The low-HP vignette: pure red wash whose alpha is the pulse function's
     // output. Created invisible; update() drives it every frame.
@@ -7693,7 +7798,13 @@ export class GameScene extends Phaser.Scene {
   // Returns null when no panel is open, so the world hint can take over.
   private openPanelHint(): string | null {
     const combat = getGame().combat;
-    if (this.encounterOpen && combat) return '↑/↓ 选择 · Enter 出招 · ESC 撤退';
+    // AG-63: 战斗中脚注先答「用什么攻击」。用户原话：「我们对打的时候我
+    // 需要看到我们的页面然后左下角提示那啥用什么来攻击等等」。武器名与伤害
+    // 数都从真来源读（包里的槽位 / playerCombatant），不另维护一套口径。
+    if (this.encounterOpen && combat) {
+      const state = getGame();
+      return combatFootHint(combatWeaponLabel(state.player.inventory.slots), playerCombatant(state).damage);
+    }
     if (this.encounterOpen && this.encounter) return '↑/↓ 选择 · Enter 确认 · ESC 离开';
     if (this.encounterOpen) return '↑/↓ 选择 · Enter 买入 · S 卖出 · ESC 离开';
     if (this.nightChoiceOpen) return '↑/↓ 选择 · Enter 确认 · ESC 今晚再想想';
@@ -8916,6 +9027,22 @@ export class GameScene extends Phaser.Scene {
     // 面板早退之后世界模拟整段不跑，滑步途中的名签跟随在这里补。敌人剪影
     // 的呼吸/击退/前冲都是 MonsterView 自己的 tween，无需每帧驱动。
     if (this.encounterOpen) this.syncCombatStage();
+    // 裁决记录（merge ag-63）：采纳 ag-63 的根因修复——面板提示刷新挪到
+    // 面板早退之前。HEAD 侧没有这段（面板提示块在 update 后半的世界链开
+    // 头，永远执行不到），AG-70 的 syncCombatStage 行保留；早退行取 HEAD 版
+    // （比 ag-63 侧多 nightChoiceOpen，AG-72 夜间选择面板的新成员）。
+    // AG-63: THE FOOT BAR USED TO FREEZE FOR THE WHOLE FIGHT. update()
+    // early-returns on encounterOpen — a panel owns the keyboard — and the
+    // hint chain, the only caller of openPanelHint(), sat BELOW that return.
+    // So the "a panel owns the bar" contract had never once executed: the
+    // player opened an ambush standing on a question mark and the foot bar
+    // read 「按 E 查看问号点」 for the entire fight. That is exactly what the
+    // user asked to be fixed — 「我们对打的时候我需要看到我们的页面然后左下
+    // 角提示那啥用什么来攻击等等」. The panel hint is refreshed above the
+    // freeze now; the world chain below still owns the bar whenever no panel
+    // is up (openPanelHint returns null then, so the two cannot fight).
+    const panelHint = this.openPanelHint();
+    if (panelHint !== null) this.hintText.setText(panelHint);
     if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.ventureOpen || this.questsOpen) return;
     const state = getGame();
 
@@ -9089,9 +9216,17 @@ export class GameScene extends Phaser.Scene {
     // the HUD already uses to call a stat urgent (URGENT_THRESHOLDS in
     // render/feedback.ts), so the body and the interface never disagree about
     // whether the player is in trouble.
-    const starving =
-      state.player.hunger <= GAME_CONFIG.player.hungerMax * 0.25 ||
-      state.player.thirst <= GAME_CONFIG.player.thirstMax * 0.25;
+    const hungry = state.player.hunger <= GAME_CONFIG.player.hungerMax * 0.25;
+    const parched = state.player.thirst <= GAME_CONFIG.player.thirstMax * 0.25;
+    const starving = hungry || parched;
+    // A sprite left over from a previous scene is not a live fx: Phaser clears
+    // .scene on destroy(). Treat it as absent — the old code quietly dropped
+    // the glow for the rest of a reloaded run — and re-arm the announcement,
+    // because re-entering a run while still starving is a new session's news.
+    if (this.debuffFx && !this.debuffFx.scene) {
+      this.debuffFx = undefined;
+      this.debuffAnnounced = false;
+    }
     if (starving && !this.debuffFx) {
       const fx = startFxLoop(this, 'poisoned', state.player.x, PLAYER_FEET_Y - 46, LIGHT_DEPTH + 1);
       if (fx) this.debuffFx = fx;
@@ -9100,6 +9235,25 @@ export class GameScene extends Phaser.Scene {
       this.debuffFx = undefined;
     } else if (this.debuffFx) {
       this.debuffFx.x = state.player.x;
+    }
+    // THE GREEN GLOW HAD NO NAME. The user filed it as a bug: "这个绿色的我
+    // 不知道是什么好像是 Bug". It is the designed debuff visualisation, kept
+    // as-is; what was missing is the interface telling the player what it
+    // means. So the crossing announces itself — once in, once out, on the edge
+    // and never per frame — and a standing marker sits above the foot bar for
+    // as long as it lasts.
+    if (starving !== this.debuffAnnounced) {
+      this.debuffAnnounced = starving;
+      this.flash(starving ? debuffEnterMessage(hungry, parched) : DEBUFF_CLEARED_MESSAGE);
+    }
+    if (this.debuffMark) {
+      if (starving) {
+        const label = debuffMarkLabel(hungry, parched);
+        if (this.debuffMark.text !== label) this.debuffMark.setText(label);
+        this.debuffMark.setVisible(true);
+      } else if (this.debuffMark.visible) {
+        this.debuffMark.setVisible(false);
+      }
     }
     // Read after ensureNightEvent so an event rolled this very frame counts.
     const event = state.worldEvents.activeEvent;
@@ -9186,16 +9340,13 @@ export class GameScene extends Phaser.Scene {
 
     this.autoPickup();
 
-    // OVERHAUL interaction: the hint used to describe the WORLD even while a
-    // panel covered it, so the bar read "按 E 查看问号点" underneath an open
-    // inventory - it promised an interaction the player could not perform and
-    // said nothing about the one they were in. A panel owns the bar now.
-    const panelHint = this.openPanelHint();
-    if (panelHint !== null) {
-      this.hintText.setText(panelHint);
-      return;
-    }
-
+    // 裁决记录（merge ag-63）：HEAD 侧此处的 panelHint 块（OVERHAUL 交互
+    // 契约）删除——它位于面板早退之后，按构造执行不到，功能已由早退前的
+    // 刷新段覆盖（见上文 update 早退区）；AG-66 的 pendingAction/obstacle
+    // 两段保留，ag-63 的注释沿用。
+    // AG-63: a panel's keys were already printed above the freeze (see the
+    // panel early-return), and no panel is up here by construction — so this
+    // chain is the world's again, and it cannot overwrite a panel's hint.
     // AG-66：搜刮/挖掘动作中——底栏只说在干什么，不说周围有什么（面板优先
     // 的契约在上面的 panelHint 段，开着面板时仍旧是面板的话）。
     if (this.pendingAction) {

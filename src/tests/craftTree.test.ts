@@ -36,11 +36,11 @@ function nodeById(id: string): CraftTreeNode {
 }
 
 describe('树数据完整性', () => {
-  it('13 条配方一个不少，且没有多余节点', () => {
+  it('14 条配方一个不少，且没有多余节点', () => {
     const recipeNodes = CRAFT_TREE_NODES.filter((n) => n.kind === 'recipe').map((n) => n.id);
     expect(recipeNodes.sort()).toEqual([...RECIPE_IDS].sort());
-    // 节点总数：9 材料 + 13 配方 + 1 净化动作。
-    expect(CRAFT_TREE_NODES).toHaveLength(23);
+    // 节点总数：9 材料 + 14 配方 + 1 净化动作。
+    expect(CRAFT_TREE_NODES).toHaveLength(24);
   });
 
   it('节点 id 唯一，且每类节点的 id 落位正确', () => {
@@ -192,14 +192,17 @@ describe('导航序（旧列表下标语义 + e2e 按键预算）', () => {
     expect(NODE_IDS.slice(0, RECIPES.length)).toEqual(RECIPE_IDS);
   });
 
-  it('净化跟在配方段之后（下标 13），材料殿后——都在 navTo 按键预算内', () => {
-    expect(NODE_IDS[13]).toBe('purify');
+  it('净化跟在配方段之后（下标 14），材料殿后——都在 navTo 按键预算内', () => {
+    // AG-66 的铲子（craft_shovel）在 AG-61 开分支之后进 RECIPES，配方段从
+    // 13 涨到 14，净化随之后移到下标 14（动态断言，不写死数字）。
+    expect(NODE_IDS[RECIPES.length]).toBe('purify');
     // crafting.spec.ts 的 navTo 预算 = RECIPES.length + 2 次 ArrowDown，
-    // 从下标 0 起最远抵达下标 14；净化在 13，留一次余量。
+    // 从下标 0 起最远抵达下标 RECIPES.length + 1；净化在 RECIPES.length，
+    // 留一次余量。
     expect(NODE_IDS.indexOf('purify')).toBeLessThanOrEqual(RECIPES.length + 1);
     expect(NODE_IDS.indexOf('reinforced_door')).toBeLessThanOrEqual(RECIPES.length + 1);
     // 材料段：9 个，全是第 0 列。
-    const materials = CRAFT_TREE_NODES.slice(14);
+    const materials = CRAFT_TREE_NODES.slice(RECIPES.length + 1);
     expect(materials).toHaveLength(9);
     expect(materials.every((n) => n.kind === 'material' && n.col === 0)).toBe(true);
   });
@@ -267,7 +270,7 @@ describe('节点状态（与 canCraft 同一道闸门）', () => {
 });
 
 describe('信息等价性（旧滚动列表 → 树形态）', () => {
-  it('旧列表的每个条目在树上都有节点（13 配方 + 净化）', () => {
+  it('旧列表的每个条目在树上都有节点（14 配方 + 净化）', () => {
     const entryKinds = CRAFT_TREE_NODES.map((n) => n.kind);
     expect(entryKinds.filter((k) => k === 'recipe')).toHaveLength(RECIPES.length);
     expect(entryKinds.filter((k) => k === 'action')).toHaveLength(1);

@@ -139,6 +139,13 @@ export const CRAFT_TREE_NODES: readonly CraftTreeNode[] = [
   { id: 'craft_short_sword', kind: 'recipe', displayName: '短剑', iconKey: 'short_sword', col: 1, y: 338, inputs: ['scrap_metal', 'wood', 'tape'] },
   { id: 'craft_cleaver', kind: 'recipe', displayName: '砍刀', iconKey: 'cleaver', col: 1, y: 378, inputs: ['scrap_metal', 'wood', 'tape'] },
   { id: 'craft_fire_axe', kind: 'recipe', displayName: '消防斧', iconKey: 'fire_axe', col: 1, y: 418, inputs: ['scrap_metal', 'wood', 'cloth'] },
+  // 集成侧补：AG-66 的铲子（obstacles 线的挖掘工具，只能做、不进掉落池）在
+  // AG-61 开分支之后才进 RECIPES，两边各对、合起来缺这一节点——没有它玩家
+  // 在合成树里看不到也做不了铲子。只依赖第 0 列材料，按 CRAFT_TREE_EDGES 的
+  // 「只画相邻列」规则它不带任何边（料责由详情块的材料行承担），因此放第 2
+  // 列不碰「边不穿盒」的排版约束；y=280 与 purify(203)/pass_sticker(443) 同
+  // 列相距 ≥90，与其它列最近的 scrap_metal(152)/lamp(138)/storage_rack(258) 均差 ≥22px（≥8 的探针余量，y=280 是枚举出来的空位：全树唯一满足「与所有 23 个既有 y 差 ≥8 且与同列 purify/pass_sticker 差 ≥40」的中段值）。
+  { id: 'craft_shovel', kind: 'recipe', displayName: '铲子', iconKey: null, col: 2, y: 280, inputs: ['scrap_metal', 'wood'] },
   // 净化：净水器的动作节点，跟在配方段之后（旧列表里它也在所有配方之后）。
   { id: 'purify', kind: 'action', displayName: '净化', iconKey: 'dirty_water', col: 2, y: 203, inputs: ['purifier'] },
   // ── 材料列（第 0 列，合成的根）────────────────────────────────────────

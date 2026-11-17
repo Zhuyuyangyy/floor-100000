@@ -3165,7 +3165,12 @@ export class GameScene extends Phaser.Scene {
     const wallH = FLOOR_HEIGHT - FLOOR_BAND;
     if (geo.holeX !== null) {
       const hw = FLOOR_GEOMETRY_BALANCE.holeWidthPx;
-      const g = this.add.graphics().setDepth(3);
+      // depth 27：buildForeground 在天花板画了一条 14px 的前景横梁
+      // （FG_DEPTH 26，alpha 0.92，「crops the top of the wall」）——洞画在
+      // depth 9 会被它盖成只剩 8% 亮度（e2e 像素取证实测：洞 (22,20,21) vs
+      // 应有的 (240,198,140)）。洞是透下来的光，压过前景梁：读作梁上的一个
+      // 透光口，光晕洒在梁沿与墙上。
+      const g = this.add.graphics().setDepth(27);
       // 光晕先画（洒在洞口下面的墙上），再画洞口本体压住天花板黑条。
       g.fillStyle(PALETTE.lightHigh, 0.1);
       g.fillRect(geo.holeX - hw, 8, hw * 2, 52);
@@ -3489,8 +3494,8 @@ export class GameScene extends Phaser.Scene {
       const hw = FLOOR_GEOMETRY_BALANCE.holeWidthPx;
       const reveal = this.add
         .tileSprite(hole - hw / 2, yOffset + FLOOR_HEIGHT - FLOOR_BAND, hw, FLOOR_BAND + 8, floorKeyFor(floor))
-        .setDepth(3);
-      const rim = this.add.graphics().setDepth(3);
+        .setDepth(27);
+      const rim = this.add.graphics().setDepth(27);
       rim.lineStyle(2, PALETTE.ink, 0.9);
       rim.strokeRect(hole - hw / 2 - 1, yOffset + FLOOR_HEIGHT - FLOOR_BAND - 1, hw + 2, FLOOR_BAND + 10);
       this.floorObjects.push(reveal, rim);

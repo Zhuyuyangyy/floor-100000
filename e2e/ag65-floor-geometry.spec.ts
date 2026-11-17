@@ -143,16 +143,14 @@ async function rideLiftUp(page: Page, pass: string, from: number, to: number): P
     const up = (s?.player as unknown as { homeUpgrades: string[] } | undefined)?.homeUpgrades;
     if (up && !up.includes(p)) up.push(p);
   }, pass);
-  await walkUntil(page, 'ArrowRight', 1140, true);
-  for (let i = 0; i < 24; i++) {
-    const x = (await readState(page)).x;
-    if (x >= 1145 && x <= 1190) break;
-    const key = x < 1145 ? 'ArrowRight' : 'ArrowLeft';
-    await page.keyboard.down(key);
-    await page.waitForTimeout(40);
-    await page.keyboard.up(key);
-    await page.waitForTimeout(30);
-  }
+  // 电梯走位用 setX 而不是按住右键微调：跨段只是本次验证的桥，走位抖动
+  // （键抬起延迟把角色带过 1195 窗口）会让脚注读错——npc/firstChapter 两个
+  // spec 同样用 setX 定位，仓库既有手法。
+  await page.evaluate(() => {
+    const s = window.__PHASER_SESSION__?.getState();
+    if (s) s.player.x = 1165; // LIFT_X
+  });
+  await page.waitForTimeout(120);
   const hint = await hudText(page, 'hud-hint');
   expect(hint, `lift at ${from}: the hint must offer the freight lift`).toContain('货运电梯');
   await page.keyboard.press('E');
@@ -242,7 +240,7 @@ test.describe('AG-65 楼层几何实测', () => {
     test.setTimeout(120_000);
     await startRun(page);
     await walkToUpExit(page);
-    for (let f = 1; f <= 9; f++) await climbOne(page, f);
+    for (let f = 1; f <= 9; f++) await climbOne(page, f); // 爬到第 10 层乘电梯
     await rideLiftUp(page, 'work_badge', 10, 100);
     await walkToUpExit(page);
     await climbOne(page, 100); // 落到 101
@@ -270,7 +268,9 @@ test.describe('AG-65 楼层几何实测', () => {
     test.setTimeout(180_000);
     await startRun(page);
     await walkToUpExit(page);
-    for (let f = 1; f <= 9; f++) await climbOne(page, f);
+    for (let f = 1; f <= 8; f++) await climbOne(page, f); // 停在第 9 层（有洞）
+    // 等相机落位：落地缓动 220ms + follow 阻尼，瞬态帧里天花板还在 HUD 板后面。
+    await page.waitForTimeout(800);
     // 第 9 层有楼板洞（seeded x=464）。
     const geo9 = await readGeo(page);
     expect(geo9.floor).toBe(9);
@@ -289,6 +289,7 @@ test.describe('AG-65 楼层几何实测', () => {
     expect(rects.ladder, 'floor 9 has no mid ladder').toBeNull();
 
     // 亮度取证：洞是暖光方块，天花板别处是近黑——同一行上采样对比。
+    // 采样按当前相机实时折算屏幕坐标（探针内部读 cam.scrollX/scrollY）。
     const probe = await page.evaluate(async (holeX: number) => {
       const game = window.__PHASER_GAME__ as unknown as {
         renderer: { snapshot: (cb: (img: HTMLImageElement) => void) => void };

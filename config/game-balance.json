@@ -57,6 +57,22 @@
     "runSpeedMultiplier": 2,
     "runAnimTimeScale": 1.6
   },
+  "floorGeometry": {
+    "_comment": "AG-65 楼层几何（2026-11-17 用户原话：「每一层宽度长度都不一样，不能一样，有的长」「梯子的位置也不是说一定是起点和终点」「每层小概率在中间开个楼板洞/加个梯子」）。全部 seeded 派生（deriveSeed/makeRng，禁 Math.random），且种子只认楼层号不认 runSeed：FloorSystem/GameScene/存量测试都按楼层号读数，同一层每次进都是同一个答案，爬上去再爬回来梯子不跑。tier1（1-10 层）全部保持现值：roomSpread 0、下行口仍在右端，存量单测/e2e 因此不用改。",
+    "roomSpreadByTier": { "1": 0, "2": 2, "3": 2, "4": 2, "5": 2, "6": 2 },
+    "stairRandomFromTier": 2,
+    "stairEdgeMarginPx": 80,
+    "stairBandLowPct": 0.3,
+    "stairBandHighPct": 0.75,
+    "stairKeepClearPx": 96,
+    "holeChance": 0.15,
+    "holeWidthPx": 56,
+    "holeStairClearPx": 60,
+    "midLadderChance": 0.15,
+    "midLadderKeepClearPx": 70,
+    "npcStrollBandPx": 40,
+    "npcStrollSpeedPxPerSec": 55
+  },
   "warmthSources": {
     "_comment": "AG-25 TickHeaters：每层热源（床/蜡烛/火把/火盆）。x 世界像素、radius 供暖半径、power 中心回温点数/游戏小时。零新增美术——candle/torch/brazier 的照明位置就是热源位置。",
     "1": [

@@ -14,7 +14,17 @@
 //      （它对没有模板的楼层会 throw），本文件的合成器只接管未探索楼层。
 //   3. 纯函数，零框架。本文件不 import Phaser、不读全局状态、不碰存档；任意
 //      (worldSeed, floorNumber) 在任意时刻给出同一个答案——可复现性的底线。
-import { environmentFor } from './constants';
+import {
+  environmentFor,
+  floorKeepClearXs,
+  floorWidthFor,
+  roomCountFor,
+  upExitXFor,
+  downExitXFor,
+  pickSeededXInBand,
+  FLOOR_GEO_SEED_TAG,
+  FLOOR_GEOMETRY_BALANCE,
+} from './constants';
 import type { FloorEnvironment } from './constants';
 import type { GeneratedContainer, GeneratedFloor, GroundItem, InventoryStack, ItemId } from './gameTypes';
 import { generateFloor, getFloorTemplate, groundItemKey, hasFloorContent } from '../data/floorTemplates';
@@ -472,6 +482,89 @@ function synthesizeUnexploredFloor(worldSeed: number, floor: number): GeneratedF
     name: unexploredFloorName(worldSeed, floor, tier),
     containers,
     groundItems,
+  };
+}
+
+// ── AG-65：楼层几何（长度/梯口/洞/中梯的 seeded 派生）────────────────────────
+// 用户 2026-11-17 原话：「其实每一层宽度长度都不一样，不能一样，有的长知道不」
+// 「梯子的位置也不是说一定是起点和终点」「每一层都不要做的那么平滑，可以在中间
+// 加个梯子啥的，或者楼上面有个洞可以看到上面一层的情况，不过这个是比较少的」。
+//
+// 一个楼层的全部几何量都是楼层号的纯函数（全部走 core/rng.ts 的 seeded RNG，不用全局随机源，见
+// core/rng.ts）：同一层每次进都是同一个答案——玩家爬上去再爬回来，梯子、洞、
+// 中梯都在原地，因此不需要进存档，也没有旧存档兼容问题。低层读数（房间数/层宽/
+// 上下梯口）在 constants.ts（floorWidthFor/roomCountFor/downExitXFor），本文件只
+// 做聚合与洞/中梯的抽取，供 GameScene 绘制与 e2e 实测读取。
+export interface FloorGeometry {
+  floor: number;
+  /** 楼层物理长度（px）。tier1 一档 1280；tier2+ 同阶层内每层不同 */
+  width: number;
+  /** 房间数（层长的房间口径，drawCorridor 的房间循环按它走） */
+  rooms: number;
+  /** 上行梯口 x。恒为 UP_EXIT_X(40)——floorSystem.test.ts 把 40 钉成每层的
+   *  上楼梯口，属主测试不许动；随机化由下行口与中梯承担 */
+  upX: number;
+  /** 下行梯口 x。tier1 在右端（现值）；tier2+ 在本层中段 seeded 随机，避开
+   *  容器/地面物资/床铺/上梯口/电梯（玩家按 E 爬的是梯不是箱子） */
+  downX: number;
+  /** 楼板洞 x（天花板上的透光方框，站立态只透光、爬梯态透出目标层地板）。
+   *  null = 本层没有洞（少见：15%） */
+  holeX: number | null;
+  /** 中梯 x（层内装饰短梯，不是上下交通梯，不可交互）。null = 本层没有（15%） */
+  midLadderX: number | null;
+}
+
+/** 洞与中梯的取值带：楼层中段（25%..75%），刻意不在两端。 */
+const FEATURE_BAND_LOW_PCT = 0.25;
+const FEATURE_BAND_HIGH_PCT = 0.75;
+
+/**
+ * 本层是否开楼板洞、开在哪。seeded：同层同答案。避开两个交通梯口
+ * （洞正压在梯口上会同时挡住爬梯落点）。
+ */
+export function floorHoleFor(floor: number): number | null {
+  const width = floorWidthFor(floor);
+  const rng = makeRng(deriveSeed(FLOOR_GEO_SEED_TAG, 'hole', floor));
+  if (!rng.chance(FLOOR_GEOMETRY_BALANCE.holeChance)) return null;
+  return pickSeededXInBand(
+    deriveSeed(FLOOR_GEO_SEED_TAG, 'holeX', floor),
+    Math.round(width * FEATURE_BAND_LOW_PCT),
+    Math.round(width * FEATURE_BAND_HIGH_PCT),
+    [upExitXFor(floor), downExitXFor(floor)],
+    FLOOR_GEOMETRY_BALANCE.holeStairClearPx,
+  );
+}
+
+/**
+ * 本层是否有中梯（层内装饰短梯）、在哪。seeded：同层同答案。避开容器/梯口/
+ * 电梯，也避开本层的洞（两个装饰元素不叠在一起）。
+ */
+export function floorMidLadderFor(floor: number): number | null {
+  const width = floorWidthFor(floor);
+  const rng = makeRng(deriveSeed(FLOOR_GEO_SEED_TAG, 'midLadder', floor));
+  if (!rng.chance(FLOOR_GEOMETRY_BALANCE.midLadderChance)) return null;
+  const hole = floorHoleFor(floor);
+  const clears = [downExitXFor(floor), ...floorKeepClearXs(floor), ...(hole !== null ? [hole] : [])];
+  return pickSeededXInBand(
+    deriveSeed(FLOOR_GEO_SEED_TAG, 'midLadderX', floor),
+    Math.round(width * FEATURE_BAND_LOW_PCT),
+    Math.round(width * FEATURE_BAND_HIGH_PCT),
+    clears,
+    FLOOR_GEOMETRY_BALANCE.midLadderKeepClearPx,
+  );
+}
+
+/** 一个楼层的全部几何量（层宽/房间数/上下梯口/洞/中梯）。纯函数，同层同答案。 */
+export function floorGeometryFor(floor: number): FloorGeometry {
+  assertFloor(floor);
+  return {
+    floor,
+    width: floorWidthFor(floor),
+    rooms: roomCountFor(floor),
+    upX: upExitXFor(floor),
+    downX: downExitXFor(floor),
+    holeX: floorHoleFor(floor),
+    midLadderX: floorMidLadderFor(floor),
   };
 }
 

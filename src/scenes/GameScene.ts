@@ -11,6 +11,8 @@ import {
   downExitXFor,
   floorWidthFor,
   roomCountFor,
+  FLOOR_GEOMETRY_BALANCE,
+  FLOOR_GEO_SEED_TAG,
   environmentFor,
   FLOOR_VIEW_ZOOM,
   ENTRY_X,
@@ -48,7 +50,8 @@ import { BUNK_DISMANTLE_COST, BUNK_SEARCH_COST, OBSTACLE_DIG_COST_MINUTES, OBSTA
   searchBunk, type FloorObstacle } from '../systems/LootSystem';
 import { hasFloorContent } from '../data/floorTemplates';
 import { liftDirection, liftOutcome, liftRequirement, nextSegment, prevSegment, skippedFloors } from '../core/segments';
-import { crossingSummary } from '../core/worldgen';
+import { crossingSummary, floorGeometryFor } from '../core/worldgen';
+import type { FloorGeometry } from '../core/worldgen';
 import { countItem, isBagFull, removeItem, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater, recipePreview } from '../systems/CraftingSystem';
 import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, isNight, spendTime } from '../systems/SurvivalSystem';
@@ -203,7 +206,7 @@ import { QUEST_FLAG, QUESTS } from '../data/quests';
 import { bumpFlag, clearFlag, flagCount, hasFlag, setFlag } from '../systems/WorldFlags';
 import { availableOffers, claimGift, executeBarter, giftOffer, receiveGift, reputationOf } from '../ai/npcEconomy';
 import { stockOf, syncNpcInventory } from '../ai/npcInventory';
-import { npcAutonomyFor, type NpcAutonomyView } from '../ai/npcSchedule';
+import { NPC_MARGIN, npcAutonomyFor, scheduleFor, slotAt, type NpcAutonomyView } from '../ai/npcSchedule';
 import { aiNpcConfig, archetypeForNpcId, npcFactFor } from '../ai/config';import { OllamaBrain } from '../ai/brains/ollamaBrain';
 import { OptionTreeBrain } from '../ai/brains/optionTreeBrain';
 import { createNpcState } from '../data/npcPersonalities';
@@ -567,6 +570,73 @@ const CLICK_MARKER_DEPTH = 40;
 
 /** AG-66：程序化生成的铲子图标贴图 key（见 ensureShovelIcon 的注释）。 */
 const SHOVEL_ICON_KEY = 'shovel';
+// ── AG-65：NPC 实时散步（用户原话「那些 npc 应该都是可以动的」）────────────
+// 日程（ai/npcSchedule 的 npcAutonomyFor）按游戏时间赶路，玩家站着不动时整层
+// 人是僵的。这里叠一层实时散步：到达日程锚点后在 ±band 内走-停-走，waypoint
+// 时间线由 (floor, npcId) seeded 派生（core/rng.ts，不用任何全局随机源），对
+// 真实经过的秒数求值——纯函数，场景只喂时间、不持有坐标，刷新/重进楼层相位从
+// 落层那刻起算（GameScene.npcStrollState 记 parkedSince）。
+//
+// 单格日程的站桩 NPC（核心终端）band 为 0：不走，只按 turnPeriod 偶尔转身。
+interface StrollLeg {
+  walk: boolean;
+  dur: number;
+  from: number;
+  to: number;
+}
+interface StrollPlan {
+  legs: StrollLeg[];
+  total: number;
+  stationary: boolean;
+  turnPeriod: number;
+}
+const strollPlans = new Map<string, StrollPlan>();
+
+function npcStrollPlan(npcId: string, floor: number, stationary: boolean, band: number): StrollPlan {
+  const key = `${floor}:${npcId}`;
+  const cached = strollPlans.get(key);
+  if (cached) return cached;
+  const rng = makeRng(deriveSeed(FLOOR_GEO_SEED_TAG, 'npcStroll', floor, npcId));
+  const legs: StrollLeg[] = [];
+  let prev = 0;
+  let total = 0;
+  for (let i = 0; i < 4; i++) {
+    const to = stationary ? 0 : rng.nextFloat() * 2 * band - band;
+    const walkDur = stationary ? 0 : Math.max(0.5, Math.min(3, Math.abs(to - prev) / FLOOR_GEOMETRY_BALANCE.npcStrollSpeedPxPerSec));
+    const pauseDur = 1 + rng.nextFloat() * 1.6;
+    legs.push({ walk: true, dur: walkDur, from: prev, to });
+    legs.push({ walk: false, dur: pauseDur, from: to, to });
+    total += walkDur + pauseDur;
+    prev = to;
+  }
+  const plan: StrollPlan = { legs, total, stationary, turnPeriod: 5 + rng.nextFloat() * 5 };
+  strollPlans.set(key, plan);
+  return plan;
+}
+
+/** 散步时间线在 elapsed 秒处的读数：偏移量、是否在走、面朝（0 = 保持）。 */
+function npcStrollPose(npcId: string, floor: number, stationary: boolean, elapsed: number, band: number): { x: number; walking: boolean; face: 1 | -1 | 0 } {
+  const plan = npcStrollPlan(npcId, floor, stationary, band);
+  if (plan.stationary) {
+    const cycle = Math.floor(elapsed / plan.turnPeriod);
+    return { x: 0, walking: false, face: cycle % 2 === 0 ? 1 : -1 };
+  }
+  let t = elapsed % plan.total;
+  for (let i = 0; i < plan.legs.length; i++) {
+    const leg = plan.legs[i];
+    const last = i === plan.legs.length - 1;
+    if (last || t < leg.dur) {
+      const p = leg.dur <= 0 ? 1 : Math.min(1, t / leg.dur);
+      return {
+        x: leg.from + (leg.to - leg.from) * p,
+        walking: leg.walk && p > 0.02 && p < 0.98,
+        face: leg.walk && leg.to !== leg.from ? (leg.to > leg.from ? 1 : -1) : 0,
+      };
+    }
+    t -= leg.dur;
+  }
+  return { x: 0, walking: false, face: 0 };
+}
 
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
@@ -611,6 +681,18 @@ export class GameScene extends Phaser.Scene {
   // wall tiling, the room loop and the stair mouths all read these two.
   private floorW = FLOOR_WIDTH;
   private downExit = DOWN_EXIT_X;
+  // AG-65：本层的全部几何（层宽/房间数/上下梯口/洞/中梯）。worldgen 的纯函数
+  // 按楼层号 seeded 派生，同层每次进同一个答案——drawFloor 每帧重设，e2e 直接
+  // 读这个字段核对「梯子还在原地」。
+  private floorGeo?: FloorGeometry;
+  // AG-65：爬梯态天花板洞口透出的目标层地板（与目标层同生共死：成功落地由
+  // clearFloor 收，拒绝落地由 destroyClimbTargetLayer 收）。
+  private climbHoleReveal: Phaser.GameObjects.GameObject[] = [];
+  // AG-65：洞与中梯的实际绘制矩形（e2e 像素取证用——画在哪由 seeded 位置定，
+  // 这里把画出来的矩形交出来，实测才能核对「画的位置 = floorGeometryFor 的位置」）。
+  private floorFeatureRects: { hole: [number, number, number, number] | null; ladder: [number, number, number, number] | null } = { hole: null, ladder: null };
+  // AG-65：NPC 实时散步状态（seeded waypoint 时间线的相位，见 syncNpcs）。
+  private npcStrollState = new Map<string, { parkedSince: number; lastX: number; face: 1 | -1 }>();
   /** Set when a stair climb lands, so the camera can ease instead of snapping. */
   private landingEase = false;
   private wasBlackout = false;
@@ -1150,6 +1232,10 @@ export class GameScene extends Phaser.Scene {
     recordFloorVisit(state, floor);
     this.floorW = floorWidthFor(floor);
     this.downExit = downExitXFor(floor);
+    // AG-65：楼层几何（层宽/梯口/洞/中梯）随层派生。downExit 与 floorGeo.downX
+    // 同源（都是 downExitXFor），这里分别喂给「按 E 判定/hasInteractableNear」
+    // 与「洞/中梯绘制 + e2e 实测」两条既有消费者。
+    this.floorGeo = floorGeometryFor(floor);
     this.floorView = getFloorView(state, floor);
 
     if (floor === STARTING_FLOOR) {
@@ -1387,7 +1473,9 @@ export class GameScene extends Phaser.Scene {
       // cross-section used, and stairNeighbour() already guarantees it.
       if (!hasFloorContent(climb.to)) return;
       const above = climb.direction === 1;
-      this.drawNeighbourFloor(climb.to, above ? -FLOOR_HEIGHT : FLOOR_HEIGHT, above, 1);
+      // AG-65：把出发层梯口传给目标层绘制——梯口随机化后，落点不再是目标层
+      // 自己的下行口，而是这趟梯子出发的那个 x（起止同 x 的竖井）。
+      this.drawNeighbourFloor(climb.to, above ? -FLOOR_HEIGHT : FLOOR_HEIGHT, above, 1, climb.startX);
       // drawNeighbourFloor pushes the layer as the LAST element of
       // floorObjects; grab it there so a refused landing can take it down
       // alone. (Its lifetime is ours from here: on success clearFloor's batch
@@ -1403,6 +1491,15 @@ export class GameScene extends Phaser.Scene {
     const layer = this.climbTargetLayer;
     this.climbTargetLayer = undefined;
     this.climbTargetFloor = undefined;
+    // AG-65：拒绝落地时梯停了，洞口透出的目标层地板跟着撤（成功落地走
+    // clearFloor 的批量销毁，这里靠 floorObjects.includes 防双销毁）。
+    for (const o of this.climbHoleReveal) {
+      if (this.floorObjects.includes(o)) {
+        this.floorObjects = this.floorObjects.filter((x) => x !== o);
+        o.destroy();
+      }
+    }
+    this.climbHoleReveal = [];
     // A successful landing's clearFloor() already destroyed it and emptied
     // floorObjects; a scene restart leaves a stale reference to a dead object.
     // Either way it is no longer in the array, so there is nothing to destroy.
@@ -2962,6 +3059,65 @@ export class GameScene extends Phaser.Scene {
       const downLabel = this.add.text(this.downExit, FLOOR_HEIGHT - 104, '↓ 下楼', { fontFamily: FONT_FAMILY, fontSize: `${TYPE_AUX}px`, color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
       this.floorObjects.push(downLabel);
     }
+    // AG-65：楼板洞与中梯画在交通梯之后——同一条「楼梯绘制调用段」，两者都是
+    // 楼层几何的视觉面（位置见 worldgen.floorGeometryFor）。
+    this.drawFloorFeatures(floor);
+  }
+
+  // ── AG-65：楼板洞与中梯（层内装饰，非交通）────────────────────────────────
+  // 用户 2026-11-17 原话：「可以在中间加个梯子啥的，或者楼上面有个洞可以看到
+  // 上面一层的情况，不过这个是比较少的」。位置按楼层号 seeded（各 15%，数值在
+  // config/game-balance.json 的 floorGeometry），同层每次进同一个地方。
+  //
+  // 洞的取景（AG-52 契约）：站立态只在天花板画一块透光方框加光晕——「只看得见
+  // 自己这一层」，不把楼下层画出来；爬梯态由 drawNeighbourFloor 在洞口补一块
+  // 目标层地板，那一刻才「看到上面一层」。
+  private drawFloorFeatures(floor: number): void {
+    const geo = this.floorGeo;
+    this.floorFeatureRects = { hole: null, ladder: null };
+    if (!geo || geo.floor !== floor) return;
+    const wallH = FLOOR_HEIGHT - FLOOR_BAND;
+    if (geo.holeX !== null) {
+      const hw = FLOOR_GEOMETRY_BALANCE.holeWidthPx;
+      const g = this.add.graphics().setDepth(3);
+      // 光晕先画（洒在洞口下面的墙上），再画洞口本体压住天花板黑条。
+      g.fillStyle(PALETTE.lightHigh, 0.1);
+      g.fillRect(geo.holeX - hw, 8, hw * 2, 52);
+      g.fillStyle(PALETTE.lightHigh, 0.14);
+      g.fillRect(geo.holeX - hw * 0.6, 8, hw * 1.2, 34);
+      // 洞本体：天花板黑条上的一块暖光，描一道墨边说是「洞」不是「灯」。
+      g.fillStyle(PALETTE.ink, 0.9);
+      g.fillRect(geo.holeX - hw / 2 - 2, 0, hw + 4, 10);
+      g.fillStyle(PALETTE.lightHigh, 0.92);
+      g.fillRect(geo.holeX - hw / 2, 1, hw, 7);
+      g.fillStyle(PALETTE.lightHot, 0.5);
+      g.fillRect(geo.holeX - hw / 2 + 6, 2, hw - 12, 3);
+      this.floorObjects.push(g);
+      this.floorFeatureRects.hole = [geo.holeX - hw / 2, 1, hw, 7];
+    }
+    if (geo.midLadderX !== null) {
+      // 中梯：墙根一部短梯加一个黑洞洞的小隔间。纯装饰——没有 E 交互、不通往
+      // 任何楼层（交通梯只有 drawExits 画的那两部），是「这一层有人用过」的布景。
+      const x = geo.midLadderX;
+      const g = this.add.graphics().setDepth(ACTOR_DEPTH - 1);
+      // 隔间口：墨黑凹腔加一道石沿。
+      g.fillStyle(PALETTE.ink, 0.92);
+      g.fillRect(x - 24, wallH - 58, 48, 58);
+      g.fillStyle(PALETTE.shadow, 0.5);
+      g.fillRect(x - 20, wallH - 54, 40, 54);
+      g.fillStyle(PALETTE.stone, 1);
+      g.fillRect(x - 26, wallH - 60, 52, 4);
+      // 短梯：两根栏加五根横档，从腔里搭到楼面带。
+      g.fillStyle(PALETTE.stoneLight, 1);
+      g.fillRect(x - 9, wallH - 54, 3, 84);
+      g.fillRect(x + 6, wallH - 54, 3, 84);
+      g.fillStyle(PALETTE.dust, 0.9);
+      for (let i = 0; i < 5; i++) {
+        g.fillRect(x - 9, wallH - 48 + i * 18, 18, 2);
+      }
+      this.floorObjects.push(g);
+      this.floorFeatureRects.ladder = [x - 26, wallH - 60, 52, 64];
+    }
   }
 
   /**
@@ -3065,7 +3221,7 @@ export class GameScene extends Phaser.Scene {
    * depth values the live floor uses: base art, then the depth cues, then the
    * props and their light fixtures.
    */
-  private drawNeighbourFloor(floor: number, yOffset: number, isAbove: boolean, distance: number): void {
+  private drawNeighbourFloor(floor: number, yOffset: number, isAbove: boolean, distance: number, landingX: number): void {
     const wallH = FLOOR_HEIGHT - FLOOR_BAND;
     const tint = corridorTint(floor);
     // A neighbour is drawn at ITS length, not the player's: tiers differ, and a
@@ -3201,7 +3357,11 @@ export class GameScene extends Phaser.Scene {
     // The stairwell opening, so the flight arriving from the player's floor has
     // somewhere to land. Drawn after the props because it is a hole in the
     // floor, not something standing on it.
-    const stairX = isAbove ? UP_EXIT_X : downExitXFor(floor);
+    // AG-65：落点取「到达本层的这趟梯子的出发口」（调用方传 climb.startX），
+    // 不再取目标层自己的下行口——tier2 起每层的下行口各不相同（seeded 随机），
+    // 竖井跨两层同一条 x，落点必须画在出发口正下方，角色才落在梯口上
+    // （stairsArt.test.ts 钉 end.x = downExitXFor(出发层) 同源）。
+    const stairX = landingX;
     const g = this.add.graphics();
     g.fillStyle(PALETTE.ink, 0.85);
     g.fillRect(stairX - 22, STAIR_START_Y - 10, 44, 10);
@@ -3232,6 +3392,24 @@ export class GameScene extends Phaser.Scene {
     // standing on, and the eye went to the background.
     layer.setAlpha(1 - 0.09 * distance);
     this.floorObjects.push(layer);
+
+    // AG-65：本层天花板上的楼板洞，爬梯态透出目标层的地板——「楼上面有个洞可以
+    // 看到上面一层」只在爬梯时成立（目标层画在上面的时候）。下行行程楼上没有
+    // 可画的层，洞保持站立态的一块透光。画在层容器之外（depth 3 压得住本层
+    // 天花板黑条），且必须在上面那个「新对象扫进层」的循环之后创建，否则会被
+    // 扫进 depth -10 的层里、被本层天花板盖住。
+    const hole = this.floorGeo?.holeX;
+    if (isAbove && hole !== null && hole !== undefined) {
+      const hw = FLOOR_GEOMETRY_BALANCE.holeWidthPx;
+      const reveal = this.add
+        .tileSprite(hole - hw / 2, yOffset + FLOOR_HEIGHT - FLOOR_BAND, hw, FLOOR_BAND + 8, floorKeyFor(floor))
+        .setDepth(3);
+      const rim = this.add.graphics().setDepth(3);
+      rim.lineStyle(2, PALETTE.ink, 0.9);
+      rim.strokeRect(hole - hw / 2 - 1, yOffset + FLOOR_HEIGHT - FLOOR_BAND - 1, hw + 2, FLOOR_BAND + 10);
+      this.floorObjects.push(reveal, rim);
+      this.climbHoleReveal = [reveal, rim];
+    }
   }
 
   /**
@@ -5151,6 +5329,8 @@ export class GameScene extends Phaser.Scene {
   // 带是 depth 100 的 0.94 alpha 面，低于它会被吞），距离比例渐隐
   // （贴近角色时不挡脸，信息交给底栏的「按 E 对话」）。
   private drawNpcs(floor: number): void {
+    // AG-65：散步相位随楼层重开——落层那刻起算（见 npcStrollPose 的 elapsed）。
+    this.npcStrollState.clear();
     for (const npc of npcsOnFloor(floor)) {
       // AG-46：id -> 贴图 key 的翻译收在 artpack.characterKeyForNpc（加 NPC
       // 只改那一处）。返回 null = 没有贴图的实体（core_terminal，active:false），
@@ -5188,15 +5368,51 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /** 某 NPC 当前时刻的自主状态（位置/是否在走/目标）。场景每帧据此摆精灵。 */
-  private npcView(state: GameState, npc: NpcDef): NpcAutonomyView {
+  /**
+   * 某 NPC 当前时刻的自主状态 + 实时散步（位置/是否在走/面朝/目标）。场景每帧
+   * 据此摆精灵，对话距离与点击走位也读它——眼里看见的就是能对话的。
+   *
+   * AG-65：日程赶路时位置全归日程；到达锚点后位置 = 锚点 + 散步偏移（seeded
+   * waypoint 时间线，见文件顶部的 npcStrollPose）。日程语义一个字节没动
+   * （npcAtoms/npcBehavior 钉的是 npcAutonomyFor 本身），这里只是场景侧的
+   * 实时摆位。
+   */
+  private npcView(state: GameState, npc: NpcDef): NpcAutonomyView & { strolling: boolean; face: 1 | -1 } {
     const { inventory } = syncNpcInventory(state, npc);
-    return npcAutonomyFor(npc, {
+    const view = npcAutonomyFor(npc, {
       day: state.day,
       minuteOfDay: state.gameMinuteOfDay,
       runSeed: state.runSeed,
       stock: (itemId) => stockOf(inventory, itemId),
     });
+    const width = floorWidthFor(state.currentFloor);
+    const lo = NPC_MARGIN;
+    const hi = Math.max(lo, width - NPC_MARGIN);
+    let stroll = this.npcStrollState.get(npc.id);
+    if (!stroll) {
+      stroll = { parkedSince: view.moving ? -1 : this.time.now, lastX: view.x, face: 1 };
+      this.npcStrollState.set(npc.id, stroll);
+    }
+    let x = view.x;
+    let strolling = false;
+    let face = stroll.face;
+    if (view.moving) {
+      // 日程赶路中：散步相位挂起，落定重新起算（避免从半个偏移里接续，跳一下）。
+      stroll.parkedSince = -1;
+    } else {
+      if (stroll.parkedSince < 0) stroll.parkedSince = this.time.now;
+      const slots = scheduleFor(npc.id);
+      const { index } = slotAt(slots, state.gameMinuteOfDay);
+      const pose = npcStrollPose(npc.id, state.currentFloor, slots.length <= 1, (this.time.now - stroll.parkedSince) / 1000, FLOOR_GEOMETRY_BALANCE.npcStrollBandPx);
+      x = Phaser.Math.Clamp(slots[index].x + pose.x, lo, hi);
+      strolling = pose.walking;
+      if (pose.face !== 0) face = pose.face;
+    }
+    // 面朝跟真实位移走：日程赶路、散步、站桩偶尔转身都覆盖。
+    if (Math.abs(x - stroll.lastX) > 0.5) face = x < stroll.lastX ? -1 : 1;
+    stroll.lastX = x;
+    stroll.face = face;
+    return { ...view, x, strolling, face };
   }
 
   /**
@@ -5213,8 +5429,11 @@ export class GameScene extends Phaser.Scene {
       const view = this.npcView(state, npc);
       rec.sprite.setPosition(view.x, PLAYER_FEET_Y);
       for (const s of rec.shadow) (s as Phaser.GameObjects.Rectangle).setPosition(view.x, PLAYER_FEET_Y + 2);
-      const want = view.moving ? walkAnimKey(rec.who) : idleAnimKey(rec.who);
+      // AG-65：实时散步也在走——walk clip 与转身跟真实位移走（用户原话「那些
+      // npc 应该都是可以动的」）。
+      const want = view.moving || view.strolling ? walkAnimKey(rec.who) : idleAnimKey(rec.who);
       if (rec.sprite.anims.currentAnim?.key !== want) rec.sprite.play(want, true);
+      rec.sprite.setFlipX(view.face < 0);
       rec.label.setPosition(view.x, NPC_LABEL_Y);
       rec.plate.setPosition(view.x, NPC_LABEL_Y);
       // 距离比例渐隐，与容器名签同一公式：贴近角色时名字让位给角色。

@@ -1,4 +1,5 @@
 import { GAME_CONFIG } from './config';
+import { deriveSeed, makeRng } from './rng';
 import { segmentOf } from './segments';
 import { FLOOR_TEMPLATES } from '../data/floorTemplates';
 
@@ -69,6 +70,88 @@ export const ROOM_WIDTH = FLOOR_WIDTH / ROOM_COUNT;
 // themes, the container grid and the stair mouths keep their existing maths.
 const ROOMS_BY_TIER: Record<number, number> = { 1: 4, 2: 5, 3: 6, 4: 7, 5: 8, 6: 9 };
 
+// ── AG-65：楼层几何的平衡数值（config/game-balance.json 的 floorGeometry）───
+// 用户 2026-11-17 原话：「其实每一层宽度长度都不一样，不能一样，有的长知道不」
+// 「梯子的位置也不是说一定是起点和终点」。几何全部 seeded 派生，且种子只认
+// 楼层号、不认 runSeed——FloorSystem/GameScene 与存量测试都按楼层号读数，同一层
+// 每次进都是同一个答案（爬上去再爬回来，梯子还在原地），因此不需要进存档。
+//
+// tier1（1-10 层）整体保持现值：roomSpreadByTier[1] = 0、stairRandomFromTier
+// 从 2 起——floorSystem/stairsArt/uiLayout 有测试钉 tier1 的 1240/UP_EXIT_X，
+// 首章 e2e 也按 40/1240 走位，基础发育区必须稳。
+export interface FloorGeometryBalance {
+  /** 阶层内房间数在 ROOMS_BY_TIER 基础上的 seeded 上浮（0 = 该阶层一档封死） */
+  roomSpreadByTier: Record<number, number>;
+  /** 从哪一阶层起下行梯口做 seeded 随机（tier1 保持右端 -40 的现值） */
+  stairRandomFromTier: number;
+  /** 随机梯口离楼层两端的最小距离 */
+  stairEdgeMarginPx: number;
+  /** 随机梯口的取值范围（楼层宽度百分比），刻意不开到两端——用户要「不在起点和终点」 */
+  stairBandLowPct: number;
+  stairBandHighPct: number;
+  /** 随机梯口与「已占用 x」（容器/地面物资/床铺/上梯口/电梯）的最小间距 */
+  stairKeepClearPx: number;
+  /** 每层开出楼板洞的概率（少见：用户说「这个是比较少的」） */
+  holeChance: number;
+  /** 洞宽（像素，天花板上的透光方框） */
+  holeWidthPx: number;
+  /** 洞与两个交通梯口的最小间距 */
+  holeStairClearPx: number;
+  /** 每层出现中梯（层内装饰短梯，非交通梯）的概率 */
+  midLadderChance: number;
+  /** 中梯与容器/梯口的最小间距 */
+  midLadderKeepClearPx: number;
+  /** NPC 实时散步的幅度（像素）与步速（像素/秒）——见 GameScene 的 npcStroll */
+  npcStrollBandPx: number;
+  npcStrollSpeedPxPerSec: number;
+}
+
+function readFloorGeometryBalance(raw: unknown): FloorGeometryBalance {
+  const src = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+  const num = (key: string): number => {
+    const v = src[key];
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      throw new Error(`config/game-balance.json 无效：floorGeometry.${key} 不是有效数字`);
+    }
+    return v;
+  };
+  const spreads: Record<number, number> = {};
+  const rawSpreads = (src.roomSpreadByTier ?? {}) as Record<string, unknown>;
+  for (const key of Object.keys(rawSpreads)) {
+    if (!/^\d+$/.test(key)) continue; // _comment 之类的非阶层键
+    const v = rawSpreads[key];
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+      throw new Error(`config/game-balance.json 无效：floorGeometry.roomSpreadByTier.${key} 不是非负数字`);
+    }
+    spreads[Number(key)] = v;
+  }
+  return {
+    roomSpreadByTier: spreads,
+    stairRandomFromTier: num('stairRandomFromTier'),
+    stairEdgeMarginPx: num('stairEdgeMarginPx'),
+    stairBandLowPct: num('stairBandLowPct'),
+    stairBandHighPct: num('stairBandHighPct'),
+    stairKeepClearPx: num('stairKeepClearPx'),
+    holeChance: num('holeChance'),
+    holeWidthPx: num('holeWidthPx'),
+    holeStairClearPx: num('holeStairClearPx'),
+    midLadderChance: num('midLadderChance'),
+    midLadderKeepClearPx: num('midLadderKeepClearPx'),
+    npcStrollBandPx: num('npcStrollBandPx'),
+    npcStrollSpeedPxPerSec: num('npcStrollSpeedPxPerSec'),
+  };
+}
+
+/** AG-65 楼层几何数值。坏配置在加载时大声失败并点名字段（同 SURVIVAL_BALANCE 契约）。 */
+export const FLOOR_GEOMETRY_BALANCE: FloorGeometryBalance = readFloorGeometryBalance(
+  (GAME_CONFIG as unknown as Record<string, unknown>).floorGeometry,
+);
+
+// 楼层几何的种子标签（worldgen.ts 的洞/中梯派生共用）。刻意不挂
+// WORLDGEN_DATA_VERSION（worldgen.ts 反向依赖本文件，取不到）：楼层几何没有
+// 任何持久化状态，换标签只是让同一层换个布局，没有「旧存档对新布局」的兼容问题。
+export const FLOOR_GEO_SEED_TAG = 'ag65-floorGeo';
+
 /** Which tier a floor belongs to, by the tower's own numbering. */
 export function tierOfFloor(floor: number): number {
   if (floor >= 100000) return 6;
@@ -80,7 +163,14 @@ export function tierOfFloor(floor: number): number {
 }
 
 export function roomCountFor(floor: number): number {
-  return ROOMS_BY_TIER[tierOfFloor(floor)] ?? ROOM_COUNT;
+  const tier = tierOfFloor(floor);
+  const base = ROOMS_BY_TIER[tier] ?? ROOM_COUNT;
+  // AG-65：同阶层内每层长度也不同。spread 0 的阶层（tier1）一档封死，保持
+  // 存量测试钉住的现值；tier2 起按配置上浮，seeded 随机。
+  const spread = FLOOR_GEOMETRY_BALANCE.roomSpreadByTier[tier] ?? 0;
+  if (spread <= 0) return base;
+  const rng = makeRng(deriveSeed(FLOOR_GEO_SEED_TAG, 'rooms', floor));
+  return base + rng.nextInt(0, spread);
 }
 
 /** Physical length of a floor, in pixels. */
@@ -90,7 +180,15 @@ export function floorWidthFor(floor: number): number {
 
 /** The down stairwell sits at the right end, whatever the floor's length. */
 export function downExitXFor(floor: number): number {
-  return floorWidthFor(floor) - 40;
+  const width = floorWidthFor(floor);
+  // tier1 保持现值（右端 -40）：floorSystem/stairsArt 的存量断言与首章 e2e
+  // 都按它走位。
+  if (tierOfFloor(floor) < FLOOR_GEOMETRY_BALANCE.stairRandomFromTier) {
+    return width - 40;
+  }
+  // AG-65：tier2 起，下行梯口不再钉在右端——在本层中段 seeded 随机，避开
+  // 容器/地面物资/床铺/上梯口/电梯，玩家按 E 爬的是梯不是箱子。
+  return pickSeededX(deriveSeed(FLOOR_GEO_SEED_TAG, 'stairDown', floor), width, floorKeepClearXs(floor));
 }
 export const PLAYER_SPEED = 130; // px / second
 // Where the player's feet sit. The props are bottom-aligned further back in the
@@ -408,6 +506,75 @@ export const ENTRY_X = FLOOR_WIDTH / 2;
 export const INTERACT_DISTANCE = 44;
 export const UP_EXIT_X = 40; // left end -> 上楼 (toward higher floors)
 export const DOWN_EXIT_X = FLOOR_WIDTH - 40; // right end -> 下楼 (toward lower floors)
+
+/**
+ * AG-65：上行梯口。永远是 UP_EXIT_X——不是疏漏：floorSystem.test.ts 的
+ * stairMouthZone/currentInteractionZone 两组断言把 UP_EXIT_X 钉成每一层
+ * （含 tier2+ 全段）的上楼梯口，首章 e2e 与 F 抄近路也按 40 走位；动它必须
+ * 改那份不属于本任务的文件。用户「梯子不在端点」的诉求由下行口与中梯承担。
+ * 保留这个入口是为了让 stairTraversalFor 两侧同口径地「按楼层实际口位取值」。
+ */
+export function upExitXFor(_floor: number): number {
+  return UP_EXIT_X;
+}
+
+/** GameScene 的货运电梯 x（LIFT_X）。随机下行口要避开它：电梯是段界主通道。 */
+const LIFT_X_PX = 1165;
+
+/** floorTemplates.bunksFor 的稠密阶层（tier2/3 有可搜床铺）。 */
+const DENSE_BUNK_TIERS = new Set([2, 3]);
+
+/**
+ * 本层「已被占用」的 x 列表：模板容器、地面物资、床铺槽位、上梯口、电梯。
+ * 坐标口径与 getFloorView 一致——模板按 1280 网格书写，按 floorWidthFor 缩放；
+ * 床铺槽位复刻 bunksFor 的摆法（稠密阶层 300 与 width-300）。
+ * 供下行梯口/中梯的 seeded 随机避开，保证玩家按 E 爬的是梯不是箱子。
+ */
+export function floorKeepClearXs(floor: number): number[] {
+  const width = floorWidthFor(floor);
+  const k = width / FLOOR_WIDTH;
+  const template = FLOOR_TEMPLATES[floor];
+  const out: number[] = [UP_EXIT_X, LIFT_X_PX];
+  if (template) {
+    for (const c of template.containers) out.push(Math.round(c.x * k));
+    for (const g of template.ground) out.push(Math.round(g.x * k));
+    if (DENSE_BUNK_TIERS.has(tierOfFloor(floor))) out.push(300, width - 300);
+  }
+  return out;
+}
+
+/**
+ * 在 [lo, hi] 带里 seeded 取一个 x，避开 clears（最小间距 keepClear）。
+ * 候选网格扫描 + 一次性抽签：不像「随机-拒绝」那样有试不完的概率，任何带
+ * 都能给出一个确定答案；真的全都贴死时退回间距最大的那个候选。
+ */
+export function pickSeededXInBand(seed: number, lo: number, hi: number, clears: readonly number[], keepClear: number): number {
+  const rng = makeRng(seed);
+  const clearanceAt = (x: number): number => clears.reduce((min, c) => Math.min(min, Math.abs(c - x)), Number.POSITIVE_INFINITY);
+  let bestX = lo;
+  let bestClearance = -1;
+  const pool: number[] = [];
+  for (let x = lo; x <= hi; x += 8) {
+    const clearance = clearanceAt(x);
+    if (clearance > bestClearance) {
+      bestClearance = clearance;
+      bestX = x;
+    }
+    if (clearance >= keepClear) pool.push(x);
+  }
+  const from = pool.length > 0 ? pool[rng.nextInt(0, pool.length - 1)] : bestX;
+  return from;
+}
+
+/**
+ * 下行梯口的取值带：楼层中段（stairBandLowPct..stairBandHighPct，默认 30%..75%），
+ * 离两端至少 stairEdgeMarginPx——用户要「梯子不在起点和终点」，就不开到两端。
+ */
+export function pickSeededX(seed: number, width: number, clears: readonly number[], keepClear = FLOOR_GEOMETRY_BALANCE.stairKeepClearPx): number {
+  const lo = Math.max(FLOOR_GEOMETRY_BALANCE.stairEdgeMarginPx, Math.round(width * FLOOR_GEOMETRY_BALANCE.stairBandLowPct));
+  const hi = Math.min(width - FLOOR_GEOMETRY_BALANCE.stairEdgeMarginPx, Math.round(width * FLOOR_GEOMETRY_BALANCE.stairBandHighPct));
+  return Math.max(8, Math.min(width - 8, pickSeededXInBand(seed, lo, hi, clears, keepClear)));
+}
 export const BED_X = 1120; // dorm bed on the starting floor (sleep to pass the night)
 export const CRAFT_X = 480; // dorm workbench on the starting floor (crafting station)
 

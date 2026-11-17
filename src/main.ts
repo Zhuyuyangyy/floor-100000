@@ -9,6 +9,7 @@ import { diaryOf, diaryKindCount, type DiaryKind } from './systems/DiarySystem';
 import { npcAtomsFor, sense } from './ai/npcAtoms';
 import { NPCS } from './data/npcs';
 import { evaluateAllQuests } from './data/quests';
+import { loadAchievements, type AchievementEvent } from './systems/AchievementSystem';
 
 /**
  * Phaser creates a Text's canvas once and measures it against whatever font is
@@ -86,6 +87,12 @@ async function boot(): Promise<void> {
         getSelection: () => { mode: 'list' | 'branch'; quest: number; branch: number };
         getMessage: () => string;
       };
+      __PHASER_ACHIEVEMENTS__?: {
+        /** 走 GameScene 的同一条事件通路（求值 + toast + 落盘），返回新解锁 id。 */
+        emit: (event: AchievementEvent) => string[];
+        /** 直读独立存储键——证明「刷新后不丢」的那一位。 */
+        getUnlocked: () => string[];
+      };
     };
     w.__PHASER_GAME__ = game;
     w.__PHASER_SESSION__ = { getState: () => (hasGame() ? getGame() : null) };
@@ -122,6 +129,22 @@ async function boot(): Promise<void> {
       getEvaluations: () => (hasGame() ? evaluateAllQuests(getGame()) : []),
       getSelection: () => questPanelScene()?.devSelection() ?? { mode: 'list', quest: 0, branch: 0 },
       getMessage: () => questPanelScene()?.devMessage() ?? '',
+    };
+
+    // AG-77：成就。emit 派一个事件进 GameScene 的真实通路（与玩法钩子同一
+    // 入口：evaluateAchievements → toast 队列 → 独立键落盘），让 e2e 能驱动
+    // 「多成就连亮排队」这类自然玩法里凑不齐的场景；getUnlocked 直读存储键，
+    // 用于「刷新后不丢」的取证。场景不活跃时 emit 诚实返回空数组——没有
+    // 活着的 GameScene 就没有通路，静默丢弃好过打一个空场景。
+    const activeGameScene = (): { emitAchievementEvent: (event: AchievementEvent) => string[] } | null => {
+      const scene = game.scene.getScenes(true).find((s) => s.scene.key === 'Game');
+      return scene
+        ? (scene as unknown as { emitAchievementEvent: (event: AchievementEvent) => string[] })
+        : null;
+    };
+    w.__PHASER_ACHIEVEMENTS__ = {
+      emit: (event) => activeGameScene()?.emitAchievementEvent(event) ?? [],
+      getUnlocked: () => loadAchievements().unlocked,
     };
   }
 }

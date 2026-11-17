@@ -44,6 +44,11 @@ declare global {
     };
     __PHASER_SESSION__?: { getState: () => E2EGameState | null };
     __PHASER_TOWER__?: unknown;
+    /** AG-77：emit 走 GameScene 的真实事件通路；getUnlocked 直读独立存储键。 */
+    __PHASER_ACHIEVEMENTS__?: {
+      emit: (event: Record<string, unknown>) => string[];
+      getUnlocked: () => string[];
+    };
   }
 }
 

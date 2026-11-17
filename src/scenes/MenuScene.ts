@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { FONT_FAMILY } from '../render/uiKit';
+import { FONT_FAMILY, buildPanelWell } from '../render/uiKit';
 
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { startNewGame, tryContinue } from '../core/session';
@@ -10,6 +10,9 @@ import { applyPanelDepth, buildPanel, createMarker, PANEL_DEPTH, placeMarker, ty
 import { buildPhotoTitleBackdrop, buildTitleBackdrop, type TitleBackdrop } from '../render/titleBackdrop';
 import { TITLE_BG_KEY } from '../render/artpack';
 import { hitRect, textClickable } from '../render/pointer';
+import { ACHIEVEMENTS, type AchievementDef } from '../data/achievements';
+import { achievementProgress, loadAchievements, type AchievementSave } from '../systems/AchievementSystem';
+import { ACHIEVEMENT_TIER_COLOR } from '../render/achievementSkin';
 
 // Title screen: a keyboard-navigable option list — 开始新游戏 / 继续游戏 (when a
 // save exists) / 操作说明. ↑/↓ to move, Enter to choose (docs/03_TASKS.md#p0-08).
@@ -21,6 +24,16 @@ import { hitRect, textClickable } from '../render/pointer';
 // tweens and the title's slow flicker exist so the first frame already says
 // what this game is about.
 type InputSlot = 'up' | 'down' | 'enter' | 'esc';
+
+// ── AG-77：成就查看面板的几何 ─────────────────────────────────────────────
+// 十四条一行Rows：档位章 + 名称 + 右侧状态（已解锁/进度），选中行的说明沉在
+// 底部详情井。高度按内容钉：标题栏 30 + 14×26 行 + 详情井 64 + 页脚 24，
+// 居中后上下各留 ~100px，不出画布（三视口由 Scale.FIT letterbox 消化，
+// 设计像素不动）。行距用 ROW_H——与游戏内列表同一行高。
+const ACH_PANEL_W = 680;
+const ACH_ROW_H = 26;
+const ACH_ROWS_TOP = 62;
+const ACH_DETAIL_H = 64;
 
 export class MenuScene extends Phaser.Scene {
   private optionTexts: Phaser.GameObjects.Text[] = [];
@@ -38,6 +51,22 @@ export class MenuScene extends Phaser.Scene {
   private backdrop?: TitleBackdrop;
   private titleText?: Phaser.GameObjects.Text;
   private subtitleText?: Phaser.GameObjects.Text;
+  // ── AG-77: the achievements cabinet ─────────────────────────────────────
+  // A riveted list of the fourteen cross-run achievements, read from the same
+  // independent localStorage key GameScene writes to (floor100000.achievements.v1).
+  // Re-read on every open: a run may have unlocked more since the last visit.
+  private achievementsOpen = false;
+  private achievementObjects: PanelObject[] = [];
+  private achievementSelected = 0;
+  private achievementRows: Array<{
+    def: AchievementDef;
+    chip: Phaser.GameObjects.Rectangle;
+    nameText: Phaser.GameObjects.Text;
+    statusText: Phaser.GameObjects.Text;
+  }> = [];
+  private achievementBand?: Phaser.GameObjects.Rectangle;
+  private achievementDetailText?: Phaser.GameObjects.Text;
+  private achievementCountText?: Phaser.GameObjects.Text;
 
   constructor() {
     super('Menu');
@@ -51,6 +80,8 @@ export class MenuScene extends Phaser.Scene {
     // Survives a scene restart; left true, the help panel would still swallow
     // navigation on the fresh title screen.
     this.helpOpen = false;
+    // AG-77：同理——成就面板开着重启会吞掉 ↑/↓。
+    this.achievementsOpen = false;
 
     const { width, height } = this.cameras.main;
     // Art pass: this rect used to sit at the default depth 0, which is ABOVE
@@ -98,6 +129,8 @@ export class MenuScene extends Phaser.Scene {
 
     this.entries = [{ label: '开始新游戏', run: () => this.startNew() }];
     if (hasSave()) this.entries.push({ label: '继续游戏', run: () => this.continueRun() });
+    // AG-77：成就在标题屏的入口（奖杯柜不该埋在游戏里）。
+    this.entries.push({ label: '成就', run: () => this.toggleAchievements() });
     this.entries.push({ label: '操作说明', run: () => this.toggleHelp() });
     this.selected = 0;
 
@@ -120,6 +153,8 @@ export class MenuScene extends Phaser.Scene {
     // buildHelp() only pushes, and field initialisers do not re-run on scene
     // restart — without this the help panel accumulates destroyed objects.
     this.helpObjects = [];
+    // AG-77：成就面板同上（buildAchievements 只 push）。
+    this.achievementObjects = [];
     this.entries.forEach((entry, i) => {
       const t = this.add
         .text(width / 2, MENU_TOP + i * MENU_STEP, entry.label, { fontFamily: FONT_FAMILY, fontSize: '36px', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
@@ -130,7 +165,7 @@ export class MenuScene extends Phaser.Scene {
       // than styling the text alone.
       textClickable(t, hex(TEXT.primary), hex(PALETTE.lightHigh), {
         onOver: () => {
-          if (this.helpOpen) return;
+          if (this.helpOpen || this.achievementsOpen) return;
           this.selected = i;
           this.refreshOptions();
           this.hideMessage();
@@ -163,6 +198,8 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setVisible(false);
     this.buildHelp(width, height);
+    // AG-77：成就面板与帮助面板同宗——只建一次，开时重挂内容。
+    this.buildAchievements(width, height);
   }
 
   // The per-frame life of the title screen: the backdrop's tower drift, window
@@ -196,6 +233,11 @@ export class MenuScene extends Phaser.Scene {
 
   private onNav(slot: 'up' | 'down', delta: number): void {
     if (this.helpOpen || !this.accept(slot)) return;
+    // AG-77：面板开着时 ↑/↓ 在十四条成就里移光标，不动标题菜单。
+    if (this.achievementsOpen) {
+      this.moveAchievement(delta);
+      return;
+    }
     this.move(delta);
   }
 
@@ -203,6 +245,11 @@ export class MenuScene extends Phaser.Scene {
     if (!this.accept(slot)) return;
     if (this.helpOpen) {
       this.toggleHelp(); // Enter and Esc both close the help panel
+      return;
+    }
+    // AG-77：Enter 与 Esc 都关成就面板（与操作说明同一套键位）。
+    if (this.achievementsOpen) {
+      this.toggleAchievements();
       return;
     }
     if (slot === 'enter') this.activate();
@@ -310,5 +357,122 @@ export class MenuScene extends Phaser.Scene {
   private toggleHelp(): void {
     this.helpOpen = !this.helpOpen;
     for (const o of this.helpObjects) o.setVisible(this.helpOpen);
+  }
+
+  // ── AG-77: the achievements cabinet ─────────────────────────────────────
+  /** Enter/Esc/点击：开合。每次开都重读存档——这一跑可能又亮了几条。 */
+  private toggleAchievements(): void {
+    this.achievementsOpen = !this.achievementsOpen;
+    if (this.achievementsOpen) {
+      this.achievementSelected = 0;
+      this.refreshAchievements();
+    }
+    for (const o of this.achievementObjects) o.setVisible(this.achievementsOpen);
+    if (!this.achievementsOpen) this.hideMessage();
+  }
+
+  /** ↑/↓：在十四条里移光标（循环不循环？不循环——到底就停，与菜单一致）。 */
+  private moveAchievement(delta: number): void {
+    this.achievementSelected = Phaser.Math.Clamp(this.achievementSelected + delta, 0, ACHIEVEMENTS.length - 1);
+    this.refreshAchievements();
+  }
+
+  /**
+   * 重挂面板内容：从独立键读档，逐行刷名称/状态/详情。开合不重建对象
+   * （与 help 同一理由：场景重启复用实例，字段初始化器不重跑）。
+   */
+  private refreshAchievements(): void {
+    const save: AchievementSave = loadAchievements();
+    let unlockedCount = 0;
+    this.achievementRows.forEach((row) => {
+      const unlocked = save.unlocked.includes(row.def.id);
+      if (unlocked) unlockedCount += 1;
+      const color = unlocked ? hex(PALETTE.lightHigh) : hex(TEXT.secondary);
+      row.nameText.setColor(color);
+      row.statusText.setText(unlocked ? '已解锁' : achievementProgress(save, row.def.id));
+      row.statusText.setColor(unlocked ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
+      row.chip.setFillStyle(ACHIEVEMENT_TIER_COLOR[row.def.tier], unlocked ? 1 : 0.45);
+    });
+    if (this.achievementCountText) this.achievementCountText.setText(`已解锁 ${unlockedCount}/${ACHIEVEMENTS.length}`);
+    const selected = this.achievementRows[this.achievementSelected];
+    if (this.achievementDetailText) this.achievementDetailText.setText(selected?.def.description ?? '');
+    if (this.achievementBand && selected) {
+      this.achievementBand.setPosition(0, ACH_ROWS_TOP + this.achievementSelected * ACH_ROW_H);
+      this.achievementBand.setVisible(true);
+    }
+  }
+
+  /** 面板只建一次（create 里调），内容每次开面板时由 refreshAchievements 重挂。 */
+  private buildAchievements(width: number, height: number): void {
+    const panelH = ACH_ROWS_TOP + ACHIEVEMENTS.length * ACH_ROW_H + 12 + ACH_DETAIL_H + 30;
+    const cx = width / 2;
+    const cy = height / 2;
+    const left = cx - ACH_PANEL_W / 2;
+    const top = cy - panelH / 2;
+
+    this.achievementObjects.push(...buildPanel(this, cx, cy, ACH_PANEL_W, panelH, 'yellow', PANEL_DEPTH.menu.help));
+    const title = this.add.text(cx, top + 26, '成就', { fontFamily: FONT_FAMILY, fontSize: '30px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
+    this.achievementCountText = this.add
+      .text(left + ACH_PANEL_W - 20, top + 26, '', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(TEXT.dim) })
+      .setOrigin(1, 0.5)
+      .setName('achievement-count');
+    this.achievementObjects.push(title, this.achievementCountText);
+
+    // 选中行的整幅淡洗 + 左筋（与 uiKit buildListRow 的选中语言同款）。
+    this.achievementBand = this.add
+      .rectangle(left, top + ACH_ROWS_TOP, ACH_PANEL_W - 32, ACH_ROW_H, PALETTE.lightHigh)
+      .setOrigin(0, 0)
+      .setAlpha(0.13)
+      .setVisible(false);
+    this.achievementObjects.push(this.achievementBand);
+
+    this.achievementRows = [];
+    ACHIEVEMENTS.forEach((def, i) => {
+      const y = top + ACH_ROWS_TOP + i * ACH_ROW_H;
+      const cy2 = y + ACH_ROW_H / 2;
+      const chip = this.add.rectangle(left + 20, cy2, 10, 10, ACHIEVEMENT_TIER_COLOR[def.tier]).setOrigin(0.5);
+      const nameText = this.add
+        .text(left + 40, cy2, def.name, { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(TEXT.secondary) })
+        .setOrigin(0, 0.5)
+        .setName('achievement-row-name');
+      const statusText = this.add
+        .text(left + ACH_PANEL_W - 20, cy2, '', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(TEXT.dim) })
+        .setOrigin(1, 0.5)
+        .setName('achievement-row-status');
+      // 行点击 = 把光标移到这行（与 ↑/↓ 同一效果）；不做「点击即关」——
+      // 十四条挤在一起，误触一列就关面板太容易丢上下文。
+      const hit = hitRect(this, left + 8, y, ACH_PANEL_W - 16, ACH_ROW_H, PANEL_DEPTH.menu.help + 6, {
+        onClick: () => {
+          if (!this.achievementsOpen) return;
+          this.achievementSelected = i;
+          this.refreshAchievements();
+        },
+      });
+      this.achievementRows.push({ def, chip, nameText, statusText });
+      this.achievementObjects.push(chip, nameText, statusText, hit);
+    });
+
+    // 详情井：选中行的一句话说明（说明写满两行也装得下——20px 两行 50px < 64）。
+    const detailTop = top + ACH_ROWS_TOP + ACHIEVEMENTS.length * ACH_ROW_H + 12;
+    this.achievementObjects.push(
+      ...buildPanelWell(this, left + 16, detailTop, ACH_PANEL_W - 32, ACH_DETAIL_H, PANEL_DEPTH.menu.help),
+    );
+    this.achievementDetailText = this.add
+      .text(left + 28, detailTop + 12, '', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '20px',
+        color: hex(TEXT.primary),
+        wordWrap: { width: ACH_PANEL_W - 56 },
+      })
+      .setName('achievement-detail');
+    this.achievementObjects.push(this.achievementDetailText);
+
+    const footer = this.add
+      .text(cx, top + panelH - 16, '↑/↓ 选择 · Enter / Esc 关闭', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.clothHigh) })
+      .setOrigin(0.5);
+    this.achievementObjects.push(footer);
+
+    applyPanelDepth(this.achievementObjects, PANEL_DEPTH.menu.help);
+    for (const o of this.achievementObjects) o.setVisible(false);
   }
 }

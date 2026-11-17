@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
-import { playFx, startFxLoop } from '../render/fx';
+import { FloatTextPool, FrameBudgetGuard, playFx, setFxDegraded, startFxLoop } from '../render/fx';
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../core/design';
 import { getGame, hasGame, startNewGame } from '../core/session';
 import {
@@ -1304,6 +1304,10 @@ export class GameScene extends Phaser.Scene {
     // AG-74：楼层 BGM。按当前上下文起（入夜/带电台都由 resolveTrackId 决定），
     // AudioContext 未获手势前只记待播、不发声（自动播放策略）。
     startFloorMusic(getGame());
+
+    // AG-80：性能层（飘字池/帧预算守卫/FPS 计数器）建在 drawFloor 之前——
+    // 楼层过程与之后的搜刮、战斗飘字全都走池。
+    this.initPerfLayer();
 
     this.drawFloor();
 
@@ -2663,14 +2667,16 @@ export class GameScene extends Phaser.Scene {
     return Math.max(0, state.player.hp) / GAME_CONFIG.player.hpMax;
   }
 
-  /** 飘字：世界坐标，上飘 46px 淡出。depth 压过前景剪影（26）。 */
+  /**
+   * 飘字：世界坐标，上飘 46px 淡出。depth 压过前景剪影（26）。
+   *
+   * AG-80：走 FloatTextPool——每次命中 this.add.text 一个新 Text、900ms 后
+   * destroy，一场战斗就是几十次「新建 Text + 重烤纹理 + 上传 GPU」。池预建
+   * 12 个复用，超发时回收最旧的一个（见 fx.ts 的 FloatTextPool）。调用点
+   * 一个都没改：掉血/未命中/反击/行为标签仍然调这一个方法。
+   */
   private combatFloatText(x: number, y: number, text: string, color: string): void {
-    const t = this.add
-      .text(x, y, text, { fontFamily: FONT_FAMILY, fontSize: '20px', color, fontStyle: 'bold' })
-      .setOrigin(0.5, 0.5)
-      .setDepth(DUST_DEPTH + 4);
-    this.tweens.add({ targets: t, y: y - 46, duration: 900, ease: 'Quad.easeOut' });
-    this.tweens.add({ targets: t, alpha: 0, duration: 480, delay: 420, onComplete: () => t.destroy() });
+    this.floatText.spawn(x, y, text, color);
   }
 
   /** ambusher 开场偷袭：敌人前冲 + 玩家受伤动画/震屏 + 掉血飘字 + 头顶血条收缩。 */
@@ -8838,6 +8844,128 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // ── AG-80: 性能层（飘字池 / 帧预算守卫 / FPS 计数器 / 降级） ──────────────
+  // 上架承诺「低端机不炸」的落点。四件东西：
+  //   1. floatText —— 飘字池（combatFloatText 的下游），create() 里建；
+  //   2. perfGuard —— 帧时间滑动窗口 + 双阈值滞回（纯逻辑在 fx.ts，Node 直测），
+  //      update() 每个分支之前喂 delta，爬梯/面板/战斗全都覆盖；
+  //   3. perfHudText —— FPS 计数器，F3 切换（F 是 AG-50 抄近路键，不抢），
+  //      默认不可见，右上角 hudLayout.fpsX/fpsY；
+  //   4. applyPerfDegrade —— 守卫的 onDegrade 边沿：关粒子（playFx no-op 化）
+  //      + 停敌人呼吸（MonsterView.setBreathing(false)），帧时间回来后自动恢复。
+  // 纪律：本段只换实现，不碰任何游戏逻辑/数值/存档。
+
+  /** AG-80：飘字池。场景重启时 initPerfLayer 先拆旧的再建新的。 */
+  private floatText!: FloatTextPool;
+  /** AG-80：帧预算守卫。 */
+  private perfGuard!: FrameBudgetGuard;
+  /** AG-80：当前是否处于降级态（守卫边沿与强制切换都写它，计数器读它）。 */
+  private perfDegraded = false;
+  /** AG-80：FPS 计数器文本（scrollFactor 0，默认不可见）。 */
+  private perfHudText!: Phaser.GameObjects.Text;
+  private perfHudVisible = false;
+  /** 上次刷新计数器的场景时间（500ms 节流 + 按值缓存，不重烤纹理）。 */
+  private perfHudLast = Number.NEGATIVE_INFINITY;
+  private perfHudShown = '';
+  /** F3 一帧只认一次（系统自动重复不会一帧翻两次）。 */
+  private perfKeyFrame = -1;
+  /** F3 的稳定处理器引用：重启时 off 再 on，不叠第二份监听。 */
+  private perfKeyHandler = (): void => {
+    const frame = this.game.getFrame();
+    if (frame === this.perfKeyFrame) return;
+    this.perfKeyFrame = frame;
+    this.togglePerfHud();
+  };
+
+  /**
+   * AG-80：建/重建性能层。create() 里 drawFloor 之前调——drawFloor 过程中的
+   * 搜刮飘字与之后的战斗飘字都要用池。重启时字段初始化器不重跑，旧池要先拆：
+   * 它的 Text 还在 display list 里，不拆就会留下一份播完的幽灵字。
+   */
+  private initPerfLayer(): void {
+    this.floatText?.destroy();
+    this.floatText = new FloatTextPool(this, { depth: DUST_DEPTH + 4 });
+    this.perfGuard = new FrameBudgetGuard({ onDegrade: (on) => this.applyPerfDegrade(on) });
+    this.buildPerfHud();
+    const kb = this.input.keyboard;
+    if (kb) {
+      kb.off('keydown-F3', this.perfKeyHandler);
+      kb.on('keydown-F3', this.perfKeyHandler);
+    }
+  }
+
+  /**
+   * AG-80：FPS 计数器。右上角逐个（hudLayout.fpsX/fpsY），caption 20px、
+   * 16 色板内的 TEXT.secondary，降级时转 TEXT.warn 并缀「· 降级」。自带
+   * 0b0f12 底板（hud-feedback 同款读法）——计数器在世界腰带上，世界再亮
+   * 也读得清。默认不可见，e2e 的 HUD 取证因此不受影响。
+   */
+  private buildPerfHud(): void {
+    this.perfHudText = this.add
+      .text(HUD_LAYOUT.fpsX, HUD_LAYOUT.fpsY, '', {
+        fontFamily: FONT_FAMILY,
+        fontSize: `${TYPE.caption}px`,
+        color: hex(TEXT.secondary),
+        backgroundColor: '#0b0f12ee',
+        padding: { x: 6, y: 2 },
+      })
+      .setOrigin(1, 0)
+      .setName('hud-fps')
+      .setScrollFactor(0)
+      .setDepth(HUD_FEEDBACK_DEPTH)
+      .setVisible(false);
+    this.perfHudVisible = false;
+    this.perfHudShown = '';
+    this.perfHudLast = Number.NEGATIVE_INFINITY;
+  }
+
+  /** F3：计数器显隐。打开时立刻刷一次，不等 500ms 节流点。 */
+  private togglePerfHud(): void {
+    this.perfHudVisible = !this.perfHudVisible;
+    this.perfHudText.setVisible(this.perfHudVisible);
+    if (this.perfHudVisible) this.refreshPerfHud(true);
+    else {
+      this.perfHudText.setText('');
+      this.perfHudShown = '';
+    }
+  }
+
+  /**
+   * AG-80：每帧喂帧时间；计数器可见时按 500ms 节流刷新。放在 stairClimb
+   * 分支与全部面板早退之前——爬梯和开面板正是最重的几帧，那才是最该被
+   * 守卫覆盖的状态。
+   */
+  private updatePerfGuard(delta: number): void {
+    this.perfGuard.sample(delta);
+    if (!this.perfHudVisible) return;
+    if (this.time.now - this.perfHudLast < 500) return;
+    this.refreshPerfHud(false);
+  }
+
+  /** 计数器文案：窗口均值折成 fps + 降级标记。按值缓存，没变不碰对象。 */
+  private refreshPerfHud(force: boolean): void {
+    const mean = this.perfGuard.meanMs;
+    const fps = mean > 0 ? Math.round(1000 / mean) : 0;
+    const shown = `${fps} FPS${this.perfDegraded ? ' · 降级' : ''}`;
+    if (!force && shown === this.perfHudShown) return;
+    this.perfHudShown = shown;
+    this.perfHudLast = this.time.now;
+    this.perfHudText.setText(shown).setColor(hex(this.perfDegraded ? TEXT.warn : TEXT.secondary));
+  }
+
+  /**
+   * AG-80：降级边沿（FrameBudgetGuard 的 onDegrade）。进：粒子整体关停
+   * （setFxDegraded → playFx no-op，含一次性的火花/闪白/挥击与地面的火）
+   * + 敌人待机呼吸停帧；出：两样都恢复，下次 playFx 照常。计数器立刻反映
+   * 状态——玩家该知道画面为什么变素了，以及这是暂时的。
+   */
+  private applyPerfDegrade(on: boolean): void {
+    this.perfDegraded = on;
+    setFxDegraded(this, on);
+    this.combatStage?.monster.setBreathing(!on);
+    this.refreshPerfHud(true);
+  }
+
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
     // AG-71: the nav bar first, before every early-return below — a panel's
@@ -8872,6 +9000,8 @@ export class GameScene extends Phaser.Scene {
     // is precisely when it is slung and static. The swing happens in a panel, so
     // it stayed slung across the back through the entire attack.
     this.syncWeapon();
+    // AG-80：帧预算守卫在每个早退分支之前喂样——爬梯、面板、战斗全程覆盖。
+    this.updatePerfGuard(delta);
     if (this.stairClimb) {
       this.updateStairClimb(delta);
       return;

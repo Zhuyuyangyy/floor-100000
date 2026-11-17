@@ -100,6 +100,16 @@ export const HUD_LAYOUT = {
   statusRowPitch: 23,
   /** The summary line's centre, near the card's bottom. */
   statusSummaryCY: 542,
+  // ── AG-80: the FPS counter (perf HUD) ─────────────────────────────────
+  // 右上角逐个：顶板的三条横向车道（row1 钱币/分数、goalY 目标、
+  // environmentY 环境 chips）都在 y ≤ 105，计数器右缘钉 12px 内边距、落在
+  // 顶板下沿（contextBottom 102）之下 6px——状态卡（statusCardY 376）之上
+  // 的整段右腰没有任何 HUD。默认不可见（F3 切换），不参与既有车道取证；
+  // 文字自带 0b0f12 底板（hud-feedback 同款读法），世界再亮也读得清。
+  // 为什么不是 F 键：F 是 AG-50 的「楼梯口抄近路」快捷键，抢键会让玩家在
+  // 梯口按一下计数器就付一笔金子。调试覆盖层的通用键位是 F3。
+  fpsX: DESIGN_WIDTH - 12,
+  fpsY: 108,
 } as const;
 
 // ── AG-71: the bottom navigation bar ───────────────────────────────────────

@@ -620,6 +620,12 @@ const AILMENT_LABEL: Record<string, string> = {
 // 「本局统计」固定在设置之后（index 5）：统计是只读面板，放最后不碍事。
 const PAUSE_OPTIONS = ['继续游戏', '塔楼地图', '重新开始', '返回标题', '设置', '本局统计'];
 
+// AG-81 统计面板（暂停菜单 → 本局统计）的画布尺寸。表格每次打开都按当前
+// state 重建（QA-01），buildStatsPanel / refreshStatsTable / openStatsPanel
+// 的 panelBox 必须同源——三处各写一遍 480/330 正是旧代码允许漂移的口子。
+const STATS_PANEL_W = 480;
+const STATS_PANEL_H = 330;
+
 // OVERHAUL: the daily objective's one-line label, per goal kind.
 const GOAL_LABELS: Record<'water' | 'containers' | 'upgrade' | 'floor', (target: number) => string> = {
   water: (n) => `带回 ${n} 瓶净水`,
@@ -1327,6 +1333,9 @@ export class GameScene extends Phaser.Scene {
   // statsOpen 期间 pauseOpen 保持 true（游戏仍暂停），ESC 先回暂停菜单。
   private statsOpen = false;
   private statsObjects: PanelObject[] = [];
+  // QA-01：统计表格的行件单列一池——打开时整池销毁重建（refreshStatsTable），
+  // 与面板框/页眉/脚注（statsObjects 的其余部分，create 时建一次）分开管。
+  private statsTableObjects: PanelObject[] = [];
   private lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
   // B3-01 D9: last save-failure count we already warned about. Survives a scene
   // restart on purpose — the page's storage is still broken after 重新开始, so
@@ -1375,6 +1384,7 @@ export class GameScene extends Phaser.Scene {
     this.pauseOptionTexts = [];
     this.pauseMarker = createMarker(this);
     this.statsObjects = [];
+    this.statsTableObjects = [];
     this.statsOpen = false;
     this.dialogueObjects = [];
     this.dialogueOptions = [];
@@ -6551,23 +6561,24 @@ export class GameScene extends Phaser.Scene {
   // 布局：480×330 绿板，16 行统计两列网格（8 行 × STATS_PANEL.rowPitch），
   // 行件与死亡/通关结算共用 buildStatsTable——「一局的账」三个画面同一张脸。
   // 纪录对比不在这里：跨局纪录是结局时刻的炫耀，见 EndScene / EndgameScene。
+  //
+  // QA-01（P1）根因：表格文本曾在这里由当次 runStatRows(getGame()) 生成，
+  // 而本方法只在 create() 跑一次——游玩中累积的爬梯/开箱/击杀/伤害永远
+  // 停在开局零值，只有创建时即非零的存活天数/得分两行对得上。表格因此改为
+  // 每次打开整池重建（refreshStatsTable），而不是 create() 的一次性快照。
   private buildStatsPanel(): void {
     const { width, height } = this.viewSize();
-    const panelW = 480;
-    const panelH = 330;
     const cx = width / 2;
     const cy = height / 2;
-    const left = cx - panelW / 2;
-    const top = cy - panelH / 2;
+    const left = cx - STATS_PANEL_W / 2;
+    const top = cy - STATS_PANEL_H / 2;
 
-    this.statsObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', PANEL_DEPTH.game.pause));
-    this.statsObjects.push(...buildPanelHeader(this, left, top, panelW, '本局统计', UI.good, PANEL_DEPTH.game.pause + 5));
-    const colW = (panelW - 32 - STATS_PANEL.colGap) / 2;
-    const grid = buildStatsTable(this, left + 16, top + 46, colW, runStatRows(getGame()), PANEL_DEPTH.game.pause + 5, 2);
-    this.statsObjects.push(...grid.objects);
+    this.statsObjects.push(...buildPanel(this, cx, cy, STATS_PANEL_W, STATS_PANEL_H, 'green', PANEL_DEPTH.game.pause));
+    this.statsObjects.push(...buildPanelHeader(this, left, top, STATS_PANEL_W, '本局统计', UI.good, PANEL_DEPTH.game.pause + 5));
+    this.refreshStatsTable();
     this.statsObjects.push(
       this.add
-        .text(cx, top + panelH - 16, '历史纪录见死亡 / 通关结算画面', {
+        .text(cx, top + STATS_PANEL_H - 16, '历史纪录见死亡 / 通关结算画面', {
           fontFamily: FONT_FAMILY,
           fontSize: `${TYPE.caption}px`,
           color: hex(TEXT.dim),
@@ -6579,16 +6590,59 @@ export class GameScene extends Phaser.Scene {
     for (const o of this.statsObjects) o.setVisible(false);
   }
 
+  /**
+   * QA-01：按当前 state 重建统计表格——暂停面板每次打开都走这里。
+   *
+   * 为什么是「打开时整池销毁重建」而不是「存行件 setText」：
+   * ① runStatRows(getGame()) 是唯一数据源，重建走的正是 create() 首建同一
+   *    条构造路径，面板内容永远不可能与数据函数漂移；setText 按索引刷要求
+   *    行序/行数被两处分别记住，上游哪天改行数（STAT_KEYS 或末尾三项）就
+   *    静默错位——QA 这类「数字对不上」的 bug 正是那么养出来的。
+   * ② 代码库同款先例在手：EndgameScene.buildMode 切模式即销毁重建整池，
+   *    GameScene create() 重启 likewise 重置对象池重建（见 1364 行注释）。
+   * ③ 成本可忽略：16 行 × 2 个 Text，且只在人类打开暂停子面板时发生——
+   *    面板不可见时刷新才是浪费（QA 建议的「打开时刷新」语义）。
+   * ④ 不动共享件 buildStatsTable 的签名（EndScene/EndgameScene 零改动）。
+   *
+   * 几何用当前 viewSize 与 STATS_PANEL_W/H 常量：面板框在 create() 时按
+   * 当时画布定位，表格跟随打开时刻的画布——两者同源常量化，不存在漂移。
+   */
+  private refreshStatsTable(): void {
+    if (this.statsTableObjects.length > 0) {
+      const stale = new Set<PanelObject>(this.statsTableObjects);
+      for (const o of this.statsTableObjects) o.destroy();
+      this.statsTableObjects = [];
+      this.statsObjects = this.statsObjects.filter((o) => !stale.has(o));
+    }
+    const { width, height } = this.viewSize();
+    const cx = width / 2;
+    const cy = height / 2;
+    const left = cx - STATS_PANEL_W / 2;
+    const top = cy - STATS_PANEL_H / 2;
+    const colW = (STATS_PANEL_W - 32 - STATS_PANEL.colGap) / 2;
+    const grid = buildStatsTable(this, left + 16, top + 46, colW, runStatRows(getGame()), PANEL_DEPTH.game.pause + 5, 2);
+    this.statsTableObjects.push(...grid.objects);
+    this.statsObjects.push(...grid.objects);
+    // 与 create() 首建同款收尾：锁屏 + 深度归位（网格件非 PANEL_OWNED，
+    // 压到 pause 深度），可见性跟随 statsOpen——刷新不是显示开关
+    // （refreshInventory 的同款约定：不可见时刷新不得把内容浮上屏）。
+    applyPanelDepth(grid.objects, PANEL_DEPTH.game.pause);
+    for (const o of grid.objects) o.setVisible(this.statsOpen);
+  }
+
   /** 打开统计面板：暂停菜单让位（pauseOpen 不变——游戏仍然暂停着）。 */
   private openStatsPanel(): void {
     this.statsOpen = true;
+    // QA-01：先按当前 state 重建表格再显形——旧代码只切可见性，面板永远
+    // 显示 create() 时刻的快照（QA 第 0 轮 20a 截图：游玩后全 0）。
+    this.refreshStatsTable();
     for (const o of this.pauseObjects) o.setVisible(false);
     for (const o of this.statsObjects) o.setVisible(true);
-    // 面板矩形现取统计面板自己的（480×330，与 buildStatsPanel 同源）：点它
-    // 外面 = ESC 返回暂停菜单（onEsc 的 statsOpen 分支），与暂停菜单既有的
+    // 面板矩形现取统计面板自己的（STATS_PANEL_W/H，与 buildStatsPanel 同源）：
+    // 点它外面 = ESC 返回暂停菜单（onEsc 的 statsOpen 分支），与暂停菜单既有的
     // 「点外面关面板」同构。
     const { width, height } = this.viewSize();
-    this.panelBox = { x: width / 2 - 240, y: height / 2 - 165, w: 480, h: 330 };
+    this.panelBox = { x: width / 2 - STATS_PANEL_W / 2, y: height / 2 - STATS_PANEL_H / 2, w: STATS_PANEL_W, h: STATS_PANEL_H };
     playSfx('panel');
   }
 

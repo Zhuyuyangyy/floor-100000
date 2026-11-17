@@ -346,8 +346,11 @@ test('the freight lift refuses a rider without the segment pass', async ({ page 
 
   await setX(page, LIFT_X);
   // The hint advertises the lift before the press, the way every other
-  // interaction does.
-  await expect.poll(async () => hasVisibleText(page, '按 E 乘货运电梯')).toBe(true);
+  // interaction does. AG-71: the hint moved into the nav bar's contextual
+  // slot, where the key lives in an [E] keycap and the text is the action
+  // name alone ("[E] 乘货运电梯") — the full string stays on the invisible
+  // hud-hint state object that the hudText() helpers read.
+  await expect.poll(async () => hasVisibleText(page, '乘货运电梯')).toBe(true);
 
   await page.keyboard.press('E');
   await waitForFlash(page, `需要${LIFT_PASS_NAME}`);

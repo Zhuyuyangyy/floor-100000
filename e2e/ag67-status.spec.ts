@@ -288,7 +288,9 @@ for (const viewport of [
       const scene = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as {
         children: { list: Array<{ type: string; text: string; getBounds(): { x: number; y: number; width: number; height: number } }> };
       };
-      const labels = ['背包 I', '制作 C', '产业 G', '地图 M', '菜单'];
+      // AG-71: the button row became the bottom navigation bar; the 菜单
+      // slot now carries its Esc key like every other slot.
+      const labels = ['背包 I', '制作 C', '产业 G', '地图 M', '菜单 Esc'];
       return scene.children.list
         .filter((o) => o.type === 'Text' && labels.includes(o.text))
         .map((o) => {

@@ -207,7 +207,7 @@ import {
   buildWallDressing,
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
-import { BAG_LAYOUT, CONTAINER_LABEL_DROP, HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
+import { BAG_LAYOUT, CONTAINER_LABEL_DROP, HUD_LAYOUT, NAV_BAR, hudClockLabel, navSlotX } from '../render/hudLayout';
 import { getRecipe, isPassUpgrade, materialSourceHint, type RecipeId, type UpgradeId } from '../data/recipes';
 import {
   CRAFT_NODE_H,
@@ -1063,7 +1063,35 @@ export class GameScene extends Phaser.Scene {
   // lives here rather than in a tween that would outlive the floor it belongs to.
   private dormSleepers: Array<{ z: Phaser.GameObjects.Text; baseY: number; phase: number }> = [];
   private panelBox: { x: number; y: number; w: number; h: number } | null = null;
-  private hudButtons: Phaser.GameObjects.GameObject[] = [];
+  // ── AG-71: the bottom navigation bar ────────────────────────────────────
+  // 六个槽的常驻栏（见 render/hudLayout.ts 的 NAV_BAR）。它接替了旧的
+  // hudButtons 按钮行：五个固定槽各带一个 hitRect（同一套 stairClimb /
+  // anyPanelOpen 守卫），contextual 槽是提示不是控件。navGfx 画静态部分
+  // （板/分隔线/条纹），navStateGfx 画随状态变的部分（槽高亮、槽图标、
+  // contextual 键帽）；六个文本 = 五个槽标签 + contextual 文本 + 键帽字母。
+  private navSlots: Array<{
+    key: 'bag' | 'craft' | 'venture' | 'map' | 'menu';
+    label: string;
+    icon: 'bag' | 'craft' | 'coins' | 'tower' | 'clipboard';
+    run: () => void;
+    owned: () => boolean;
+  }> = [
+    { key: 'bag', label: '背包 I', icon: 'bag', run: () => this.onToggleInventory(), owned: () => this.inventoryOpen },
+    { key: 'craft', label: '制作 C', icon: 'craft', run: () => this.onToggleCrafting(), owned: () => this.craftingOpen },
+    { key: 'venture', label: '产业 G', icon: 'coins', run: () => this.onToggleVentures(), owned: () => this.ventureOpen },
+    { key: 'map', label: '地图 M', icon: 'tower', run: () => this.onToggleMap(), owned: () => false },
+    { key: 'menu', label: '菜单 Esc', icon: 'clipboard', run: () => this.onEsc(), owned: () => this.pauseOpen },
+  ];
+  private navGfx?: Phaser.GameObjects.Graphics;
+  private navStateGfx?: Phaser.GameObjects.Graphics;
+  private navSlotTexts: Phaser.GameObjects.Text[] = [];
+  private navIconX: number[] = [];
+  private navContextText?: Phaser.GameObjects.Text;
+  private navKeyText?: Phaser.GameObjects.Text;
+  private navHitRects: Phaser.GameObjects.Rectangle[] = [];
+  /** 上次画过的 contextual 键帽键与激活槽的组合键（没变就不碰对象）。 */
+  private navStateKey = '';
+  private navContextShown = '';
   private readonly pointerHandler = (pointer: Phaser.Input.Pointer, currentlyOver?: unknown[]): void =>
     this.onPointerDown(pointer, currentlyOver ?? []);
   private pauseObjects: PanelObject[] = [];
@@ -4032,6 +4060,22 @@ export class GameScene extends Phaser.Scene {
     this.statusCardValueTexts = [];
     this.statusCardSummaryText = undefined;
     this.statusCardKey = '';
+    // AG-71: the navigation bar owns the old foot bar's lane now.
+    this.navGfx?.destroy();
+    this.navGfx = undefined;
+    this.navStateGfx?.destroy();
+    this.navStateGfx = undefined;
+    for (const t of this.navSlotTexts) t.destroy();
+    this.navSlotTexts = [];
+    this.navIconX = [];
+    this.navContextText?.destroy();
+    this.navContextText = undefined;
+    this.navKeyText?.destroy();
+    this.navKeyText = undefined;
+    for (const r of this.navHitRects) r.destroy();
+    this.navHitRects = [];
+    this.navStateKey = '';
+    this.navContextShown = '';
     // A restart already destroyed the old ticker (Clock.shutdown on scene
     // shutdown); removing it again is harmless and keeps the field honest.
     this.monologueTimer?.remove();
@@ -4133,14 +4177,15 @@ export class GameScene extends Phaser.Scene {
       { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12ee', padding: { x: 8, y: 3 }, wordWrap: { width: 1216 } },
     ).setName('hud-bag-full').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
 
-    // ── the foot bar ────────────────────────────────────────────────────────
-    this.add.rectangle(0, DESIGN_HEIGHT - HUD_FOOT_H, DESIGN_WIDTH, HUD_FOOT_H, UI.surface).setOrigin(0, 0).setAlpha(0.88).setScrollFactor(0).setDepth(100);
-    const footLine = this.add.graphics().setScrollFactor(0).setDepth(101);
-    footLine.fillStyle(UI.line, 0.9);
-    footLine.fillRect(0, DESIGN_HEIGHT - HUD_FOOT_H, DESIGN_WIDTH, 1);
+    // ── AG-71: the bottom navigation bar ──────────────────────────────────────
+    // 参考 UI 的常驻底栏：一个 contextual 槽 + 五个固定槽，六个槽一条铆钉板。
+    // hud-hint 退居状态对象（不可见）：它的文案是 contextual 槽的唯一数据源
+    // （世界链逐帧刷新、面板链在开面板那一帧落定），e2e 仍按 name 断言它的
+    // 全串文本；显示层是导航条自己的 hud-nav-context，见 buildNavBar。
     this.hintText = this.add
-      .text(8, DESIGN_HEIGHT - HUD_FOOT_H / 2, 'A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
-      .setOrigin(0, 0.5).setName('hud-hint').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+      .text(8, DESIGN_HEIGHT - HUD_FOOT_H / 2, 'A/D 或 ←/→ 移动 · E 交互', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
+      .setOrigin(0, 0.5).setName('hud-hint').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
+    this.buildNavBar();
 
     // The low-HP vignette: pure red wash whose alpha is the pulse function's
     // output. Created invisible; update() drives it every frame.
@@ -4176,11 +4221,10 @@ export class GameScene extends Phaser.Scene {
     }
     this.lastStats = '';
     this.refreshGoalHud();
-    this.buildHudButtons();
 
     // ── AG-67: the bottom-right character card + the monologue ticker ────
     // Built last, so the card's lane is measured against the FINISHED hud:
-    // money lane, button row, foot bar (see render/hudLayout.ts statusCard*).
+    // money lane, nav bar (see render/hudLayout.ts statusCard*).
     this.buildStatusCard();
     this.monologueTimer = this.time.addEvent({
       delay: STATUS_PANEL_BALANCE.monologue.tickMs,
@@ -4189,52 +4233,164 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // Four clickable buttons for the four panels the keyboard opens. Placed on the
-  // bottom-right, above the key legend: the top bar is already full (four stat
-  // bars, floor badge, clock, gold, score) and the panel row would have sat on
-  // top of the world's floor labels.
-  //
-  // Every one of them goes through the same guard the keyboard path uses, and
-  // refuses to open a second panel on top of an open one — except its own, which
-  // toggles closed.
-  private buildHudButtons(): void {
-    for (const o of this.hudButtons) o.destroy();
-    this.hudButtons = [];
-    const items: Array<{ label: string; run: () => void; owned: () => boolean }> = [
-      { label: '背包 I', run: () => this.onToggleInventory(), owned: () => this.inventoryOpen },
-      { label: '制作 C', run: () => this.onToggleCrafting(), owned: () => this.craftingOpen },
-      { label: '产业 G', run: () => this.onToggleVentures(), owned: () => this.ventureOpen },
-      { label: '地图 M', run: () => this.onToggleMap(), owned: () => false },
-      { label: '菜单', run: () => this.onEsc(), owned: () => this.pauseOpen },
-    ];
-    const W = 88;
-    const H = 26;
-    const GAP = 6;
-    const total = items.length * W + (items.length - 1) * GAP;
-    let x = DESIGN_WIDTH - 16 - total;
-    const y = DESIGN_HEIGHT - 56;
-    for (const item of items) {
-      const parts = framedButton(
-        this,
-        x,
-        y,
-        W,
-        H,
-        item.label,
-        104,
-        () => {
+  // ── AG-71: the bottom navigation bar ──────────────────────────────────────
+  // 一条常驻铆钉板：contextual 槽（最左）+ 五个等宽固定槽。铆钉/渐变/暖条
+  // 用 drawHudPlate 与顶带同一套语言，顶缘再压一道同款危险条纹；两条视觉
+  // 语言因此读作同一块界面。固定槽同时是旧 buildHudButtons 按钮行的接替者
+  // ——每个槽一张 hitRect，守卫与键盘路径相同（攀爬中不接、别的面板开着不
+  // 接，自己的面板 toggle 关闭）。
+  private buildNavBar(): void {
+    const nav = NAV_BAR;
+    const y = DESIGN_HEIGHT - nav.height;
+    const cy = y + nav.height / 2;
+    // 板：矩形打底（半透明，世界读得进来）+ drawHudPlate 的六段渐变/铆钉。
+    this.add.rectangle(0, y, DESIGN_WIDTH, nav.height, UI.surface).setOrigin(0, 0).setAlpha(0.9).setScrollFactor(0).setDepth(100);
+    this.navGfx = this.add.graphics().setScrollFactor(0).setDepth(101);
+    drawHudPlate(this.navGfx, DESIGN_WIDTH, nav.height, 0x0b0f12, UI.line, PALETTE.stoneLight, PALETTE.light);
+    // 槽分隔线：contextual 右缘一条 + 固定槽之间四条，上下各缩 12px。
+    this.navGfx.fillStyle(UI.line, 0.85);
+    for (let i = 0; i < 5; i++) {
+      this.navGfx.fillRect(Math.round(navSlotX(i)), y + 12, 1, nav.height - 24);
+    }
+    // 顶带同款签名条（顶带那条在环境行下方，这条在导航条顶缘）。
+    drawHazardStripe(this.navGfx, 4, y + 3, DESIGN_WIDTH - 8, nav.stripeH, PALETTE.lightDeep);
+
+    this.navStateGfx = this.add.graphics().setScrollFactor(0).setDepth(103);
+    // contextual 文本：hud-hint 的显示层，位置随键帽有无左右移。
+    this.navContextText = this.add.text(nav.contextPadX, cy, '', {
+      fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight),
+    }).setOrigin(0, 0.5).setName('hud-nav-context').setScrollFactor(0).setDepth(103);
+    // contextual 键帽字母（仅世界链「按 E ××」时亮）。
+    this.navKeyText = this.add.text(nav.contextPadX + nav.keycapW / 2, cy, '', {
+      fontFamily: FONT_FAMILY, fontSize: `${nav.keycapFont}px`, color: hex(PALETTE.lightHigh),
+    }).setOrigin(0.5, 0.5).setName('hud-nav-key').setScrollFactor(0).setDepth(104).setVisible(false);
+
+    this.navSlotTexts = [];
+    this.navIconX = [];
+    this.navHitRects = [];
+    this.navSlots.forEach((slot, i) => {
+      const sx = navSlotX(i);
+      const text = this.add.text(0, cy, slot.label, {
+        fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary),
+      }).setOrigin(0, 0.5).setName(`hud-nav-${slot.key}`).setScrollFactor(0).setDepth(103);
+      // 图标+标签作为一组在槽内居中：先建文本量宽度，再回推整组左缘。
+      const groupW = nav.iconSize + nav.iconGap + text.width;
+      const gx = sx + (nav.slotW - groupW) / 2;
+      text.setX(gx + nav.iconSize + nav.iconGap);
+      this.navIconX.push(gx);
+      this.navSlotTexts.push(text);
+      const hit = hitRect(this, sx, y, nav.slotW, nav.height, 105, {
+        onClick: () => {
           if (this.stairClimb) return;
-          if (this.anyPanelOpen() && !item.owned()) return;
-          item.run();
+          if (this.anyPanelOpen() && !slot.owned()) return;
+          slot.run();
         },
-        { fill: UI.surfaceRaised, line: UI.line, text: hex(TEXT.primary), hover: PALETTE.stoneLight },
-      );
-      for (const part of parts) {
-        const withScroll = part as unknown as { setScrollFactor?: (v: number) => unknown };
-        withScroll.setScrollFactor?.(0);
-        this.hudButtons.push(part);
+      });
+      hit.setScrollFactor(0);
+      this.navHitRects.push(hit);
+    });
+    this.navStateKey = '';
+    this.navContextShown = '';
+    this.refreshNavBar();
+  }
+
+  /**
+   * contextual 槽的显示拆分：世界链的「按 E ××」拆成键帽 E + 动作名（参考图
+   * `[E] 搜刮床铺` 的读法，槽里不再重复一个「按 E」）；面板链、忙碌中、环境
+   * 提示没有单一按键，整串显示、不画键帽——它们的键位本就写在文案里
+   * （↑/↓、Enter、ESC）。hud-hint 的 Text 保留全串不变（e2e 按 name 断言），
+   * 这里只决定导航条怎么画。
+   */
+  private navContextParts(hint: string): { key: string; label: string } {
+    if (hint.startsWith('按 E ')) return { key: 'E', label: hint.slice(4) };
+    return { key: '', label: hint };
+  }
+
+  /**
+   * 导航条每帧刷新，放在 update() 第一行：面板布尔在帧间被键盘/鼠标改写，
+   * 而世界模拟段有面板早退，只有这里保证开着面板时高亮与 contextual 照更。
+   * contextual 取「面板链优先，否则世界链当前脚注」——与 openPanelHint 的
+   * 既有分支一致（含战斗提示）；高亮读四个面板布尔。全部按值缓存，没变不碰
+   * 对象（Text.setText 每帧调会重烤纹理）。
+   */
+  private refreshNavBar(): void {
+    if (!this.navStateGfx || !this.navContextText || !this.navKeyText) return;
+    const nav = NAV_BAR;
+    const cy = DESIGN_HEIGHT - nav.height / 2;
+    const hint = this.openPanelHint() ?? this.hintText.text;
+    const { key, label } = this.navContextParts(hint);
+    if (label !== this.navContextShown) {
+      this.navContextShown = label;
+      this.navContextText.setText(label);
+      this.fitHudLine(this.navContextText, nav.contextTextW);
+      this.navContextText.setX(nav.contextPadX + (key ? nav.keycapW + nav.keycapGap : 0));
+    }
+    // 地图面板是另一个场景（TowerOverview），本场景没有它的布尔——参考图里
+    // 它也就位一个普通槽，不开高亮。
+    const activeKey = this.inventoryOpen ? 'bag'
+      : this.craftingOpen ? 'craft'
+        : this.ventureOpen ? 'venture'
+          : this.pauseOpen ? 'menu'
+            : '';
+    const stateKey = `${activeKey}|${key}`;
+    if (stateKey === this.navStateKey) return;
+    this.navStateKey = stateKey;
+    const g = this.navStateGfx;
+    g.clear();
+    this.navSlots.forEach((slot, i) => {
+      const sx = navSlotX(i);
+      const active = slot.key === activeKey;
+      if (active) {
+        // 激活槽：暖色薄纱 + 槽底一道亮线 + 标签转 highlight，一眼认出开着谁。
+        g.fillStyle(PALETTE.light, 0.1);
+        g.fillRect(sx, DESIGN_HEIGHT - nav.height, nav.slotW, nav.height);
+        g.fillStyle(PALETTE.lightHigh, 0.9);
+        g.fillRect(sx + 12, DESIGN_HEIGHT - 3, nav.slotW - 24, 2);
       }
-      x += W + GAP;
+      this.drawNavGlyph(g, slot.icon, this.navIconX[i] ?? 0, cy - nav.iconSize / 2, nav.iconSize, active ? PALETTE.lightHigh : TEXT.secondary);
+      this.navSlotTexts[i]?.setColor(active ? hex(TEXT.highlight) : hex(TEXT.secondary));
+    });
+    if (key) {
+      g.fillStyle(UI.surfaceRaised, 0.95);
+      g.fillRect(nav.contextPadX, cy - nav.keycapH / 2, nav.keycapW, nav.keycapH);
+      g.lineStyle(1, PALETTE.lightHigh, 0.9);
+      g.strokeRect(nav.contextPadX + 0.5, cy - nav.keycapH / 2 + 0.5, nav.keycapW - 1, nav.keycapH - 1);
+      this.navKeyText.setVisible(true).setText(key);
+    } else {
+      this.navKeyText.setVisible(false).setText('');
+    }
+  }
+
+  /**
+   * 导航槽图标。hudSkin 是只读模块且没有背包/制作的字形，这两个按
+   * drawHudIcon 的 8×8 网格语言（2px 一格、同款负空间）在本地补；其余三个
+   * 直接复用 drawHudIcon 的既有字形。缺字形这件事记在 AG-71 报告里。
+   */
+  private drawNavGlyph(
+    g: Phaser.GameObjects.Graphics,
+    name: 'bag' | 'craft' | 'coins' | 'tower' | 'clipboard',
+    x: number,
+    y: number,
+    s: number,
+    color: number,
+  ): void {
+    if (name !== 'bag' && name !== 'craft') {
+      drawHudIcon(g, name, x, y, s, color);
+      return;
+    }
+    const u = s / 8;
+    const cell = (cx: number, cy: number, cw: number, ch: number): void => {
+      g.fillStyle(color, 1);
+      g.fillRect(Math.round(x + cx * u), Math.round(y + cy * u), Math.max(1, Math.round(cw * u)), Math.max(1, Math.round(ch * u)));
+    };
+    if (name === 'bag') {
+      cell(1, 3, 6, 5); // 包身
+      cell(3, 1, 2, 2); // 提手
+      g.fillStyle(0x0b0f12, 0.9); // 包口（负空间，同 drawHudIcon 的 bg 用法）
+      g.fillRect(Math.round(x + 1 * u), Math.round(y + 3 * u), Math.max(1, Math.round(6 * u)), Math.max(1, Math.round(1 * u)));
+    } else {
+      cell(2, 1, 4, 2); // 锤头
+      cell(3, 3, 2, 5); // 锤柄
     }
   }
 
@@ -8169,6 +8325,11 @@ export class GameScene extends Phaser.Scene {
 
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
+    // AG-71: the nav bar first, before every early-return below — a panel's
+    // booleans flip between frames, and the world simulation section bails out
+    // on them, so this is the only line that keeps the bar's highlights and its
+    // contextual slot live while a panel (or a climb) owns the screen.
+    this.refreshNavBar();
     this.refreshBagFullWarning();
     // The dorm's sleeping roommates breathe. Each Z carries its own phase, so
     // five beds do not pulse in unison — a shared phase reads as one blinking
@@ -8532,7 +8693,9 @@ export class GameScene extends Phaser.Scene {
     }
     else if (zone === 'up') this.hintText.setText('按 E 上楼');
     else if (zone === 'down') this.hintText.setText('按 E 下楼');
-    else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单');
+    // AG-71: 默认脚注只剩移动与交互两个键——I/C/G/M/Esc 已经常驻在底部
+    // 导航条里，脚注再整串复读只是重复（与 MenuScene 帮助面板同一句）。
+    else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互');
   }
 
   // The wanderer only haunts its own floor; it is slower than the player and

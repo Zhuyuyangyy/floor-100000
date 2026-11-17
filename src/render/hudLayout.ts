@@ -102,6 +102,54 @@ export const HUD_LAYOUT = {
   statusSummaryCY: 542,
 } as const;
 
+// ── AG-71: the bottom navigation bar ───────────────────────────────────────
+// 2026-11-17 参考 UI 的底部常驻导航栏：一个 contextual 槽（最左，接管 hud-hint
+// 的世界链/面板链文案）+ 五个固定槽（背包 I / 制作 C / 产业 G / 地图 M /
+// 菜单 Esc）。它同时接替了两样东西：左下角那行 hud-hint 脚注（ contextual
+// 槽接管它的文案，Text 本身保留为不可见状态对象，e2e 仍按 name 断言）和
+// 右下角那排 framedButton（五个固定槽就是按钮行的常驻形态，热区同一套守卫）。
+//
+// 几何全部按实测钉住（20px GameSans，canvas measureText 逐串量过）：
+//   * contextW 560 —— 最长的 contextual 串是制作面板提示
+//     「↑/↓ 选择 · Enter 制作 · 拖拽平移 · 滚轮缩放 · C 关闭」实测 500px，
+//     加上左内边距 16（无键帽时）/ 键帽 22+8（世界链）后仍小于 560-12。
+//   * 五个固定槽等分剩下的 720px：144 一个。最宽的槽内容是「菜单 Esc」
+//     实测 76px + 图标 16 + 间隔 6 = 98，居中后两侧各剩 23px。
+//   * height 48 —— 20px 文案的线盒是 25px（fontLineBox），上下各留 11/12px；
+//     drawHudPlate 的四角铆钉落在板内 8 与 h-9=39 两行。
+//   * 板顶 672 = DESIGN_HEIGHT - 48：背包警告文案底约 655（hudLayout.spec.ts
+//     钉的 bagY+52<680 车道不变），状态卡底 556 更在其上，世界可读区（角色
+//     居中在屏高 360 附近）不相交。
+export const NAV_BAR = {
+  /** 板高，下缘钉在设计画布底边（DESIGN_HEIGHT）。 */
+  height: 48,
+  /** contextual 槽宽（最左；左缘 3px 暖色 accent 条之后量起）。 */
+  contextW: 560,
+  /** 五个固定槽的等宽：(1280-560)/5 = 144。 */
+  slotW: (DESIGN_WIDTH - 560) / 5,
+  /** 槽内 hudIcon 的边长（hudSkin 的 16px 格）。 */
+  iconSize: 16,
+  /** 图标与标签文本之间的间隔。 */
+  iconGap: 6,
+  /** contextual 文本可用宽度（fitHudLine 的上限；最长的实测串 500）。 */
+  contextTextW: 532,
+  /** contextual 文本左内边距（无键帽时）。 */
+  contextPadX: 16,
+  /** contextual 键帽（仅世界链「按 E ××」时画）的宽高与字母字号。 */
+  keycapW: 22,
+  keycapH: 18,
+  keycapFont: 14,
+  /** 键帽与文本之间的间隔。 */
+  keycapGap: 8,
+  /** 板顶危险条纹厚（顶带同款签名条，顶带那条在环境行下方）。 */
+  stripeH: 3,
+} as const;
+
+/** contextual 槽固定槽 i（0..4）的左缘 x。 */
+export function navSlotX(i: number): number {
+  return NAV_BAR.contextW + i * NAV_BAR.slotW;
+}
+
 export function hudClockLabel(day: number, minute: number): string {
   return `D${day} ${formatClock(minute)}`;
 }

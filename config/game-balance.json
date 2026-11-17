@@ -152,6 +152,30 @@
     "preloadAllFloors": false,
     "fixedQaSeeds": [1, 42, 2026]
   },
+  "statusPanel": {
+    "_comment": "AG-67 右下角色状态面板 + 角色自言自语。阈值与节流全在本段，改平衡不动代码。",
+    "summary": {
+      "hpDangerRatio": 0.3,
+      "statLowRatio": 0.25,
+      "stressHigh": 70
+    },
+    "monologue": {
+      "tickMs": 250,
+      "minGapMs": 9000,
+      "lineCooldownMs": 45000,
+      "bubbleMs": 2600,
+      "triggers": {
+        "hpRatio": 0.3,
+        "hungerRatio": 0.25,
+        "thirstRatio": 0.25,
+        "energyRatio": 0.25,
+        "night": true,
+        "newFloor": true,
+        "goodLoot": true,
+        "combatWin": true
+      }
+    }
+  },
   "notes": [
     "这些是首版初始平衡值，必须通过真实试玩调整。",
     "不要为补齐配置而自行添加未在设计文档中批准的复杂系统。",

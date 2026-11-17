@@ -50,6 +50,15 @@
       { "itemId": "cloth", "min": 1, "max": 3 }
     ]
   },
+  "nightWatch": {
+    "_comment": "AG-64：入夜二选一（出去找物资 / 在家守夜）+ NPC 偷东西。用户 2026-11-17 原话：「晚上的话应该会提示我们是出去找物资还是在家里守夜，防止别的 npc 抢我们的东西」。选「出去」后：入夜 theftDelayMinutes 游戏分钟起按 seeded 判定 NPC 造访（theftChance），造访后再过 stealWindowMinutes 分钟得手——玩家赶回 1 层（家）即阻止。偷取只碰家里容器里「非 guaranteed 且未被玩家取走」的堆：survivalBalance 钉死的每层 guaranteed 水食与地面 guaranteed 物资永不被偷，数量 lossMin..lossMax 堆。全部走 deriveSeed/makeRng（禁 Math.random），同 (runSeed, 夜) 同结果。",
+    "theftDelayMinutes": 45,
+    "theftChance": 0.55,
+    "stealWindowMinutes": 40,
+    "lossMin": 1,
+    "lossMax": 2,
+    "protectSurvivalItems": true
+  },
   "movement": {
     "_comment": "AG-50 点击操控线：鼠标/触屏点一下走、快速点两下跑；键盘 Shift+A/D（或 Shift+点击）同样跑。数值全部走这里，GameScene 不硬编码。",
     "doubleClickWindowMs": 300,

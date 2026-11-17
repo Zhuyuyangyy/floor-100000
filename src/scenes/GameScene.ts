@@ -76,6 +76,16 @@ import {
 } from '../systems/MoraleSystem';
 import { recentDiary } from '../systems/DiarySystem';
 import { availableShelterActions, finishNight, resolveShelterAction } from '../systems/ShelterSystem';
+import {
+  nightChoicePending,
+  nightWatchEvidenceNote,
+  nightWatchWakeNote,
+  recordNightChoice,
+  recordNightDismissal,
+  settlePendingVisitOnSleep,
+  stepNightWatch,
+  type NightChoice,
+} from '../systems/NightSystem';
 import { recordDepth, runScore } from '../systems/progress';
 import { CHARACTER_NAMES, applyDepth, loadMeta, saveMeta, unlockFromDepth } from '../systems/metaProgress';
 import type { CharacterKey } from '../render/artpack';
@@ -455,6 +465,12 @@ const SHELTER_ROWS: Array<{ action: ShelterAction; label: string; value: string 
   { action: 'treat', label: '治疗', value: '医疗包 · 处理伤势' },
   { action: 'repair', label: '修理', value: '木材×2 + 胶带×1' },
   { action: 'care', label: '照顾邻居', value: '口粮×1 · 压力 -12' },
+];
+// AG-64：入夜二选一的两张选项卡（各有图标/标题/一句后果说明，选中高亮、
+// Enter 确认）。图标走 itemIconKey：手电 = 推门走进夜色；医疗包 = 守夜睡觉回血。
+const NIGHT_CHOICE_ROWS: Array<{ choice: NightChoice; label: string; consequence: string; iconKey: string }> = [
+  { choice: 'scavenge', label: '出去找物资', consequence: '夜里搜刮各层 · 宿舍可能遭 NPC 光顾', iconKey: itemIconKey('flashlight') },
+  { choice: 'watch', label: '在家守夜', consequence: '回宿舍睡觉回血 · 今夜没人偷得走你的东西', iconKey: itemIconKey('medkit') },
 ];
 type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 's' | 'f' | 'q' | 'l' | 'g' | 'up' | 'down';
 type DirKeys = {
@@ -868,6 +884,13 @@ export class GameScene extends Phaser.Scene {
   private shelterSelected = 0;
   private shelterObjects: PanelObject[] = [];
   private shelterMarker!: Phaser.GameObjects.Image;
+  // AG-64：入夜二选一面板（出去找物资 / 在家守夜）。
+  private nightChoiceOpen = false;
+  private nightChoiceSelected = 0;
+  private nightChoiceObjects: PanelObject[] = [];
+  private nightChoiceMarker!: Phaser.GameObjects.Image;
+  /** 上一帧的 gameMinuteOfDay：只有帧循环把时钟推过 18:00 的那一帧算「入夜」 */
+  private prevMinuteOfDay: number | null = null;
   private feedbackTimer?: Phaser.Time.TimerEvent;
   private lastClock = '';
   private lastStats = '';
@@ -1054,6 +1077,13 @@ export class GameScene extends Phaser.Scene {
     this.dialogueMarker = createMarker(this);
     this.shelterObjects = [];
     this.shelterMarker = createMarker(this);
+    this.nightChoiceObjects = [];
+    this.nightChoiceMarker = createMarker(this);
+    this.nightChoiceOpen = false;
+    this.nightChoiceSelected = 0;
+    // 入夜提示是「时钟跨过 18:00」的边沿触发：续档/重开从当前时刻起算，
+    // 不补弹今夜之前错过的提示。
+    this.prevMinuteOfDay = getGame().gameMinuteOfDay;
     this.ventureObjects = [];
     this.ventureMarker = createMarker(this);
     // 重新开始 runs while the pause menu is still open, and these flags survive a
@@ -1237,6 +1267,16 @@ export class GameScene extends Phaser.Scene {
     // 与「洞/中梯绘制 + e2e 实测」两条既有消费者。
     this.floorGeo = floorGeometryFor(floor);
     this.floorView = getFloorView(state, floor);
+    // AG-64：回宿舍时的小偷证据。放在方法前部——落地路径会走 landingEase 分支
+    // 并提前 return，钩子挂在尾部就永远等不到爬梯落地那一帧。delayedCall(0)：
+    // create() 里第一次 drawFloor 时 feedbackText 还没建（HUD 在后头），直接
+    // flash 会炸；scene 已被换掉则跳过。
+    if (floor === STARTING_FLOOR) {
+      this.time.delayedCall(0, () => {
+        if (!this.scene.isActive()) return;
+        this.reportNightWatchEvidence();
+      });
+    }
 
     if (floor === STARTING_FLOOR) {
       this.drawDormRoom();
@@ -2032,7 +2072,7 @@ export class GameScene extends Phaser.Scene {
   // 观察，绝不绕过 economy:settled-day 水位标记自己结算。打开面板时再补一
   // 次 settleInvestments：幂等，时钟已结过就是空转，悬挂的结算日在此入账。
   private onToggleVentures(): void {
-    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
+    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen) return;
     this.ventureOpen = !this.ventureOpen;
     for (const o of this.ventureObjects) o.setVisible(this.ventureOpen);
     if (this.ventureOpen) {
@@ -5249,7 +5289,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onToggleCrafting(): void {
-    if (this.inventoryOpen || this.dialogueOpen || this.pauseOpen || this.shelterOpen) return;
+    if (this.inventoryOpen || this.dialogueOpen || this.pauseOpen || this.shelterOpen || this.nightChoiceOpen) return;
     if (!this.craftingOpen && getGame().currentFloor !== STARTING_FLOOR) {
       this.flash('只能在宿舍工作台制作');
       return;
@@ -6053,6 +6093,7 @@ export class GameScene extends Phaser.Scene {
       this.encounterObjects,
       this.shelterObjects,
       this.ventureObjects,
+      this.nightChoiceObjects,
     ];
     let found = false;
     for (const group of groups) {
@@ -6087,7 +6128,7 @@ export class GameScene extends Phaser.Scene {
    * player would press Q into silence. Say so instead.
    */
   private onToggleQuests(): void {
-    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.ventureOpen || this.questsOpen) return;
+    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.ventureOpen || this.questsOpen) return;
     if (!this.scene.get('QuestPanel')) {
       this.flash('任务面板未就绪');
       return;
@@ -6130,12 +6171,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onToggleMap(): void {
-    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.ventureOpen) return;
+    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.ventureOpen) return;
     this.openTowerOverview();
   }
 
   private onToggleInventory(): void {
-    if (this.stairClimb || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.ventureOpen) return;
+    if (this.stairClimb || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.ventureOpen) return;
     this.toggleInventory();
   }
 
@@ -6158,7 +6199,7 @@ export class GameScene extends Phaser.Scene {
 
   private anyPanelOpen(): boolean {
     return (
-      this.encounterOpen || this.shelterOpen || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.decoOpen || this.ventureOpen
+      this.encounterOpen || this.shelterOpen || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.decoOpen || this.ventureOpen || this.nightChoiceOpen
     );
   }
 
@@ -6276,6 +6317,7 @@ export class GameScene extends Phaser.Scene {
       !this.dialogueOpen &&
       !this.pauseOpen &&
       !this.shelterOpen &&
+      !this.nightChoiceOpen &&
       !this.ventureOpen &&
       !this.decoOpen &&
       this.clearStrayPanels()
@@ -6301,6 +6343,10 @@ export class GameScene extends Phaser.Scene {
       this.closeEncounter();
       return;
     }
+    if (this.nightChoiceOpen) {
+      this.dismissNightPrompt();
+      return;
+    }
     if (this.shelterOpen) {
       this.closeShelter();
       return;
@@ -6319,6 +6365,11 @@ export class GameScene extends Phaser.Scene {
   private onNavUp(): void {
     if (this.decoOpen) {
       this.pageDeco(-1);
+      return;
+    }
+    if (this.nightChoiceOpen) {
+      this.nightChoiceSelected = Math.max(0, this.nightChoiceSelected - 1);
+      this.buildNightChoicePanel();
       return;
     }
     if (this.shelterOpen && !getGame().shelterPlan?.resolved) {
@@ -6361,6 +6412,11 @@ export class GameScene extends Phaser.Scene {
       this.pageDeco(1);
       return;
     }
+    if (this.nightChoiceOpen) {
+      this.nightChoiceSelected = Math.min(NIGHT_CHOICE_ROWS.length - 1, this.nightChoiceSelected + 1);
+      this.buildNightChoicePanel();
+      return;
+    }
     if (this.shelterOpen && !getGame().shelterPlan?.resolved) {
       this.shelterSelected = Math.min(SHELTER_ROWS.length - 1, this.shelterSelected + 1);
       this.buildShelterPanel();
@@ -6401,6 +6457,10 @@ export class GameScene extends Phaser.Scene {
 
   private onUse(): void {
     if (this.stairClimb) return;
+    if (this.nightChoiceOpen) {
+      this.activateNightChoice();
+      return;
+    }
     if (this.shelterOpen) {
       this.activateShelterChoice();
       return;
@@ -6507,6 +6567,11 @@ export class GameScene extends Phaser.Scene {
 
   private onInteract(): void {
     if (this.stairClimb) return;
+    // AG-64：夜间二选一面板开着时，面板自己吃 E（同 shelterOpen 模式）。
+    if (this.nightChoiceOpen) {
+      this.onUse();
+      return;
+    }
     // AG-66：搜刮/挖掘进行中再按 E = 收手（与移动取消同一个出口）。
     if (this.pendingAction) {
       this.cancelPendingAction();
@@ -6621,7 +6686,7 @@ export class GameScene extends Phaser.Scene {
   private tryShortcut(): void {
     const state = getGame();
     if (state.status !== 'playing') return;
-    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.ventureOpen) return;
+    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.ventureOpen) return;
     const top = Math.max(...PLAYABLE_FLOORS_V01);
     if (!shortcutAvailable(state.currentFloor, top)) {
       this.flash('这里没有可抄的近路');
@@ -6686,6 +6751,7 @@ export class GameScene extends Phaser.Scene {
     if (this.encounterOpen && combat) return '↑/↓ 选择 · Enter 出招 · ESC 撤退';
     if (this.encounterOpen && this.encounter) return '↑/↓ 选择 · Enter 确认 · ESC 离开';
     if (this.encounterOpen) return '↑/↓ 选择 · Enter 买入 · S 卖出 · ESC 离开';
+    if (this.nightChoiceOpen) return '↑/↓ 选择 · Enter 确认 · ESC 今晚再想想';
     if (this.shelterOpen) return getGame().shelterPlan?.resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回';
     if (this.inventoryOpen) return '↑/↓ 选择 · Enter 使用 · I 关闭';
     if (this.craftingOpen) return '↑/↓ 选择 · Enter 制作 · C 关闭';
@@ -7061,6 +7127,9 @@ export class GameScene extends Phaser.Scene {
       // AG-20: 睡醒即跨日，产业结算在 finishNight→sleep 内部发生。前后对比
       // 账本，「昨夜的收益」才能在醒来时就被看见（只观察，不重复结算）。
       const ledger = state.growth?.ventures?.length ? this.ventureLedgerSnapshot() : null;
+      // AG-64：躺进被窝前把悬挂的造访判定结清——人都睡在屋里了，小偷无从
+      // 下手；睡醒台词里带上昨夜的一句（settlePendingVisitOnSleep 幂等）。
+      const nightPreventedBySleep = settlePendingVisitOnSleep(state);
       const result = finishNight(state);
       if (ledger) this.diffVentureLedger(ledger);
       if (!result.ok) {
@@ -7079,7 +7148,8 @@ export class GameScene extends Phaser.Scene {
         this.refreshStats();
         this.applyNightLighting();
         const attackNote = result.attacked ? ` · 夜袭 -${result.attackDamage} HP` : '';
-        this.flash(`睡到第 ${result.nextDay} 天 06:00 · 压力 ${Math.round(state.player.stress ?? 20)}${attackNote}`);
+        const nightNote = nightWatchWakeNote(state) ?? (nightPreventedBySleep ? ' · 楼道里有脚步声，但你在屋里，没敢进来' : '');
+        this.flash(`睡到第 ${result.nextDay} 天 06:00 · 压力 ${Math.round(state.player.stress ?? 20)}${attackNote}${nightNote}`);
       });
       if (state.status === 'lost') this.scene.start('End');
       return;
@@ -7096,6 +7166,194 @@ export class GameScene extends Phaser.Scene {
     playSfx('click');
     this.buildShelterPanel();
     this.flash(`${result.message} 按 Enter 睡觉`);
+  }
+
+  // ── AG-64：入夜二选一（出去找物资 / 在家守夜）──────────────────────────
+  // 用户 2026-11-17 原话：「晚上的话应该会提示我们是出去找物资还是在家里守夜，
+  // 防止别的 npc 抢我们的东西」。面板语言延用既有面板：buildPanel 铆钉板 +
+  // buildPanelHeader + 选项卡高亮（accent wash + 左竖线，同 buildListRow）+
+  // placeMarker 箭头 + panelHit 鼠标行。判定全在 NightSystem 的纯函数里，
+  // 这里只出面板与反馈。
+  //
+  // 弹窗时机在 update() 的入夜边沿里（只在外层、只一次/夜）；交互走
+  // onUse/onNavUp/onNavDown/onEsc/onInteract 的 nightChoiceOpen 分支。
+
+  private openNightPrompt(): void {
+    this.nightChoiceSelected = 0;
+    this.nightChoiceOpen = true;
+    this.buildNightChoicePanel();
+  }
+
+  private closeNightChoice(): void {
+    this.nightChoiceOpen = false;
+    for (const object of this.nightChoiceObjects) {
+      if (object !== this.nightChoiceMarker) object.destroy();
+    }
+    this.nightChoiceObjects = [];
+    this.nightChoiceMarker.setVisible(false);
+  }
+
+  private buildNightChoicePanel(): void {
+    for (const object of this.nightChoiceObjects) {
+      if (object !== this.nightChoiceMarker) object.destroy();
+    }
+    this.nightChoiceObjects = [];
+    const { width, height } = this.viewSize();
+    const panelW = 460;
+    const panelH = 252;
+    const cx = width / 2;
+    const cy = height / 2;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+    // Remembered for the mouse: a click outside this rectangle closes the panel.
+    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
+    const depth = PANEL_DEPTH.game.dialogue;
+
+    this.nightChoiceObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
+    this.nightChoiceObjects.push(...buildPanelHeader(this, left, top, panelW, '入夜 · 宿舍外', UI.good, depth + 5));
+    this.nightChoiceObjects.push(...buildPanelWell(this, left + 12, top + 36, panelW - 24, 30, depth + 5));
+    this.nightChoiceObjects.push(
+      this.add
+        .text(left + 24, top + 51, '天黑了，楼里不会只有你一个人。', {
+          fontFamily: FONT_FAMILY,
+          fontSize: `${TYPE.caption}px`,
+          color: hex(PALETTE.clothHigh),
+        })
+        .setOrigin(0, 0.5)
+        .setScrollFactor(0)
+        .setDepth(depth + 6),
+    );
+    NIGHT_CHOICE_ROWS.forEach((row, index) => {
+      const y = top + 78 + index * 78;
+      const selected = index === this.nightChoiceSelected;
+      if (selected) {
+        // 选中高亮与 buildListRow 同一语言：accent 淡 wash + 左侧 2px 竖线。
+        this.nightChoiceObjects.push(this.add.rectangle(left + 16, y, panelW - 32, 66, UI.accent).setOrigin(0, 0).setScrollFactor(0).setAlpha(0.13).setDepth(depth + 6));
+        this.nightChoiceObjects.push(this.add.rectangle(left + 16, y, 2, 66, UI.accent).setOrigin(0, 0).setScrollFactor(0).setDepth(depth + 7));
+      }
+      this.nightChoiceObjects.push(this.add.image(left + 46, y + 33, row.iconKey).setOrigin(0.5).setScrollFactor(0).setDepth(depth + 7));
+      const title = this.add
+        .text(left + 72, y + 24, row.label, {
+          fontFamily: FONT_FAMILY,
+          fontSize: `${TYPE.body}px`,
+          color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary),
+        })
+        .setOrigin(0, 0.5)
+        .setScrollFactor(0)
+        .setDepth(depth + 7);
+      const consequence = this.add
+        .text(left + 72, y + 48, row.consequence, {
+          fontFamily: FONT_FAMILY,
+          fontSize: `${TYPE.caption}px`,
+          color: '#6b6862',
+          wordWrap: { width: panelW - 110 },
+        })
+        .setOrigin(0, 0.5)
+        .setScrollFactor(0)
+        .setDepth(depth + 7);
+      this.nightChoiceObjects.push(title, consequence);
+      if (selected) {
+        placeMarker(this.nightChoiceMarker, title);
+        this.nightChoiceMarker.setDepth(depth + 8).setVisible(true).setScrollFactor(0);
+      }
+      this.nightChoiceObjects.push(
+        this.panelHit(left + 16, y, panelW - 32, 66, depth + 8, {
+          onOver: () => {
+            if (this.nightChoiceSelected === index) return;
+            this.nightChoiceSelected = index;
+            this.buildNightChoicePanel();
+          },
+          onClick: () =>
+            this.time.delayedCall(0, () => {
+              if (this.nightChoiceSelected !== index) {
+                this.nightChoiceSelected = index;
+                this.buildNightChoicePanel();
+                playSfx('click');
+                return;
+              }
+              this.activateNightChoice();
+            }),
+        }),
+      );
+    });
+    this.nightChoiceObjects.push(
+      this.add
+        .text(cx, top + panelH - 14, '↑/↓ 选择 · Enter 确认 · ESC 今晚再想想', {
+          fontFamily: FONT_FAMILY,
+          fontSize: `${TYPE.caption}px`,
+          color: hex(PALETTE.clothHigh),
+        })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(depth + 6),
+    );
+    this.nightChoiceObjects.push(this.nightChoiceMarker);
+    // 与 shelter 面板同一收尾：统一 depth + 锁屏。所有对象创建时即
+    // scrollFactor(0)（buildListRow 的同款做法），placeMarker 因此量到的是
+    // 屏幕坐标——本面板会在 2 层以上（相机有滚动）弹出，这点不能省。
+    applyPanelDepth(this.nightChoiceObjects, PANEL_DEPTH.game.dialogue);
+    lockToScreen(this.nightChoiceObjects);
+    this.assertPanelContent('night-choice', this.nightChoiceObjects);
+  }
+
+  /** Enter：确认二选一。出去 = 武装一夜的偷取模拟；守夜 = 回家睡，小偷整晚不来。 */
+  private activateNightChoice(): void {
+    const state = getGame();
+    const row = NIGHT_CHOICE_ROWS[this.nightChoiceSelected];
+    if (!row) return;
+    recordNightChoice(state, row.choice);
+    saveToStorage(state);
+    this.closeNightChoice();
+    if (row.choice === 'scavenge') {
+      playSfx('click');
+      this.flash('你推门走进夜色——楼里不会只有你一个人');
+    } else {
+      playSfx('sleep');
+      this.flash('你决定回宿舍守夜——今夜楼里再乱也乱不到你头上');
+    }
+  }
+
+  /** ESC：今夜再想想。拒过之后今夜不再问，也不武装偷取。 */
+  private dismissNightPrompt(): void {
+    const state = getGame();
+    recordNightDismissal(state);
+    saveToStorage(state);
+    this.closeNightChoice();
+    this.flash('今夜的事，明天再说');
+  }
+
+  /**
+   * AG-64：一夜的偷取后台模拟（判定全在 NightSystem）。玩家不在那一层也算——
+   * 结果写 localEvents/lootedItems，回层或睡醒时给证据。只有所有面板都关着
+   * 才会跑到这里（update 的面板早退在前），不存在「开着背包被偷」。
+   */
+  private tickNightWatch(): void {
+    const state = getGame();
+    const step = stepNightWatch(state, state.currentFloor === STARTING_FLOOR);
+    if (step.kind === 'none') return;
+    saveToStorage(state);
+    if (step.kind === 'visited') {
+      if (state.currentFloor !== STARTING_FLOOR) {
+        this.flash('楼道里似乎有脚步声——有人往宿舍那边去了……');
+        playSfx('alert');
+      }
+      return;
+    }
+    if (step.kind === 'prevented') {
+      this.flash('你守在屋里——楼道里的脚步声最终远了');
+      return;
+    }
+    // stolen：玩家不在家，什么被偷走了等回层/睡醒时由
+    // nightWatchEvidenceNote / nightWatchWakeNote 出示，这里不剧透。
+  }
+
+  /** 回到宿舍时的小偷证据：flash 一次，之后 night-theft-seen 标记让它闭嘴。 */
+  private reportNightWatchEvidence(): void {
+    const state = getGame();
+    const note = nightWatchEvidenceNote(state);
+    if (!note) return;
+    saveToStorage(state);
+    this.flash(note);
   }
 
   private nearestContainer(): GeneratedContainer | null {
@@ -7697,7 +7955,7 @@ export class GameScene extends Phaser.Scene {
       this.updateStairClimb(delta);
       return;
     }
-    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.ventureOpen || this.questsOpen) return;
+    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.ventureOpen || this.questsOpen) return;
     const state = getGame();
 
     // AG-11: the neighbours walk their own schedule. Pure function of game
@@ -7820,6 +8078,29 @@ export class GameScene extends Phaser.Scene {
       if (rolled.event.type === 'wanderer') playSfx('danger');
       this.flash(rolled.event.message);
     }
+    // AG-64：入夜二选一 + 一夜的偷取后台模拟。
+    //
+    // 时机（用户 2026-11-17 原话：「晚上的话应该会提示我们是出去找物资还是
+    // 在家里守夜」）：帧循环把时钟推过 18:00 的那一帧、且人身在外层时弹一次。
+    // 两个刻意的收窄：
+    //   1. 只有「推过」算入夜——e2e 直接设 gameMinuteOfDay 的时钟跳变
+    //      （tick.gameMinutes 远小于时钟位移）不算，否则设过夜时钟的既有
+    //      测试会被弹面板；
+    //   2. 只在外层算数——在家入夜的玩家走既有的床 → 夜间安排流程
+    //      （AG-51/shelter 钉住的行为原样），面对二选一的是身在外层的人。
+    const minuteBeforeNight = this.prevMinuteOfDay;
+    this.prevMinuteOfDay = state.gameMinuteOfDay;
+    if (
+      minuteBeforeNight !== null &&
+      !isNight(minuteBeforeNight) &&
+      isNight(state.gameMinuteOfDay) &&
+      state.gameMinuteOfDay - minuteBeforeNight <= tick.gameMinutes + 0.01 &&
+      state.currentFloor !== STARTING_FLOOR &&
+      nightChoicePending(state)
+    ) {
+      this.openNightPrompt();
+    }
+    this.tickNightWatch();
     // B3-15: dwell pressure — the longer the player lingers on one floor, the
     // more likely the next roll is teeth. Runs after the night roll so a night
     // event already occupying the day's slot suppresses the prowler (an

@@ -14,7 +14,7 @@ import { validateProposal, type NpcEventFact, type NpcFact } from '../ai/rulesEx
 import { eventStatus } from './EventSystem';
 import { isNight } from './SurvivalSystem';
 import { loadNpcState } from './NpcMemory';
-import { FLOOR_WIDTH, STARTING_FLOOR } from '../core/constants';
+import { FLOOR_WIDTH, floorWidthFor, STARTING_FLOOR } from '../core/constants';
 import { deriveSeed, makeRng, type Rng } from '../core/rng';
 import type { NpcActionProposal, NpcBrain, NpcObservation, NpcPersistedState } from '../ai/types';
 import type { GameState } from '../core/gameTypes';
@@ -211,10 +211,16 @@ function absentPlan(floor: number, reason: string): NightWandererPlan {
   return { present: false, floor, spawnX: 0, aggroRange: 0, reason };
 }
 
-/** 确定性出生点：同 (runSeed, day, source, floor) → 同位置。 */
+/** 确定性出生点：同 (runSeed, day, source, floor) → 同位置。
+ *
+ * AG-104：出生带按本层实际宽度（floorWidthFor(floor)：宽楼 1600-2880px+）。
+ * 原来写死 FLOOR_WIDTH(1280)——宽楼上流浪者永远从左 1280 里出来，右半
+ * 走断腿也撞不见它。rng 抽取不变，同 (seed, day, source, floor) 仍是同一个
+ * 答案；tier1 各层 width=1280，出生点与修复前逐点一致。 */
 export function wandererNightSpawnX(state: GameState, source: string, floor: number): number {
   const rng = makeRng(deriveSeed(state.runSeed, state.day, source, floor, 'wanderer-night'));
-  return Math.round(WANDERER_EDGE_MARGIN + rng.nextFloat() * (FLOOR_WIDTH - WANDERER_EDGE_MARGIN * 2));
+  const width = floorWidthFor(floor);
+  return Math.round(WANDERER_EDGE_MARGIN + rng.nextFloat() * (width - WANDERER_EDGE_MARGIN * 2));
 }
 
 /** 仇恨范围：原型基准 × 记仇放大（关系差 → 更远就盯上玩家）。 */
@@ -383,6 +389,12 @@ export interface WandererRoamContext {
   dtMs: number;
   /** 路径点随机源：由调用方用 deriveSeed 构造，保证同 seed 可复现 */
   rng: Rng;
+  /**
+   * AG-104：本层实际宽度（floorWidthFor：宽楼 1600-2880px+）。缺省按
+   * FLOOR_WIDTH(1280)——存量调用（测试）不变；宽楼场景由调用侧传入，
+   * 撤退出口/巡逻路径点/边界钳制才覆盖全层而不是只左 1280。
+   */
+  floorWidth?: number;
 }
 
 /**
@@ -394,26 +406,31 @@ export interface WandererRoamContext {
  */
 export function stepWandererRoam(roam: WandererRoam, ctx: WandererRoamContext): WandererRoam {
   const dt = Math.max(0, ctx.dtMs) / 1000;
+  // AG-104：楼层宽从 ctx 取（缺省 1280 保持存量行为），宽楼巡逻/撤退覆盖全层。
+  const width = ctx.floorWidth ?? FLOOR_WIDTH;
   let { phase, x, targetX } = roam;
   if (phase === 'withdraw') {
-    targetX = x < FLOOR_WIDTH / 2 ? 0 : FLOOR_WIDTH;
+    targetX = x < width / 2 ? 0 : width;
   } else if (Math.abs(ctx.playerX - x) <= ctx.aggroRange) {
     phase = 'approach';
     targetX = ctx.playerX;
   } else {
     phase = 'patrol';
     if (Math.abs(targetX - x) < 4) {
-      targetX = WANDERER_EDGE_MARGIN + ctx.rng.nextFloat() * (FLOOR_WIDTH - WANDERER_EDGE_MARGIN * 2);
+      targetX = WANDERER_EDGE_MARGIN + ctx.rng.nextFloat() * (width - WANDERER_EDGE_MARGIN * 2);
     }
   }
   const step = Math.sign(targetX - x) * WANDERER_ROAM_SPEED * dt;
   // 一步不超过到目标点的剩余距离，避免在路径点间抖动
   const move = Math.abs(targetX - x) <= Math.abs(step) ? targetX - x : step;
-  x = Math.min(FLOOR_WIDTH, Math.max(0, x + move));
+  x = Math.min(width, Math.max(0, x + move));
   return { phase, x, targetX };
 }
 
-/** 流浪者是否已经走出画面（withdraw 完成判定）。 */
-export function wandererRoamGone(roam: WandererRoam): boolean {
-  return roam.phase === 'withdraw' && (roam.x <= 8 || roam.x >= FLOOR_WIDTH - 8);
+/** 流浪者是否已经走出画面（withdraw 完成判定）。
+ *
+ * AG-104：边界按本层实际宽度（缺省 FLOOR_WIDTH 保持存量调用不变）——宽楼上
+ * 不传楼层宽，右半的撤退者永远走不到「画面外」。 */
+export function wandererRoamGone(roam: WandererRoam, floorWidth: number = FLOOR_WIDTH): boolean {
+  return roam.phase === 'withdraw' && (roam.x <= 8 || roam.x >= floorWidth - 8);
 }

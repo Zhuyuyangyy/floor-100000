@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { bossSpotId, encounterSpots, nudgeSpotX } from '../systems/encounterSpots';
 import { ENCOUNTER_TABLE } from '../systems/encounters';
-import { DOWN_EXIT_X, INTERACT_DISTANCE, PLAYABLE_FLOORS_V01, STARTING_FLOOR, UP_EXIT_X } from '../core/constants';
+import { DOWN_EXIT_X, floorWidthFor, INTERACT_DISTANCE, PLAYABLE_FLOORS_V01, STARTING_FLOOR, UP_EXIT_X } from '../core/constants';
 import { getFloorTemplate } from '../data/floorTemplates';
 import { NPCS, NPC_FLOOR } from '../data/npcs';
 
@@ -70,7 +70,9 @@ describe('encounter spots', () => {
       const spots = encounterSpots(42, floor);
       for (const s of spots) {
         expect(s.x, `floor ${floor} spot ${s.id}`).toBeGreaterThan(0);
-        expect(s.x, `floor ${floor} spot ${s.id}`).toBeLessThan(1280);
+        // AG-104：边界按本层实际宽度（floorWidthFor）——tier2+ 宽楼 1600-2880px+，
+        // 遭遇点随楼宽铺满全层；tier1 各层 width=1280，与修复前逐点一致。
+        expect(s.x, `floor ${floor} spot ${s.id}`).toBeLessThan(floorWidthFor(floor));
       }
       for (let i = 0; i < spots.length; i++) {
         for (let j = i + 1; j < spots.length; j++) {

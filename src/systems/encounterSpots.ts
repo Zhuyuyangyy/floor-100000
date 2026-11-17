@@ -1,4 +1,4 @@
-import { DOWN_EXIT_X, FLOOR_WIDTH, STARTING_FLOOR, UP_EXIT_X } from '../core/constants';
+import { DOWN_EXIT_X, floorWidthFor, FLOOR_WIDTH, STARTING_FLOOR, UP_EXIT_X } from '../core/constants';
 import { hashString } from '../core/rng';
 import { ENCOUNTER_TABLE } from './encounters';
 
@@ -46,15 +46,21 @@ const NUDGE_LIMIT = 8;
 
 // Places one spot clear of everything in `taken`, resampling the hash rather
 // than drifting, so the result stays deterministic for the seed.
+//
+// AG-104：投放范围按本层实际宽度（floorWidthFor：4-9+ 间 × 320px，宽楼至
+// 2880px+）。原来写死 FLOOR_WIDTH(1280)——宽楼的右半玩法空白，玩家走过去
+// 什么都没有。hash 入参不变，同 (seed, floor) 仍是同一个答案；tier1 各层
+// width=1280，布局与修复前逐点一致。
 function placeSpot(seed: number, floor: number, index: number, taken: readonly number[], clearance: number): number {
   const margin = 260;
-  const span = Math.max(1, FLOOR_WIDTH - margin * 2);
+  const width = floorWidthFor(floor);
+  const span = Math.max(1, width - margin * 2);
   for (let attempt = 0; attempt < NUDGE_LIMIT; attempt++) {
     const h = hashString(`encounter-spot:${seed}:${floor}:${index}:${attempt}`);
     const x = margin + (h % span);
     if (!taken.some((t) => Math.abs(t - x) <= clearance)) return x;
   }
-  return FLOOR_WIDTH / 2; // deterministic fallback; the caller still nudges
+  return width / 2; // deterministic fallback; the caller still nudges
 }
 
 // Pushes a spot marker clear of everything already interactable on the floor.
@@ -66,14 +72,17 @@ function placeSpot(seed: number, floor: number, index: number, taken: readonly n
 // gave up after eight tries, so a marker that started next to an NPC could be
 // pushed straight onto the NPC on its other side and still be returned as
 // "nudged" - measured on floor 2: the trader landed 6px from an NPC.
-export function nudgeSpotX(x: number, taken: readonly number[], clearance: number): number {
+//
+// AG-104：搜索边界按楼层实际宽度（floorWidth 入参，默认 FLOOR_WIDTH 保持存量
+// 调用不变）。宽楼上不传楼层宽，右侧的 NUDGE_LIMIT 步根本走不出去。
+export function nudgeSpotX(x: number, taken: readonly number[], clearance: number, floorWidth: number = FLOOR_WIDTH): number {
   const gapAt = (v: number): number => (taken.length === 0 ? Infinity : Math.min(...taken.map((t) => Math.abs(t - v))));
   if (gapAt(x) > clearance) return x;
   let bestX = x;
   let bestGap = gapAt(x);
   for (let i = 1; i <= NUDGE_LIMIT; i++) {
     for (const candidate of [x + NUDGE_STEP * i, x - NUDGE_STEP * i]) {
-      if (candidate < 40 || candidate > FLOOR_WIDTH - 40) continue;
+      if (candidate < 40 || candidate > floorWidth - 40) continue;
       const gap = gapAt(candidate);
       if (gap > clearance) return candidate;
       if (gap > bestGap) {
@@ -89,6 +98,9 @@ export function nudgeSpotX(x: number, taken: readonly number[], clearance: numbe
 // everything in `taken`. Resamples the hash instead of nudging, so the result is
 // spread across the floor rather than clustered wherever the seed landed - and
 // it falls back to the clearest sampled position, never to a colliding one.
+//
+// AG-104：同 placeSpot——按 floorWidthFor(floor) 的实际楼宽投放，行商在宽楼上
+// 也能落到右半。hash 入参不变，tier1 布局与修复前一致。
 export function placeClearX(
   seed: number,
   floor: number,
@@ -97,7 +109,8 @@ export function placeClearX(
   clearance: number,
 ): number {
   const margin = 200;
-  const span = Math.max(1, FLOOR_WIDTH - margin * 2);
+  const width = floorWidthFor(floor);
+  const span = Math.max(1, width - margin * 2);
   const gapAt = (v: number): number => (taken.length === 0 ? Infinity : Math.min(...taken.map((t) => Math.abs(t - v))));
   let bestX = margin;
   let bestGap = -1;

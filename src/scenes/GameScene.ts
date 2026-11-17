@@ -2153,7 +2153,9 @@ export class GameScene extends Phaser.Scene {
     if (shopX !== null) taken.push(shopX);
     for (const spot of encounterSpots(state.runSeed, floor)) {
       if (shouldSkip(state, spot.id)) continue;
-      const x = nudgeSpotX(spot.x, taken, INTERACT_DISTANCE + 8);
+      // AG-104：nudge 的搜索边界传本层实际宽度（this.floorW = floorWidthFor(floor)）——
+      // 不传就按 1280 找位，宽楼右半的 ? 会被钳回左半。
+      const x = nudgeSpotX(spot.x, taken, INTERACT_DISTANCE + 8, this.floorW);
       const color = spot.isBoss ? UI.danger : UI.accent;
       // A dark backing plate under the dot, plus a slow breath.
       //
@@ -6950,13 +6952,16 @@ export class GameScene extends Phaser.Scene {
    */
   private npcView(state: GameState, npc: NpcDef): NpcAutonomyView & { strolling: boolean; face: 1 | -1 } {
     const { inventory } = syncNpcInventory(state, npc);
+    // AG-104：楼层宽先算，一路喂给 npcAutonomyFor（goTo/日程钳制上限）与下面的
+    // 散步钳制——原来钳制写死 1280，宽楼上 NPC 的 x 到不了右半。
+    const width = floorWidthFor(state.currentFloor);
     const view = npcAutonomyFor(npc, {
       day: state.day,
       minuteOfDay: state.gameMinuteOfDay,
       runSeed: state.runSeed,
       stock: (itemId) => stockOf(inventory, itemId),
+      floorWidth: width,
     });
-    const width = floorWidthFor(state.currentFloor);
     const lo = NPC_MARGIN;
     const hi = Math.max(lo, width - NPC_MARGIN);
     let stroll = this.npcStrollState.get(npc.id);
@@ -10382,7 +10387,10 @@ export class GameScene extends Phaser.Scene {
         this.wandererIntent = 'attack';
       } else {
         const safe = Math.abs(this.wanderer!.x - state.player.x) >= WANDERER_FLEE_SAFE_DISTANCE;
-        const atExit = this.wanderer!.x <= WANDERER_FLEE_EXIT_MARGIN || this.wanderer!.x >= FLOOR_WIDTH - WANDERER_FLEE_EXIT_MARGIN;
+        // AG-104：出口判定按本层实际宽度（this.floorW = floorWidthFor(floor)）——
+        // 写死 FLOOR_WIDTH(1280) 时，宽楼右半的撤退者在 x≥1232 就被判「已出场」，
+        // 事件提前解除，流浪者瞬移消失。
+        const atExit = this.wanderer!.x <= WANDERER_FLEE_EXIT_MARGIN || this.wanderer!.x >= this.floorW - WANDERER_FLEE_EXIT_MARGIN;
         if (safe || atExit) {
           this.resolveWandererFlee(state, wandererEvent);
           return;

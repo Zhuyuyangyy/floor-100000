@@ -75,18 +75,25 @@ export interface NpcAutonomyView {
   moving: boolean;
 }
 
-function clampX(x: number): number {
-  return Math.min(FLOOR_WIDTH - NPC_MARGIN, Math.max(NPC_MARGIN, x));
+function clampX(x: number, width: number): number {
+  return Math.min(width - NPC_MARGIN, Math.max(NPC_MARGIN, x));
 }
 
 /**
  * 某游戏时刻该 NPC 的自主状态。纯函数：同 (npcId, day, minuteOfDay,
  * runSeed, scarcity) → 同结果，与场景帧率、调用次数无关。
+ *
+ * AG-104：ctx.floorWidth 是本层实际宽度（floorWidthFor：宽楼 1600-2880px+），
+ * 缺省 FLOOR_WIDTH(1280) 保持存量调用不变。钳制上限原来是写死的 1280-48——
+ * 宽楼上 NPC 的 goTo/日程 x 永远到不了右半；现在由调用侧（GameScene.npcView）
+ * 传本层宽度。锚点全部 ≤1200（data/npcs.ts），tier1 各层 width=1280，既有
+ * 布局与修复前逐点一致。
  */
 export function npcAutonomyAt(
   npcId: string,
-  ctx: { day: number; minuteOfDay: number; runSeed: number; scarcity?: ItemId | null },
+  ctx: { day: number; minuteOfDay: number; runSeed: number; scarcity?: ItemId | null; floorWidth?: number },
 ): NpcAutonomyView {
+  const width = ctx.floorWidth ?? FLOOR_WIDTH;
   const slots = scheduleFor(npcId);
   const { index, minute } = slotAt(slots, ctx.minuteOfDay);
   const slot = slots[index];
@@ -113,7 +120,7 @@ export function npcAutonomyAt(
   }
 
   const goal = ctx.scarcity ? `寻找${getItem(ctx.scarcity).displayName}` : slot.goal;
-  return { npcId, x: clampX(x), slotLabel: slot.label, goal, moving };
+  return { npcId, x: clampX(x, width), slotLabel: slot.label, goal, moving };
 }
 
 /** 某 NPC 当前稀缺的需求物品（库存见底 → 目标变成寻找它）。 */
@@ -124,10 +131,12 @@ export function scarcityOf(npc: NpcDef, stock: (itemId: ItemId) => number): Item
   return null;
 }
 
-/** 便捷入口：给定 npc 定义与查库存函数，拿自主状态。 */
+/** 便捷入口：给定 npc 定义与查库存函数，拿自主状态。
+ *
+ * AG-104：ctx.floorWidth 透传给 npcAutonomyAt（缺省 FLOOR_WIDTH 不变）。 */
 export function npcAutonomyFor(
   npc: NpcDef,
-  ctx: { day: number; minuteOfDay: number; runSeed: number; stock: (itemId: ItemId) => number },
+  ctx: { day: number; minuteOfDay: number; runSeed: number; stock: (itemId: ItemId) => number; floorWidth?: number },
 ): NpcAutonomyView {
   return npcAutonomyAt(npc.id, { ...ctx, scarcity: scarcityOf(npc, ctx.stock) });
 }

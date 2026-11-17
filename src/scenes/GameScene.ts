@@ -45,9 +45,9 @@ import {
   tryChangeFloor,
 } from '../systems/FloorSystem';
 import { BUNK_DISMANTLE_COST, BUNK_SEARCH_COST, OBSTACLE_DIG_COST_MINUTES, OBSTACLE_DIG_MS, SEARCH_MS,
-  bunkDismantleTool, clampXAgainstObstacles, clearObstacle, dismantleBunk, getFloorView, isBunkDismantled,
-  isBunkSearched, isObstacleCleared, lootContainer, lootGround, nearestObstacle, obstacleTool, obstaclesForFloor, recordFloorVisit,
-  searchBunk, type FloorObstacle } from '../systems/LootSystem';
+  bunkDismantleTool, clampXAgainstObstacles, clearObstacle, dismantleBunk, floorExitXs, getFloorView, homewardExitXs,
+  isBunkDismantled, isBunkSearched, isObstacleCleared, lootContainer, lootGround, nearestObstacle, obstacleTool,
+  obstaclesForFloor, recordFloorVisit, rescueSealedPlayerX, searchBunk, type FloorObstacle } from '../systems/LootSystem';
 import { hasFloorContent } from '../data/floorTemplates';
 import { liftDirection, liftOutcome, liftRequirement, nextSegment, prevSegment, skippedFloors } from '../core/segments';
 import { crossingSummary, floorGeometryFor } from '../core/worldgen';
@@ -1655,6 +1655,21 @@ export class GameScene extends Phaser.Scene {
     this.buildGround();
     // AG-66：过道阻碍物（本层 seeded 全集 + 挖过的残骸）。
     this.buildObstacles();
+    // R4 护栏（旧档兼容软锁，QA 第 2 轮 probeA-R3）：AG-96 起正常楼层按 roll
+    // 率生成阻碍物，生成侧的防软锁保证的是「每个落点至少一个出口可达」——新
+    // 档落点因此永远安全。但修复前创建的旧档重进这些层时，玩家位置是旧布局
+    // 留下的，可能落在新布局的无口区间里（实测 seed 4 第 2 层 x=365 夹在
+    // rubble@272 与 gate@458 之间，[298,432] 两个口全够不着，没铲子即软锁）。
+    // drawFloor 是新档/继续/dev 入口/每次爬梯落地的同一条进入路径，在这里挂
+    // 一次性迁移：只把玩家挪到最近的走得通的 x，不跨层、不动其它状态；位置
+    // 本就安全时纯 no-op（新档零行为变化）。
+    const rescuedX = rescueSealedPlayerX(
+      this.activeObstacleList,
+      state.player.x,
+      floorExitXs(floor),
+      homewardExitXs(floor),
+    );
+    if (rescuedX !== null) state.player.x = rescuedX;
     if (floor === STARTING_FLOOR) {
       this.drawBed();
       this.drawWorkbench();

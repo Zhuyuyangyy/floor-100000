@@ -90,6 +90,11 @@ export type BehaviourAction = NpcAtom | ((ctx: BehaviourContext) => NpcAtom);
  * - aggroRange ← NpcAutonomy.wandererAggroRange
  * - patrolX ← 调用方用 deriveSeed/makeRng 确定性算出的路径点（禁 Math.random）
  * 扩展字段属于契约变更，要走 TWOM_ALIGNMENT.md，不得在本文件私加。
+ *
+ * AG-104：floorWidth 与 patrolX 同一模式——楼层宽这种「调用方算好后传入」的
+ * 动态值。缺省按 FLOOR_WIDTH(1280)，存量求值（behaviour.test.ts）不变；
+ * 宽楼接线时由调用侧传 floorWidthFor(floor)，P1 撤退的「近端出口」才按本层
+ * 实际中点选边（与 NpcAutonomy.stepWandererRoam 同规则）。
  */
 export interface BehaviourSense {
   /** 是否夜间。 */
@@ -104,6 +109,8 @@ export interface BehaviourSense {
   aggroRange: number;
   /** 确定性巡逻路径点 x（调用方算好后传入）。 */
   patrolX: number;
+  /** 本层实际宽度（floorWidthFor；宽楼 1600-2880px+）。缺省 FLOOR_WIDTH。 */
+  floorWidth?: number;
 }
 
 /** 求值上下文：树能看到的一切。 */
@@ -192,8 +199,13 @@ export const WANDERER_PATROL_TREE: BehaviourNode = {
         { kind: 'condition', test: (ctx) => ctx.hasFlag('wanderer.withdrawing') },
         {
           kind: 'action',
-          // 出口选近端：与 stepWandererRoam 的 `x < FLOOR_WIDTH / 2 ? 0 : FLOOR_WIDTH` 同规则。
-          action: (ctx) => ({ kind: 'goTo', x: ctx.sense.selfX < FLOOR_WIDTH / 2 ? 0 : FLOOR_WIDTH }),
+          // 出口选近端：与 stepWandererRoam 的 `x < width / 2 ? 0 : width` 同规则。
+          // AG-104：width 取 sense.floorWidth（缺省 FLOOR_WIDTH）——宽楼上按本层
+          // 实际中点选边，流浪者才不会撤向「中间」而不是出口。
+          action: (ctx) => {
+            const width = ctx.sense.floorWidth ?? FLOOR_WIDTH;
+            return { kind: 'goTo', x: ctx.sense.selfX < width / 2 ? 0 : width };
+          },
         },
         { kind: 'action', action: { kind: 'playAnimation', clip: 'withdraw' } },
       ],

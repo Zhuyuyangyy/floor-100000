@@ -100,14 +100,18 @@ export interface NpcSense {
  * 库存读取走 syncNpcInventory 的既有惰性结算通路（与 GameScene.npcView
  * 一致）：同日重复调用是恒等操作，不破坏可复现性；跨天首次读取会补
  * 消耗+补货，这是 AG-13 既有的「读取即结算」设计，不是本模块新增的副作用。
+ *
+ * AG-104：opts.floorWidth 透传给 npcAutonomyFor（缺省 FLOOR_WIDTH 不变），
+ * 宽楼上 sense.x 的钳制上限才跟着本层宽度走。
  */
-export function sense(npc: NpcDef, state: GameState): NpcSense {
+export function sense(npc: NpcDef, state: GameState, opts: { floorWidth?: number } = {}): NpcSense {
   const { npcState, inventory } = syncNpcInventory(state, npc);
   const view = npcAutonomyFor(npc, {
     day: state.day,
     minuteOfDay: state.gameMinuteOfDay,
     runSeed: state.runSeed,
     stock: (itemId) => stockOf(inventory, itemId),
+    floorWidth: opts.floorWidth,
   });
   const sameFloor = state.currentFloor === npcFloor(npc);
   const distance = sameFloor ? Math.abs(view.x - state.player.x) : Infinity;
@@ -187,10 +191,16 @@ export function npcClipKey(who: string, moving: boolean): string {
 export interface NpcAtomsOptions {
   /** 玩家指令目标 x（像素）。null/undefined = 无指令。越界值按楼层安全范围钳制。 */
   forcedTarget?: number | null;
+  /**
+   * AG-104：本层实际宽度（floorWidthFor：宽楼 1600-2880px+），缺省
+   * FLOOR_WIDTH(1280)。goTo/forcedTarget 的钳制上限原来是写死的 1280-48——
+   * 宽楼上玩家点右半下令，NPC 也被截在 1232。由调用侧传本层宽度。
+   */
+  floorWidth?: number;
 }
 
-function clampX(x: number): number {
-  return Math.min(FLOOR_WIDTH - NPC_MARGIN, Math.max(NPC_MARGIN, x));
+function clampX(x: number, width: number): number {
+  return Math.min(width - NPC_MARGIN, Math.max(NPC_MARGIN, x));
 }
 
 /**
@@ -206,13 +216,16 @@ function clampX(x: number): number {
  *   NPC 嘴里的话。每帧都会发射，场景侧按「进入范围」去重（见实现说明）。
  */
 export function npcAtomsFor(npc: NpcDef, state: GameState, opts: NpcAtomsOptions = {}): NpcAtom[] {
-  const s = sense(npc, state);
+  // AG-104：楼层宽从调用侧拿（缺省 FLOOR_WIDTH 保持存量行为），sense 与
+  // forcedTarget 的钳制同用一个宽度。
+  const width = opts.floorWidth ?? FLOOR_WIDTH;
+  const s = sense(npc, state, { floorWidth: width });
 
   // Forced 打断：玩家指令期间只有「去指令点」+ 行走 clip，不闲聊。
   const forced = opts.forcedTarget;
   if (typeof forced === 'number' && Number.isFinite(forced)) {
     return [
-      { kind: 'goTo', x: clampX(forced), speed: NPC_WALK_SPEED },
+      { kind: 'goTo', x: clampX(forced, width), speed: NPC_WALK_SPEED },
       { kind: 'playAnimation', clip: npcClipKey(npcCharacterKey(npc), true) },
     ];
   }

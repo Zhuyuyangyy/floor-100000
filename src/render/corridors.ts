@@ -1,5 +1,5 @@
 import type Phaser from 'phaser';
-import { FLOOR_HEIGHT, FLOOR_WIDTH, ROOM_WIDTH, STAIR_RISE, STAIR_START_Y, tierOfFloor } from '../core/constants';
+import { FLOOR_HEIGHT, FLOOR_WIDTH, floorWidthFor, ROOM_WIDTH, STAIR_RISE, STAIR_START_Y, tierOfFloor } from '../core/constants';
 import { hasFloorContent } from '../data/floorTemplates';
 
 // Per-floor corridor art (docs/05_ART_GUIDE.md §3).
@@ -803,9 +803,16 @@ export interface StairPathNode {
  * inside the room (up leaves the left stairwell, down the right one), and
  * the second flight returns to `startX` — the mouth — which is what keeps
  * the climb on the drawn steps from first tread to last.
+ *
+ * AG-104：`floorWidth` 是本层实际宽度（floorWidthFor：宽楼 1600-2880px+），
+ * 默认 FLOOR_WIDTH 保持存量调用不变。判据原来写死 FLOOR_WIDTH/2=640——
+ * 宽楼中段梯口（downExitXFor 从 tier2 起 seeded 随机在 30%-75% 带）x 落在
+ * [640, width/2) 时折返方向算反：第一段背向楼层中间走，画出来的楼梯与爬梯
+ * 曲线同源地一起折错（110 层实测：梯口 648、楼宽 1920、楼中 960，旧判据
+ * 向左折向 488；段 2/4/5 的宽楼阶梯连接都吃这个亏）。
  */
-export function stairPath(direction: 1 | -1, startX: number, startY: number): StairPathNode[] {
-  const inward = startX < FLOOR_WIDTH / 2 ? 1 : -1;
+export function stairPath(direction: 1 | -1, startX: number, startY: number, floorWidth: number = FLOOR_WIDTH): StairPathNode[] {
+  const inward = startX < floorWidth / 2 ? 1 : -1;
   const stepX = STAIR_TREAD_DEPTH * inward;
   const stepY = -STAIR_STEP_RISE * direction; // up climbs toward -Y: the floor above sits at -FLOOR_HEIGHT
   const nodes: StairPathNode[] = [{ x: startX, y: startY }];
@@ -875,7 +882,7 @@ export function stairClimbPose(floor: number, climb: StairClimb, elapsedMs: numb
       animTimeScale: LADDER_ANIM_TIME_SCALE,
     };
   }
-  const nodes = stairPath(climb.direction, climb.startX, climb.startY);
+  const nodes = stairPath(climb.direction, climb.startX, climb.startY, floorWidthFor(floor));
   const sliceMs = climb.durationMs / (nodes.length - 1);
   const i = Math.min(nodes.length - 2, Math.max(0, Math.floor(elapsedMs / sliceMs)));
   const t = clamp01((elapsedMs - i * sliceMs) / sliceMs);
@@ -938,7 +945,9 @@ export function drawStairwell(
     const drop = hasFloorContent(neighbour) ? STAIR_SHAFT_DROP : 0;
     drawLadder(g, x, dir, floor, drop);
   }
-  else drawStairFlight(g, x, dir);
+  // AG-104：折返判据按本层实际宽度（与 stairClimbPose 同一口径）——画在哪、
+  // 从哪开爬、往哪折，三处同源。
+  else drawStairFlight(g, x, dir, floorWidthFor(floor));
 }
 
 /**
@@ -949,9 +958,9 @@ export function drawStairwell(
  * so the flight reads as a staircase mass rather than floating slabs — the
  * shape the user asked for ("2D 的，就是阶梯型的那种").
  */
-function drawStairFlight(g: Phaser.GameObjects.Graphics, x: number, dir: 'up' | 'down'): void {
+function drawStairFlight(g: Phaser.GameObjects.Graphics, x: number, dir: 'up' | 'down', floorWidth: number = FLOOR_WIDTH): void {
   const direction = dir === 'up' ? 1 : -1;
-  const nodes = stairPath(direction, x, STAIR_START_Y);
+  const nodes = stairPath(direction, x, STAIR_START_Y, floorWidth);
   const c = STAIR_COLORS;
   const depth = Math.round(STAIR_STEP_RISE) + 2; // reach the next tread's cap, hairline-free
   for (let i = 1; i < nodes.length; i++) {

@@ -99,16 +99,25 @@ export interface CraftTreeNode {
 }
 
 // 节点的数组顺序即键盘/滚动的导航顺序（↑/↓ 在树里按这个线性序走）。
-// 顺序约束（e2e/crafting.spec.ts 的 navTo 预算是 RECIPES.length+2 次
-// ArrowDown）：加固门必须落在下标 10、净化落在 12——两者都在 14 步内。
+// 顺序约束见下方数组头上的导航序注释：配方段保持 RECIPES 原序（照明灯 0、
+// 加固门 1），净化 13、材料 14 起——e2e/crafting.spec.ts 的 navTo 预算
+// （RECIPES.length+2 次 ArrowDown，最远抵达下标 14）因此全部够用。
 //
-// y 坐标是手工排版的结果，三条硬约束：
-//   1. 同一列内相邻节点 ≥ CRAFT_NODE_H + 8（盒子不叠，本表列内距 44）；
+// y 坐标是手工排版的结果，四条硬约束：
+//   1. 同一列内相邻节点 ≥ CRAFT_NODE_H + 6（盒子不叠，本表列内距 40）；
 //   2. 任意两个节点的 y 相差 ≥ 8px——e2e 的 navTo 用「marker 的 y ±4 之内
 //      找文本」定位选中行，两个标签贴在同一行会让探针抓到别人的名字；
 //   3. 材料列（0）与配方列（1）交错 22px，第 2 列起取两者行号的中点
 //      （+11）：列 0 的行号恰好落在列 1 的行间隙里——材料→配方的边因此
-//      永远走在两条列之间的沟槽内，不穿过任何节点盒子。
+//      永远走在两条列之间的沟槽内，不穿过任何节点盒子；
+//   4. 整棵树（y 95..475）必须完整落在树活动带（94..482）内——缩放 1 时
+//      pan=0 恒在 clamp 区间里，打开面板即是排版就位的全树视图；带高留给
+//      详情块的最坏流（效果+状态+材料+两行去哪拿 = 143px）；
+//   5. 任何节点的 y 不许落在 166..174——工作台的 upgradeBoard 是个常驻
+//      空文本（新开局无已建设施时它就是空的），挂在世界坐标 y=170；
+//      e2e/crafting.spec.ts 的 navTo 用「marker 的 y ±4 之内找第一个
+//      Text」定位选中行，不筛深度，空文本会抢在工作台之后创建的面板文本
+//      前面被找到（加固门曾压在 174 上，探针钉钉落空）。
 export const CRAFT_TREE_NODES: readonly CraftTreeNode[] = [
   // ── 导航序 = 旧滚动列表的原序（RECIPES 序）+ 净化 + 材料 ────────────────
   // 为什么不是「按列从左到右」：两个既有 e2e 钉死了旧列表的下标语义——
@@ -117,31 +126,31 @@ export const CRAFT_TREE_NODES: readonly CraftTreeNode[] = [
   // 加固门与净化。配方段保持 RECIPES 原序，这些钉子一根不断；净化跟在
   // 配方段之后（与旧列表相同）；材料是树形态新增的参考节点，排在导航序
   // 末尾——↑/↓ 先看「做得出什么」，再回头看「料在哪」。
-  { id: 'lamp', kind: 'recipe', displayName: '照明灯', iconKey: null, col: 1, y: 140, inputs: ['battery', 'wire', 'scrap_metal'] },
-  { id: 'reinforced_door', kind: 'recipe', displayName: '加固门', iconKey: null, col: 1, y: 184, inputs: ['wood', 'tape'] },
-  { id: 'purifier', kind: 'recipe', displayName: '简易净水器', iconKey: null, col: 1, y: 228, inputs: ['scrap_metal', 'filter', 'wire'] },
-  { id: 'storage_rack', kind: 'recipe', displayName: '置物架', iconKey: null, col: 1, y: 272, inputs: ['wood', 'cloth', 'crowbar'] },
-  { id: 'work_badge', kind: 'recipe', displayName: '工牌', iconKey: null, col: 1, y: 492, inputs: ['scrap_metal', 'cloth', 'tape'] },
-  { id: 'pass_sticker', kind: 'recipe', displayName: '通行贴', iconKey: null, col: 2, y: 481, inputs: ['work_badge', 'wire', 'tape', 'battery'] },
-  { id: 'permit', kind: 'recipe', displayName: '许可证', iconKey: null, col: 3, y: 437, inputs: ['pass_sticker', 'battery', 'filter', 'cloth'] },
-  { id: 'vip_card', kind: 'recipe', displayName: '贵宾卡', iconKey: null, col: 4, y: 393, inputs: ['permit', 'scrap_metal', 'cloth', 'battery'] },
-  { id: 'core_key', kind: 'recipe', displayName: '核心权限', iconKey: null, col: 5, y: 349, inputs: ['vip_card', 'fuse', 'wire', 'scrap_metal'] },
-  { id: 'craft_dagger', kind: 'recipe', displayName: '匕首', iconKey: 'dagger', col: 1, y: 316, inputs: ['scrap_metal', 'cloth'] },
-  { id: 'craft_short_sword', kind: 'recipe', displayName: '短剑', iconKey: 'short_sword', col: 1, y: 360, inputs: ['scrap_metal', 'wood', 'tape'] },
-  { id: 'craft_cleaver', kind: 'recipe', displayName: '砍刀', iconKey: 'cleaver', col: 1, y: 404, inputs: ['scrap_metal', 'wood', 'tape'] },
-  { id: 'craft_fire_axe', kind: 'recipe', displayName: '消防斧', iconKey: 'fire_axe', col: 1, y: 448, inputs: ['scrap_metal', 'wood', 'cloth'] },
+  { id: 'lamp', kind: 'recipe', displayName: '照明灯', iconKey: null, col: 1, y: 138, inputs: ['battery', 'wire', 'scrap_metal'] },
+  { id: 'reinforced_door', kind: 'recipe', displayName: '加固门', iconKey: null, col: 1, y: 178, inputs: ['wood', 'tape'] },
+  { id: 'purifier', kind: 'recipe', displayName: '简易净水器', iconKey: null, col: 1, y: 218, inputs: ['scrap_metal', 'filter', 'wire'] },
+  { id: 'storage_rack', kind: 'recipe', displayName: '置物架', iconKey: null, col: 1, y: 258, inputs: ['wood', 'cloth', 'crowbar'] },
+  { id: 'work_badge', kind: 'recipe', displayName: '工牌', iconKey: null, col: 1, y: 458, inputs: ['scrap_metal', 'cloth', 'tape'] },
+  { id: 'pass_sticker', kind: 'recipe', displayName: '通行贴', iconKey: null, col: 2, y: 443, inputs: ['work_badge', 'wire', 'tape', 'battery'] },
+  { id: 'permit', kind: 'recipe', displayName: '许可证', iconKey: null, col: 3, y: 403, inputs: ['pass_sticker', 'battery', 'filter', 'cloth'] },
+  { id: 'vip_card', kind: 'recipe', displayName: '贵宾卡', iconKey: null, col: 4, y: 363, inputs: ['permit', 'scrap_metal', 'cloth', 'battery'] },
+  { id: 'core_key', kind: 'recipe', displayName: '核心权限', iconKey: null, col: 5, y: 323, inputs: ['vip_card', 'fuse', 'wire', 'scrap_metal'] },
+  { id: 'craft_dagger', kind: 'recipe', displayName: '匕首', iconKey: 'dagger', col: 1, y: 298, inputs: ['scrap_metal', 'cloth'] },
+  { id: 'craft_short_sword', kind: 'recipe', displayName: '短剑', iconKey: 'short_sword', col: 1, y: 338, inputs: ['scrap_metal', 'wood', 'tape'] },
+  { id: 'craft_cleaver', kind: 'recipe', displayName: '砍刀', iconKey: 'cleaver', col: 1, y: 378, inputs: ['scrap_metal', 'wood', 'tape'] },
+  { id: 'craft_fire_axe', kind: 'recipe', displayName: '消防斧', iconKey: 'fire_axe', col: 1, y: 418, inputs: ['scrap_metal', 'wood', 'cloth'] },
   // 净化：净水器的动作节点，跟在配方段之后（旧列表里它也在所有配方之后）。
-  { id: 'purify', kind: 'action', displayName: '净化', iconKey: 'dirty_water', col: 2, y: 217, inputs: ['purifier'] },
+  { id: 'purify', kind: 'action', displayName: '净化', iconKey: 'dirty_water', col: 2, y: 203, inputs: ['purifier'] },
   // ── 材料列（第 0 列，合成的根）────────────────────────────────────────
-  { id: 'wood', kind: 'material', displayName: '木材', iconKey: 'wood', col: 0, y: 118, inputs: [] },
-  { id: 'scrap_metal', kind: 'material', displayName: '废金属', iconKey: 'scrap_metal', col: 0, y: 162, inputs: [] },
-  { id: 'cloth', kind: 'material', displayName: '布料', iconKey: 'cloth', col: 0, y: 206, inputs: [] },
-  { id: 'tape', kind: 'material', displayName: '胶带', iconKey: 'tape', col: 0, y: 250, inputs: [] },
-  { id: 'battery', kind: 'material', displayName: '电池', iconKey: 'battery', col: 0, y: 294, inputs: [] },
-  { id: 'wire', kind: 'material', displayName: '电线', iconKey: 'wire', col: 0, y: 338, inputs: [] },
-  { id: 'filter', kind: 'material', displayName: '滤芯', iconKey: 'filter', col: 0, y: 382, inputs: [] },
-  { id: 'fuse', kind: 'material', displayName: '保险丝', iconKey: 'fuse', col: 0, y: 426, inputs: [] },
-  { id: 'crowbar', kind: 'material', displayName: '撬棍', iconKey: 'crowbar', col: 0, y: 470, inputs: [] },
+  { id: 'wood', kind: 'material', displayName: '木材', iconKey: 'wood', col: 0, y: 112, inputs: [] },
+  { id: 'scrap_metal', kind: 'material', displayName: '废金属', iconKey: 'scrap_metal', col: 0, y: 152, inputs: [] },
+  { id: 'cloth', kind: 'material', displayName: '布料', iconKey: 'cloth', col: 0, y: 192, inputs: [] },
+  { id: 'tape', kind: 'material', displayName: '胶带', iconKey: 'tape', col: 0, y: 232, inputs: [] },
+  { id: 'battery', kind: 'material', displayName: '电池', iconKey: 'battery', col: 0, y: 272, inputs: [] },
+  { id: 'wire', kind: 'material', displayName: '电线', iconKey: 'wire', col: 0, y: 312, inputs: [] },
+  { id: 'filter', kind: 'material', displayName: '滤芯', iconKey: 'filter', col: 0, y: 352, inputs: [] },
+  { id: 'fuse', kind: 'material', displayName: '保险丝', iconKey: 'fuse', col: 0, y: 392, inputs: [] },
+  { id: 'crowbar', kind: 'material', displayName: '撬棍', iconKey: 'crowbar', col: 0, y: 432, inputs: [] },
 ];
 
 export function findCraftNode(id: string): CraftTreeNode | undefined {

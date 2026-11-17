@@ -127,7 +127,7 @@
   "craftTree": {
     "_comment": "AG-61 二叉树合成面板：节点几何与视图变换范围。树比面板高是必然，缩放/拖拽的边界与步长全部走这里，GameScene 与 src/data/craftTree.ts 不硬编码；改节点大小时同步看 craftTree.test.ts 的排版断言。",
     "nodeWidth": 136,
-    "nodeHeight": 36,
+    "nodeHeight": 34,
     "columnPitch": 170,
     "firstColumnX": 147,
     "zoomMin": 0.5,

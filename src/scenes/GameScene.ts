@@ -236,7 +236,7 @@ const CRAFT_TREE_PANEL_TOP = 56;
 /** 树面板高：底边 676，清开 foot 带（680）。 */
 const CRAFT_TREE_PANEL_H = 620;
 /** 详情块第一行的 y（效果 / 状态+档位 / 材料 / 去哪拿 四行流式排布）。 */
-const CRAFT_TREE_DETAIL_Y = 520;
+const CRAFT_TREE_DETAIL_Y = 490;
 /**
  * 详情文本的换行宽。右侧留出制作按钮（116px + 12px 透气）。
  * 最坏流预算：效果 1 行 + 状态 1 行 + 材料 1 行 + 去哪拿 2 行 =
@@ -4557,7 +4557,7 @@ export class GameScene extends Phaser.Scene {
     const box = this.panelBox;
     const interiorLeft = (box?.x ?? 0) + 32;
     const interiorRight = (box ? box.x + box.w : 1280) - 32;
-    const interiorTop = (box?.y ?? 56) + 40;
+    const interiorTop = (box?.y ?? 56) + 38;
     const interiorBottom = CRAFT_TREE_DETAIL_Y - 8;
     const loX = interiorRight - b.maxX * z;
     const hiX = interiorLeft - b.minX * z;

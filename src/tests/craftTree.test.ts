@@ -114,7 +114,7 @@ describe('排版约束（画布 / 探针 / 边）', () => {
     for (const [col, ys] of byCol) {
       ys.sort((a, b) => a - b);
       for (let i = 1; i < ys.length; i++) {
-        expect(ys[i] - ys[i - 1], `第 ${col} 列第 ${i} 个节点贴太近`).toBeGreaterThanOrEqual(CRAFT_NODE_H + 8);
+        expect(ys[i] - ys[i - 1], `第 ${col} 列第 ${i} 个节点贴太近`).toBeGreaterThanOrEqual(CRAFT_NODE_H + 6);
       }
     }
   });
@@ -164,6 +164,14 @@ describe('排版约束（画布 / 探针 / 边）', () => {
     }
     // 25 条材料边 + 4 条凭证链边 + 1 条净化边。
     expect(CRAFT_TREE_EDGES).toHaveLength(30);
+  });
+
+  it('没有节点压在 y=166..174——工作台 upgradeBoard 的空文本行', () => {
+    // 新开局无已建设施时 upgradeBoard 是空文本，挂世界坐标 y=170；
+    // navTo 探针「marker y ±4 内找第一个 Text」不筛深度，空文本会抢靶。
+    for (const node of CRAFT_TREE_NODES) {
+      expect(Math.abs(node.y - 170), `${node.id} 压在 upgradeBoard 空文本行上`).toBeGreaterThan(4);
+    }
   });
 
   it('树包围盒与 clamp 区间自洽（树确实比面板高，缩放才有意义）', () => {

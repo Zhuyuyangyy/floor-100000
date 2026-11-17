@@ -158,7 +158,11 @@ import {
   WORLD_DEFAULT_HINT,
 } from '../data/tutorial';
 import { playSfx } from '../render/audio';
-import { shakeIfEnabled } from '../systems/SettingsSystem';
+// AG-91：juice 层（战斗打击感）。纯逻辑在 render/juice.ts（零 Phaser），
+// 本场景只做三件事：updateJuice 每帧按真实时间推进并写相机 offset、按分级
+// 表在战斗钩子触发 impact、消费 ImpactFeedback 演闪白/缩放。
+import { JuiceState, JUICE_BALANCE } from '../render/juice';
+import { getSettings } from '../systems/SettingsSystem';
 import { SettingsScene } from './MenuScene';
 import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, PANEL_FILL_BANDS, PANEL_FRAME_PIECES, PANEL_SLICE, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import {
@@ -1474,6 +1478,10 @@ export class GameScene extends Phaser.Scene {
     // AG-80：性能层（飘字池/帧预算守卫/FPS 计数器）建在 drawFloor 之前——
     // 楼层过程与之后的搜刮、战斗飘字全都走池。
     this.initPerfLayer();
+
+    // AG-91：juice 层（震屏/顿帧/闪白/缩放的状态机）同样建在 drawFloor 之前——
+    // 伏击开场偷袭（playAmbusherStrike）在战斗第一帧就可能打人。
+    this.initJuice();
 
     this.drawFloor();
 
@@ -2897,7 +2905,12 @@ export class GameScene extends Phaser.Scene {
     if (!stage) return;
     playSfx('danger');
     this.playActionAnim(hurtAnimKey(this.metaSelectedCharacter()), 400);
-    shakeIfEnabled(this, 160, 0.008); // AG-72: 震屏开关
+    // AG-91：玩家受击 = medium 档（震屏 0.4 trauma + 50ms 顿帧 + 受击闪白）。
+    // 原 AG-72 的 shakeIfEnabled(160, 0.008) 被这套分级表取代——同一事件
+    // 全游戏一个入口、一个比例（config/game-balance.json 的 juice 块）。
+    // （集成裁决：受击动画取 anim 的 metaSelectedCharacter 按角色播，
+    // 反馈取 juice 的分级入口。）
+    this.juiceImpact('medium', this.player.x, PLAYER_FEET_Y - 48);
     stage.monster.lunge();
     this.time.delayedCall(130, () => {
       if (!this.combatStage) return;
@@ -2912,6 +2925,9 @@ export class GameScene extends Phaser.Scene {
     const state = getGame();
     const stage = this.combatStage;
     if (!stage || !state.combat) return;
+    // AG-91：普通命中 = small 档（trauma 0.15 的轻震、无顿帧无闪白）——
+    // 与受击/击杀共用一套比例，打击感的「底噪」。位置取敌人胸口。
+    this.juiceImpact('small', stage.monster.root.x, stage.monster.chestY);
     playSfx('hurt');
     stage.monster.hit(26);
     stage.monster.tweenHpTo(Math.max(0, state.combat.monster.hp) / state.combat.monster.maxHp, 240);
@@ -3228,7 +3244,11 @@ export class GameScene extends Phaser.Scene {
       bumpStat(state, 'damageTaken', dmg); // AG-81：敌人反击命中计数（软化后的实扣）
       this.combatDamageTaken += dmg; // AG-77：零伤守门人的判据在这里记账
       if (action === 'guard') this.playActionAnim(hurtAnimKey(this.metaSelectedCharacter()), 400);
-      shakeIfEnabled(this, 160, 0.008); // AG-72: 震屏开关
+      // AG-91：敌人反击命中 = medium 档（震屏 0.4 trauma + 50ms 顿帧 + 受击
+      // 闪白）。原 AG-72 的 shakeIfEnabled(160, 0.008) 被分级表取代。
+      // （集成裁决：受击动画取 anim 的 metaSelectedCharacter 按角色播，
+      // 反馈取 juice 的分级入口。）
+      this.juiceImpact('medium', this.player.x, PLAYER_FEET_Y - 48);
       // AG-70：敌人反击要看见——前冲 38px + 玩家掉血飘字 + 头顶血条收缩。
       this.stageMonsterCounter(dmg);
     }
@@ -3239,6 +3259,9 @@ export class GameScene extends Phaser.Scene {
       state.player.hp = 0;
       state.status = 'lost';
       bumpStat(state, 'deaths'); // AG-81：战死计数
+      // AG-91：玩家阵亡 = large 档（满 trauma + 120ms 顿帧 + 闪白 + 缩放）——
+      // 倒下的最后一击要有全场最重的那一下，再进 End 场景。
+      this.juiceImpact('large', this.player.x, PLAYER_FEET_Y - 48);
       saveToStorage(state);
       // AG-90：战死也倒地——原来这里直接 scene.start('End')，玩家的最后一
       // 帧是战斗面板。与世界循环的死亡同一演法：die clip 播完（GIF 3x900ms）
@@ -3253,6 +3276,11 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (round.monsterDead) {
+      // AG-91：击杀 = large 档。位置取敌人胸口（die 之前抓——倒地后 root 会
+      // 被 tween 挪走）。与上面 stageMonsterHit 的 small 档同帧叠加：trauma
+      // 0.15+1.0 钳到 1.0，顿帧取 max(0,120)=120ms，读作「这下打实了」。
+      const stage = this.combatStage;
+      if (stage) this.juiceImpact('large', stage.monster.root.x, stage.monster.chestY);
       // AG-70：阵亡演出——闪白、倒地、淡出（outcome 面板同时升起，不抢戏）。
       this.combatStage?.monster.die();
       this.finishCombat('win');
@@ -3466,7 +3494,8 @@ export class GameScene extends Phaser.Scene {
       this.playSwingFx();
     }
     if (result.hpChange < 0) {
-      shakeIfEnabled(this, 160, 0.008); // AG-72: 震屏开关
+      // AG-91：非战斗舞台的受伤（遭遇战掉血）= medium 档，与战斗反击同一比例。
+      this.juiceImpact('medium', this.player.x, PLAYER_FEET_Y - 48);
       this.refreshStats();
     }
     // Outcome panel: the message, and the item flow the player actually got.
@@ -9379,6 +9408,124 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // ── AG-91: juice 层（战斗打击感：震屏 / 顿帧 / 闪白 / 缩放） ─────────────
+  // 纯逻辑状态机在 render/juice.ts（零 Phaser，Node 单测直跑）；本段只做
+  // 「消费」三件事：
+  //   1. updateJuice —— update() 里按**真实时间**推进状态，把 trauma² 震屏
+  //      写进相机 offset（只写相机，绝不动物体）；
+  //   2. juiceImpact —— 战斗钩子的分级入口（small=命中 / medium=受击 /
+  //      large=击杀），全游戏共用一套比例（config/game-balance.json 的 juice 块）；
+  //   3. 顿帧闸门 —— hitstop 期间只冻模拟（世界链 + 舞台 tween），导航条/
+  //      教程/toast 等 UI 与相机衰减照常走真实时间。
+  //
+  // 相机 offset 的写入点（为什么是 shakeEffect 的私有字段）：
+  //   Phaser 4.2.1 每帧的顺序是 CameraManager.update（先）→ scene.update()
+  //   → Camera.preRender()：follow 跟随 → useBounds 钳制 → 建矩阵 →
+  //   shakeEffect.preRender() 把 _offsetX/_offsetY translate 进矩阵。也就是说
+  //   矩阵平移点是**唯一在 bounds 钳制之后**作用的位置——写 scrollX/scrollY
+  //   会被钳制吃掉（站立 bounds 只有 200px 高 × 层宽，而视口 1280×720，
+  //   clampX/clampY 会把偏移整体钉死，一层楼内震屏直接消失），内置 shake()
+  //   又用 Math.random（项目硬规则禁随机，回放要可复现）。因此本场景直接写
+  //   shakeEffect 的偏移字段：复用 Phaser 官方的「只抖相机不动物体」机制，
+  //   只把随机源换成 juice.ts 的 seeded value noise。字段自 Phaser 3.5.0
+  //   起未变，且 package.json 将 phaser 精确钉在 4.2.1。
+  // 参考：node_modules/phaser/src/cameras/2d/Camera.js preRender 第 637 行、
+  //       effects/Shake.js preRender/update、CameraManager.js 第 201 行（UPDATE 绑定）。
+
+  /** AG-91：juice 状态机。场景重启时 initJuice 建新的（字段初始化器不重跑）。 */
+  private juice!: JuiceState;
+  /**
+   * AG-91：震屏强度（0..1）。= AG-72 的 screenShake 总闸开着时的平衡旋钮值
+   * （JUICE_BALANCE.shakeStrength），总闸关闭时 0。只在 create 与 resume 时
+   * 读设置（设置在 MenuScene 改，那时本场景已暂停），不进每帧热路径。
+   */
+  private juiceStrength = JUICE_BALANCE.shakeStrength;
+
+  /** AG-91：建/重建 juice 状态机。create() 里 initPerfLayer 之后调。 */
+  private initJuice(): void {
+    // 种子只认 runSeed + 固定标签：同一局的重放震屏噪声一致；不同局不同表。
+    const seed = deriveSeed(getGame().runSeed, JUICE_BALANCE.seedTag);
+    this.juiceStrength = getSettings().screenShake ? JUICE_BALANCE.shakeStrength : 0;
+    this.juice = new JuiceState({ seed, strength: this.juiceStrength });
+    // 相机 shakeEffect 可能留着上一局的 offset（重启不重建相机）——先清零，
+    // 否则新场景第一帧会闪一下旧局的震屏。
+    this.writeCameraShakeOffset(0, 0);
+    // 从设置场景返回时重读总闸（GameScene 在 MenuScene 期间处于暂停态）。
+    this.events.on(Phaser.Scenes.Events.RESUME, this.refreshJuiceStrength, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.events.off(Phaser.Scenes.Events.RESUME, this.refreshJuiceStrength, this);
+    });
+  }
+
+  private refreshJuiceStrength(): void {
+    this.juiceStrength = getSettings().screenShake ? JUICE_BALANCE.shakeStrength : 0;
+    this.juice.shakeStrength = this.juiceStrength;
+  }
+
+  /**
+   * AG-91：把 juice 算出的相机 offset 写进 Phaser 的 shakeEffect——矩阵平移
+   * 点（见本节注释）。全 0 时显式 isRunning=false，不留残留位移。
+   */
+  private writeCameraShakeOffset(x: number, y: number): void {
+    const fx = this.cameras.main.shakeEffect as unknown as {
+      isRunning: boolean;
+      duration: number;
+      _offsetX: number;
+      _offsetY: number;
+    };
+    if (x === 0 && y === 0) {
+      fx.isRunning = false;
+      fx._offsetX = 0;
+      fx._offsetY = 0;
+      return;
+    }
+    // duration 设成无穷大：不让 Phaser 自己的 update 走到「effectComplete」
+    // 分支把 offset 清掉（我们每帧都会重写，但它跑在我们前面）。
+    fx.duration = Number.MAX_SAFE_INTEGER;
+    fx.isRunning = true;
+    fx._offsetX = x;
+    fx._offsetY = y;
+  }
+
+  /**
+   * AG-91：分级打击入口。战斗钩子（命中/受击/击杀/伏击/巡游体）统一走这里，
+   * 返回的视觉清单当场演：闪白（受击白闪 50-80ms）与缩放（squash & stretch
+   * 保体积回弹，large 专属）。顿帧由 updateJuice 的闸门兑现。
+   */
+  private juiceImpact(tier: 'small' | 'medium' | 'large', x: number, y: number): void {
+    const fb = this.juice.impact(tier, x, y);
+    if (fb.flash) {
+      // 受击闪白：Phaser Flash 效果（一次性、自褪色，零新增对象）。总闸只管
+      // 震屏位移，闪白与顿帧不设开关——无位移刺激，且 70ms 一闪即灭。
+      this.cameras.main.flash(JUICE_BALANCE.flashMs, 255, 255, 255);
+    }
+  }
+
+  /**
+   * AG-91：每帧推进（真实时间）。位置在所有早退分支之前——爬梯/面板/战斗
+   * 全程覆盖，顿帧期间震屏与闪白/缩放计时也不冻（spec：只冻模拟）。
+   * 返回是否处于顿帧（调用方据此闸掉世界模拟）。
+   */
+  private updateJuice(deltaMs: number): boolean {
+    this.juice.update(deltaMs);
+    const frozen = this.juice.isFrozen();
+    // 顿帧只冻「模拟」：世界链由调用方闸掉，战斗舞台的 tween（击退/前冲/
+    // 呼吸/飘字）在这里统一冻结——经典 hitstop 冻结受击反应用的就是它。
+    // 每帧都写（不只在边沿）：万一有代码在别处改了 timeScale，下一帧纠回。
+    this.tweens.timeScale = frozen ? 0 : 1;
+    // squash & stretch：按真实时间采样（演出层，不随顿帧冻），保体积
+    // （sx=1/sy）。只挂在战斗舞台的敌人剪影上——large（击杀）的受害者。
+    const stage = this.combatStage;
+    if (stage && this.juice.scaleRemainingMs > 0) {
+      const p = this.juice.scalePulse();
+      stage.monster.root.setScale(p.sx, p.sy);
+    }
+    // 相机 offset：trauma² × 强度 × seeded noise（juice.ts 纯逻辑产出）。
+    const off = this.juice.cameraOffset();
+    this.writeCameraShakeOffset(off.x, off.y);
+    return frozen;
+  }
+
   // ── AG-80: 性能层（飘字池 / 帧预算守卫 / FPS 计数器 / 降级） ──────────────
   // 上架承诺「低端机不炸」的落点。四件东西：
   //   1. floatText —— 飘字池（combatFloatText 的下游），create() 里建；
@@ -9540,6 +9687,10 @@ export class GameScene extends Phaser.Scene {
     this.syncWeapon();
     // AG-80：帧预算守卫在每个早退分支之前喂样——爬梯、面板、战斗全程覆盖。
     this.updatePerfGuard(delta);
+    // AG-91：juice 层 tick（真实时间衰减 + 写相机 offset）同样在所有早退之前；
+    // 顿帧闸门只冻模拟——上面的导航条/教程/toast/呼吸/武器同步都是 UI 与
+    // 演出，照常走真实时间（spec：冻结期只冻模拟）。
+    if (this.updateJuice(delta)) return;
     if (this.stairClimb) {
       this.updateStairClimb(delta);
       return;
@@ -10139,8 +10290,11 @@ export class GameScene extends Phaser.Scene {
       // 否则它会保持挥击姿势走完全程。
       this.playWandererAttack();
       playSfx('hurt');
-      shakeIfEnabled(this, 160, 0.008); // AG-72: 震屏开关
-      this.cameras.main.flash(140, 230, 109, 99);
+      // AG-91：巡游体击中 = medium 档（震屏 + 50ms 顿帧 + 受击闪白）。原
+      // AG-72 的 shakeIfEnabled 与绿色全屏闪（flash(140,230,109,99)）被
+      // 分级表取代——全游戏受击反馈同一个入口同一个比例；绿色那抹毒味由
+      // ground-slam 特效与 wound debuff 保留，不再靠全屏闪表达。
+      this.juiceImpact('medium', this.player.x, PLAYER_FEET_Y - 48);
       playFx(this, 'ground-slam', state.player.x, PLAYER_FEET_Y - 6, LIGHT_DEPTH);
       this.flash(`被巡游体击中！HP -${damage}，快回宿舍或换层！`);
       if (state.player.hp <= 0) {

@@ -66,6 +66,22 @@
     "runSpeedMultiplier": 2,
     "runAnimTimeScale": 1.6
   },
+  "juice": {
+    "_comment": "AG-91 战斗 juice 层（game-feel，调研提案 P1）：震屏/顿帧/闪白/缩放的分级表与旋钮。数值出处：2026-11-17 开源调研 P1（gamedev-skills game-feel 技能 + m2-md hitstop-juice 思路，许可证已核验；全部自行实现，零新依赖），档位区间按该提案分级表落地。trauma² 震屏模型（Squirrel Eiserloh GDC「Juicing Your Cameras with Shake」）：偏移幅度=trauma²，trauma 线性衰减、满值 1/traumaDecayPerSecond 秒归零；偏移采样走 seeded value noise（deriveSeed/makeRng，禁 Math.random），同 seed 同输入同偏移——回放可复现。分级：small=普通命中（trauma 0.10-0.20 取 0.15，无顿帧，粒子 0-4 取 2）；medium=玩家受击（trauma 0.30-0.50 取 0.40，顿帧 0.04-0.06s 取 50ms，粒子 6-12 取 8，闪白）；large=击杀（trauma 0.70-1.00 取 1.00，顿帧 0.10-0.15s 取 120ms，粒子 20-40 取 28，闪白+缩放+伤害数字）。受击闪白 50-80ms 取 70ms。shakeStrength 是无障碍旋钮（0-1，默认 0.7，防光敏/晕眩）；AG-72 的 screenShake 布尔开关仍是总闸，关时强度按 0 计（顿帧/闪白/缩放不受影响——无位移刺激）。相机只写 offset（Phaser shakeEffect 的矩阵平移点，位于 follow/bounds 钳制之后），绝不动物体。",
+    "shakeStrength": 0.7,
+    "traumaDecayPerSecond": 2,
+    "maxShakePx": 12,
+    "noiseHz": 20,
+    "flashMs": 70,
+    "scaleMs": 180,
+    "scaleAmount": 0.28,
+    "seedTag": "juice-shake",
+    "tiers": {
+      "small": { "trauma": 0.15, "hitstopMs": 0, "particles": 2, "flash": false, "scale": false, "damageNumber": false },
+      "medium": { "trauma": 0.4, "hitstopMs": 50, "particles": 8, "flash": true, "scale": false, "damageNumber": false },
+      "large": { "trauma": 1, "hitstopMs": 120, "particles": 28, "flash": true, "scale": true, "damageNumber": true }
+    }
+  },
   "floorGeometry": {
     "_comment": "AG-65 楼层几何（2026-11-17 用户原话：「每一层宽度长度都不一样，不能一样，有的长」「梯子的位置也不是说一定是起点和终点」「每层小概率在中间开个楼板洞/加个梯子」）。全部 seeded 派生（deriveSeed/makeRng，禁 Math.random），且种子只认楼层号不认 runSeed：FloorSystem/GameScene/存量测试都按楼层号读数，同一层每次进都是同一个答案，爬上去再爬回来梯子不跑。tier1（1-10 层）全部保持现值：roomSpread 0、下行口仍在右端，存量单测/e2e 因此不用改。",
     "roomSpreadByTier": { "1": 0, "2": 2, "3": 2, "4": 2, "5": 2, "6": 2 },

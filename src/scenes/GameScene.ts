@@ -104,7 +104,7 @@ import {
 } from '../systems/encounters';
 import { encounterSpots, nudgeSpotX, placeClearX } from '../systems/encounterSpots';
 import { resolveRound, playerCombatant, GUARD_ENERGY_RESTORE, type CombatAction, type CombatRound, type Combatant } from '../systems/combat';
-import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster } from '../systems/monsters';
+import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster, type MonsterBehavior } from '../systems/monsters';
 import { guardianDamageMult, lootBonus, moveSpeedMult } from '../systems/relics';
 import { modeGuardianDamageMult } from '../systems/modes';
 import { buy, materialShelf, sell, sellPrice, shopStock } from '../systems/shop';
@@ -232,7 +232,16 @@ import {
   buildWallDressing,
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
-import { BAG_LAYOUT, CONTAINER_LABEL_DROP, HUD_LAYOUT, NAV_BAR, hudClockLabel, navSlotX } from '../render/hudLayout';
+import { BAG_LAYOUT, COMBAT_BAR, CONTAINER_LABEL_DROP, HUD_LAYOUT, NAV_BAR, combatBarX, hudClockLabel, navSlotX } from '../render/hudLayout';
+import {
+  BEHAVIOR_LABELS,
+  MONSTER_BAR_COLORS,
+  createHeadTag,
+  createMonsterView,
+  monsterFormFor,
+  type HeadTag,
+  type MonsterView,
+} from '../render/monsterArt';
 import { getRecipe, isPassUpgrade, materialSourceHint, type RecipeId, type UpgradeId } from '../data/recipes';
 import {
   CRAFT_NODE_H,
@@ -442,6 +451,17 @@ const LIFT_SIGN_FONT = 18;
 
 const WANDERER_FLEE_SAFE_DISTANCE = 280;
 const WANDERER_FLEE_EXIT_MARGIN = 24;
+
+/**
+ * AG-70：战斗站位。用户 2026-11-17 原话：「我不是说那个就是打击别人的时候
+ * 展示战斗然后我们打击吗，不要做那种文本框，我们点击攻击看不见人的操作了」。
+ * 双方因此以「人」的形式上场：玩家滑步到层左 25% 面右，敌人在层右 75% 面左。
+ * 按当前层宽取值（floorWidthFor，tier1 一档 1280）——不硬编码 1280：tier2+
+ * 的层宽不同，25%/75% 的间距随之伸缩，zoom 1 视口在遭遇层（2..5，全 tier1）
+ * 恰好把双方同时框住。
+ */
+const COMBAT_SPOT_PLAYER_FRAC = 0.25;
+const COMBAT_SPOT_MONSTER_FRAC = 0.75;
 
 // Row pitch for the four HUD stat bars. 15px gives an 11px label plus a 7px bar
 // with breathing room; 13px was too cramped to read at a glance.
@@ -911,6 +931,16 @@ export class GameScene extends Phaser.Scene {
   private combatSelected = 0;
   // True while the outcome screen is up (the fight is decided, one Enter left).
   private combatDone = false;
+  // AG-70：战斗舞台——敌人剪影视图 + 双方头顶名签。世界坐标（scrollFactor 1），
+  // 击退/前冲/待机呼吸都由 MonsterView 自己的确定性 tween 驱动；本场景只在
+  // syncCombatStage 里把名签钉在角色身上。不走 encounterObjects：那个列表由
+  // 面板重建/销毁管，舞台要活过整个战斗（含 outcome 面板那一段）。
+  private combatStage?: { monster: MonsterView; playerTag: HeadTag };
+  // AG-70：敌人剪影上的点击热区（世界坐标）——「点击攻击」直接点怪也出手。
+  private combatMonsterHit?: Phaser.GameObjects.Rectangle;
+  // AG-70：演出锁——撤退成功时角色跑向边缘淡出（560ms），这期间任何战斗
+  // 输入（Enter/ESC/点击）都不再驱动回合，否则半空中再结算一回合。
+  private combatBusy = false;
   // OVERHAUL Wave C1: the shop panel's cursor. AG-20: one cursor over BOTH
   // shelves — the trader's stock and the material shelf — so Enter buys and S
   // sells whatever row is highlighted, whichever shelf it came from.
@@ -2464,13 +2494,15 @@ export class GameScene extends Phaser.Scene {
     const log: string[] = [combatIntroMessage(kind, monster.name ?? '敌人')];
     // An ambusher's first strike lands before the player acts: the wind-up is
     // the tell, the hit is the bill.
+    let ambushStrike = 0;
     if (monster.behavior === 'ambusher') {
       const mods = behaviorModifiers('ambusher');
       const strike = Math.max(1, Math.round(monster.damage * mods.firstStrikeMult));
       state.player.hp = Math.max(0, state.player.hp - strike);
       log.push(`${monster.name} 抢先扑出，造成 ${strike} 点伤害！`);
-      this.playActionAnim(hurtAnimKey('player'), 400);
-      this.cameras.main.shake(160, 0.008);
+      // 受伤动画/震屏挪到 playAmbusherStrike——否则紧接着的滑步 walk clip
+      // 会把 hurt clip 当场盖掉，偷袭只剩日志没有画面。
+      ambushStrike = strike;
     }
     state.combat = {
       kind,
@@ -2492,6 +2524,10 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     saveToStorage(state);
+    // AG-70：双方上场（滑步 + 敌人生成 + 头顶名签），再补 ambusher 的偷袭
+    // 演出——前冲、受伤、掉血飘字与头顶血条收缩，全部看得见。
+    this.buildCombatStage(monster, kind === 'boss');
+    if (ambushStrike > 0) this.playAmbusherStrike(ambushStrike);
     this.buildCombatPanel();
   }
 
@@ -2499,85 +2535,280 @@ export class GameScene extends Phaser.Scene {
     const state = getGame();
     state.combat = undefined;
     this.combatDone = false;
+    this.combatBusy = false;
     this.encounterOpen = false;
     for (const o of this.encounterObjects) o.destroy();
     this.encounterObjects = [];
+    // AG-70：拆舞台——敌人剪影、双方名签、敌人点击热区都随战斗结束消失。
+    this.destroyCombatStage();
     // The floor's spots are rebuilt so a resolved one disappears.
     this.buildEncounterSpots();
   }
 
+  // ── AG-70: the combat stage ─────────────────────────────────────────────
+  // 战斗从「读面板」变成「看人打」：双方以剪影/立绘上场站位，头顶名签血条
+  // 随人移动，命中/未命中/反击/格挡/撤退各有动作链演出。逻辑与数值仍全部
+  // 在 combat.ts/monsters.ts（只读），这里只播片——resolveRound 同步返回，
+  // 演出是它下游的 tween/delayedCall，永不阻塞回合结算。
+
+  /** 双方上场：敌人在层右 75% 面左落地，玩家滑步到层左 25% 面右。 */
+  private buildCombatStage(monster: Combatant & { id: number; behavior: string }, isBoss: boolean): void {
+    this.destroyCombatStage();
+    const behavior = monster.behavior as MonsterBehavior;
+    let monsterX = this.floorW * COMBAT_SPOT_MONSTER_FRAC;
+    // 与行商保持一个身位：75% 若落在商店点 100px 内，顺移到商店外侧 100px，
+    // 再夹回 75%±(60..64) 的带内——既不和另一个站着的活人穿模，也不跑出
+    // 「层右大半边」的站位语义。行商的名签与敌人头顶名签同高且带深色底板，
+    // 贴太近两块字牌会叠，敌人的血条会被行商标签板盖住（seed 42 的 2 层
+    // 实测：shop 1000 vs 960）。
+    const shopX = this.spotMarkers.get('shop')?.x;
+    if (shopX !== undefined && Math.abs(monsterX - shopX) < 100) {
+      const away = shopX + (monsterX <= shopX ? -100 : 100);
+      const spot = this.floorW * COMBAT_SPOT_MONSTER_FRAC;
+      monsterX = Phaser.Math.Clamp(away, spot - 60, spot + 64);
+    }
+    const view = createMonsterView(this, {
+      x: monsterX,
+      y: PLAYER_FEET_Y,
+      form: monsterFormFor(behavior, { isBoss }),
+      name: monster.name ?? '敌人',
+      hpFrac: Math.max(0, monster.hp) / monster.maxHp,
+      barColor: isBoss ? MONSTER_BAR_COLORS.boss : MONSTER_BAR_COLORS.normal,
+    });
+    // 玩家名签：青色（安全色）与敌人的血红/boss 金分开，一眼分清谁是谁。
+    const playerTag = createHeadTag(this, { name: '你', barColor: PALETTE.clothHigh });
+    playerTag.setHp(this.combatPlayerHpFrac());
+    this.combatStage = { monster: view, playerTag };
+    // 具名：e2e 按名字探针（世界坐标/可见性），不用数 children。
+    view.root.setName('combat-monster-view');
+    playerTag.root.setName('combat-player-tag');
+    this.syncCombatStage();
+    // 滑步上场：距离近就原地转身面右，不硬播一段走路。
+    this.combatSlidePlayerTo(this.floorW * COMBAT_SPOT_PLAYER_FRAC);
+    // 行为标签开场飘一次：「这只怎么打」在看见剪影之后立刻有文字确认。
+    // 伏击/蛮力/冷枪是「特别疼」的三类，用 warn 色；其余中性。
+    const warn = behavior === 'ambusher' || behavior === 'brute' || behavior === 'ranged';
+    this.combatFloatText(monsterX, view.chestY - 34, BEHAVIOR_LABELS[behavior], warn ? hex(TEXT.warn) : hex(TEXT.secondary));
+    // 点敌人本身也能出手——「点击攻击」的字面兑现：世界坐标热区盖在剪影上，
+    // 与底部动作条按钮同一终点（activateCombatChoice，自带 combatBusy 锁）。
+    const hit = hitRect(this, monsterX - 40, PLAYER_FEET_Y - view.formH - 8, 80, view.formH + 8, DUST_DEPTH + 5, {
+      onClick: () => {
+        if (this.combatBusy || this.combatDone) return;
+        if (getGame().combat) this.activateCombatChoice();
+      },
+    });
+    hit.setName('combat-monster-hit');
+    this.combatMonsterHit = hit;
+  }
+
+  /** 拆舞台：先摘 tween 再销毁（ Graphics 被 tween 追着画会炸）。 */
+  private destroyCombatStage(): void {
+    this.combatMonsterHit?.destroy();
+    this.combatMonsterHit = undefined;
+    const stage = this.combatStage;
+    if (!stage) return;
+    this.combatStage = undefined;
+    stage.monster.destroy();
+    stage.playerTag.stop();
+    stage.playerTag.root.destroy();
+  }
+
+  /** 每帧（update 的面板早退之前）：玩家名签钉在世界坐标，滑步途中跟着走。 */
+  private syncCombatStage(): void {
+    const stage = this.combatStage;
+    if (!stage) return;
+    stage.playerTag.root.setPosition(this.player.x, PLAYER_FEET_Y - FRAME_H - 8);
+  }
+
+  /** 滑步：tween 代理同时驱动 sprite 与 state.player.x（存档位置一致）。 */
+  private combatSlidePlayerTo(x: number): void {
+    const from = this.player.x;
+    const dist = x - from;
+    if (Math.abs(dist) < 4) {
+      this.player.setFlipX(false); // 面右：敌人从右打来
+      return;
+    }
+    const who = this.metaSelectedCharacter();
+    this.player.setFlipX(dist < 0);
+    this.player.play(walkAnimKey(who), true);
+    const proxy = { v: from };
+    this.tweens.add({
+      targets: proxy,
+      v: x,
+      duration: Math.min(700, 260 + Math.abs(dist) * 0.6),
+      ease: 'Quad.easeInOut',
+      onUpdate: () => this.syncPlayerWorldObjects(proxy.v, PLAYER_FEET_Y),
+      onComplete: () => {
+        if (!this.player.active) return;
+        this.player.setFlipX(false);
+        this.player.play(idleAnimKey(who), true);
+      },
+    });
+  }
+
+  /** 玩家血量比：头顶血条与飘字共用同一个数。 */
+  private combatPlayerHpFrac(): number {
+    const state = getGame();
+    return Math.max(0, state.player.hp) / GAME_CONFIG.player.hpMax;
+  }
+
+  /** 飘字：世界坐标，上飘 46px 淡出。depth 压过前景剪影（26）。 */
+  private combatFloatText(x: number, y: number, text: string, color: string): void {
+    const t = this.add
+      .text(x, y, text, { fontFamily: FONT_FAMILY, fontSize: '20px', color, fontStyle: 'bold' })
+      .setOrigin(0.5, 0.5)
+      .setDepth(DUST_DEPTH + 4);
+    this.tweens.add({ targets: t, y: y - 46, duration: 900, ease: 'Quad.easeOut' });
+    this.tweens.add({ targets: t, alpha: 0, duration: 480, delay: 420, onComplete: () => t.destroy() });
+  }
+
+  /** ambusher 开场偷袭：敌人前冲 + 玩家受伤动画/震屏 + 掉血飘字 + 头顶血条收缩。 */
+  private playAmbusherStrike(damage: number): void {
+    const stage = this.combatStage;
+    if (!stage) return;
+    playSfx('danger');
+    this.playActionAnim(hurtAnimKey('player'), 400);
+    this.cameras.main.shake(160, 0.008);
+    stage.monster.lunge();
+    this.time.delayedCall(130, () => {
+      if (!this.combatStage) return;
+      playSfx('hurt');
+      this.combatFloatText(this.player.x, PLAYER_FEET_Y - FRAME_H - 4, `-${damage}`, hex(TEXT.warn));
+      this.combatStage.playerTag.tweenHpTo(this.combatPlayerHpFrac(), 200);
+    });
+  }
+
+  /** 命中：闪白 + 击退（MonsterView.hit）+ 火花 + 掉血飘字 + 敌人血条收缩。 */
+  private stageMonsterHit(damage: number): void {
+    const state = getGame();
+    const stage = this.combatStage;
+    if (!stage || !state.combat) return;
+    playSfx('hurt');
+    stage.monster.hit(26);
+    stage.monster.tweenHpTo(Math.max(0, state.combat.monster.hp) / state.combat.monster.maxHp, 240);
+    // 90ms 后出字与火花——与挥击 clip（320ms）同帧，读作「这一下打中了」。
+    this.time.delayedCall(90, () => {
+      const live = this.combatStage;
+      if (!live) return;
+      const mx = live.monster.root.x;
+      const cy = live.monster.chestY;
+      this.combatFloatText(mx, cy, `-${damage}`, hex(TEXT.warn));
+      playFx(this, 'hit-flash', mx, cy, LIGHT_DEPTH + 2);
+    });
+  }
+
+  /** 未命中：敌人朝玩家侧移闪避（与击退反向）+ 灰色「未命中」。 */
+  private stageMonsterDodge(): void {
+    const stage = this.combatStage;
+    if (!stage) return;
+    stage.monster.dodge();
+    this.time.delayedCall(110, () => {
+      const live = this.combatStage;
+      if (!live) return;
+      this.combatFloatText(live.monster.root.x, live.monster.chestY, '未命中', hex(TEXT.dim));
+    });
+  }
+
+  /** 格挡：沉腰架盾（压缩回弹）+ 招架火花。 */
+  private stagePlayerGuard(): void {
+    playFx(this, 'parry', this.player.x, PLAYER_FEET_Y - 46, LIGHT_DEPTH + 1, { scale: 1.3 });
+    this.tweens.add({ targets: this.player, scaleY: 0.94, duration: 90, yoyo: true, ease: 'Quad.easeOut' });
+  }
+
+  /** 敌人反击：前冲 38px + 玩家掉血飘字 + 玩家头顶血条收缩。 */
+  private stageMonsterCounter(damage: number): void {
+    const stage = this.combatStage;
+    if (!stage) return;
+    stage.monster.lunge();
+    // 140ms 后落地：与前冲 tween（130ms）同步，飘字贴在挨上的那一刻。
+    this.time.delayedCall(140, () => {
+      const live = this.combatStage;
+      if (!live) return;
+      this.combatFloatText(this.player.x, PLAYER_FEET_Y - FRAME_H - 4, `-${damage}`, hex(TEXT.warn));
+      live.playerTag.tweenHpTo(this.combatPlayerHpFrac(), 200);
+    });
+  }
+
+  /** 撤退成功：角色跑向层左缘淡出（敌人留在原地），收尾后交还控制。 */
+  private playFleeShow(): void {
+    this.combatBusy = true;
+    const who = this.metaSelectedCharacter();
+    this.player.setFlipX(true);
+    const runKey = runAnimKey(who);
+    this.player.play(this.anims.exists(runKey) ? runKey : walkAnimKey(who), true);
+    const targetX = Math.max(48, this.floorW * COMBAT_SPOT_PLAYER_FRAC * 0.4);
+    const proxy = { v: this.player.x };
+    this.tweens.add({
+      targets: proxy,
+      v: targetX,
+      duration: 520,
+      ease: 'Quad.easeIn',
+      onUpdate: () => this.syncPlayerWorldObjects(proxy.v, PLAYER_FEET_Y),
+    });
+    this.tweens.add({ targets: this.player, alpha: 0, duration: 400, delay: 160 });
+    const stage = this.combatStage;
+    if (stage) this.tweens.add({ targets: stage.playerTag.root, alpha: 0, duration: 400, delay: 160 });
+    this.time.delayedCall(560, () => {
+      if (!this.scene.isActive()) return;
+      this.player.setAlpha(1);
+      this.closeCombat();
+      this.flash('你撤出了战斗。');
+    });
+  }
+
+  /**
+   * AG-70：战斗界面去文本框化。440×232 的中央文字面板整块拆除——
+   *   1. 底部动作条（y 604..656，导航条 672 之下）：攻击/格挡/撤退三个大
+   *      按钮，图标 + 效果说明，可点击（panelHit），Enter/↑↓/Esc 语义原样
+   *      （onUse/onNavUp/onNavDown/onEsc 的战斗分支一个都没动）；
+   *   2. 双方头顶血条在世界坐标随人移动（buildCombatStage，不走本列表）；
+   *   3. 回合日志降级成左下角三行半透明小字，主要信息走头顶飘字。
+   * 战斗中圆环 HUD 与底部导航条常驻可读——动作条 x 与日志错开，y 全在
+   * 660 硬线之内。
+   */
   private buildCombatPanel(): void {
     for (const o of this.encounterObjects) o.destroy();
     this.encounterObjects = [];
     const state = getGame();
     const combat = state.combat;
     if (!combat) return;
-    const { width, height } = this.viewSize();
-    const cx = width / 2;
-    const cy = height / 2;
-    const panelW = 440;
-    const panelH = 232;
-    const left = cx - panelW / 2;
-    const top = cy - panelH / 2;
-    // Remembered for the mouse: a click outside this rectangle closes the panel.
-    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
+    const bar = COMBAT_BAR;
+    const bx = combatBarX();
     const depth = PANEL_DEPTH.game.dialogue;
-    const isBoss = combat.kind === 'boss';
+    // 面板点击外区域 = 鼠标 ESC 的逃生门（onPointerDown 读 panelBox）。整个
+    // 画布都算「板内」：战斗中移动锁定，点世界不再触发撤退回合；想撤退点
+    // 按钮或按 ESC。点敌人剪影出手走 buildCombatStage 的世界热区。
+    this.panelBox = { x: 0, y: 0, w: DESIGN_WIDTH, h: DESIGN_HEIGHT };
 
-    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
-    // OVERHAUL UI: the fight uses the same header strip, segmented bar and row
-    // bands as every other panel, instead of its own centred title and a flat
-    // two-rectangle HP bar. A boss gets the danger accent on the header rule.
-    this.encounterObjects.push(
-      ...buildPanelHeader(this, left, top, panelW, `${combat.monster.name}${isBoss ? '（守门人）' : ''}`, isBoss ? UI.danger : UI.accent, depth + 5),
-    );
-
-    // The monster's HP as the same segmented bar the HUD uses, so "how much is
-    // left" reads at a glance instead of as a proportion of a strip.
-    const g = this.add.graphics().setDepth(depth + 7);
-    drawStatBar(g, left + 12, top + 30, panelW - 24, 7, combat.monster.hp / combat.monster.maxHp, isBoss ? UI.danger : UI.accent, 24);
-    this.encounterObjects.push(g);
-    this.encounterObjects.push(
-      this.add
-        .text(left + panelW - 12, top + 44, `${combat.monster.hp}/${combat.monster.maxHp} · 第 ${combat.turn} 回合`, {
-          fontFamily: FONT_FAMILY,
-          fontSize: `${TYPE.caption}px`,
-          color: hex(TEXT.dim),
-        })
-        .setOrigin(1, 0)
-        .setDepth(depth + 7),
-    );
-
-    // The log's tail: the last three lines, on a dark well so they read as a
-    // record of what happened rather than as more body text.
-    const logTop = top + 56;
-    const logH = 62;
-    this.encounterObjects.push(...buildPanelWell(this, left + 12, logTop, panelW - 24, logH, depth + 5));
-    const tail = combat.log.slice(-3);
-    tail.forEach((line, i) => {
+    const actions: ReadonlyArray<{ label: string; note: string; icon: 'attack' | 'guard' | 'flee' }> = [
+      { label: '攻击', note: '武器伤害', icon: 'attack' },
+      { label: '格挡', note: '受伤减半', icon: 'guard' },
+      { label: '撤退', note: '可能失败', icon: 'flee' },
+    ];
+    actions.forEach((act, i) => {
+      const x = bx + i * (bar.btnW + bar.gap);
+      const y = bar.y;
+      const selected = i === this.combatSelected;
+      this.encounterObjects.push(this.add.rectangle(x, y, bar.btnW, bar.btnH, UI.surface).setOrigin(0, 0).setAlpha(0.92).setDepth(depth));
+      if (selected) {
+        this.encounterObjects.push(
+          this.add.rectangle(x, y, bar.btnW, bar.btnH, UI.accent).setOrigin(0, 0).setAlpha(0.16).setDepth(depth + 1),
+          this.add.rectangle(x, y, 2, bar.btnH, UI.accent).setOrigin(0, 0).setDepth(depth + 2),
+        );
+      }
+      const iconG = this.add.graphics().setDepth(depth + 3);
+      this.drawCombatActionIcon(iconG, act.icon, x + 14, y + 18, selected ? PALETTE.lightHigh : TEXT.secondary);
+      this.encounterObjects.push(iconG);
       this.encounterObjects.push(
         this.add
-          .text(left + 20, logTop + 8 + i * 17, line, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim), wordWrap: { width: panelW - 40 } })
-          .setDepth(depth + 7),
-      );
-    });
-
-    // The three actions, as rows with a status column - the key, what it does,
-    // and what it costs. A list of three verbs in a row was the old shape.
-    const choices: ReadonlyArray<readonly [string, string, string]> = [
-      ['攻击', '按 Enter', '造成武器伤害'],
-      ['格挡', '受伤减半', '回 3 精力'],
-      ['撤退', '按 ESC', '逃跑可能失败'],
-    ];
-    choices.forEach(([label, key, note], i) => {
-      const y = top + 126 + i * 26;
-      const selected = i === this.combatSelected;
-      if (selected) {
-        this.encounterObjects.push(this.add.rectangle(left + 12, y, panelW - 24, 24, UI.accent).setOrigin(0, 0).setAlpha(0.14).setDepth(depth + 5));
-        this.encounterObjects.push(this.add.rectangle(left + 12, y, 2, 24, UI.accent).setOrigin(0, 0).setDepth(depth + 6));
-      }
-      this.encounterObjects.push(
-        this.panelHit( left + 12, y, panelW - 24, 24, depth + 8, {
+          .text(x + 40, y + 16, act.label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary) })
+          .setOrigin(0, 0.5)
+          .setDepth(depth + 3),
+        this.add
+          .text(x + 40, y + 38, act.note, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+          .setOrigin(0, 0.5)
+          .setDepth(depth + 3),
+        this.panelHit(x, y, bar.btnW, bar.btnH, depth + 6, {
           onClick: () =>
             this.time.delayedCall(0, () => {
               this.combatSelected = i;
@@ -2586,25 +2817,61 @@ export class GameScene extends Phaser.Scene {
             }),
         }),
       );
+    });
+
+    // 回合日志：左下角三行小字半透明。最新一行亮、旧的压暗——「刚刚发生了
+    // 什么」仍然可读，但不再占据屏幕中央。
+    const tail = combat.log.slice(-3);
+    tail.forEach((line, i) => {
       this.encounterObjects.push(
         this.add
-          .text(left + 22, y + 12, label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary) })
-          .setOrigin(0, 0.5)
-          .setDepth(depth + 7),
-        this.add
-          .text(left + panelW - 22, y + 12, `${key} · ${note}`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
-          .setOrigin(1, 0.5)
-          .setDepth(depth + 7),
+          .text(bar.logX, bar.logY + i * bar.logPitch, line, {
+            fontFamily: FONT_FAMILY,
+            fontSize: `${TYPE.caption}px`,
+            color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim),
+            wordWrap: { width: bar.logW },
+          })
+          .setOrigin(0, 0)
+          .setAlpha(i === tail.length - 1 ? 0.85 : 0.55)
+          .setDepth(depth),
       );
     });
 
+    // 「第 N 回合」：动作条上方居中，半透明——节奏感不抢戏。
     this.encounterObjects.push(
       this.add
-        .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 出招 · ESC 撤退', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
-        .setOrigin(0.5)
-        .setDepth(depth + 7),
+        .text(DESIGN_WIDTH / 2, bar.turnY, `第 ${combat.turn} 回合`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
+        .setOrigin(0.5, 0.5)
+        .setAlpha(0.8)
+        .setDepth(depth),
     );
+
     lockToScreen(this.encounterObjects);
+  }
+
+  /**
+   * 动作条图元：16px 盒内三枚程序化小图——攻击（斜斩刃）、格挡（盾）、
+   * 撤退（左向奔跑箭）。与敌人剪影同一纪律：不新画贴图，Graphics 现画。
+   */
+  private drawCombatActionIcon(g: Phaser.GameObjects.Graphics, kind: 'attack' | 'guard' | 'flee', x: number, y: number, color: number): void {
+    g.fillStyle(color, 1);
+    if (kind === 'attack') {
+      // 斜斩：一道宽刃楔形 + 护手。
+      g.fillTriangle(x + 2, y + 14, x + 14, y + 2, x + 14, y + 5);
+      g.fillRect(x + 1, y + 12, 4, 3);
+    } else if (kind === 'guard') {
+      // 盾：方首 + 尖底 + 甲心高光。
+      g.fillRect(x + 3, y + 2, 10, 8);
+      g.fillTriangle(x + 3, y + 10, x + 13, y + 10, x + 8, y + 14);
+      g.fillStyle(PALETTE.stone, 0.9);
+      g.fillRect(x + 7, y + 4, 2, 6);
+    } else {
+      // 撤退：左箭头 + 杆 + 两道速度线。
+      g.fillTriangle(x + 2, y + 8, x + 7, y + 3, x + 7, y + 13);
+      g.fillRect(x + 7, y + 7, 8, 2);
+      g.fillRect(x + 11, y + 3, 3, 1);
+      g.fillRect(x + 13, y + 12, 2, 1);
+    }
   }
 
   /**
@@ -2663,6 +2930,8 @@ export class GameScene extends Phaser.Scene {
     const state = getGame();
     const combat = state.combat;
     if (!combat) return;
+    // AG-70：撤退演出期间（角色跑向边缘淡出）任何输入都不再结算回合。
+    if (this.combatBusy) return;
     const action = (['attack', 'guard', 'flee'] as const)[this.combatSelected];
     const player = playerCombatant(state);
     const monsterC: Combatant = {
@@ -2687,9 +2956,16 @@ export class GameScene extends Phaser.Scene {
     if (action === 'attack') this.playActionAnim(attackAnimKey('player'), 320);
     if (round.playerDamage > 0) {
       combat.monster.hp = Math.max(0, combat.monster.hp - round.playerDamage);
+      // AG-70：命中要看见——敌人闪白、击退、掉血飘字、头顶血条收缩。
+      this.stageMonsterHit(round.playerDamage);
+    } else if (action === 'attack') {
+      // 未命中：敌人侧移闪避，与击退反向，读法不同。
+      this.stageMonsterDodge();
     }
     if (action === 'guard') {
       state.player.energy = Math.min(GAME_CONFIG.player.energyMax, state.player.energy + GUARD_ENERGY_RESTORE);
+      // AG-70：格挡招架——沉腰架盾 + 火花。
+      this.stagePlayerGuard();
     }
     if (round.monsterDamage > 0 && !round.monsterDead && !round.fled) {
       // A coward that dropped below its threshold breaks off the fight and
@@ -2697,6 +2973,8 @@ export class GameScene extends Phaser.Scene {
       const cowardFrac = behaviorModifiers('coward').fleeAtHpFrac;
       if (combat.monster.behavior === 'coward' && cowardFrac > 0 && combat.monster.hp / combat.monster.maxHp < cowardFrac) {
         combat.log.push(`${combat.monster.name} 伤痕累累地逃走了。`);
+        // AG-70：战退演出——敌人滑出战场淡出，再接 outcome 面板。
+        this.combatStage?.monster.fleeAway();
         this.finishCombat('coward');
         return;
       }
@@ -2708,6 +2986,8 @@ export class GameScene extends Phaser.Scene {
       state.player.hp = Math.max(0, state.player.hp - dmg);
       if (action === 'guard') this.playActionAnim(hurtAnimKey('player'), 400);
       this.cameras.main.shake(160, 0.008);
+      // AG-70：敌人反击要看见——前冲 38px + 玩家掉血飘字 + 头顶血条收缩。
+      this.stageMonsterCounter(dmg);
     }
     combat.turn += 1;
     this.refreshStats();
@@ -2720,6 +3000,8 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (round.monsterDead) {
+      // AG-70：阵亡演出——闪白、倒地、淡出（outcome 面板同时升起，不抢戏）。
+      this.combatStage?.monster.die();
       this.finishCombat('win');
       return;
     }
@@ -2728,8 +3010,9 @@ export class GameScene extends Phaser.Scene {
       // the player can come back with a better plan (or a crowbar).
       combat.log.push('你成功撤出。');
       saveToStorage(state);
-      this.closeCombat();
-      this.flash('你撤出了战斗。');
+      // AG-70：撤退成功看得见——角色跑向层左缘淡出，敌人留在原地；560ms
+      // 后 closeCombat 收尾（期间 combatBusy 锁死输入，不会半空再结算）。
+      this.playFleeShow();
       return;
     }
     saveToStorage(state);
@@ -8573,6 +8856,10 @@ export class GameScene extends Phaser.Scene {
       this.updateStairClimb(delta);
       return;
     }
+    // AG-70：战斗舞台的世界坐标元素（双方头顶名签）每帧钉在角色身上——
+    // 面板早退之后世界模拟整段不跑，滑步途中的名签跟随在这里补。敌人剪影
+    // 的呼吸/击退/前冲都是 MonsterView 自己的 tween，无需每帧驱动。
+    if (this.encounterOpen) this.syncCombatStage();
     if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.ventureOpen || this.questsOpen) return;
     const state = getGame();
 

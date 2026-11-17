@@ -154,6 +154,42 @@ export function hudClockLabel(day: number, minute: number): string {
   return `D${day} ${formatClock(minute)}`;
 }
 
+// ── AG-70: the combat action bar ─────────────────────────────────────────
+// 2026-11-17 用户原话：「我不是说那个就是打击别人的时候展示战斗然后我们
+// 打击吗，不要做那种文本框，我们点击攻击看不见人的操作了」。440×232 的
+// 中央文字面板因此整块拆除，换成底部一条三个大按钮的动作条；战斗信息
+// （掉血/未命中/格挡）走角色头顶飘字，日志降级成左下角三行半透明小字。
+//
+// 硬边界（导航条 AG-71 板顶 672，bagY 警告车道 624，状态卡底 556）：
+//   * 板体 y 604..656：底边 656 距导航条顶 672 留 16px 净空，距 bagY
+//     警告文本顶 624 有 20px——x 上也错开（见下），两者永不同框；
+//   * 三个按钮等宽 200、间距 16，总宽 632，居中（左缘 combatBarX()）；
+//   * 回合日志在左下 x 20..316，与动作条左缘 324 之间有 8px 沟，垂直
+//     重叠区不碰字；三行 540..613，压在 bagY 警告（624）之上、feedback
+//     车道（556，瞬态且战斗中为空）之下，caption 20px 的 25px 线盒用 24
+//     行距刚好首尾相接。
+export const COMBAT_BAR = {
+  /** 单个动作按钮的宽与高。 */
+  btnW: 200,
+  btnH: 52,
+  /** 按钮间距。 */
+  gap: 16,
+  /** 动作条板顶 y（底 656 ≤ 660 硬线）。 */
+  y: 604,
+  /** 左下角回合日志：左缘 x、首行 y、行距、可用宽（三行小字半透明）。 */
+  logX: 20,
+  logY: 540,
+  logPitch: 24,
+  logW: 296,
+  /** 「第 N 回合」标签：动作条上方居中。 */
+  turnY: 588,
+} as const;
+
+/** 三个按钮横排的居中左缘 x。 */
+export function combatBarX(): number {
+  return (DESIGN_WIDTH - (3 * COMBAT_BAR.btnW + 2 * COMBAT_BAR.gap)) / 2;
+}
+
 // ── tower overview (TowerOverviewScene) ─────────────────────────────────────
 // The map's fixed lanes, exported so uiLayout.test.ts can assert the fit
 // arithmetically (estimateTextWidth) instead of by screenshot. Everything the

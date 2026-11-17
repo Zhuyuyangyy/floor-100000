@@ -180,7 +180,7 @@ import {
 } from '../render/uiKit';
 import { characterKeyForNpc, portraitKey } from '../render/artpack';
 import { framedButton, hitRect } from '../render/pointer';
-import { drawHazardStripe, drawHudIcon, drawHudPlate, drawStatRing, type HudIconName } from '../render/hudSkin';
+import { createStatRingsBaker, drawHazardStripe, drawHudIcon, drawHudPlate, type HudIconName, type StatRingsBaker } from '../render/hudSkin';
 import {
   MONOLOGUE_TRIGGER_PRIORITY,
   STATUS_PANEL_BALANCE,
@@ -1002,7 +1002,10 @@ export class GameScene extends Phaser.Scene {
   private combatDamageTaken = 0;
 
   private clockText!: Phaser.GameObjects.Text;
-  private barsGfx!: Phaser.GameObjects.Graphics;
+  /** AG-102（性能轮 3）：四联圆环是一张 RenderTexture——Phaser 4 每帧重三角化
+   *  Graphics 的 ARC 命令，42 条弧实测 0.68ms/帧；数值变化时重烤（render/hudSkin.ts
+   *  的 createStatRingsBaker），每帧只剩一个贴图 quad。 */
+  private statRings?: StatRingsBaker;
   private statLabels: Phaser.GameObjects.Text[] = [];
   private statValues: Phaser.GameObjects.Text[] = [];
   private invCountText?: Phaser.GameObjects.Text;
@@ -4691,6 +4694,10 @@ export class GameScene extends Phaser.Scene {
     this.envNightText = undefined;
     this.hudIcons?.destroy();
     this.hudIcons = undefined;
+    // AG-102：圆环贴图的 Image 同属先毁后建之列——重启时旧图留着的话，新图会
+    // 在同一位置再画一遍，半透明抗锯齿边缘叠一次会变深。
+    this.statRings?.destroy();
+    this.statRings = undefined;
     this.goalText?.destroy();
     this.goalText = undefined;
     this.scoreText?.destroy();
@@ -4787,7 +4794,13 @@ export class GameScene extends Phaser.Scene {
       .setName('hud-clock').setScrollFactor(0).setDepth(103);
     this.refreshClock();
 
-    this.barsGfx = this.add.graphics().setName('hud-stat-rings').setScrollFactor(0).setDepth(103);
+    // AG-102（性能轮 3）：四联圆环从每帧重三角化的 Graphics 换成一张
+    // RenderTexture——同一条 WebGL 三角化路径画进 FBO，只在数值变化时重画，
+    // 每帧只剩一个 quad。（不用 Graphics.generateTexture：它的 Canvas 2D
+    // 光栅化与线上三角化的边缘像素对不上，冻结 diff 0.128% 不过像素级关口；
+    // 见 render/hudSkin.ts 的路线记录。）重建顺序与原 Graphics 一致：环在
+    // 文本之下，重启时先毁后建。
+    this.statRings = createStatRingsBaker(this, hud);
     STAT_BARS.forEach((stat, i) => {
       const gx = hud.statX + i * hud.statPitch;
       this.statLabels.push(this.add.text(gx + hud.ringR * 2 + 30, hud.statLabelY, stat.label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
@@ -5287,15 +5300,16 @@ export class GameScene extends Phaser.Scene {
     const key = `${values.map((v) => Math.round(v)).join(',')}|${Math.round(p.stress ?? 20)}`;
     if (key === this.lastStats) return;
     this.lastStats = key;
-    this.barsGfx.clear();
+    // AG-102（性能轮 3）：圆环整组重烤进 RenderTexture。这就是旧 clear+重画
+    // 所在的位置——只在数值变化时跑，绝不每帧——RT 把 42 条弧在这里三角化
+    // 一次，取代 WebGL 渲染器每帧的重三角化（实测 0.68ms/帧，见
+    // docs/2026-11-18-PERF-ROUND2-CHUNK-CULL.md §4）。
+    this.statRings?.redraw(values, STAT_BARS.map((s) => STAT_COLORS[s.key] ?? UI.good), UI.danger);
     values.forEach((v, i) => {
-      const gx = HUD_LAYOUT.statX + i * HUD_LAYOUT.statPitch;
       const frac = v / 100;
-      const color = STAT_COLORS[STAT_BARS[i].key] ?? UI.good;
       // 12 pips at 30 degrees: the concept sheet's bar, turned into a ring.
       // A stat running out lights danger red whatever its own colour is, the
       // same <=20% rule the bar had; its number goes warn with it.
-      drawStatRing(this.barsGfx, gx + HUD_LAYOUT.ringR, HUD_LAYOUT.ringCY, HUD_LAYOUT.ringR, frac, frac <= 0.2 ? UI.danger : color, { stroke: HUD_LAYOUT.ringStroke });
       this.statValues[i]?.setText(String(Math.round(v)));
       this.statValues[i]?.setColor(frac <= 0.2 ? hex(TEXT.warn) : hex(TEXT.primary));
     });

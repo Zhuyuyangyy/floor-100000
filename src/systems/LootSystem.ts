@@ -391,9 +391,25 @@ export function obstaclesForFloor(state: GameState, floor: number): FloorObstacl
   if (hasUpExit(floor)) exits.push(UP_EXIT_X);
   if (hasDownExit(floor)) exits.push(downExitXFor(floor));
   if (liftDirection(floor) !== null) exits.push(OBSTACLES.liftX);
-  const reachable = (to: number): boolean =>
-    !out.some((o) => o.x - half > Math.min(ENTRY_X, to) && o.x + half < Math.max(ENTRY_X, to));
-  while (out.length > 0 && !exits.some(reachable)) out.pop();
+  // 起点 = 玩家在层里的全部合法落点：ENTRY_X（电梯/首入）之外，爬梯落点是
+  // 上梯口 UP_EXIT_X（AG-53 的梯脚）与下梯口。只从 ENTRY_X 出发的裁决会漏
+  // 「阻碍物挡在 40→640 之间」：玩家爬梯落在 40，被钳在阻碍物边，而 640
+  // 出发的路明明畅通——stairNavigation「1010 层 rideLiftUp」20s 超时的根因
+  // （AG-65 几何把 tier4 层长拉到 2176-2688 后，阻碍物可放区间变大，撞上
+  // 这个缺口的概率从 0 变实在）。口径：每个起点到每个**其它**出口都可达
+  // （排除自身，否则起点=出口时恒真、检查形同虚设）。删到全通即止。
+  const starts: number[] = [ENTRY_X];
+  if (hasUpExit(floor)) starts.push(UP_EXIT_X);
+  if (hasDownExit(floor)) starts.push(downExitXFor(floor));
+  const reachableFrom = (from: number, to: number): boolean =>
+    !out.some((o) => o.x - half > Math.min(from, to) && o.x + half < Math.max(from, to));
+  while (out.length > 0) {
+    const allThrough = starts.every((from) =>
+      exits.filter((to) => to !== from).every((to) => reachableFrom(from, to)),
+    );
+    if (allThrough) break;
+    out.pop();
+  }
   return out;
 }
 

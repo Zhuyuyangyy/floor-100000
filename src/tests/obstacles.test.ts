@@ -103,10 +103,14 @@ describe('obstaclesForFloor — 每层 seeded 0-2 个', () => {
     }
   });
 
-  it('never traps the player: from ENTRY_X at least one exit stays reachable', () => {
-    // 独立复算可达性（不借用实现的表达式）：出口与 ENTRY_X 之间的开区间里
-    // 不能含任何阻碍区间的任一部分。全楼层 × 多 seed 扫描——这条是防软锁的
-    // 硬规则（GAME_DESIGN_LOCK §5）。
+  it('never traps the player: every landing spot reaches every other exit', () => {
+    // 独立复算可达性（不借用实现的表达式）：起点集合 = 玩家在层里的全部合法
+    // 落点（ENTRY_X 电梯/首入 + 上梯口爬梯落点 + 下梯口），每个起点到每个
+    // **其它**出口之间的开区间不能含任何阻碍区间的任一部分。全楼层 × 多 seed
+    // 扫描——这条是防软锁的硬规则（GAME_DESIGN_LOCK §5）。
+    // 口径从「ENTRY_X 至少一个出口」加强为「每个落点到每个其它出口」：
+    // 旧口径漏「阻碍物挡在上梯口(40)与 ENTRY_X(640)之间」——玩家爬梯落在
+    // 40 被钳住，而 640 出发的路畅通（stairNavigation 1010 层 20s 超时）。
     for (const seed of [1, 42, 2026, 7, 99, 1234, 55555, 987654, 31337]) {
       const s = createNewGame(seed);
       for (const floor of PLAYABLE_FLOORS_V01) {
@@ -115,13 +119,23 @@ describe('obstaclesForFloor — 每层 seeded 0-2 个', () => {
         if (hasUpExit(floor)) exits.push(UP_EXIT_X);
         if (hasDownExit(floor)) exits.push(downExitXFor(floor));
         if (liftDirection(floor) !== null) exits.push(LIFT_X);
+        const starts: number[] = [ENTRY_X];
+        if (hasUpExit(floor)) starts.push(UP_EXIT_X);
+        if (hasDownExit(floor)) starts.push(downExitXFor(floor));
         const obstacles = obstaclesForFloor(s, floor);
-        const reachable = (to: number): boolean => {
-          const lo = Math.min(ENTRY_X, to);
-          const hi = Math.max(ENTRY_X, to);
+        const reachableFrom = (from: number, to: number): boolean => {
+          const lo = Math.min(from, to);
+          const hi = Math.max(from, to);
           return !obstacles.some((o) => o.x - HALF > lo && o.x + HALF < hi);
         };
-        expect(exits.some(reachable), `seed ${seed} F${floor} 全出口被堵`).toBe(true);
+        for (const from of starts) {
+          const others = exits.filter((to) => to !== from);
+          if (others.length === 0) continue;
+          expect(
+            others.every((to) => reachableFrom(from, to)),
+            `seed ${seed} F${floor} 从落点 ${from} 有出口被堵`,
+          ).toBe(true);
+        }
       }
     }
   });

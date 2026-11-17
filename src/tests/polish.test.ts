@@ -178,7 +178,11 @@ describe('EndScene offers a way back into a run (source contract)', () => {
 
   it('both outcomes render a card with the cause and the run numbers', () => {
     expect(src).toContain('deathCause(state)');
-    expect(src).toContain('depthRecord(state)');
-    expect(src).toContain('runScore(state)');
+    // AG-81：死亡卡从「三行数字」升级为统计结算——死因仍在（causeOf），
+    // 本局数字改由 StatsSystem 的 runStatRows/recordRows 出（最深楼层与
+    // 得分都在统计表行里），跨局纪录走 settleRun 落盘。
+    expect(src).toContain('runStatRows(state)');
+    expect(src).toContain('recordRows(state,');
+    expect(src).toContain('settleRun(state)');
   });
 });

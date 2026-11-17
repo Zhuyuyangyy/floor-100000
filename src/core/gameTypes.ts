@@ -306,6 +306,41 @@ export interface GrowthProfile {
   ventures: string[];
 }
 
+// ── AG-81：本局统计（结算画面与统计面板的数据位）──────────────────────────
+// 对标 deep-end 的 Statistics Tracking：一局跑完，玩家要看见自己这一趟到底
+// 干了什么。全部是只增不减的计数器（maxFloor 取历址最大），由 GameScene 在
+// 各事件点调 StatsSystem.bumpStat 累加，End/EndgameScene 与暂停菜单的统计
+// 面板只读。
+//
+// 为什么是 GameState 上的可选字段而不是 records 那样的独立块：统计是「这一
+// 局」的账，随存档走（读档继续时计数接着走），而 records 是跨局炫耀。旧存档
+// 没有 stats——与 growth/diaryEntries 同一套兼容语义：读者先过
+// StatsSystem.statsOf() 补零，不需要为此升 schemaVersion。
+// 与上面 StatKey（hp/hunger/thirst/energy 四条生存槽）区分：那个是「角色有
+// 哪几条槽」，这个是「一局攒了哪些数」，故名 RunStatKey。
+export type RunStatKey =
+  /** 爬梯次数（上楼+下楼都算「爬了一次楼梯」）。 */
+  | 'floorsClimbed'
+  /** 本局到达过的最高层（取 max，不是当前层）。 */
+  | 'maxFloor'
+  | 'containersLooted'
+  | 'itemsCrafted'
+  | 'monstersKilled'
+  | 'bedsSearched'
+  | 'bedsDismantled'
+  | 'obstaclesCleared'
+  /** 活下来的夜晚数（每次睡觉跨到新的一天 +1）。 */
+  | 'nightsSurvived'
+  /** 本局总收入（卖出/产业进账；花费不计）。 */
+  | 'goldEarned'
+  | 'damageDealt'
+  | 'damageTaken'
+  /** 本局死亡次数（正常一局最多 1，留字段是为多段死法与统计完整）。 */
+  | 'deaths';
+
+/** 本局累计统计。旧存档缺此字段时按 createRunStats() 的全零读。 */
+export type RunStats = { [K in RunStatKey]: number };
+
 export interface GameState {
   schemaVersion: number;
   runSeed: number;
@@ -357,6 +392,12 @@ export interface GameState {
   // 加载后 growth 为 undefined，首个读者必须先过 ensureGrowth() 补默认值，
   // 见 core/growth.ts。没有任何系统在 ensureGrowth 之前读它，所以老存档不会崩。
   growth?: GrowthProfile;
+  // AG-81：本局统计。可选字段的理由同 growth——统计系统到来之前写下的存档
+  // 没有它，SaveSystem 不因缺字段拒档（也不该为一个新增计数块去升
+  // schemaVersion，那会让所有旧存档变成「版本不支持」）。旧存档加载后 stats
+  // 为 undefined，首个读者先过 StatsSystem.statsOf()/ensureStats() 补零值，
+  // 没有任何系统在那之前读它，所以老存档不会红。
+  stats?: RunStats;
   status: GameStatus;
 }
 

@@ -113,6 +113,11 @@ import { guardianDamageMult, lootBonus, moveSpeedMult } from '../systems/relics'
 import { modeGuardianDamageMult } from '../systems/modes';
 import { buy, materialShelf, sell, sellPrice, shopStock } from '../systems/shop';
 import { VENTURES, invest, settleInvestments } from '../systems/shop';
+// AG-81：本局统计。只加钩子不改逻辑——各事件点 bumpStat 一行，读写都在
+// StatsSystem（纯函数 + 旧存档补零）。buildStatsTable 是结算画面的共享统计
+// 表组件，暂停菜单的统计面板复用同一件。
+import { bumpStat, noteFloorReached, noteGoldEarned, runStatRows } from '../systems/StatsSystem';
+import { buildStatsTable } from './EndScene';
 import { charge, recordShortcut, shortcutAvailable, shortcutPlan } from '../systems/shortcut';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
@@ -236,7 +241,7 @@ import {
   buildWallDressing,
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
-import { BAG_LAYOUT, COMBAT_BAR, CONTAINER_LABEL_DROP, HUD_LAYOUT, NAV_BAR, combatBarX, hudClockLabel, navSlotX } from '../render/hudLayout';
+import { BAG_LAYOUT, COMBAT_BAR, CONTAINER_LABEL_DROP, HUD_LAYOUT, NAV_BAR, STATS_PANEL, combatBarX, hudClockLabel, navSlotX } from '../render/hudLayout';
 import {
   BEHAVIOR_LABELS,
   MONSTER_BAR_COLORS,
@@ -495,7 +500,10 @@ const AILMENT_LABEL: Record<string, string> = {
 // bar each), then the right-aligned score and gold. These are computed once
 // here rather than sprinkled through buildHud, so moving a column is one edit.
 // All doubled with the design canvas (640x360 -> 1280x720).
-const PAUSE_OPTIONS = ['继续游戏', '塔楼地图', '重新开始', '返回标题'];
+// 「本局统计」固定在末位（index 4）：前四项的键位走法被 e2e 钉死了
+// （ui.spec/ag71 的「两次 ↓ = 重新开始」、tower.spec 的「一次 ↓ = 塔楼地图」），
+// 插到中间会让那些探针落到错误的选项上。统计是只读面板，放最后不碍事。
+const PAUSE_OPTIONS = ['继续游戏', '塔楼地图', '重新开始', '返回标题', '本局统计'];
 
 // OVERHAUL: the daily objective's one-line label, per goal kind.
 const GOAL_LABELS: Record<'water' | 'containers' | 'upgrade' | 'floor', (target: number) => string> = {
@@ -1171,6 +1179,10 @@ export class GameScene extends Phaser.Scene {
   private pauseOptionTexts: Phaser.GameObjects.Text[] = [];
   private pauseMarker!: Phaser.GameObjects.Image;
   private pauseSelected = 0;
+  // AG-81：本局统计面板——暂停菜单的「本局统计」项打开的只读子面板。
+  // statsOpen 期间 pauseOpen 保持 true（游戏仍暂停），ESC 先回暂停菜单。
+  private statsOpen = false;
+  private statsObjects: PanelObject[] = [];
   private lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
   // B3-01 D9: last save-failure count we already warned about. Survives a scene
   // restart on purpose — the page's storage is still broken after 重新开始, so
@@ -1218,6 +1230,8 @@ export class GameScene extends Phaser.Scene {
     this.pauseObjects = [];
     this.pauseOptionTexts = [];
     this.pauseMarker = createMarker(this);
+    this.statsObjects = [];
+    this.statsOpen = false;
     this.dialogueObjects = [];
     this.dialogueOptions = [];
     this.dialogueOptionIcons = [];
@@ -1312,6 +1326,7 @@ export class GameScene extends Phaser.Scene {
     this.buildCraftPanel();
     this.buildDialoguePanel();
     this.buildPausePanel();
+    this.buildStatsPanel();
     this.bindInput();
 
     // AG-11: QuestPanel 的回报通道（UI.md「quests:changed」契约，AG-12）：
@@ -2204,10 +2219,12 @@ export class GameScene extends Phaser.Scene {
     if (!entry) return;
     // 卖方向：材料行走收购价（MATERIAL_SELL_PRICES，全世界固定），商品架走
     // band 半价——选中的是哪行就卖哪行，S 因此同时是两个货架的出口。
+    const goldBefore = state.player.gold; // AG-81：金币收入按卖出前后的差额计
     const r = sell(state, entry.itemId, state.currentFloor);
     playSfx(r.ok ? 'chest' : 'pickup');
     this.flash(r.ok ? r.message : r.reason);
     if (r.ok) {
+      noteGoldEarned(state, goldBefore); // AG-81：卖出进账
       const coin = startFxLoop(this, 'coin-spin', state.player.x + 26, PLAYER_FEET_Y - 62, LIGHT_DEPTH);
       if (coin) this.encounterObjects.push(coin);
     }
@@ -2259,6 +2276,7 @@ export class GameScene extends Phaser.Scene {
     if (before.ventures.length === 0) return; // 没有在册产业，结算必然是 no-op
     const after = state.growth?.ventures ?? [];
     const income = state.player.gold - before.gold;
+    if (income > 0) noteGoldEarned(state, before.gold); // AG-81：产业日结进账
     const collapsed = before.ventures.filter((id) => !after.includes(id));
     if (income <= 0 && collapsed.length === 0) return;
     this.recordVentureSettlement(state.day - 1, income, collapsed);
@@ -2508,6 +2526,7 @@ export class GameScene extends Phaser.Scene {
       const mods = behaviorModifiers('ambusher');
       const strike = Math.max(1, Math.round(monster.damage * mods.firstStrikeMult));
       state.player.hp = Math.max(0, state.player.hp - strike);
+      bumpStat(state, 'damageTaken', strike); // AG-81：偷袭这一口也要进「受到伤害」
       log.push(`${monster.name} 抢先扑出，造成 ${strike} 点伤害！`);
       // 受伤动画/震屏挪到 playAmbusherStrike——否则紧接着的滑步 walk clip
       // 会把 hurt clip 当场盖掉，偷袭只剩日志没有画面。
@@ -2529,6 +2548,7 @@ export class GameScene extends Phaser.Scene {
     this.refreshStats();
     if (state.player.hp <= 0) {
       state.status = 'lost';
+      bumpStat(state, 'deaths'); // AG-81：偷袭反杀也记一次死亡
       saveToStorage(state);
       this.scene.start('End');
       return;
@@ -2967,6 +2987,7 @@ export class GameScene extends Phaser.Scene {
     if (action === 'attack') this.playActionAnim(attackAnimKey('player'), 320);
     if (round.playerDamage > 0) {
       combat.monster.hp = Math.max(0, combat.monster.hp - round.playerDamage);
+      bumpStat(state, 'damageDealt', round.playerDamage); // AG-81：命中的每一口都计数
       // AG-70：命中要看见——敌人闪白、击退、掉血飘字、头顶血条收缩。
       this.stageMonsterHit(round.playerDamage);
     } else if (action === 'attack') {
@@ -2995,6 +3016,7 @@ export class GameScene extends Phaser.Scene {
       const soften = (combat.kind === 'boss' ? guardianDamageMult(state.relics ?? []) * modeGuardianDamageMult(state.mode ?? 'adventure') : guardianDamageMult(state.relics ?? []));
       const dmg = Math.max(1, Math.round(round.monsterDamage * soften));
       state.player.hp = Math.max(0, state.player.hp - dmg);
+      bumpStat(state, 'damageTaken', dmg); // AG-81：敌人反击命中计数（软化后的实扣）
       if (action === 'guard') this.playActionAnim(hurtAnimKey('player'), 400);
       this.cameras.main.shake(160, 0.008);
       // AG-70：敌人反击要看见——前冲 38px + 玩家掉血飘字 + 头顶血条收缩。
@@ -3006,6 +3028,7 @@ export class GameScene extends Phaser.Scene {
     if (round.playerDead || state.player.hp <= 0) {
       state.player.hp = 0;
       state.status = 'lost';
+      bumpStat(state, 'deaths'); // AG-81：战死计数
       saveToStorage(state);
       this.scene.start('End');
       return;
@@ -3037,6 +3060,7 @@ export class GameScene extends Phaser.Scene {
     if (!combat) return;
     const isBoss = combat.kind === 'boss';
     if (outcome === 'win') {
+      bumpStat(state, 'monstersKilled'); // AG-81：只有真杀掉才计数（逃走的 coward 不算）
       // Ambush win: the loser's pockets. Boss win: the chapter's payoff.
       // OVERHAUL Wave B3: the lucky charm adds one more roll to the pile.
       const rng = makeRng(deriveSeed(state.runSeed, state.day, combat.floor, combat.spotId, 'combat-loot'));
@@ -6077,7 +6101,9 @@ export class GameScene extends Phaser.Scene {
   private buildPausePanel(): void {
     const { width, height } = this.viewSize();
     const panelW = 460;
-    const panelH = 264;
+    // 五行版：末行「本局统计」在 top+96+4*40 = top+256，加 19px 半行高与
+    // 29px 下内边距 → 304。原来的 264 会把第五行压出面板底。
+    const panelH = 304;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -6131,6 +6157,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private togglePause(): void {
+    // 统计面板是暂停菜单的子层：关暂停必须连它一起收，否则暂停菜单没了、
+    // 统计表面板还挂在屏幕上（ESC 逃生舱判据全踩空）。
+    if (this.pauseOpen && this.statsOpen) {
+      this.statsOpen = false;
+      for (const o of this.statsObjects) o.setVisible(false);
+    }
     this.pauseOpen = !this.pauseOpen;
     for (const o of this.pauseObjects) o.setVisible(this.pauseOpen);
     if (this.pauseOpen) {
@@ -6151,9 +6183,66 @@ export class GameScene extends Phaser.Scene {
       // other new run — otherwise the pick screen would be skippable and the
       // survivor choice would silently stop mattering.
       this.scene.start('MetaSelect');
-    } else {
+    } else if (this.pauseSelected === 3) {
       this.scene.start('Menu'); // 返回标题
+    } else {
+      this.openStatsPanel(); // 本局统计
     }
+  }
+
+  // ── AG-81：本局统计面板（暂停菜单 → 只读子面板）────────────────────────
+  // 布局：480×330 绿板，16 行统计两列网格（8 行 × STATS_PANEL.rowPitch），
+  // 行件与死亡/通关结算共用 buildStatsTable——「一局的账」三个画面同一张脸。
+  // 纪录对比不在这里：跨局纪录是结局时刻的炫耀，见 EndScene / EndgameScene。
+  private buildStatsPanel(): void {
+    const { width, height } = this.viewSize();
+    const panelW = 480;
+    const panelH = 330;
+    const cx = width / 2;
+    const cy = height / 2;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+
+    this.statsObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', PANEL_DEPTH.game.pause));
+    this.statsObjects.push(...buildPanelHeader(this, left, top, panelW, '本局统计', UI.good, PANEL_DEPTH.game.pause + 5));
+    const colW = (panelW - 32 - STATS_PANEL.colGap) / 2;
+    const grid = buildStatsTable(this, left + 16, top + 46, colW, runStatRows(getGame()), PANEL_DEPTH.game.pause + 5, 2);
+    this.statsObjects.push(...grid.objects);
+    this.statsObjects.push(
+      this.add
+        .text(cx, top + panelH - 16, '历史纪录见死亡 / 通关结算画面', {
+          fontFamily: FONT_FAMILY,
+          fontSize: `${TYPE.caption}px`,
+          color: hex(TEXT.dim),
+        })
+        .setOrigin(0.5),
+    );
+    applyPanelDepth(this.statsObjects, PANEL_DEPTH.game.pause);
+    this.assertPanelContent('stats', this.statsObjects);
+    for (const o of this.statsObjects) o.setVisible(false);
+  }
+
+  /** 打开统计面板：暂停菜单让位（pauseOpen 不变——游戏仍然暂停着）。 */
+  private openStatsPanel(): void {
+    this.statsOpen = true;
+    for (const o of this.pauseObjects) o.setVisible(false);
+    for (const o of this.statsObjects) o.setVisible(true);
+    // 面板矩形现取统计面板自己的（480×330，与 buildStatsPanel 同源）：点它
+    // 外面 = ESC 返回暂停菜单（onEsc 的 statsOpen 分支），与暂停菜单既有的
+    // 「点外面关面板」同构。
+    const { width, height } = this.viewSize();
+    this.panelBox = { x: width / 2 - 240, y: height / 2 - 165, w: 480, h: 330 };
+    playSfx('panel');
+  }
+
+  /** 关闭统计面板，回到暂停菜单。 */
+  private closeStatsPanel(): void {
+    this.statsOpen = false;
+    for (const o of this.statsObjects) o.setVisible(false);
+    for (const o of this.pauseObjects) o.setVisible(true);
+    const { width, height } = this.viewSize();
+    this.panelBox = { x: width / 2 - 230, y: height / 2 - 152, w: 460, h: 304 };
+    playSfx('panel');
   }
 
   // Opening the map hands the scene off entirely: GameScene is stopped, so the
@@ -6186,6 +6275,7 @@ export class GameScene extends Phaser.Scene {
     if (entry.kind === 'recipe') {
       const result = craft(state, entry.id as RecipeId);
       if (result.ok) {
+        bumpStat(state, 'itemsCrafted'); // AG-81：制作成功计数（配方，不含净化）
         saveToStorage(state);
         this.refreshCraft();
         this.refreshInventory();
@@ -6238,6 +6328,7 @@ export class GameScene extends Phaser.Scene {
     this.applyNightLighting();
     saveToStorage(state);
     if (tick.died || tick.won || state.status !== 'playing') {
+      if (tick.died) bumpStat(state, 'deaths'); // AG-81：动作跨点把角色饿死/渴死也记一次
       saveToStorage(state);
       this.scene.start('End');
     }
@@ -7197,6 +7288,13 @@ export class GameScene extends Phaser.Scene {
 
   private onEsc(): void {
     if (this.stairClimb) return;
+    // AG-81：统计面板是暂停菜单的子层——ESC 先合它回暂停菜单，暂停菜单再接
+    // 住下一记 ESC 继续游戏。没有这一分支，统计面板开着时 ESC 会直接
+    // togglePause 把暂停菜单也关掉，统计表面板却还挂在屏幕上。
+    if (this.statsOpen) {
+      this.closeStatsPanel();
+      return;
+    }
     // ESCAPE HATCH FIRST.
     //
     // Every branch below is gated on a state flag, so a panel that is DRAWN
@@ -7304,7 +7402,8 @@ export class GameScene extends Phaser.Scene {
     } else if (this.dialogueOpen && this.dialogue) {
       this.dialogue.selected = Math.max(0, this.dialogue.selected - 1);
       this.refreshDialogue();
-    } else if (this.pauseOpen) {
+    } else if (this.pauseOpen && !this.statsOpen) {
+      // AG-81：统计面板开着时暂停菜单隐藏着，↑ 不挪它的光标（同 onNavDown）。
       this.pauseSelected = Math.max(0, this.pauseSelected - 1);
       this.refreshPause();
     }
@@ -7352,7 +7451,9 @@ export class GameScene extends Phaser.Scene {
       const count = this.dialogueOptionsCount();
       this.dialogue.selected = Math.min(Math.max(0, count - 1), this.dialogue.selected + 1);
       this.refreshDialogue();
-    } else if (this.pauseOpen) {
+    } else if (this.pauseOpen && !this.statsOpen) {
+      // AG-81：统计面板开着时暂停菜单是隐藏的，别让 ↓ 偷偷挪它的光标——
+      // 否则 ESC 合下面板，标记停在一个玩家没看见过的选项上。
       this.pauseSelected = Math.min(PAUSE_OPTIONS.length - 1, this.pauseSelected + 1);
       this.refreshPause();
     }
@@ -7430,7 +7531,9 @@ export class GameScene extends Phaser.Scene {
       this.activateDialogueOption();
       return;
     }
-    if (this.pauseOpen) this.activatePause();
+    // AG-81：统计面板是只读子面板，Enter 不当确认键——它在暂停菜单里就是
+    // 被按下的那一键，再按一次只是重开一遍同一个面板。
+    if (this.pauseOpen && !this.statsOpen) this.activatePause();
   }
 
   /**
@@ -7666,6 +7769,8 @@ export class GameScene extends Phaser.Scene {
     if (this.craftingOpen) return '↑/↓ 选择 · Enter 制作 · 拖拽平移 · 滚轮缩放 · C 关闭';
     if (this.ventureOpen) return '↑/↓ 选择 · Enter 入股 · G 关闭';
     if (this.dialogueOpen) return '↑/↓ 选择 · Enter 确定 · ESC 返回';
+    // AG-81：统计面板只有一条出路——回暂停菜单。Enter 不当确认（只读面板）。
+    if (this.statsOpen) return 'ESC 返回暂停菜单';
     if (this.pauseOpen) return '↑/↓ 选择 · Enter 确认 · ESC 继续';
     return null;
   }
@@ -7750,6 +7855,7 @@ export class GameScene extends Phaser.Scene {
       this.flash('今天已经翻过这张床了');
       return;
     }
+    bumpStat(state, 'bedsSearched'); // AG-81：搜床计数（翻过的不重复计）
     saveToStorage(state);
     this.refreshInventory();
     if (result.took.length > 0) {
@@ -7770,6 +7876,7 @@ export class GameScene extends Phaser.Scene {
       this.flash(result.reason ?? '拆不了这张床');
       return;
     }
+    bumpStat(state, 'bedsDismantled'); // AG-81：拆床计数
     saveToStorage(state);
     this.refreshInventory();
     this.removeBunk(bunk.id);
@@ -8047,6 +8154,7 @@ export class GameScene extends Phaser.Scene {
       }
       this.closeShelter();
       saveToStorage(state);
+      bumpStat(state, 'nightsSurvived'); // AG-81：活过今晚（睡觉跨到新的一天）
       playSfx('sleep');
       const cam = this.cameras.main;
       cam.fadeOut(520, 5, 8, 11);
@@ -8060,7 +8168,10 @@ export class GameScene extends Phaser.Scene {
         const nightNote = nightWatchWakeNote(state) ?? (nightPreventedBySleep ? ' · 楼道里有脚步声，但你在屋里，没敢进来' : '');
         this.flash(`睡到第 ${result.nextDay} 天 06:00 · 压力 ${Math.round(state.player.stress ?? 20)}${attackNote}${nightNote}`);
       });
-      if (state.status === 'lost') this.scene.start('End');
+      if (state.status === 'lost') {
+        bumpStat(state, 'deaths'); // AG-81：夜袭/睡梦中死亡（finishNight 内部置的 lost）
+        this.scene.start('End');
+      }
       return;
     }
 
@@ -8311,6 +8422,7 @@ export class GameScene extends Phaser.Scene {
     const target = this.floorView.containers.find((c) => c.id === containerId);
     const label = target?.label ?? containerId;
     const result = lootContainer(state, floor, containerId);
+    if (result.took.length > 0 || result.full) bumpStat(state, 'containersLooted'); // AG-81：开出东西（或包满没拿完）的箱才算开过
     saveToStorage(state);
     this.floorView = getFloorView(state, floor);
     this.setContainerEmptyVisual(containerId, (this.floorView.containers.find((c) => c.id === containerId)?.items.length ?? 0) === 0);
@@ -8565,6 +8677,7 @@ export class GameScene extends Phaser.Scene {
     const state = getGame();
     if (isObstacleCleared(state, state.currentFloor, x)) return;
     clearObstacle(state, state.currentFloor, x);
+    bumpStat(state, 'obstaclesCleared'); // AG-81：清障计数
     saveToStorage(state);
     this.refreshFloorObstacles();
     const o = this.floorObstacles.find((ob) => ob.x === x);
@@ -8760,6 +8873,8 @@ export class GameScene extends Phaser.Scene {
     this.clearFloor();
     this.drawFloor(); // records the visit only after the player lands
     recordDepth(state);
+    bumpStat(state, 'floorsClimbed'); // AG-81：爬梯次数（成功落地才算）
+    noteFloorReached(state); // AG-81：最高层取历址最大（下楼不走低）
     const meta = loadMeta();
     const gained = applyDepth(meta, state.currentFloor);
     if (gained.length > 0) {
@@ -9124,6 +9239,7 @@ export class GameScene extends Phaser.Scene {
       // pose - and the end card waits for it. Winning still cuts immediately:
       // reaching the top is not a fall.
       if (tick.died) {
+        bumpStat(state, 'deaths'); // AG-81：帧循环里的死亡（饥渴/体温/伤势）
         this.playActionAnim(dieAnimKey(this.metaSelectedCharacter()), 520);
         this.time.delayedCall(620, () => {
           if (this.scene.isActive()) this.scene.start('End');
@@ -9391,6 +9507,7 @@ export class GameScene extends Phaser.Scene {
     if (this.wandererIntent === 'attack' && ai.state !== 'fleeing' && Math.abs(this.wanderer!.x - state.player.x) <= 12 && this.time.now - this.wandererHitAt >= WANDERER_HIT_COOLDOWN_MS) {
       this.wandererHitAt = this.time.now;
       state.player.hp = Math.max(0, state.player.hp - damage);
+      bumpStat(state, 'damageTaken', damage); // AG-81：巡游体每口都计数
       this.recordWandererMemory('attack', `巡游体在第${state.currentFloor}层攻击了玩家，造成${damage}点伤害。`);
       inflict(state, 'wound', ai.state === 'lunge' ? 55 : 30, absoluteMinute(state));
       // TWOM 对齐 §2：目睹/遭受袭击掷创伤概率——这是 morale 五机制里的
@@ -9403,7 +9520,10 @@ export class GameScene extends Phaser.Scene {
       this.cameras.main.flash(140, 230, 109, 99);
       playFx(this, 'ground-slam', state.player.x, PLAYER_FEET_Y - 6, LIGHT_DEPTH);
       this.flash(`被巡游体击中！HP -${damage}，快回宿舍或换层！`);
-      if (state.player.hp <= 0) state.status = 'lost';
+      if (state.player.hp <= 0) {
+        state.status = 'lost';
+        bumpStat(state, 'deaths'); // AG-81：巡游体打死
+      }
     }
   }
 }

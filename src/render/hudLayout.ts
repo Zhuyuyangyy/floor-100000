@@ -520,3 +520,20 @@ export const BAG_LAYOUT = {
   /** 四角铆钉距面板内缘的缩进（铆钉本体 2x2，hudSkin 的语言）。 */
   rivetInset: 8,
 } as const;
+
+// ── AG-81：统计面板与结算画面（StatsSystem 的渲染侧几何）──────────────────
+// 两个消费者共用一套行几何：GameScene 暂停菜单里的「本局统计」面板，以及
+// End / EndgameScene 的结算统计表（scenes/EndScene.ts 的 buildStatsTable）。
+// 数值按 20px GameSans 的 25px 线盒定：行距 30 留 5px 呼吸，两列网格的列宽
+// 由面板宽扣掉列间距均分——这里只放与面板宽无关的行几何与列间距，面板宽由
+// 各场景按自己的画布定（结算画面 640 两列，统计面板 460 单列）。
+export const STATS_PANEL = {
+  /** 统计行距（label/value 同一基线，20px caption 的 25px 线盒 + 5px）。 */
+  rowPitch: 30,
+  /** 两列网格的列间距。 */
+  colGap: 24,
+  /** 破纪录行的「新纪录」章宽（标签列右侧的占位，防止与数值列重叠）。 */
+  recordTagW: 72,
+  /** 纪录对比区与统计区之间的分隔带上半厚。 */
+  sectionGap: 18,
+} as const;

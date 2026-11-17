@@ -10,9 +10,12 @@ import { applyPanelDepth, buildPanel, createMarker, PANEL_DEPTH, placeMarker, ty
 import { buildPhotoTitleBackdrop, buildTitleBackdrop, type TitleBackdrop } from '../render/titleBackdrop';
 import { TITLE_BG_KEY } from '../render/artpack';
 import { hitRect, textClickable } from '../render/pointer';
+// AG-75: the About panel's version line comes from the manifest, so a release
+// bump can never leave the menu advertising a stale number.
+import pkg from '../../package.json';
 
 // Title screen: a keyboard-navigable option list — 开始新游戏 / 继续游戏 (when a
-// save exists) / 操作说明. ↑/↓ to move, Enter to choose (docs/03_TASKS.md#p0-08).
+// save exists) / 操作说明 / 关于. ↑/↓ to move, Enter to choose (docs/03_TASKS.md#p0-08).
 //
 // OVERHAUL: the screen used to be a flat colour with text on it, and the
 // owner's one-glance verdict was "this alone makes me not want to play". A
@@ -20,6 +23,16 @@ import { hitRect, textClickable } from '../render/pointer';
 // animated backdrop (tower, failing windows, drifting ash), the entrance
 // tweens and the title's slow flicker exist so the first frame already says
 // what this game is about.
+//
+// AG-75 (pre-Steam polish): three additions, all in AG-75-marked sections —
+//   • a hard offset shadow under the title and subtitle (pixel-art drop shadow,
+//     layered Text at a fixed offset — no CSS filter, which would resample the
+//     pixel face away);
+//   • a standing version tag in the corner (Steam-store etiquette: a player can
+//     always tell a support person what build they are on);
+//   • an 关于 panel — version, engine, credits — the store-page basic.
+// The entry order puts 关于 last so the existing e2e index probes
+// (ArrowDown → 操作说明) keep their meaning.
 type InputSlot = 'up' | 'down' | 'enter' | 'esc';
 
 export class MenuScene extends Phaser.Scene {
@@ -38,6 +51,15 @@ export class MenuScene extends Phaser.Scene {
   private backdrop?: TitleBackdrop;
   private titleText?: Phaser.GameObjects.Text;
   private subtitleText?: Phaser.GameObjects.Text;
+  // AG-75: the hard shadows under the two headline texts. Separate objects at a
+  // fixed pixel offset — a Text's own stroke is a soft outline, and a CSS
+  // shadow filter would blur and resample the pixel font; this cannot.
+  // update() keeps their alpha locked to their headline's flicker.
+  private titleShadow?: Phaser.GameObjects.Text;
+  private subtitleShadow?: Phaser.GameObjects.Text;
+  // AG-75: the 关于 panel's state and objects, mirroring the help panel.
+  private aboutOpen = false;
+  private aboutObjects: PanelObject[] = [];
 
   constructor() {
     super('Menu');
@@ -51,6 +73,8 @@ export class MenuScene extends Phaser.Scene {
     // Survives a scene restart; left true, the help panel would still swallow
     // navigation on the fresh title screen.
     this.helpOpen = false;
+    // Same for the about panel (AG-75).
+    this.aboutOpen = false;
 
     const { width, height } = this.cameras.main;
     // Art pass: this rect used to sit at the default depth 0, which is ABOVE
@@ -86,12 +110,26 @@ export class MenuScene extends Phaser.Scene {
     const MENU_TOP = 286;
     const MENU_STEP = 56;
 
+    // AG-75: the title's hard shadow. A separate Text at a fixed +3px offset in
+    // the palette's ink — the pixel-art way to do a drop shadow. A CSS filter
+    // would blur and resample the 80px face; this cannot. Depth -1 keeps it
+    // behind the headline (depth 0) and above the backdrop.
+    this.titleShadow = this.add
+      .text(width / 2 + 3, TITLE_Y + 3, '第100000层', { fontFamily: FONT_FAMILY, fontSize: '80px', color: hex(PALETTE.ink) })
+      .setOrigin(0.5)
+      .setDepth(-1)
+      .setAlpha(0.55);
     this.titleText = this.add
       .text(width / 2, TITLE_Y, '第100000层', { fontFamily: FONT_FAMILY, fontSize: '80px', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 6 })
       .setOrigin(0.5);
     // Every piece of title text carries its own dark stroke: the painted
     // backdrop behind it is bright in places, and a stroke keeps the text
     // legible without a scrim heavy enough to bury the painting.
+    this.subtitleShadow = this.add
+      .text(width / 2 + 2, SUBTITLE_Y + 2, '末 日 宿 舍', { fontFamily: FONT_FAMILY, fontSize: '44px', color: hex(PALETTE.ink) })
+      .setOrigin(0.5)
+      .setDepth(-1)
+      .setAlpha(0.5);
     this.subtitleText = this.add
       .text(width / 2, SUBTITLE_Y, '末 日 宿 舍', { fontFamily: FONT_FAMILY, fontSize: '44px', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 4 })
       .setOrigin(0.5);
@@ -99,6 +137,9 @@ export class MenuScene extends Phaser.Scene {
     this.entries = [{ label: '开始新游戏', run: () => this.startNew() }];
     if (hasSave()) this.entries.push({ label: '继续游戏', run: () => this.continueRun() });
     this.entries.push({ label: '操作说明', run: () => this.toggleHelp() });
+    // AG-75: 关于 goes last — after 操作说明 — so every existing e2e index
+    // probe (ArrowDown → 操作说明) keeps its meaning.
+    this.entries.push({ label: '关于', run: () => this.toggleAbout() });
     this.selected = 0;
 
     // Bind input first: waitForScene() reports the scene active as soon as its
@@ -120,6 +161,8 @@ export class MenuScene extends Phaser.Scene {
     // buildHelp() only pushes, and field initialisers do not re-run on scene
     // restart — without this the help panel accumulates destroyed objects.
     this.helpObjects = [];
+    // Same reset for the about panel (AG-75).
+    this.aboutObjects = [];
     this.entries.forEach((entry, i) => {
       const t = this.add
         .text(width / 2, MENU_TOP + i * MENU_STEP, entry.label, { fontFamily: FONT_FAMILY, fontSize: '36px', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
@@ -130,7 +173,7 @@ export class MenuScene extends Phaser.Scene {
       // than styling the text alone.
       textClickable(t, hex(TEXT.primary), hex(PALETTE.lightHigh), {
         onOver: () => {
-          if (this.helpOpen) return;
+          if (this.helpOpen || this.aboutOpen) return;
           this.selected = i;
           this.refreshOptions();
           this.hideMessage();
@@ -162,7 +205,14 @@ export class MenuScene extends Phaser.Scene {
       .text(width / 2, height - 30, '', { fontFamily: FONT_FAMILY, fontSize: '26px', color: hex(TEXT.warn), align: 'center' })
       .setOrigin(0.5)
       .setVisible(false);
+    // AG-75: the standing version tag, bottom-right. A shipped game's menu
+    // tells you what build you are on — it is the first thing a Steam support
+    // thread asks for. Small and dim: present, never competing with the menu.
+    this.add
+      .text(width - 16, height - 22, `v${pkg.version}`, { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(TEXT.dim) })
+      .setOrigin(1, 0.5);
     this.buildHelp(width, height);
+    this.buildAbout(width, height);
   }
 
   // The per-frame life of the title screen: the backdrop's tower drift, window
@@ -176,9 +226,13 @@ export class MenuScene extends Phaser.Scene {
       // incommensurate sines so the pattern never visibly loops.
       const flicker = 0.9 + 0.1 * Math.sin(time * 0.004) * Math.sin(time * 0.0013 + 1.7);
       this.titleText.setAlpha(Math.max(0.55, Math.min(1, flicker)));
+      // AG-75: the shadow shares the headline's flicker — a shadow that stayed
+      // steady while its light dipped would read as a second, darker title.
+      this.titleShadow?.setAlpha(Math.max(0.3, Math.min(0.55, flicker * 0.55)));
     }
     if (this.subtitleText) {
       this.subtitleText.setAlpha(0.78 + 0.22 * Math.sin(time * 0.0016));
+      this.subtitleShadow?.setAlpha((0.78 + 0.22 * Math.sin(time * 0.0016)) * 0.6);
     }
   }
 
@@ -195,7 +249,10 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private onNav(slot: 'up' | 'down', delta: number): void {
-    if (this.helpOpen || !this.accept(slot)) return;
+    // AG-75: the about panel swallows navigation the same way the help panel
+    // does — Enter and Esc both close it, arrows do not move the cursor
+    // behind it.
+    if (this.helpOpen || this.aboutOpen || !this.accept(slot)) return;
     this.move(delta);
   }
 
@@ -203,6 +260,10 @@ export class MenuScene extends Phaser.Scene {
     if (!this.accept(slot)) return;
     if (this.helpOpen) {
       this.toggleHelp(); // Enter and Esc both close the help panel
+      return;
+    }
+    if (this.aboutOpen) {
+      this.toggleAbout(); // ...and the about panel (AG-75)
       return;
     }
     if (slot === 'enter') this.activate();
@@ -310,5 +371,52 @@ export class MenuScene extends Phaser.Scene {
   private toggleHelp(): void {
     this.helpOpen = !this.helpOpen;
     for (const o of this.helpObjects) o.setVisible(this.helpOpen);
+  }
+
+  // ── AG-75: the about panel ───────────────────────────────────────────────
+  // The store-page basic: what this game is, what build this is, what engine
+  // runs it, whose art is in it. Built exactly like the help panel — same
+  // frame, same dismiss paths (Enter / Esc / click), same hidden-by-default
+  // pool — so the two can never drift apart in behaviour.
+  private buildAbout(width: number, height: number): void {
+    const panelW = 560;
+    const panelH = 300;
+    const cx = width / 2;
+    const cy = height / 2;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+
+    this.aboutObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', PANEL_DEPTH.menu.help));
+    const title = this.add.text(cx, top + 28, '关于', { fontFamily: FONT_FAMILY, fontSize: '30px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
+    const lines: Array<[string, string]> = [
+      ['第100000层：末日宿舍', hex(TEXT.primary)],
+      [`版本 v${pkg.version} · 引擎 Phaser ${Phaser.VERSION}`, hex(TEXT.secondary)],
+      ['', hex(TEXT.primary)],
+      ['像素 UI / 音效素材：Kenney（CC0 1.0）', hex(TEXT.secondary)],
+      ['字体：Noto Sans SC 子集（SIL OFL）', hex(TEXT.secondary)],
+      ['程序化贴图：本项目工具链生成', hex(TEXT.secondary)],
+      ['', hex(TEXT.primary)],
+      ['完整许可信息见 THIRD_PARTY_NOTICES.md', hex(TEXT.dim)],
+    ];
+    const texts = lines.map(([line, color], i) =>
+      this.add.text(left + 28, top + 78 + i * 26, line, { fontFamily: FONT_FAMILY, fontSize: '20px', color }),
+    );
+    const footer = this.add
+      .text(cx, top + panelH - 26, '按 Enter / ESC 关闭', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(PALETTE.clothHigh) })
+      .setOrigin(0.5);
+    const dismiss = hitRect(this, left, top, panelW, panelH, PANEL_DEPTH.menu.help + 6, {
+      onClick: () => {
+        if (this.aboutOpen) this.toggleAbout();
+      },
+    });
+    this.aboutObjects.push(title, ...texts, footer, dismiss);
+    applyPanelDepth(this.aboutObjects, PANEL_DEPTH.menu.help);
+    dismiss.setDepth(PANEL_DEPTH.menu.help + 6);
+    for (const o of this.aboutObjects) o.setVisible(false);
+  }
+
+  private toggleAbout(): void {
+    this.aboutOpen = !this.aboutOpen;
+    for (const o of this.aboutObjects) o.setVisible(this.aboutOpen);
   }
 }

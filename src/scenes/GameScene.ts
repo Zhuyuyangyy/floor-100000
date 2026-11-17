@@ -180,7 +180,7 @@ import {
   buildWallDressing,
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
-import { CONTAINER_LABEL_DROP, HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
+import { BAG_LAYOUT, CONTAINER_LABEL_DROP, HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
 import { RECIPES, getRecipe, isPassUpgrade, type RecipeId, type UpgradeId } from '../data/recipes';
 import { WALL_DECO } from '../data/wallDeco';
 import { NPCS, NPC_FLOOR, getNpc, npcsOnFloor, type BarterOffer, type NpcDef, type NpcId } from '../data/npcs';
@@ -206,7 +206,6 @@ import {
 import type { NpcPersistedState } from '../ai/types';
 import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId, ShelterAction } from '../core/gameTypes';
 
-const INVENTORY_SLOTS = 12;
 // Row pitch for the inventory list: 20px fits a full-size 16x16 icon with a 2px
 // gap either side, and keeps every offset an integer (no scaling, no blur).
 // Crafting rows: the pitch is the font's line box, not a hand-tuned number.
@@ -501,6 +500,53 @@ function readMovementBalance(): MovementBalance {
 /** 点击操控线的数值入口（AG-50）：GameScene 内不硬编码任何跑动参数。 */
 const MOVEMENT_BALANCE: MovementBalance = readMovementBalance();
 
+// ── AG-60：背包面板的平衡值 ────────────────────────────────────────────
+// 面板/格子几何全部走 config/game-balance.json 的 bag 块（AG-60 放大改版：
+// 440x236/40px 格/12 格 → 880x360/76px 格/14 格）。core/config.ts 的校验
+// 只查必填键，扩展块与 movement/warmthSources 同款按 Record 读；缺字段回退
+// 默认值，旧配置文件照样能跑。布局语言（标题栏/条纹/行锚点/内边距）在
+// render/hudLayout.ts 的 BAG_LAYOUT，两边不重复尺寸。
+export interface BagBalance {
+  panelWidth: number;
+  panelHeight: number;
+  gridCols: number;
+  gridSlots: number;
+  cellSize: number;
+  cellGap: number;
+  iconScale: number;
+  detailGap: number;
+}
+
+const BAG_DEFAULTS: BagBalance = {
+  panelWidth: 880,
+  panelHeight: 360,
+  gridCols: 5,
+  gridSlots: 14,
+  cellSize: 76,
+  cellGap: 8,
+  iconScale: 3,
+  detailGap: 12,
+};
+
+function readBagBalance(): BagBalance {
+  const raw = (GAME_CONFIG as unknown as { bag?: Partial<BagBalance> }).bag ?? {};
+  const num = (v: unknown, fallback: number): number =>
+    typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+  return {
+    panelWidth: num(raw.panelWidth, BAG_DEFAULTS.panelWidth),
+    panelHeight: num(raw.panelHeight, BAG_DEFAULTS.panelHeight),
+    gridCols: num(raw.gridCols, BAG_DEFAULTS.gridCols),
+    gridSlots: num(raw.gridSlots, BAG_DEFAULTS.gridSlots),
+    cellSize: num(raw.cellSize, BAG_DEFAULTS.cellSize),
+    cellGap: num(raw.cellGap, BAG_DEFAULTS.cellGap),
+    iconScale: num(raw.iconScale, BAG_DEFAULTS.iconScale),
+    detailGap: num(raw.detailGap, BAG_DEFAULTS.detailGap),
+  };
+}
+
+/** AG-60：背包面板几何的数值入口——GameScene 内不硬编码任何尺寸。 */
+export const BAG_BALANCE: BagBalance = readBagBalance();
+
 /** 点击落点标记的深度：在地面物件（≤26）之上、HUD（100+）之下。 */
 const CLICK_MARKER_DEPTH = 40;
 
@@ -599,6 +645,8 @@ export class GameScene extends Phaser.Scene {
   private statValues: Phaser.GameObjects.Text[] = [];
   private invCountText?: Phaser.GameObjects.Text;
   private invCells: Phaser.GameObjects.Rectangle[] = [];
+  /** AG-60：全部格子边框共用这一个 Graphics，refreshInventory 整幅重画 */
+  private invCellBorders!: Phaser.GameObjects.Graphics;
   private invDetailName?: Phaser.GameObjects.Text;
   private invDetailMeta?: Phaser.GameObjects.Text;
   private invDetailBody?: Phaser.GameObjects.Text;
@@ -3926,14 +3974,23 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildInventoryPanel(): void {
-    // OVERHAUL UI: this panel used to be a 380x340 box holding twelve rows of
-    // "name ×count" text in 13px monospace — measured, 46% of the whole screen
-    // was one flat colour. It is now an icon grid on the left and a detail pane
-    // on the right: the icons carry the identity, the pane carries the words,
-    // and neither one is a wall of text.
+    // AG-60 放大改版（用户 2026-11-17：「感觉 i 还是比较简陋吧，首先这个背包
+    // 界面可以稍微做大一点」）：440x236 / 40px 格 / 12 格 → 880x360 / 76px 格 /
+    // 14 格。几何数值全在 config/game-balance.json 的 bag 块（BAG_BALANCE），
+    // 布局语言在 render/hudLayout.ts 的 BAG_LAYOUT——本方法内不硬编码尺寸。
+    //
+    // 视觉沿用 hudSkin 的铆钉板+危险条纹语言，不自创风格：buildPanel 的五段
+    // 渐变底板与八件框筋原样保留，标题栏下加一条通栏危险条纹
+    // （drawHazardStripe，HUD 同款），四角补 2x2 铆钉（drawHudPlate 的同款
+    // 摆法）。底板半透明，世界照旧透得出来。
+    //
+    // 14 格 = 5 列 x 3 行（末行 4 格，ragged，与末行两格「未解锁」合成一组
+    // 读数）。容量由 inventory.slotCount 决定（基础 12 + 置物架 2），超出当前
+    // 容量的格子画成未解锁：压暗 + 斜纹 + 不响应鼠标；置物架做成后
+    // refreshInventory 自然点亮，标题栏计数同步切到 x/14。
     const { width, height } = this.viewSize();
-    const panelW = 440;
-    const panelH = 236;
+    const panelW = BAG_BALANCE.panelWidth;
+    const panelH = BAG_BALANCE.panelHeight;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -3944,58 +4001,89 @@ export class GameScene extends Phaser.Scene {
 
     this.invObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'item', depth));
     this.invObjects.push(...buildPanelHeader(this, left, top, panelW, '背包', UI.good, depth + 5));
+    // The capacity readout on the header's right: used / capacity. It reads
+    // inventory.slotCount (12, or 14 once the storage rack is crafted), NOT the
+    // grid size — the old /12 said 12 even with the rack's two extra slots in
+    // the save, and the two dimmed cells at the end of the grid now show exactly
+    // what that count is talking about.
     this.invObjects.push(
       this.add
-        .text(left + panelW - 10, top + 10, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
+        .text(left + panelW - 10, top + BAG_LAYOUT.headerH / 2, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
         .setOrigin(1, 0.5)
         .setDepth(depth + 6),
     );
     this.invCountText = this.invObjects[this.invObjects.length - 1] as Phaser.GameObjects.Text;
 
+    // ── 危险条纹 + 四角铆钉（hudSkin 语言，HUD 同款）─────────────────────
+    const skin = this.add.graphics().setScrollFactor(0).setDepth(depth + 4);
+    drawHazardStripe(
+      skin,
+      left + BAG_LAYOUT.stripeInset,
+      top + BAG_LAYOUT.headerH,
+      panelW - BAG_LAYOUT.stripeInset * 2,
+      BAG_LAYOUT.stripeH,
+      PALETTE.lightDeep,
+    );
+    skin.fillStyle(PALETTE.stoneLight, 0.85);
+    const ri = BAG_LAYOUT.rivetInset;
+    const rivetY = top + BAG_LAYOUT.headerH + BAG_LAYOUT.stripeH + 4;
+    const rivets: Array<[number, number]> = [
+      [left + ri, rivetY],
+      [left + panelW - ri - 2, rivetY],
+      [left + ri, top + panelH - ri - 2],
+      [left + panelW - ri - 2, top + panelH - ri - 2],
+    ];
+    for (const [rx, ry] of rivets) skin.fillRect(rx, ry, 2, 2);
+    this.invObjects.push(skin);
+
     // ── the grid ────────────────────────────────────────────────────────────
-    // 4 columns x 3 rows of 40px cells: twelve slots, no scrolling, and each
-    // cell is big enough for a 2x icon (pixel art upscales cleanly at integer
-    // factors, unlike the old 16px icons in a 20px row).
-    const GRID_X = left + 12;
-    const GRID_Y = top + 30;
-    const CELL = 40;
-    const GAP = 5;
+    // 5 columns x 3 rows of 76px cells: fourteen slots — the base 12 plus the
+    // storage rack's 2, drawn locked until the rack is crafted — no scrolling,
+    // and each cell is big enough for a 3x icon (pixel art upscales cleanly at
+    // integer factors, unlike the old 16px icons in a 20px row).
+    const GRID_X = left + BAG_LAYOUT.padX;
+    const GRID_Y = top + BAG_LAYOUT.contentTop;
+    const CELL = BAG_BALANCE.cellSize;
+    const GAP = BAG_BALANCE.cellGap;
+    const COLS = BAG_BALANCE.gridCols;
+    const ROWS = Math.ceil(BAG_BALANCE.gridSlots / COLS);
     this.invCells = [];
     this.invSlotIcons = [];
     this.invSlotTexts = [];
-    for (let i = 0; i < INVENTORY_SLOTS; i++) {
-      const col = i % 4;
-      const row = Math.floor(i / 4);
+    for (let i = 0; i < BAG_BALANCE.gridSlots; i++) {
+      const col = i % COLS;
+      const row = Math.floor(i / COLS);
       const x = GRID_X + col * (CELL + GAP);
       const y = GRID_Y + row * (CELL + GAP);
       const cell = this.add.rectangle(x, y, CELL, CELL, 0x080c0f).setOrigin(0, 0).setAlpha(0.6).setDepth(depth + 5);
-      const border = this.add.graphics().setDepth(depth + 6);
-      border.lineStyle(1, UI.line, 0.85);
-      border.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
       const icon = this.add
         .image(x + CELL / 2, y + CELL / 2, 'blank')
         .setOrigin(0.5)
-        .setScale(2)
+        .setScale(BAG_BALANCE.iconScale)
         .setDepth(depth + 6);
       const badge = this.add
-        .text(x + CELL - 3, y + CELL - 3, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
+        .text(x + CELL - 4, y + CELL - 4, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
         .setOrigin(1, 1)
         .setDepth(depth + 7);
       this.invCells.push(cell);
       this.invSlotIcons.push(icon);
       this.invSlotTexts.push(badge);
-      this.invObjects.push(cell, border, icon, badge);
+      this.invObjects.push(cell, icon, badge);
       // Mouse: click selects; clicking the already-selected slot uses the item,
-      // which is what Enter does. Pushed into invObjects so it hides with the
-      // panel — an orphan hit rect would keep eating clicks over the world.
+      // which is what Enter does. A LOCKED cell (beyond the current slotCount)
+      // ignores the mouse entirely — it is capacity not earned yet. Pushed into
+      // invObjects so it hides with the panel — an orphan hit rect would keep
+      // eating clicks over the world.
       this.invObjects.push(
         this.panelHit( x, y, CELL, CELL, depth + 8, {
           onOver: () => {
+            if (!this.invSlotUnlocked(i)) return;
             if (this.invSelected === i) return;
             this.invSelected = i;
             this.refreshInventory();
           },
           onClick: () => {
+            if (!this.invSlotUnlocked(i)) return;
             if (this.invSelected !== i) {
               this.invSelected = i;
               this.refreshInventory();
@@ -4007,32 +4095,40 @@ export class GameScene extends Phaser.Scene {
         }),
       );
     }
+    // ONE Graphics for every cell border, created AFTER the cells so it draws
+    // above their fills, and redrawn wholesale by refreshInventory: selection
+    // and the rack's unlock both change border colour, and fourteen per-cell
+    // Graphics objects would mean fourteen clear() calls to keep in step.
+    this.invCellBorders = this.add.graphics().setScrollFactor(0).setDepth(depth + 6);
+    this.invObjects.push(this.invCellBorders);
 
     // ── the detail pane ─────────────────────────────────────────────────────
-    const DETAIL_X = GRID_X + 4 * (CELL + GAP) + 8;
-    const DETAIL_W = left + panelW - 12 - DETAIL_X;
-    this.invObjects.push(...buildPanelWell(this, DETAIL_X, GRID_Y, DETAIL_W, 3 * (CELL + GAP) - GAP, depth + 5));
-    // Three rows at 10 / 48 / 76. They used to be at 10 / 28 / 46, which only
-    // worked because SimSun's glyphs sit inside a much smaller ink box than the
-    // em size; a pixel face fills the whole em, so the 30px name ran straight
-    // through the 20px meta line and the body through both.
+    // The pane starts past the grid's FULL-row right edge (the last row is one
+    // cell short: 14 = 5+5+4), so its left edge stays a clean vertical.
+    const DETAIL_X = GRID_X + COLS * (CELL + GAP) - GAP + BAG_BALANCE.detailGap;
+    const DETAIL_W = left + panelW - BAG_LAYOUT.padRight - DETAIL_X;
+    const DETAIL_H = ROWS * (CELL + GAP) - GAP;
+    this.invObjects.push(...buildPanelWell(this, DETAIL_X, GRID_Y, DETAIL_W, DETAIL_H, depth + 5));
+    // Three rows at 12 / 62 / 104 inside the well. They used to sit at 10 / 48 /
+    // 76 in a 130px well; the 244px well gives the type room to breathe, and the
+    // anchors keep the 30px name's 37px line box clear of the 20px meta's.
     this.invDetailName = this.add
-      .text(DETAIL_X + 8, GRID_Y + 10, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(PALETTE.lightHigh) })
+      .text(DETAIL_X + BAG_LAYOUT.detailPadX, GRID_Y + BAG_LAYOUT.detailNameY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(PALETTE.lightHigh) })
       .setDepth(depth + 7);
     this.invDetailMeta = this.add
-      .text(DETAIL_X + 8, GRID_Y + 48, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+      .text(DETAIL_X + BAG_LAYOUT.detailPadX, GRID_Y + BAG_LAYOUT.detailMetaY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
       .setDepth(depth + 7);
     this.invDetailBody = this.add
       // useAdvancedWrap is load-bearing, fourth time in this codebase: the basic
       // wrapper breaks on spaces only, and Chinese has none, so a width here is
       // silently ignored. Measured: the empty-slot sentence rendered 688px wide
       // inside a 520px panel, i.e. it ran 248px past the frame.
-      .text(DETAIL_X + 8, GRID_Y + 76, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: DETAIL_W - 16, useAdvancedWrap: true } })
+      .text(DETAIL_X + BAG_LAYOUT.detailPadX, GRID_Y + BAG_LAYOUT.detailBodyY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: DETAIL_W - BAG_LAYOUT.detailPadX * 2, useAdvancedWrap: true } })
       .setDepth(depth + 7);
     this.invObjects.push(this.invDetailName, this.invDetailMeta, this.invDetailBody);
 
     const footer = this.add
-      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+      .text(cx, top + panelH - BAG_LAYOUT.footerDrop, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5, 0.5)
       .setDepth(depth + 6);
     this.invObjects.push(footer, this.invMarker);
@@ -4042,23 +4138,32 @@ export class GameScene extends Phaser.Scene {
     for (const o of this.invObjects) o.setVisible(false);
   }
 
+  /** AG-60：格子 i 是否已解锁。容量 = inventory.slotCount（基础 12 + 置物架 2）。
+   *  未解锁格不响应鼠标、画成压暗斜纹；置物架做成后本判官自然放行，不需要
+   *  重建格子——刷新即点亮。 */
+  private invSlotUnlocked(i: number): boolean {
+    return i < getGame().player.inventory.slotCount;
+  }
+
   private refreshInventory(): void {
     const slots = getGame().player.inventory.slots;
-    if (this.invSelected >= INVENTORY_SLOTS) this.invSelected = Math.max(0, INVENTORY_SLOTS - 1);
-    for (let i = 0; i < INVENTORY_SLOTS; i++) {
+    const capacity = getGame().player.inventory.slotCount;
+    if (this.invSelected >= BAG_BALANCE.gridSlots) this.invSelected = Math.max(0, BAG_BALANCE.gridSlots - 1);
+    for (let i = 0; i < BAG_BALANCE.gridSlots; i++) {
       const badge = this.invSlotTexts[i];
       const icon = this.invSlotIcons[i];
       const stack = slots[i];
-      if (stack) {
-        // Keyed by item id, never by display name — see itemIconKey().
-        //
-        // No setVisible(true): refreshInventory() also runs while the panel is
-        // CLOSED — looting a container, a shop trade and a neighbour trade all
-        // call it. Showing the icon here used to float the bag's first row over
-        // the world with no panel behind it: four icons straddling the top
-        // frame of whatever panel happened to be open. Visibility is
-        // toggleInventory's job — it sets the whole list, and the empty slots
-        // below hide themselves again.
+      // Keyed by item id, never by display name — see itemIconKey().
+      //
+      // No setVisible(true): refreshInventory() also runs while the panel is
+      // CLOSED — looting a container, a shop trade and a neighbour trade all
+      // call it. Showing the icon here used to float the bag's first row over
+      // the world with no panel behind it: four icons straddling the top
+      // frame of whatever panel happened to be open. Visibility is
+      // toggleInventory's job — it sets the whole list, and the empty slots
+      // below hide themselves again. A locked cell never has a stack
+      // (slots.length <= slotCount), so it falls in here and stays empty.
+      if (stack && this.invSlotUnlocked(i)) {
         icon.setTexture(itemIconKey(stack.itemId));
         badge.setText(stack.quantity > 1 ? `${stack.quantity}` : '');
       } else {
@@ -4066,11 +4171,36 @@ export class GameScene extends Phaser.Scene {
         badge.setText('');
       }
     }
-    // Highlight the selected cell.
+    // Cells + borders in one pass. The selection wash moves with the cursor;
+    // a locked cell drops to a near-black fill with a diagonal hatch — the
+    // hazard-stripe language, where a diagonal means "not yours yet". The
+    // single borders Graphics is redrawn wholesale (built after the cells so
+    // it draws above their fills).
+    const borders = this.invCellBorders;
+    borders.clear();
     this.invCells.forEach((c, i) => {
-      c.setFillStyle(i === this.invSelected ? UI.accent : 0x080c0f, i === this.invSelected ? 0.2 : 0.6);
+      const unlocked = this.invSlotUnlocked(i);
+      const selected = i === this.invSelected;
+      c.setFillStyle(!unlocked ? 0x05070a : selected ? UI.accent : 0x080c0f, !unlocked ? 0.85 : selected ? 0.2 : 0.6);
+      const x = c.x;
+      const y = c.y;
+      const size = c.width;
+      if (unlocked) {
+        borders.lineStyle(1, selected ? UI.accent : UI.line, selected ? 0.95 : 0.85);
+        borders.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+      } else {
+        borders.lineStyle(1, UI.line, 0.3);
+        borders.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+        borders.lineStyle(1, PALETTE.stoneLight, 0.22);
+        for (let d = 10; d < size; d += 18) {
+          borders.lineBetween(x + d, y + 1, x + 1, y + d);
+        }
+      }
     });
-    if (this.invCountText) this.invCountText.setText(`${slots.length}/${INVENTORY_SLOTS}`);
+    // AG-60: the count now reads the REAL capacity (slotCount: 12, or 14 with
+    // the rack) instead of the grid size — the two dimmed cells at the end of
+    // the grid are what the number is talking about.
+    if (this.invCountText) this.invCountText.setText(`${slots.length}/${capacity}`);
 
     const selected = slots[this.invSelected];
     const cell = this.invCells[this.invSelected];
@@ -4085,6 +4215,13 @@ export class GameScene extends Phaser.Scene {
       this.invDetailMeta?.setText(`${category} · 持有 ${selected.quantity}`);
       const effect = item.effect ? `${STAT_LABEL[item.effect.stat]} +${item.effect.amount}` : '';
       this.invDetailBody?.setText(effect || `${category}，暂时没有直接效果。`);
+    } else if (!this.invSlotUnlocked(this.invSelected)) {
+      // Defensive: the mouse and the arrow keys both refuse to land on a
+      // locked cell, but a stale invSelected from an older build should say
+      // so rather than claim the slot is merely empty.
+      this.invDetailName?.setText('');
+      this.invDetailMeta?.setText('');
+      this.invDetailBody?.setText('锁着的格子。做出置物架就能多带 2 格。');
     } else {
       this.invDetailName?.setText('');
       this.invDetailMeta?.setText('');
@@ -4094,8 +4231,6 @@ export class GameScene extends Phaser.Scene {
     // is nothing of the bag on screen, whatever the data did on the way here.
     if (!this.inventoryOpen) for (const o of this.invObjects) o.setVisible(false);
   }
-
-
   private toggleInventory(): void {
     this.inventoryOpen = !this.inventoryOpen;
     for (const o of this.invObjects) o.setVisible(this.inventoryOpen);

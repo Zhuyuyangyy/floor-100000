@@ -4,7 +4,12 @@ import type { WeaponId } from './weapons';
 // AG-武器分支：四件可制作武器的配方 id 与武器 id 的联合。UpgradeId 见下方
 // （设施 + 五张凭证）。RecipeId 是两侧的并集——制作面板的 entries 用它遍历。
 export type WeaponRecipeId = 'craft_dagger' | 'craft_short_sword' | 'craft_cleaver' | 'craft_fire_axe';
-export type RecipeId = UpgradeId | WeaponRecipeId;
+// AG-66：过道工具配方 id。铲子是阻碍物的清理工具，产出进背包（与武器同型）。
+// outputItemId 在数据条目里铸成 WeaponId（见 RECIPES 末尾的 craft_shovel）：
+// WeaponId 联合属主在 data/weapons.ts（AG-51），本工单不碰，而运行时 id 是
+// 'shovel'——getItem/isItemId 经 DIG_TOOL_ITEMS 认得它（items.ts 的 AG-66 段）。
+export type ToolRecipeId = 'craft_shovel';
+export type RecipeId = UpgradeId | WeaponRecipeId | ToolRecipeId;
 
 // Dorm crafting recipes (docs/01_GDD.md §8). Every material must have a concrete
 // source in the world — none of these are dead-end requirements.
@@ -63,11 +68,14 @@ export interface UpgradeRecipe extends RecipeBase {
 
 export interface WeaponRecipe extends RecipeBase {
   kind: 'item';
-  id: WeaponRecipeId;
+  // AG-66：id 联合含 ToolRecipeId——铲子条目与四件武器同型（kind: item），
+  // 复用本接口而不是新开一个（outputItemId 在数据里铸成 WeaponId）。
+  id: WeaponRecipeId | ToolRecipeId;
   outputItemId: WeaponId;
   /** 效果预览：武器进背包即可装备，战斗读取见 data/weapons.ts 的 WEAPONS。 */
   effect: string;
 }
+
 
 export type Recipe = UpgradeRecipe | WeaponRecipe;
 
@@ -101,6 +109,12 @@ export const RECIPES: Recipe[] = [
   { kind: 'item', id: 'craft_short_sword', outputItemId: 'short_sword', displayName: '短剑', description: '用金属、木材和胶带制作短剑', cost: { scrap_metal: 1, wood: 1, tape: 1 } , effect: '背包里多一把短剑，战斗可装备（攻守均衡）' },
   { kind: 'item', id: 'craft_cleaver', outputItemId: 'cleaver', displayName: '砍刀', description: '用废金属、木柄和胶带制作砍刀', cost: { scrap_metal: 2, wood: 1, tape: 1 } , effect: '背包里多一把砍刀，战斗可装备（重武器，单发高伤）' },
   { kind: 'item', id: 'craft_fire_axe', outputItemId: 'fire_axe', displayName: '消防斧', description: '用废金属、木柄和布料改制消防斧', cost: { scrap_metal: 2, wood: 2, cloth: 1 } , effect: '背包里多一把消防斧，战斗可装备（最重，一下一个）' },
+
+  // AG-66：铲子——过道阻碍物（瓦砾堆/锈闸门）的清理工具。排在 weapons 之后
+  // 是硬约束：craftLoop「保底配额恰好只够三件设施」与 economyLoop 的同名诊断
+  // 表按 RECIPES 顺序逐个试做，铲子（废金属×3+木材×2）若排在前面会挤进 built。
+  // 成本两件都是 tier 1 保底料（3 层铁箱/3 层木箱），出处提示自动可得。
+  { kind: 'item', id: 'craft_shovel', outputItemId: 'shovel' as unknown as WeaponId, displayName: '铲子', description: '用废金属和木柄捆一把铲子，挖开过道上的瓦砾', cost: { scrap_metal: 3, wood: 2 }, effect: '背包里多一把铲子，挖开过道上的瓦砾堆与锈闸门（撬棍也行）' },
 ];
 
 // The pass chain is stored in homeUpgrades, but a credential is not a facility:

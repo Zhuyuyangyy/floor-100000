@@ -42,7 +42,10 @@ import {
   stepHorizontalSpeed,
   tryChangeFloor,
 } from '../systems/FloorSystem';
-import { BUNK_DISMANTLE_COST, BUNK_SEARCH_COST, bunkDismantleTool, dismantleBunk, getFloorView, isBunkDismantled, isBunkSearched, lootContainer, lootGround, recordFloorVisit, searchBunk } from '../systems/LootSystem';
+import { BUNK_DISMANTLE_COST, BUNK_SEARCH_COST, OBSTACLE_DIG_COST_MINUTES, OBSTACLE_DIG_MS, SEARCH_MS,
+  bunkDismantleTool, clampXAgainstObstacles, clearObstacle, dismantleBunk, getFloorView, isBunkDismantled,
+  isBunkSearched, isObstacleCleared, lootContainer, lootGround, nearestObstacle, obstacleTool, obstaclesForFloor, recordFloorVisit,
+  searchBunk, type FloorObstacle } from '../systems/LootSystem';
 import { hasFloorContent } from '../data/floorTemplates';
 import { liftDirection, liftOutcome, liftRequirement, nextSegment, prevSegment, skippedFloors } from '../core/segments';
 import { crossingSummary } from '../core/worldgen';
@@ -504,6 +507,9 @@ const MOVEMENT_BALANCE: MovementBalance = readMovementBalance();
 /** 点击落点标记的深度：在地面物件（≤26）之上、HUD（100+）之下。 */
 const CLICK_MARKER_DEPTH = 40;
 
+/** AG-66：程序化生成的铲子图标贴图 key（见 ensureShovelIcon 的注释）。 */
+const SHOVEL_ICON_KEY = 'shovel';
+
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
   /** The crowbar in the survivor's hand. Follows the attack pose's fist. */
@@ -592,6 +598,32 @@ export class GameScene extends Phaser.Scene {
   // switch back on the very next frame and the clip would never be seen.
   private actionAnimKey = '';
   private actionAnimUntil = 0;
+  // AG-66：过道阻碍物。floorObstacles 是本层全集（seeded，含挖过的残骸），
+  // obstacleObjs 按 x 存场景图形，activeObstacleList 是还没挖的那些——每帧
+  // 钳位与 E 交互读它，挖掉一个就地重算（drawFloor/清障时刷新）。
+  private floorObstacles: FloorObstacle[] = [];
+  private activeObstacleList: FloorObstacle[] = [];
+  private obstacleObjs = new Map<string, Phaser.GameObjects.Graphics>();
+  // AG-66：进行中的搜刮/挖掘动作（2s）。点容器/床铺/阻碍物后先播 search 动画，
+  // 到点才出货/清障；这期间任何移动输入都会取消它——不出货、不扣时间、不标记
+  // 已搜/已挖（防站着刷，见 update 的 pendingAction 段与 cancelPendingAction）。
+  private pendingAction?: {
+    kind: 'container' | 'bunk' | 'dig';
+    floor: number;
+    containerId?: string;
+    bunkId?: string;
+    obstacleX?: number;
+    /** 特效落点（床铺/阻碍物的世界 x）。 */
+    atX: number;
+    /** 动作期间底栏显示的话。 */
+    busyHint: string;
+    /** 取消时的话。 */
+    cancelHint: string;
+    until: number;
+    timer: Phaser.Time.TimerEvent;
+  };
+  /** 程序化生成的铲子图标贴图就绪没有（create 里画一次，背包格用）。 */
+  private shovelIconReady = false;
 
   private clockText!: Phaser.GameObjects.Text;
   private barsGfx!: Phaser.GameObjects.Graphics;
@@ -880,6 +912,12 @@ export class GameScene extends Phaser.Scene {
     this.lastClick = undefined;
     this.lastClock = '';
     this.lastStats = '';
+    // AG-66：阻碍物名册与进行中动作不随字段初始化器重生（场景重启复用实例），
+    // 在这里显式清空——否则上一局的 timer 会在新局到点出货。
+    this.floorObstacles = [];
+    this.activeObstacleList = [];
+    this.obstacleObjs.clear();
+    this.pendingAction = undefined;
 
     this.cameras.main.setBackgroundColor(0x22303a);
     this.cameras.main.setBounds(0, 0, FLOOR_WIDTH, FLOOR_HEIGHT);
@@ -911,6 +949,9 @@ export class GameScene extends Phaser.Scene {
     // neither: it is the flashlight a person would actually carry, and it keeps
     // the room dark around them.
     this.playerLight = addGlow(this, FLOOR_WIDTH / 2, PLAYER_FEET_Y - 40, 54, 0, LIGHT_DEPTH);
+    // AG-66：背包里会出现铲子（craft_shovel），artpack 没有它的贴图，程序化
+    // 画一把 16×16 顶着（render/artpack.ts 不归本工单，见 ensureShovelIcon）。
+    this.ensureShovelIcon();
 
     this.drawFloor();
 
@@ -1050,6 +1091,8 @@ export class GameScene extends Phaser.Scene {
     this.drawDormBunks(floor);
     this.buildContainers();
     this.buildGround();
+    // AG-66：过道阻碍物（本层 seeded 全集 + 挖过的残骸）。
+    this.buildObstacles();
     if (floor === STARTING_FLOOR) {
       this.drawBed();
       this.drawWorkbench();
@@ -1301,6 +1344,15 @@ export class GameScene extends Phaser.Scene {
     this.playerShadow = [];
     this.speedX = 0;
     this.containerObjs.clear();
+    // AG-66：阻碍物的 Graphics 都在 floorObjects 里（上面已批量销毁），这里只
+    // 清名册与动作态——delayedCall 的 timer 必须摘掉，否则换层后旧动作到点出货。
+    this.obstacleObjs.clear();
+    this.floorObstacles = [];
+    this.activeObstacleList = [];
+    if (this.pendingAction) {
+      this.pendingAction.timer.remove(false);
+      this.pendingAction = undefined;
+    }
     this.bunkObjs.clear();
     this.furnitureLabels = [];
     this.npcObjs.clear();
@@ -4059,7 +4111,9 @@ export class GameScene extends Phaser.Scene {
         // frame of whatever panel happened to be open. Visibility is
         // toggleInventory's job — it sets the whole list, and the empty slots
         // below hide themselves again.
-        icon.setTexture(itemIconKey(stack.itemId));
+        // AG-66：铲子走 ensureShovelIcon 程序化生成的 'shovel' 贴图（没生成
+        // 成功就退 artpack 里最接近的撬棍），其余照旧按 id。
+        icon.setTexture(this.itemIconFor(stack.itemId));
         badge.setText(stack.quantity > 1 ? `${stack.quantity}` : '');
       } else {
         icon.setVisible(false);
@@ -5739,6 +5793,11 @@ export class GameScene extends Phaser.Scene {
 
   private onInteract(): void {
     if (this.stairClimb) return;
+    // AG-66：搜刮/挖掘进行中再按 E = 收手（与移动取消同一个出口）。
+    if (this.pendingAction) {
+      this.cancelPendingAction();
+      return;
+    }
     if (this.shelterOpen) {
       this.onUse();
       return;
@@ -5759,6 +5818,15 @@ export class GameScene extends Phaser.Scene {
     }
     if (spot) {
       this.openEncounter(spot);
+      return;
+    }
+    // AG-66：过道阻碍物——E 挖开它（要铲子/撬棍），没工具就说缺什么。排在 NPC
+    // 之前：阻碍物是 physical blocker，玩家被钳在它身上时该先挖开路，而不是跟
+    // 站在瓦砾旁的邻居聊天（小周的巡查路线正好会压到 222 那类阻碍位）。与容器/
+    // 床/梯口不可能同距触发（放置时 keepClear 避让过），不存在歧义。
+    const obstacle = this.nearestObstacle();
+    if (obstacle) {
+      this.tryClearObstacle(obstacle);
       return;
     }
     const npc = this.nearestNpc(state);
@@ -5956,7 +6024,7 @@ export class GameScene extends Phaser.Scene {
         this.attemptSleep();
         return;
       }
-      this.runBunkSearch(state, bunk);
+      this.runBunkSearch(bunk);
       return;
     }
     if (isBunkSearched(state, state.currentFloor, bunk.id)) {
@@ -5969,22 +6037,34 @@ export class GameScene extends Phaser.Scene {
       this.flash('这张床今天已经翻过了，明天再来');
       return;
     }
-    this.runBunkSearch(state, bunk);
+    this.runBunkSearch(bunk);
   }
 
-  private runBunkSearch(state: GameState, bunk: { id: string; x: number }): void {
-    const result = searchBunk(state, state.currentFloor, bunk.id);
+  private runBunkSearch(bunk: { id: string; x: number }): void {
+    // AG-66：与容器同一条 2s 动作——先播 search 动画（翻箱倒柜的那个姿势），
+    // 到点才翻床垫（finishBunkSearch）。「今天翻过了」的闸门仍在
+    // interactWithBunk 入口原样 instant 拦着，不会为一张翻过的床弯腰。
+    this.beginPendingAction({
+      kind: 'bunk',
+      bunkId: bunk.id,
+      atX: bunk.x,
+      busyHint: '翻找床垫中……',
+      cancelHint: '你直起身来，没翻完',
+    });
+  }
+
+  /** AG-66：2s 到点——床铺搜刮的结果落地（原 runBunkSearch 的出货段原样搬来）。 */
+  private finishBunkSearch(bunkId: string, bunkX: number): void {
+    const state = getGame();
+    const result = searchBunk(state, state.currentFloor, bunkId);
     if (result.already) {
       this.flash('今天已经翻过这张床了');
       return;
     }
     saveToStorage(state);
     this.refreshInventory();
-    // 翻箱倒柜：walkcycle 的 search clip——与开柜同一个姿势、同一节奏，
-    // 用户要的「点击之后人物进入翻箱倒柜的状态」就是这一拍。
-    this.playActionAnim(searchAnimKey('player'), 420);
     if (result.took.length > 0) {
-      playFx(this, 'collect-burst', bunk.x, PLAYER_FEET_Y - 50, LIGHT_DEPTH);
+      playFx(this, 'collect-burst', bunkX, PLAYER_FEET_Y - 50, LIGHT_DEPTH);
       this.lootThisTrip += result.took.reduce((n, t) => n + t.quantity, 0);
       this.flash(`翻到 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${BUNK_SEARCH_COST} 分钟）`);
     } else if (result.full) {
@@ -6321,7 +6401,6 @@ export class GameScene extends Phaser.Scene {
 
   private openContainer(containerId: string): void {
     const state = getGame();
-    const floor = state.currentFloor;
     const target = this.floorView.containers.find((c) => c.id === containerId);
     const label = target?.label ?? containerId;
     // Tools unlock container TYPES rather than recipes: a locked safe is the
@@ -6331,6 +6410,25 @@ export class GameScene extends Phaser.Scene {
       this.flash(`${label}锁着，需要${tool}`);
       return;
     }
+    // AG-66：搜刮是一个动作——点下去先弯腰（search 动画拉满 SEARCH_MS），2s 后
+    // 才翻出东西。这期间移动输入即取消（不出货、不扣时间、不标记已搜，见
+    // update 的 pendingAction 段）。既有边界（锁/满/空/二次搜刮）原样落在
+    // finishContainerSearch 里，一个都没动。
+    this.beginPendingAction({
+      kind: 'container',
+      containerId,
+      atX: state.player.x,
+      busyHint: `翻找${label}中……`,
+      cancelHint: '你直起身来，没翻完',
+    });
+  }
+
+  /** AG-66：2s 到点——容器搜刮的结果落地（原 openContainer 的出货段原样搬来）。 */
+  private finishContainerSearch(containerId: string): void {
+    const state = getGame();
+    const floor = state.currentFloor;
+    const target = this.floorView.containers.find((c) => c.id === containerId);
+    const label = target?.label ?? containerId;
     const result = lootContainer(state, floor, containerId);
     saveToStorage(state);
     this.floorView = getFloorView(state, floor);
@@ -6356,11 +6454,9 @@ export class GameScene extends Phaser.Scene {
       // OVERHAUL: a chest thunk for opening a container, distinct from the
       // ground pickup's lighter blip — the container is the bigger event.
       playSfx('chest');
-      // 420ms against the clip's 333ms: a frame overrun (scene switch, save,
-      // hitch) must not cut the bend in half.
-      this.playActionAnim(searchAnimKey('player'), 420);
       // THE MOMENT OF GETTING IT. A container opened and its contents appeared in
       // the bag with nothing on screen saying so; the burst is that beat.
+      // （AG-66：search 动画在 beginPendingAction 就已经播满 2s，这里只放粒子与结果。）
       playFx(this, 'collect-burst', state.player.x + 10, PLAYER_FEET_Y - 50, LIGHT_DEPTH);
       this.lootThisTrip += result.took.reduce((n, t) => n + t.quantity, 0);
       this.flash(`获得 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${ACTION_COSTS.searchContainer} 分钟）`);
@@ -6393,6 +6489,239 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+
+  // ── AG-66：2s 搜刮/挖掘动作 ─────────────────────────────────────────
+  /**
+   * 起一个搜刮/挖掘动作：search clip 拉满时长（容器/床 SEARCH_MS，阻碍物
+   * OBSTACLE_DIG_MS），到点由 finishPendingAction 落地。这期间 update 里的
+   * 任何移动输入都会取消它——不出货、不扣时间、不标记已搜/已挖。
+   */
+  private beginPendingAction(action: {
+    kind: 'container' | 'bunk' | 'dig';
+    containerId?: string;
+    bunkId?: string;
+    obstacleX?: number;
+    atX: number;
+    busyHint: string;
+    cancelHint: string;
+    ms?: number;
+  }): void {
+    if (this.pendingAction) this.cancelPendingAction(true);
+    const ms = action.ms ?? (action.kind === 'dig' ? OBSTACLE_DIG_MS : SEARCH_MS);
+    // 走位订单作废：动作期间不接受点击挪步（新的移动输入照样会在下一帧取消它）。
+    this.walkTarget = null;
+    this.playActionAnim(searchAnimKey('player'), ms);
+    const entry = {
+      kind: action.kind,
+      floor: getGame().currentFloor,
+      containerId: action.containerId,
+      bunkId: action.bunkId,
+      obstacleX: action.obstacleX,
+      atX: action.atX,
+      busyHint: action.busyHint,
+      cancelHint: action.cancelHint,
+      until: this.time.now + ms,
+      timer: undefined as unknown as Phaser.Time.TimerEvent,
+    };
+    this.pendingAction = entry;
+    entry.timer = this.time.delayedCall(ms, () => {
+      // 身份比对：被取消过的动作（或换层后重建的名册）不会落地。
+      if (this.pendingAction === entry) this.finishPendingAction();
+    });
+  }
+
+  /** 收手：摘 timer、清动作态、给一句反馈（silent = 换层/重启时的静默清理）。 */
+  private cancelPendingAction(silent = false): void {
+    const action = this.pendingAction;
+    if (!action) return;
+    action.timer.remove(false);
+    this.pendingAction = undefined;
+    this.walkTarget = null;
+    if (!silent) this.flash(action.cancelHint);
+  }
+
+  /** 到点落地：先对楼层（换层/换场景就地作废），再按 kind 分派。 */
+  private finishPendingAction(): void {
+    const action = this.pendingAction;
+    if (!action) return;
+    this.pendingAction = undefined;
+    if (action.floor !== getGame().currentFloor) return;
+    if (action.kind === 'container' && action.containerId) this.finishContainerSearch(action.containerId);
+    else if (action.kind === 'bunk' && action.bunkId) this.finishBunkSearch(action.bunkId, action.atX);
+    else if (action.kind === 'dig' && action.obstacleX !== undefined) this.finishObstacleDig(action.obstacleX);
+  }
+
+  // ── AG-66：过道阻碍物 ───────────────────────────────────────────────
+  /** 本层阻碍物全集 + 未挖列表（seeded；drawFloor 与清障后各刷一次）。 */
+  private refreshFloorObstacles(): void {
+    const state = getGame();
+    const floor = state.currentFloor;
+    this.floorObstacles = obstaclesForFloor(state, floor);
+    this.activeObstacleList = this.floorObstacles.filter((o) => !isObstacleCleared(state, floor, o.x));
+  }
+
+  /** 交互距离内最近的未挖阻碍物（与 nearestContainer 同型）。 */
+  private nearestObstacle(): FloorObstacle | null {
+    return nearestObstacle(this.activeObstacleList, getGame().player.x, INTERACT_DISTANCE);
+  }
+
+  /** 阻碍物提示：有工具说「按 E 挖」，没工具说缺什么——与 E 的实际行为同源。 */
+  private obstacleHint(o: FloorObstacle): string {
+    const armed = obstacleTool(getGame().player.inventory) !== null;
+    if (o.kind === 'rubble') return armed ? '按 E 挖开这堆瓦砾' : '需要铲子才能挖开这堆瓦砾（撬棍也行）';
+    return armed ? '按 E 撬开这道闸门' : '需要铲子或撬棍才能撬开这道闸门';
+  }
+
+  /** 画本层阻碍物（含挖过的残骸）。程序化 Graphics，16 色板内，不新增贴图。 */
+  private buildObstacles(): void {
+    this.refreshFloorObstacles();
+    const state = getGame();
+    for (const o of this.floorObstacles) {
+      const g = this.add.graphics();
+      this.drawObstacle(g, o, isObstacleCleared(state, state.currentFloor, o.x));
+      this.obstacleObjs.set(`${o.x}`, g);
+      this.floorObjects.push(g);
+    }
+  }
+
+  /**
+   * 一个阻碍物的画法。瓦砾堆 = 乱石坡（顶面受光、坡脚积尘）；锈闸门 = 石立柱 +
+   * 锈红顶轨 + 斜拉铁丝网。挖过之后同一位址重画成残骸：瓦砾压成矮茬、闸门剩
+   * 一根歪柱几根断丝——还看得出动过土，但不再拦路（cleared 时 activeObstacleList
+   * 已不含它，钳位自然放行）。
+   */
+  private drawObstacle(g: Phaser.GameObjects.Graphics, o: FloorObstacle, cleared: boolean): void {
+    g.clear();
+    const floorY = FLOOR_HEIGHT - FLOOR_BAND;
+    if (o.kind === 'rubble') {
+      if (cleared) {
+        // 残骸：一层矮茬，尘色半透明。
+        g.fillStyle(PALETTE.shadow, 0.5);
+        g.fillRect(o.x - 26, floorY - 6, 52, 6);
+        g.fillStyle(PALETTE.dust, 0.55);
+        g.fillRect(o.x - 18, floorY - 11, 30, 5);
+        g.fillRect(o.x + 6, floorY - 8, 16, 3);
+        g.fillStyle(PALETTE.stone, 0.5);
+        g.fillRect(o.x - 8, floorY - 15, 12, 4);
+        return;
+      }
+      // 三五大石挤在过道中间：主石两块、配石一块，顶面一道受光。
+      g.fillStyle(PALETTE.shadow, 0.9);
+      g.fillRect(o.x - 24, floorY - 4, 48, 4);
+      g.fillStyle(PALETTE.stone, 1);
+      g.fillTriangle(o.x - 22, floorY, o.x - 12, floorY - 24, o.x - 2, floorY);
+      g.fillStyle(PALETTE.stoneLight, 1);
+      g.fillTriangle(o.x - 19, floorY, o.x - 12, floorY - 24, o.x - 8, floorY);
+      g.fillStyle(PALETTE.stone, 1);
+      g.fillTriangle(o.x - 4, floorY, o.x + 6, floorY - 30, o.x + 16, floorY);
+      g.fillStyle(PALETTE.stoneLight, 1);
+      g.fillTriangle(o.x - 1, floorY, o.x + 6, floorY - 30, o.x + 9, floorY);
+      g.fillStyle(PALETTE.stone, 1);
+      g.fillTriangle(o.x + 12, floorY, o.x + 20, floorY - 16, o.x + 26, floorY);
+      g.fillStyle(PALETTE.dust, 0.85);
+      g.fillRect(o.x - 26, floorY - 2, 54, 2);
+      g.fillRect(o.x - 10, floorY - 34, 3, 3);
+      g.fillRect(o.x + 14, floorY - 20, 2, 2);
+      return;
+    }
+    if (cleared) {
+      // 残骸：一根歪柱 + 几根耷拉的断丝。
+      g.fillStyle(PALETTE.stone, 0.8);
+      g.fillRect(o.x - 20, floorY - 30, 5, 30);
+      g.fillStyle(PALETTE.lightDeep, 0.7);
+      g.fillRect(o.x - 20, floorY - 30, 5, 4);
+      g.lineStyle(1, PALETTE.stoneLight, 0.5);
+      g.lineBetween(o.x - 15, floorY - 18, o.x + 4, floorY - 6);
+      g.lineBetween(o.x - 15, floorY - 26, o.x + 2, floorY - 14);
+      g.lineStyle(1, PALETTE.dust, 0.4);
+      g.lineBetween(o.x + 2, floorY - 6, o.x + 10, floorY);
+      return;
+    }
+    // 完好的锈闸门：凹槽里立两根石柱，顶轨锈红，中间斜拉铁丝网。
+    g.fillStyle(PALETTE.ink, 0.85);
+    g.fillRect(o.x - 26, floorY - 56, 52, 56);
+    g.fillStyle(PALETTE.stone, 1);
+    g.fillRect(o.x - 22, floorY - 52, 6, 52);
+    g.fillRect(o.x + 16, floorY - 52, 6, 52);
+    g.fillStyle(PALETTE.stoneLight, 1);
+    g.fillRect(o.x - 22, floorY - 52, 2, 52);
+    g.fillRect(o.x + 16, floorY - 52, 2, 52);
+    g.fillStyle(PALETTE.lightDeep, 1);
+    g.fillRect(o.x - 24, floorY - 58, 48, 6);
+    g.fillStyle(PALETTE.light, 0.9);
+    g.fillRect(o.x - 24, floorY - 58, 48, 2);
+    g.lineStyle(1, PALETTE.stoneLight, 0.65);
+    for (let i = 0; i <= 4; i++) {
+      const t = i / 4;
+      g.lineBetween(o.x - 16 + t * 32, floorY - 52, o.x - 16 + t * 32 + 10, floorY - 4);
+    }
+    g.lineBetween(o.x - 16, floorY - 28, o.x + 16, floorY - 28);
+    g.fillStyle(PALETTE.lightDeep, 0.8);
+    g.fillRect(o.x - 8, floorY - 46, 4, 3);
+    g.fillRect(o.x + 4, floorY - 18, 3, 4);
+  }
+
+  /** E 对准阻碍物：没工具说缺什么；有工具就起 2s 挖掘动作。 */
+  private tryClearObstacle(o: FloorObstacle): void {
+    const state = getGame();
+    if (isObstacleCleared(state, state.currentFloor, o.x)) return;
+    if (!obstacleTool(state.player.inventory)) {
+      this.flash(this.obstacleHint(o));
+      return;
+    }
+    this.beginPendingAction({
+      kind: 'dig',
+      obstacleX: o.x,
+      atX: o.x,
+      busyHint: o.kind === 'rubble' ? '挖开瓦砾中……' : '撬开闸门中……',
+      cancelHint: '你停了下来，还没挖完',
+      ms: OBSTACLE_DIG_MS,
+    });
+  }
+
+  /** 2s 到点：阻碍物消失（变残骸）、过道通、记存档键（回层不复活）。 */
+  private finishObstacleDig(x: number): void {
+    const state = getGame();
+    if (isObstacleCleared(state, state.currentFloor, x)) return;
+    clearObstacle(state, state.currentFloor, x);
+    saveToStorage(state);
+    this.refreshFloorObstacles();
+    const o = this.floorObstacles.find((ob) => ob.x === x);
+    const obj = this.obstacleObjs.get(`${x}`);
+    if (o && obj) this.drawObstacle(obj, o, true);
+    playFx(this, 'collect-burst', x, PLAYER_FEET_Y - 30, LIGHT_DEPTH);
+    playSfx('chest');
+    this.flash(o?.kind === 'gate' ? '撬开了锈闸门，过道通了' : '挖开了瓦砾堆，过道通了');
+    this.chargeTime(OBSTACLE_DIG_COST_MINUTES);
+  }
+
+  /** AG-66：背包格图标——铲子用程序化贴图，没生成成功退 artpack 的撬棍。 */
+  private itemIconFor(itemId: ItemId): string {
+    if ((itemId as string) === SHOVEL_ICON_KEY && this.shovelIconReady) return SHOVEL_ICON_KEY;
+    return itemIconKey(itemId);
+  }
+
+  /**
+   * AG-66：程序化画一把 16×16 铲子图标。artpack 的 ITEM_ICON_FILES 与 ITEMS
+   * 一件不差被 itemIcons.test.ts 钉死（且 render/ 不归本工单），新工具因此不走
+   * 贴图清单，在 create 里现画一个：木柄 + 铲头 + 一粒高光，全 16 色板。
+   */
+  private ensureShovelIcon(): void {
+    this.shovelIconReady = this.textures.exists(SHOVEL_ICON_KEY);
+    if (this.shovelIconReady) return;
+    const g = this.add.graphics();
+    g.fillStyle(PALETTE.skinDeep, 1);
+    g.fillRect(4, 1, 3, 9);
+    g.fillStyle(PALETTE.stone, 1);
+    g.fillRect(3, 9, 5, 3);
+    g.fillStyle(PALETTE.stoneLight, 1);
+    g.fillRect(4, 10, 4, 3);
+    g.fillStyle(PALETTE.dust, 1);
+    g.fillRect(5, 10, 1, 2);
+    g.generateTexture(SHOVEL_ICON_KEY, 16, 16);
+    g.destroy();
+    this.shovelIconReady = this.textures.exists(SHOVEL_ICON_KEY);
+  }
   private nearLift(state: GameState): boolean {
     return liftDirection(state.currentFloor) !== null && Math.abs(state.player.x - LIFT_X) <= LIFT_REACH;
   }
@@ -6680,6 +7009,17 @@ export class GameScene extends Phaser.Scene {
     // 要么触发跑，语义重叠），Shift 则是「更快变体」的通用修饰键，与鼠标
     // 双击跑、Shift+单击跑共用同一个 runSpeedMultiplier。
     const shiftRun = this.keyShift?.isDown === true;
+    // AG-66：搜刮/挖掘进行中——任何移动输入（方向键或点击走位订单）都取消
+    // 动作：不出货、不扣时间、不标记已搜/已挖。这是「防站着刷」的闸口：想拿
+    // 东西就得老老实实站完 2s。没有输入则到点落地。
+    if (this.pendingAction) {
+      if (dir !== 0 || this.walkTarget) {
+        this.cancelPendingAction();
+      } else if (this.time.now >= this.pendingAction.until) {
+        this.finishPendingAction();
+        return;
+      }
+    }
     // Click-to-walk. A held key cancels the order rather than fighting it, so the
     // player never feels the mouse and the keyboard pulling opposite ways.
     if (this.walkTarget) {
@@ -6721,7 +7061,13 @@ export class GameScene extends Phaser.Scene {
     }
     this.speedX = stepped * runScale * moveSpeedFactor(state.player) * moveSpeedMult(state.relics ?? []);
     const dx = this.speedX * (delta / 1000);
-    if (dx !== 0) movePlayerX(state, dx);
+    if (dx !== 0) {
+      const prevX = state.player.x;
+      movePlayerX(state, dx);
+      // AG-66：过道阻碍物把玩家钳在占位区之外——贴着进来那一侧的边停，
+      // 想过去只能把它挖掉。上一帧就在区间里（落地/传送）则取近的一侧出。
+      state.player.x = clampXAgainstObstacles(this.activeObstacleList, prevX, state.player.x);
+    }
     this.syncPlayerWorldObjects(state.player.x, STAIR_START_Y);
 
     // The walk cycle carries all the vertical motion now — the poses' own hip
@@ -6894,6 +7240,19 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    // AG-66：搜刮/挖掘动作中——底栏只说在干什么，不说周围有什么（面板优先
+    // 的契约在上面的 panelHint 段，开着面板时仍旧是面板的话）。
+    if (this.pendingAction) {
+      this.hintText.setText(this.pendingAction.busyHint);
+      return;
+    }
+    const nearObstacle = this.nearestObstacle();
+    // AG-66：阻碍物提示——有工具说「按 E 挖」，没工具说缺什么。与 onInteract
+    // 同序（问号点之后、NPC 之前）：被钳在瓦砾上时脚注先说挖开。
+    if (nearObstacle) {
+      this.hintText.setText(this.obstacleHint(nearObstacle));
+      return;
+    }
     // AG-51：床铺提示（含自己的床：夜里睡觉/白天翻床垫底下）先于工作台。
     // 两件家具在 1 层东西两端，正常永远不会同时够到，顺序只是保险。
     const bunkLine = this.bunkHint(state);

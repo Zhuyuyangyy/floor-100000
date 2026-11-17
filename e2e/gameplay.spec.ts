@@ -125,10 +125,14 @@ test('player walks, switches floor via E, and never duplicates', async ({ page }
   expect(landedView.lightX).toBe(40);
   expect(landedView.lightY).toBe(120);
 
+  // AG-90：待机换成 GIF 图集后，站立玩家的贴图键不再固定是 char-player-walk
+  // （站着是 char-anim-player-idle，动起来才回 walk sheet）——「换层不克隆出
+  // 第二个玩家」改按场景引用数，原意不变。
   const playerCount = await page.evaluate(() => {
-    const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; texture?: { key: string } }> } } | null } } }).__PHASER_GAME__;
-    const list = g?.scene.getScene('Game')?.children.list ?? [];
-    return list.filter((o) => o.type === 'Sprite' && o.texture?.key === 'char-player-walk').length;
+    const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { player?: object; children: { list: object[] } } | null } } }).__PHASER_GAME__;
+    const scene = g?.scene.getScene('Game');
+    const list = scene?.children.list ?? [];
+    return list.filter((o) => o === scene?.player).length;
   });
   expect(playerCount).toBe(1); // no duplicate cloning across scene restart
 

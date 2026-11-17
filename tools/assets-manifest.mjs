@@ -274,11 +274,25 @@ function classify(path) {
 }
 
 // ── the scan ────────────────────────────────────────────────────────────────
+// Directories the scan skips. chars/ holds the four characters' action
+// atlases baked by tools/bake-char-anims.py (24 PNGs + manifest.json). They
+// are build products, not delivered art: the bake script re-derives them
+// deterministically from docs/art-previews and enforces the same contract the
+// gate does (<=16 colours, every one in-palette, binary alpha, feet on row
+// 95) before writing a byte, and its --verify mode re-checks the committed
+// files. The snapshot in docs/assets/manifest.json tracks delivered art and
+// who references it, so generated atlases stay out of the scan - the same
+// reason src/assets/characters' walk sheets are outside this tool's scope.
+const SKIP_DIRS = ['chars'];
+
 function walk(dir) {
   const out = [];
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
-    if (statSync(full).isDirectory()) out.push(...walk(full));
+    if (statSync(full).isDirectory()) {
+      if (SKIP_DIRS.includes(entry)) continue;
+      out.push(...walk(full));
+    }
     else out.push(full);
   }
   return out.sort();

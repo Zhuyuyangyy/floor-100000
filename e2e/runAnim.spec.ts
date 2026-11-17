@@ -46,12 +46,20 @@ interface ClipRect {
 }
 
 // 读 GameScene 实例与玩家精灵。private 字段在运行时就是普通属性。
+//
+// AG-90：待机换成 GIF 图集（char-anim-{who}-idle）之后，站立玩家的贴图键
+// 不再是 char-player-walk——角色身份改从动画键读（idle-player -> player），
+// 贴图键只作信息带回。行走/奔跑的帧仍全在 walk sheet 上，下面 run 的注册
+// 断言（textureKey 精确等于 char-player-walk）原样成立。
 async function gameHandles(page: Page): Promise<{ who: string; textureKey: string }> {
   return page.evaluate(() => {
     const game = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => unknown } } }).__PHASER_GAME__;
-    const scene = game!.scene.getScene('Game') as { player: { texture: { key: string } } };
+    const scene = game!.scene.getScene('Game') as {
+      player: { texture: { key: string }; anims: { currentAnim?: { key: string } } };
+    };
     const textureKey = scene.player.texture.key;
-    const who = textureKey.replace(/^char-/, '').replace(/-walk$/, '');
+    const animKey = scene.player.anims.currentAnim?.key ?? '';
+    const who = animKey.replace(/^(idle|walk|run)-/, '');
     return { who, textureKey };
   });
 }
@@ -224,7 +232,9 @@ test('run-player 注册成功，且播放速率是行走的 1.6 倍', async ({ p
   const runKey = `run-${who}`;
   const walkKey = `walk-${who}`;
   expect(who).toBe('player');
-  expect(textureKey).toBe('char-player-walk');
+  // AG-90：站立时贴图可能是 walk sheet（程序待机）也可能是 GIF 待机图集；
+  // 两者都是玩家的贴图，身份由上面的 who 断言钉住。
+  expect(textureKey === 'char-player-walk' || textureKey.startsWith('char-anim-player-')).toBe(true);
 
   // ① 注册：key、帧率、循环、帧数、贴图，全部与 walkcycle.ts 的声明一致。
   const reg = await page.evaluate((k) => {

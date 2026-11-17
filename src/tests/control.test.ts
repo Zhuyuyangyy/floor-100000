@@ -199,7 +199,10 @@ describe('GameScene control wiring (AG-50)', () => {
     // 不再钉某个具体常量名。
     expect(SCENE_SRC).toContain('const runKey = runAnimKey(who);');
     expect(SCENE_SRC).toContain('runActive && this.anims.exists(runKey)');
-    expect(SCENE_SRC).toContain('this.player.anims.timeScale = runActive ? MOVEMENT_BALANCE.runAnimTimeScale');
+    // AG-90：timeScale 表达式改为多行——GIF 待机按自带节奏播（1000ms/帧），
+    // 不再被 0.2 的行走防滑步底线拖慢；runActive 分支语义不变，仍取
+    // MOVEMENT_BALANCE.runAnimTimeScale。\r?\n：仓库 CRLF，读出的源码行尾带 \r。
+    expect(SCENE_SRC).toMatch(/this\.player\.anims\.timeScale\s*=\s*\r?\n\s*runActive\s*\r?\n\s*\?\s*MOVEMENT_BALANCE\.runAnimTimeScale/);
     // runAnimKey 必须从 walkcycle 导入（AG-55 的命名约定），不是手搓字符串。
     // \r?\n：仓库是 CRLF，读出来的源码行尾带 \r，写死 \n 会在 Windows 上假红。
     expect(SCENE_SRC).toMatch(/\r?\n\s+runAnimKey,\r?\n/);

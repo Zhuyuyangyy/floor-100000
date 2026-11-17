@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { generateAllPixelArt } from '../render/pixelArt';
 import { createCharacterAnimations, FRAME_H, FRAME_W, WALK_CHARACTERS, walkSheetKey } from '../render/walkcycle';
+import { createCharAnimAnims, preloadCharAnims } from '../render/charAnims';
 import { createFxAnims, loadFx } from '../render/fx';
 import { WEAPONS, WEAPON_IDS } from '../data/weapons';
 import { FONT_FAMILY } from '../render/uiKit';
@@ -232,6 +233,12 @@ export class BootScene extends Phaser.Scene {
       if (name === 'wall') this.load.image(ENV_WALL_KEY, url);
       if (name === 'floor') this.load.image(ENV_FLOOR_KEY, url);
     }
+
+    // The four characters' action GIFs, baked to atlases by
+    // tools/bake-char-anims.py. Loaded as spritesheets (one horizontal strip
+    // per action, 64x96 frames) so createCharAnimAnims can re-register the
+    // six shared animation keys onto them.
+    preloadCharAnims(this);
   }
 
   create(): void {
@@ -242,6 +249,12 @@ export class BootScene extends Phaser.Scene {
     try {
       generateAllPixelArt(this);
       createCharacterAnimations(this);
+      // After createCharacterAnimations on purpose: the GIF atlases REPLACE
+      // six of the procedural registrations (attack/hurt/die/idle/pickup/
+      // search for the four characters with delivered GIFs) under the same
+      // animation keys, so every existing play site gets the owner's art with
+      // no call-site change. See render/charAnims.ts.
+      createCharAnimAnims(this);
       createFxAnims(this);
     } catch (err) {
       // A failed bake used to leave the black canvas forever: create() threw,

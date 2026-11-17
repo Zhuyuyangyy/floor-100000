@@ -269,3 +269,134 @@ export function drawStatRing(
     g.strokePath();
   }
 }
+
+/** The ring group's texture box, in SCREEN coordinates — the RenderTexture's
+ *  position and size. Derived from HUD_LAYOUT's ring geometry, so a layout
+ *  move cannot leave the texture behind. */
+export interface StatRingsBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** The ring geometry keys of HUD_LAYOUT the bake needs (structural, so the
+ *  layout tests and this module cannot drift apart). */
+export interface StatRingGeometry {
+  statX: number;
+  statPitch: number;
+  ringCY: number;
+  ringR: number;
+  ringStroke: number;
+}
+
+export function statRingsBox(hud: StatRingGeometry): StatRingsBox {
+  // The stroke is centred on the ring path, so the painted edge is r + stroke/2.
+  const outer = hud.ringR + hud.ringStroke / 2;
+  const firstCX = hud.statX + hud.ringR;
+  const lastCX = hud.statX + 3 * hud.statPitch + hud.ringR;
+  // The group's painted top edge sits ABOVE the canvas (ringCY 25 - outer
+  // 25.5 = -0.5) and the screen clips it at y=0. The texture must start at
+  // y=0 too, or the Image would show a row the baseline never had.
+  const y = Math.max(0, Math.floor(hud.ringCY - outer));
+  const x = Math.floor(firstCX - outer);
+  return { x, y, width: Math.ceil(lastCX + outer) - x, height: Math.ceil(hud.ringCY + outer) - y };
+}
+
+/**
+ * The four stat rings as one baked texture (AG-102, perf round 3).
+ *
+ * Why: Phaser 4's GraphicsWebGLRenderer has no dirty cache — every frame it
+ * re-walks the commandBuffer and re-triangulates every ARC, and the four rings
+ * are 42 arc paths (588 of the depth-103 HUD set's 1222 buffer values),
+ * measured at 0.68ms/frame, the single largest Graphics cost in the game
+ * (docs/2026-11-18-PERF-ROUND2-CHUNK-CULL.md §4). The pips only change when a
+ * stat's rounded value changes — refreshStats' key guard, ~1/s while hunger
+ * and thirst decay — so the whole group is baked into one texture on change
+ * and shown as a single object: one textured quad per frame instead of 42
+ * re-triangulated arcs.
+ *
+ * Route: a RenderTexture, NOT Graphics.generateTexture. generateTexture
+ * rasterises through the Canvas 2D renderer, and its arc strokes do not match
+ * the WebGL triangulation pixel for pixel — the frozen-screenshot diff came
+ * back at 0.128% with maxDelta 123 (the whole ring outline), 18x the 0.007%
+ * noise floor, so it failed the pixel-exact constraint. A RenderTexture draws
+ * the same Graphics through the same WebGL renderer into an FBO: same
+ * triangles, same non-MSAA rasterisation, NEAREST sampling at an integer
+ * position — the diff drops back to the 8-bit premultiply rounding of the
+ * texture round trip.
+ *
+ * The static/dynamic split was rejected: the dynamic pips ARE the expensive
+ * part, so a baked track plus a live pip Graphics would keep ~all of the
+ * per-frame cost.
+ */
+
+/** Draw the four rings into `g` in TEXTURE-LOCAL coordinates (the box origin
+ *  subtracted). Same calls the live Graphics made: the dark track, then one
+ *  pip per lit twelfth, danger red at <=20% — the value's own Text is not
+ *  drawn here (it stays live in the ring's well). */
+export function drawStatRingGroup(
+  g: Phaser.GameObjects.Graphics,
+  hud: StatRingGeometry,
+  box: StatRingsBox,
+  values: readonly number[],
+  colors: readonly number[],
+  danger: number,
+): void {
+  values.forEach((v, i) => {
+    const frac = v / 100;
+    drawStatRing(
+      g,
+      hud.statX + i * hud.statPitch + hud.ringR - box.x,
+      hud.ringCY - box.y,
+      hud.ringR,
+      frac,
+      frac <= 0.2 ? danger : colors[i],
+      { stroke: hud.ringStroke },
+    );
+  });
+}
+
+/** One ring-group baker: the display object plus its off-screen draw source. */
+export interface StatRingsBaker {
+  /** The display object — one Render Texture where the live Graphics was. */
+  readonly rt: Phaser.GameObjects.RenderTexture;
+  /** Re-bake. Call on stat change only (never per frame): queues clear+draw,
+   *  which the RT executes on its next render, triangulating the arcs once
+   *  per change instead of once per frame. */
+  redraw(values: readonly number[], colors: readonly number[], danger: number): void;
+  destroy(): void;
+}
+
+/** Create the baker: the RT placed exactly where the old Graphics sat, plus
+ *  the off-screen Graphics every re-bake draws through. */
+export function createStatRingsBaker(scene: Phaser.Scene, hud: StatRingGeometry): StatRingsBaker {
+  const box = statRingsBox(hud);
+  // Off-screen (never on the display list), reused for every re-bake — the
+  // canonical draw-then-bake pattern (render/pixelArt.ts), minus the destroy,
+  // because this one bakes repeatedly.
+  const gfx = scene.make.graphics({ x: 0, y: 0 }, false);
+  const rt = scene.add
+    .renderTexture(box.x, box.y, box.width, box.height)
+    .setOrigin(0, 0)
+    .setName('hud-stat-rings')
+    .setScrollFactor(0)
+    .setDepth(103)
+    // 'all' runs the queued clear+draw when the RT renders, then draws the
+    // texture to the frame. The default 'render' mode never runs the buffer
+    // and the rings would stay invisible.
+    .setRenderMode('all');
+  return {
+    rt,
+    redraw(values, colors, danger) {
+      gfx.clear();
+      drawStatRingGroup(gfx, hud, box, values, colors, danger);
+      rt.clear();
+      rt.draw(gfx);
+    },
+    destroy() {
+      gfx.destroy();
+      rt.destroy();
+    },
+  };
+}

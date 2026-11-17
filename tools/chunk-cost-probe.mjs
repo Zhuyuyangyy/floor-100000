@@ -32,11 +32,15 @@ const SETS = String(arg('sets', 'all'))
   .map((s) => s.trim())
   .filter(Boolean);
 const SET_TABLE = {
-  sharedG: `(v, d) => d === 0 && v > 1000`,
-  all: `(v, d) => (d === 0 && v > 100) || (d === 1 && v > 400) || (d === 2 && v > 50) || (d === 3 && v > 200) || (d === 4 && v > 30 && v < 60) || d === 26`,
-  everygfx: `(v, d) => true`,
-  hud103: `(v, d) => d === 103`,
-  hud101: `(v, d) => d === 101`,
+  sharedG: `(v, d, o) => o.type !== 'RenderTexture' && d === 0 && v > 1000`,
+  all: `(v, d, o) => o.type !== 'RenderTexture' && ((d === 0 && v > 100) || (d === 1 && v > 400) || (d === 2 && v > 50) || (d === 3 && v > 200) || (d === 4 && v > 30 && v < 60) || d === 26)`,
+  everygfx: `(v, d, o) => o.type !== 'RenderTexture'`,
+  hud103: `(v, d, o) => o.type !== 'RenderTexture' && d === 103`,
+  hud101: `(v, d, o) => o.type !== 'RenderTexture' && d === 101`,
+  // AG-102（性能轮 3）：四联圆环预烘焙成 RenderTexture 后的单集归因——
+  // 按 name 选那一个 RT，量它每帧还剩多少成本（预期 ~0.05ms 的一个 quad，
+  // 对比 AG-100 会话 C 量的旧 Graphics 0.68ms）。
+  ringsRT: `(v, d, o) => o.type === 'RenderTexture' && o.name === 'hud-stat-rings'`,
 };
 for (const s of SETS) {
   if (!SET_TABLE[s]) {
@@ -101,15 +105,15 @@ for (const name of SETS) {
     const rows = [];
     for (const s of game.scene.getScenes(true)) {
       for (const o of s.children.list) {
-        if (o.type === 'Graphics' && o.commandBuffer && sel(o.commandBuffer.length, o.depth)) {
-          rows.push({ depth: o.depth, values: o.commandBuffer.length });
+        if ((o.type === 'Graphics' && o.commandBuffer) || o.type === 'RenderTexture') {
+          if (sel(o.commandBuffer?.length ?? 0, o.depth, o)) rows.push({ depth: o.depth, type: o.type, values: o.commandBuffer?.length ?? 0 });
         }
       }
     }
     return rows;
   }, SET_TABLE[name]);
   const pickedValues = picked.reduce((a, r) => a + r.values, 0);
-  console.log(`set=${name}: 选中 ${picked.length} 个 Graphics，合计 ${pickedValues} 缓冲区值`);
+  console.log(`set=${name}: 选中 ${picked.length} 个对象（${picked.map((r) => r.type).join('/') || '无'}），合计 ${pickedValues} 缓冲区值`);
 }
 
 async function sample() {
@@ -139,7 +143,7 @@ async function showOnly(selSrc) {
     const game = window.__PHASER_GAME__;
     for (const s of game.scene.getScenes(true)) {
       for (const o of s.children.list) {
-        if (o.type === 'Graphics' && o.commandBuffer) o.visible = sel(o.commandBuffer.length, o.depth);
+        if ((o.type === 'Graphics' && o.commandBuffer) || o.type === 'RenderTexture') o.visible = sel(o.commandBuffer?.length ?? 0, o.depth, o);
       }
     }
   }, selSrc);
@@ -152,7 +156,7 @@ async function hideSet(selSrc) {
     const game = window.__PHASER_GAME__;
     for (const s of game.scene.getScenes(true)) {
       for (const o of s.children.list) {
-        if (o.type === 'Graphics' && o.commandBuffer) o.visible = !sel(o.commandBuffer.length, o.depth);
+        if ((o.type === 'Graphics' && o.commandBuffer) || o.type === 'RenderTexture') o.visible = !sel(o.commandBuffer?.length ?? 0, o.depth, o);
       }
     }
   }, selSrc);
@@ -163,7 +167,7 @@ async function restoreAll() {
     const game = window.__PHASER_GAME__;
     for (const s of game.scene.getScenes(true)) {
       for (const o of s.children.list) {
-        if (o.type === 'Graphics') o.visible = true;
+        if (o.type === 'Graphics' || o.type === 'RenderTexture') o.visible = true;
       }
     }
   });

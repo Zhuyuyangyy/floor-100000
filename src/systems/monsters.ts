@@ -27,6 +27,13 @@ export type { Combatant };
 // 七种行为标签。与 CENTUM 的标签集对齐后按我们自己的战斗模型裁剪：
 // CENTUM 的 nomove/dig/greedy/charge/ignorewall 依赖格子地图，我们是
 // 横版即时转回合制，落不到棋盘上的标签全部砍掉，只留能在
+// ── accuracy 量纲说明（2026-11-17 集成轮修复）────────────────────────────
+// 本文件的 accuracy 曾经是百分制数字（68-82），而 combat.ts 的命中公式是
+// d20 制（roll(0..20) + accuracy > 10 + defense + evasion，见该文件 60-66
+// 行与下文 171 行注释）：怪物的 68-82 进公式后恒大于阈值，怪物命中锁死
+// 100%，玩家 evasion 完全失效、defense 只在伤害公式减 1 点。已按原命中
+// 意图（68%-82%）换算到 d20 量纲（9-12，映射保持相对排序）；行为修正的
+// accuracyBonus ±3 本来就是 d20 口径，佐证公式从未是百分制。
 // accuracy/defense/evasion/damage 四个属性上做文章的七种。
 export type MonsterBehavior =
   | 'normal' // 白板怪：数值就是全部，用来当权重填充物
@@ -63,46 +70,46 @@ export interface MonsterDef {
 export const MONSTERS: readonly MonsterDef[] = [
   // ── 2 层带：刚离开宿舍层的第一批威胁，血薄恨但量大 ──
   // 拾荒者 / Scavenger：翻垃圾堆的活人，最底层的威胁，weight 给最高。
-  { id: 101, name: '拾荒者', hp: 6, damage: 2, accuracy: 74, defense: 1, evasion: 2, behavior: 'normal', minFloor: 2, weight: 10 },
+  { id: 101, name: '拾荒者', hp: 6, damage: 2, accuracy: 11, defense: 1, evasion: 2, behavior: 'normal', minFloor: 2, weight: 10 },
   // 楼道野猫 / Corridor Stray：末世里野猫比人难缠，快且闪。
-  { id: 102, name: '楼道野猫', hp: 5, damage: 2, accuracy: 76, defense: 0, evasion: 7, behavior: 'fast', minFloor: 2, weight: 9 },
+  { id: 102, name: '楼道野猫', hp: 5, damage: 2, accuracy: 11, defense: 0, evasion: 7, behavior: 'fast', minFloor: 2, weight: 9 },
   // 瞌睡宿管 / Dozing Warden： former 宿舍管理员，迟钝但皮实。
-  { id: 103, name: '瞌睡宿管', hp: 8, damage: 2, accuracy: 68, defense: 5, evasion: 0, behavior: 'slow', minFloor: 2, weight: 9 },
+  { id: 103, name: '瞌睡宿管', hp: 8, damage: 2, accuracy: 9, defense: 5, evasion: 0, behavior: 'slow', minFloor: 2, weight: 9 },
   // 偷食贼 / Food Thief：抢一口吃的就跑，残血直接跑路。
-  { id: 104, name: '偷食贼', hp: 5, damage: 3, accuracy: 72, defense: 0, evasion: 5, behavior: 'coward', minFloor: 2, weight: 9 },
+  { id: 104, name: '偷食贼', hp: 5, damage: 3, accuracy: 10, defense: 0, evasion: 5, behavior: 'coward', minFloor: 2, weight: 9 },
 
   // ── 3 层带：开始出现「不讲道理」的个体 ──
   // 变异住客 / Mutated Tenant：饿到极点的住客，力大无穷但挥空率高。
-  { id: 201, name: '变异住客', hp: 14, damage: 4, accuracy: 70, defense: 2, evasion: 1, behavior: 'brute', minFloor: 3, weight: 8 },
+  { id: 201, name: '变异住客', hp: 14, damage: 4, accuracy: 10, defense: 2, evasion: 1, behavior: 'brute', minFloor: 3, weight: 8 },
   // 楼道潜行者 / Corridor Stalker：藏在楼梯口给你第一刀的家伙。
-  { id: 202, name: '楼道潜行者', hp: 9, damage: 3, accuracy: 78, defense: 1, evasion: 4, behavior: 'ambusher', minFloor: 3, weight: 7 },
+  { id: 202, name: '楼道潜行者', hp: 9, damage: 3, accuracy: 12, defense: 1, evasion: 4, behavior: 'ambusher', minFloor: 3, weight: 7 },
   // 弹弓顽童 / Slingshot Brat：隔着一个房间放冷枪。
-  { id: 203, name: '弹弓顽童', hp: 10, damage: 3, accuracy: 80, defense: 0, evasion: 3, behavior: 'ranged', minFloor: 3, weight: 8 },
+  { id: 203, name: '弹弓顽童', hp: 10, damage: 3, accuracy: 12, defense: 0, evasion: 3, behavior: 'ranged', minFloor: 3, weight: 8 },
 
   // ── 4 层带：宿舍楼的「基础设施」开始吃人 ──
   // 断电守卫 / Blackout Guard：穿着旧制服的守卫，铁门一样难啃。
-  { id: 301, name: '断电守卫', hp: 20, damage: 4, accuracy: 76, defense: 6, evasion: 0, behavior: 'normal', minFloor: 4, weight: 6 },
+  { id: 301, name: '断电守卫', hp: 20, damage: 4, accuracy: 11, defense: 6, evasion: 0, behavior: 'normal', minFloor: 4, weight: 6 },
   // 巢穴母体 / Nest Matriarch：在通风井里做窝的东西，一巴掌一管血。
-  { id: 302, name: '巢穴母体', hp: 22, damage: 6, accuracy: 72, defense: 3, evasion: 0, behavior: 'brute', minFloor: 4, weight: 6 },
+  { id: 302, name: '巢穴母体', hp: 22, damage: 6, accuracy: 10, defense: 3, evasion: 0, behavior: 'brute', minFloor: 4, weight: 6 },
   // 通风管蛛 / Vent Spider：天花板上来去自如，快得看不清。
-  { id: 303, name: '通风管蛛', hp: 15, damage: 5, accuracy: 80, defense: 1, evasion: 8, behavior: 'fast', minFloor: 4, weight: 5 },
+  { id: 303, name: '通风管蛛', hp: 15, damage: 5, accuracy: 12, defense: 1, evasion: 8, behavior: 'fast', minFloor: 4, weight: 5 },
 
   // ── 5 层带：顶层前最后一道绞肉机 ──
   // 焚书者 / Book Burner：烧了整层教材的人，火机当远程武器甩。
-  { id: 401, name: '焚书者', hp: 24, damage: 7, accuracy: 82, defense: 2, evasion: 2, behavior: 'ranged', minFloor: 5, weight: 5 },
+  { id: 401, name: '焚书者', hp: 24, damage: 7, accuracy: 12, defense: 2, evasion: 2, behavior: 'ranged', minFloor: 5, weight: 5 },
   // 负重尸 / Burdened Carcass：背着冰箱上楼的尸体，慢，但扛打。
-  { id: 402, name: '负重尸', hp: 30, damage: 5, accuracy: 68, defense: 6, evasion: 0, behavior: 'slow', minFloor: 5, weight: 4 },
+  { id: 402, name: '负重尸', hp: 30, damage: 5, accuracy: 9, defense: 6, evasion: 0, behavior: 'slow', minFloor: 5, weight: 4 },
   // 顶楼疯裔 / Loft Heir：在顶层圈地的疯子，专蹲上楼口。
-  { id: 403, name: '顶楼疯裔', hp: 20, damage: 6, accuracy: 80, defense: 2, evasion: 5, behavior: 'ambusher', minFloor: 5, weight: 4 },
+  { id: 403, name: '顶楼疯裔', hp: 20, damage: 6, accuracy: 12, defense: 2, evasion: 5, behavior: 'ambusher', minFloor: 5, weight: 4 },
   // 畏光者 / Light-Shunner：见光就躲的住户，残血必定逃走。
-  { id: 404, name: '畏光者', hp: 26, damage: 5, accuracy: 74, defense: 2, evasion: 6, behavior: 'coward', minFloor: 5, weight: 4 },
+  { id: 404, name: '畏光者', hp: 26, damage: 5, accuracy: 11, defense: 2, evasion: 6, behavior: 'coward', minFloor: 5, weight: 4 },
 
   // ── Boss：守门人 / Gatekeeper ──
   // 只由 boss 遭遇显式召唤（ALTACIMA 每 10 层一个 Boss 的对应物；我们
   // v0.1 顶层第 5 层的守门人就是终点闸）。weight = 0 表示它永远不进
   // rollMonster 的随机池——否则第 5 层走着路就能撞见最终 Boss，
   // 遭遇的仪式感和难度曲线一起没了。
-  { id: 900, name: '守门人', hp: 45, damage: 8, accuracy: 82, defense: 4, evasion: 0, behavior: 'normal', minFloor: 5, weight: 0 },
+  { id: 900, name: '守门人', hp: 45, damage: 8, accuracy: 12, defense: 4, evasion: 0, behavior: 'normal', minFloor: 5, weight: 0 },
 ];
 
 // 权重设计：低层怪 weight 高（8–10），高层怪 weight 低（4–5）。这样

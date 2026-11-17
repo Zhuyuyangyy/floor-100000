@@ -7,8 +7,8 @@ import {
   STAIR_RISE,
   STAIR_START_Y,
   STAIR_TRAVEL_MS,
-  UP_EXIT_X,
   PLAYABLE_FLOORS_V01,
+  upExitXFor,
   downExitXFor,
   floorWidthFor,
 } from '../core/constants';
@@ -108,8 +108,15 @@ export function stairTraversalFor(state: GameState, direction: 1 | -1): StairTra
     // downExitXFor(floor)（tier2=1560、tier3+ 更宽）——宽楼层按下楼 E，
     // 角色先横跳几百 px 才开爬，画（梯口）与爬（起点）脱节。上行侧本来就是
     // UP_EXIT_X（不随楼层宽窄变），下行侧要按楼层取。楼梯从不跨段，段内同宽。
-    startX: direction === 1 ? UP_EXIT_X : downExitXFor(state.currentFloor),
-    endX: direction === 1 ? UP_EXIT_X : downExitXFor(state.currentFloor),
+    //
+    // AG-65：下行口从 tier2 起不再钉在右端——downExitXFor 按楼层号 seeded 随机
+    // （中段、避开容器/电梯，见 constants.ts 与 worldgen.floorGeometryFor），
+    // 起止两点因此都取楼层实际口位：玩家站在哪按 E，梯子就画在哪、从哪开爬。
+    // 起止同 x 是既有设计：竖井跨两层同一条 x，下行落点 = 出发层梯口正下方的
+    // 目标层可走带（stairsArt.test.ts 钉 end.x = downExitXFor(出发层)）。
+    // 上行口恒为 UP_EXIT_X（upExitXFor 是同值入口，两侧同口径）。
+    startX: direction === 1 ? upExitXFor(state.currentFloor) : downExitXFor(state.currentFloor),
+    endX: direction === 1 ? upExitXFor(state.currentFloor) : downExitXFor(state.currentFloor),
     startY: STAIR_START_Y,
     endY: STAIR_START_Y + (direction === 1 ? -STAIR_RISE : STAIR_RISE),
     durationMs: STAIR_TRAVEL_MS,
@@ -197,7 +204,9 @@ export type InteractionZone = 'up' | 'down' | null;
 
 // Which exit (if any) the player is currently standing next to.
 export function currentInteractionZone(state: GameState): InteractionZone {
-  if (hasUpExit(state.currentFloor) && Math.abs(state.player.x - UP_EXIT_X) <= INTERACT_DISTANCE) {
+  // AG-65：两个口位都按楼层实际取值（上行恒 40、下行 tier2+ 随机），与画出来
+  // 的梯子、stairTraversalFor 的起止点同源——画在哪就从哪按 E。
+  if (hasUpExit(state.currentFloor) && Math.abs(state.player.x - upExitXFor(state.currentFloor)) <= INTERACT_DISTANCE) {
     return 'up';
   }
   if (hasDownExit(state.currentFloor) && Math.abs(state.player.x - downExitXFor(state.currentFloor)) <= INTERACT_DISTANCE) {
@@ -220,7 +229,7 @@ export function currentInteractionZone(state: GameState): InteractionZone {
  * hand the question to changeFloor and let its refusal answer it.
  */
 export function stairMouthZone(state: GameState): InteractionZone {
-  if (Math.abs(state.player.x - UP_EXIT_X) <= INTERACT_DISTANCE) return 'up';
+  if (Math.abs(state.player.x - upExitXFor(state.currentFloor)) <= INTERACT_DISTANCE) return 'up';
   if (Math.abs(state.player.x - downExitXFor(state.currentFloor)) <= INTERACT_DISTANCE) return 'down';
   return null;
 }

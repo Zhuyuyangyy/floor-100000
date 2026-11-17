@@ -399,6 +399,13 @@ export interface MonsterView {
   die(): void;
   /** 战退：滑出战场并淡出。 */
   fleeAway(): void;
+  /**
+   * AG-80：待机呼吸开关。降级机（帧预算守卫生效）时 GameScene 调
+   * setBreathing(false) 停掉 2s yoyo 呼吸 tween——一个每帧都在写的
+   * Container transform 在低端机上不是零成本；恢复时调 true 重启。
+   * 停帧时 scale 复位到 1，不会有停在 1.03 的「半口气」。
+   */
+  setBreathing(on: boolean): void;
   /** 拆舞台：摘 tween 再毁容器（血条 tween 的 onUpdate 会画已销毁对象）。 */
   destroy(): void;
   setHp(frac: number): void;
@@ -446,15 +453,23 @@ export function createMonsterView(scene: Phaser.Scene, opts: MonsterViewOptions)
   body.add([art, flash]);
 
   // 待机呼吸：确定性 tween（无随机），2s yoyo——「活着」的最低成本信号。
-  scene.tweens.add({
-    targets: body,
-    scaleX: 1.03,
-    scaleY: 1.03,
-    duration: 2000,
-    yoyo: true,
-    repeat: -1,
-    ease: 'Sine.easeInOut',
-  });
+  // AG-80：提成函数，setBreathing 停帧/重启都走它（停帧时先 killTweensOf
+  // 并把 scale 复位，恢复时从 1 重新起播，不续半口气）。
+  let breathing = true;
+  const playBreathe = (): void => {
+    scene.tweens.killTweensOf(body);
+    body.setScale(1);
+    scene.tweens.add({
+      targets: body,
+      scaleX: 1.03,
+      scaleY: 1.03,
+      duration: 2000,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+  };
+  playBreathe();
 
   const tag = createHeadTag(scene, { name: opts.name, barColor: opts.barColor });
   tag.root.setPosition(0, -formH - 14);
@@ -523,6 +538,15 @@ export function createMonsterView(scene: Phaser.Scene, opts: MonsterViewOptions)
         duration: 520,
         ease: 'Quad.easeIn',
       });
+    },
+    setBreathing(on: boolean): void {
+      if (on === breathing) return;
+      breathing = on;
+      if (on) playBreathe();
+      else {
+        scene.tweens.killTweensOf(body);
+        body.setScale(1);
+      }
     },
     destroy(): void {
       scene.tweens.killTweensOf(root);

@@ -5,12 +5,21 @@ import { expect, test, type Page } from '@playwright/test';
 // (?devfloor=, ?devwin=). Reads the dev-only __PHASER_TOWER__ handle so the
 // assertions are about real nav state, not pixels.
 //
+// AG-62 (2026-11-17 楼体剖面化重做): the overview is no longer a 3px-per-sector
+// strip. It is a building cross-section that OPENS FOCUSED on the player's own
+// segment (「不要一下子看到 1 万层」), with the basement (floors 1-5, the
+// 基础发育区) as a labelled base and F / 看全塔 for the whole spire. The two
+// default-view tests below pin exactly that; the drill-down, keyboard, cell
+// colouring and no-teleport tests are unchanged, because the nav rules did not
+// change — only the drawing did.
+//
 // The tower's shape is data, not a literal: the sector count, the row pitch and
 // the summit all come from the same modules the map itself renders from, so a
 // tower that grows again does not silently invalidate this spec.
 
 import { SECTOR_COUNT, TOTAL_FLOORS, sectorOf, sectorRange } from '../src/core/tower';
-import { SECTOR_COLS, overviewHeight } from '../src/systems/TowerNav';
+import { SECTOR_COLS } from '../src/systems/TowerNav';
+import { TOWER_MAP, buildingHeight, towerFitZoom } from '../src/render/hudLayout';
 import { PLAYABLE_SEGMENTS } from '../src/core/segments';
 
 const SUMMIT = TOTAL_FLOORS; // the top of the tower
@@ -102,6 +111,16 @@ async function readNav(page: Page): Promise<Nav> {
   }) as Promise<Nav>;
 }
 
+/** Screen y of a floor in the level in view (AG-62: the map is a building, so
+ *  the camera's coverage is asserted through floor positions, not strip rows). */
+async function readFloorScreenY(page: Page, floor: number): Promise<number> {
+  return page.evaluate((f) => {
+    const h = (window as unknown as { __PHASER_TOWER__?: { floorScreenY: (f: number) => number } }).__PHASER_TOWER__;
+    if (!h) throw new Error('no tower handle');
+    return h.floorScreenY(f);
+  }, floor) as Promise<number>;
+}
+
 async function readAccess(page: Page): Promise<{ highestUnlocked: number; currentFloor: number }> {
   return page.evaluate(() => {
     const h = (window as unknown as { __PHASER_TOWER__?: { getAccess: () => { highestUnlocked: number; currentFloor: number } } }).__PHASER_TOWER__;
@@ -189,30 +208,50 @@ test('M opens the tower overview centred on the sector the player is in', async 
   expect(nav.sector).toBe(0); // floor 3 lives in sector 0
   expect(nav.cursor).toBe(0);
   expect(nav.floor).toBeNull();
-  expect(nav.zoom).toBe(1);
-  // The whole tower is on screen at the default zoom: no drag needed to see the
-  // bottom, which is the point of the overview.
+  // AG-62: the map opens at the FOCUS zoom — the player's own segment fills
+  // the content band instead of all 100000 floors at once. 「不要一下子看到
+  // 1 万层很奇怪」是这条断言存在的理由。
+  expect(nav.zoom).toBe(TOWER_MAP.zoomDefault);
   const view = await readView(page);
-  expect(view.top).toBeLessThanOrEqual(0);
-  expect(view.top + view.height).toBeGreaterThanOrEqual(view.content);
-  // One row per sector at the overview pitch: the content height is the map
-  // model's own number, so it cannot rot when the sectors change.
-  expect(view.content).toBe(overviewHeight());
+  expect(view.content).toBe(buildingHeight());
+  // Focused, not the whole spire: the view is far shorter than the building,
+  // and it is centred on the segment floor 3 stands in — the BASEMENT (1-5
+  // 层, the 基础发育区), which the user asked to see as the map's base.
+  expect(view.height).toBeLessThan(view.content * 0.4);
+  const floor1Screen = await readFloorScreenY(page, 1);
+  const floor5Screen = await readFloorScreenY(page, 5);
+  expect(floor1Screen).toBeGreaterThanOrEqual(TOWER_MAP.topBand);
+  expect(floor5Screen).toBeLessThanOrEqual(TOWER_MAP.bottomBand);
+  // ...and floor 100 (the next stretch above the base) is further UP the screen
+  // than floor 5 (the map's y grows downward: higher floors sit higher).
+  expect(await readFloorScreenY(page, 100)).toBeLessThan(floor5Screen);
   await page.screenshot({ path: 'e2e/screenshots/20-tower-overview.png' });
 
   expect(await hasVisibleText(page, '塔楼总览')).toBe(true);
   expect(await hasVisibleText(page, '当前 3 层')).toBe(true);
-  // All three reference points are on screen: the start, where the player is,
-  // and the summit they are climbing toward. The summit used to be unmarked — at
-  // 3px a row the last sector is indistinguishable from the nine above it, and it
-  // is not even in the every-tenth label set.
+  // The base is labelled as what it is: the starting five floors, the
+  // development zone the player lives in.
+  expect(await hasVisibleText(page, '地下基座 B1–B5 · 基础发育区')).toBe(true);
+  // 聚焦视角下终点让位（塔顶在内容带外）；起点就在基座底部，照常标注。
+  expect(await hasVisibleText(page, `起点 第${START_FLOOR}层`)).toBe(true);
+  expect(await hasVisibleText(page, `终点 第${SUMMIT}层`)).toBe(false);
+  expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+
+  // F / 看全塔: the whole tower fits the content band, both ends labelled.
+  await tap(page, 'f');
+  const fitNav = await readNav(page);
+  expect(fitNav.zoom).toBeCloseTo(towerFitZoom(), 5);
+  const fitView = await readView(page);
+  expect(fitView.top).toBeLessThanOrEqual(TOWER_MAP.topBand);
+  expect(fitView.top + fitView.height).toBeGreaterThanOrEqual(TOWER_MAP.bottomBand);
+  await page.screenshot({ path: 'e2e/screenshots/23-tower-overview-fit.png' });
   expect(await hasVisibleText(page, `起点 第${START_FLOOR}层`)).toBe(true);
   expect(await hasVisibleText(page, `终点 第${SUMMIT}层`)).toBe(true);
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
 
-// The overview must still fit the whole tower when the player is near the top of
-// it, not just when they start in sector 0.
+// The whole tower stays reachable from any starting sector: 看全塔 works from
+// the top of the tower as well as from the bottom.
 test('the whole tower is visible from any starting sector', async ({ page }) => {
   await startGame(page, 42);
   await parkAt(page, HIGH_FLOOR, [HIGH_FLOOR]);
@@ -221,10 +260,18 @@ test('the whole tower is visible from any starting sector', async ({ page }) => 
 
   const nav = await readNav(page);
   expect(nav.sector).toBe(sectorOf(HIGH_FLOOR));
-  const view = await readView(page);
-  expect(view.top).toBeLessThanOrEqual(0);
-  expect(view.top + view.height).toBeGreaterThanOrEqual(view.content);
+  // Focused on the ruling core (the tier floor 95000 stands in), not the spire.
+  expect(nav.zoom).toBe(TOWER_MAP.zoomDefault);
+  const coreTop = await readFloorScreenY(page, 100000);
+  expect(coreTop).toBeGreaterThanOrEqual(TOWER_MAP.topBand);
+  expect(coreTop).toBeLessThanOrEqual(TOWER_MAP.bottomBand);
   await page.screenshot({ path: 'e2e/screenshots/23-tower-overview-high.png' });
+
+  await tap(page, 'f');
+  const fitView = await readView(page);
+  expect(fitView.top).toBeLessThanOrEqual(TOWER_MAP.topBand);
+  expect(fitView.top + fitView.height).toBeGreaterThanOrEqual(TOWER_MAP.bottomBand);
+  await page.screenshot({ path: 'e2e/screenshots/24-tower-overview-fit-high.png' });
 });
 
 test('the overview drills down to a sector and a floor, and ESC walks back up', async ({ page }) => {

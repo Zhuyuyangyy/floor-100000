@@ -44,10 +44,18 @@ export interface LightPool {
 // Tight radii on purpose: a pixel-art pool that covers the floor is a wash, not
 // a light. These sit at the places the player works — the stairwells, the bed,
 // the workbench — so the floor has places to be.
-const STAIR_LIGHTS: readonly LightPool[] = [
-  { x: 40, y: 300, radius: 88, strength: 1, color: 0xf4b66a },
-  { x: 1240, y: 300, radius: 88, strength: 1, color: 0xf4b66a },
-];
+//
+// AG-103：梯口灯池的 x 原本钉在 tier1 梯口（上 40 / 下 1240 = 1280-40）。
+// AG-65 起 tier2+ 宽楼的下行梯口是中段 seeded 随机（downExitXFor），灯池还钉
+// 1240 就悬在梯口旁边的墙上——氛围层位置语义错位。改为按调用方传入的实际
+// 梯口 x 建池（buildLightLayer 的 upExitX/downExitX），省略时保持 tier1
+// 默认值，存量调用与测试行为不变。上梯口 UP_EXIT_X 恒为 40，一并参数化以
+// 保持语义对称。
+const STAIR_LIGHT_Y = 300;
+const STAIR_LIGHT_RADIUS = 88;
+const STAIR_LIGHT_STRENGTH = 1;
+const STAIR_LIGHT_COLOR = 0xf4b66a;
+const STAIR_LIGHT_DEFAULT_XS: readonly [number, number] = [40, 1240];
 
 const BED_LIGHT: LightPool = { x: 1120, y: 286, radius: 86, strength: 0.95, color: 0xf4b66a };
 const BENCH_LIGHT: LightPool = { x: 480, y: 286, radius: 86, strength: 0.95, color: 0xf4b66a };
@@ -187,6 +195,10 @@ export function buildLightLayer(
     isDorm: boolean;
     hasUpExit: boolean;
     hasDownExit: boolean;
+    /** 上梯口实际 x（省略 = tier1 默认 40 = UP_EXIT_X）。AG-103。 */
+    upExitX?: number;
+    /** 下行梯口实际 x（省略 = tier1 默认 1240 = 1280-40）。AG-103。 */
+    downExitX?: number;
     /** overrides the default cold wash; see FLOOR_AMBIENCE */
     ambience?: FloorAmbience;
   },
@@ -196,8 +208,11 @@ export function buildLightLayer(
   const owned: Phaser.GameObjects.GameObject[] = [];
 
   const pools: LightPool[] = [];
-  if (opts.hasUpExit) pools.push(STAIR_LIGHTS[0]);
-  if (opts.hasDownExit) pools.push(STAIR_LIGHTS[1]);
+  // AG-103：池位按实际梯口算——tier2+ 宽楼下行口是中段随机，默认的 1240
+  // 只对 tier1（width 恒 1280，downExit = width-40）成立。
+  const stairXs: readonly [number, number] = [opts.upExitX ?? STAIR_LIGHT_DEFAULT_XS[0], opts.downExitX ?? STAIR_LIGHT_DEFAULT_XS[1]];
+  if (opts.hasUpExit) pools.push({ x: stairXs[0], y: STAIR_LIGHT_Y, radius: STAIR_LIGHT_RADIUS, strength: STAIR_LIGHT_STRENGTH, color: STAIR_LIGHT_COLOR });
+  if (opts.hasDownExit) pools.push({ x: stairXs[1], y: STAIR_LIGHT_Y, radius: STAIR_LIGHT_RADIUS, strength: STAIR_LIGHT_STRENGTH, color: STAIR_LIGHT_COLOR });
   if (isDorm) pools.push(BED_LIGHT, BENCH_LIGHT);
 
   // Depth rule: the ambient wash is at depth 0 — the same as the room art, added

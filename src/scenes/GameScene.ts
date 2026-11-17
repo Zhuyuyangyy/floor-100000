@@ -1612,6 +1612,14 @@ export class GameScene extends Phaser.Scene {
     recordFloorVisit(state, floor);
     this.floorW = floorWidthFor(floor);
     this.downExit = downExitXFor(floor);
+    // AG-65/AG-103：夜色是楼层几何——nightOverlay 是场景级单例，create() 里
+    // 按 FLOOR_WIDTH 建（与相机初始 bounds 同口径，合法），进层后必须铺满本层
+    // 实际宽度：写死 1280 时宽楼相机右移后 x>1280 的右半楼不被夜色压暗，
+    // 昼夜观感在楼宽中段断裂。drawFloor 是所有进入路径（新档/继续/dev 入口/
+    // 每次爬梯落地）的唯一汇合点，在这里按 this.floorW 重建尺寸——setSize/
+    // setPosition 复用同一对象，不重建、不泄漏、不重复挂载；窄楼（tier1 恒
+    // 1280）数值不变。相机 bounds 的 this.floorW 覆盖见下文同一口径。
+    this.nightOverlay.setPosition(this.floorW / 2, FLOOR_HEIGHT / 2).setSize(this.floorW, FLOOR_HEIGHT);
     // AG-65：楼层几何（层宽/梯口/洞/中梯）随层派生。downExit 与 floorGeo.downX
     // 同源（都是 downExitXFor），这里分别喂给「按 E 判定/hasInteractableNear」
     // 与「洞/中梯绘制 + e2e 实测」两条既有消费者。
@@ -3803,6 +3811,12 @@ export class GameScene extends Phaser.Scene {
       isDorm: false,
       hasUpExit: hasUpExit(floor),
       hasDownExit: hasDownExit(floor),
+      // AG-103：梯口灯池对齐实际梯口——tier2+ 宽楼下行口是中段 seeded 随机
+      // （this.downExit = downExitXFor(floor)，drawFloor 入口同源赋值），
+      // lighting.ts 默认的 1240 只对 tier1 成立，宽楼会悬空。上梯口恒
+      // UP_EXIT_X=40，一并显式传入。窄楼数值与默认值相同，像素不变。
+      upExitX: UP_EXIT_X,
+      downExitX: this.downExit,
       // Each floor's own atmosphere: cold housing, green storage, cyan
       // maintenance, warm-and-wrong canteen. Without this the tower is one
       // corridor repeated.
@@ -4115,7 +4129,11 @@ export class GameScene extends Phaser.Scene {
     // The ceiling strip lights belong on top of the props: they are the room's
     // light source, and they are what tells the eye these floors are habitable
     // at all rather than sealed. Tinted for the same reason as the props.
-    const strips = buildCeilingLights(this, { width: FLOOR_WIDTH, seed: floor * 13, top: 16 });
+    // AG-65/AG-103：顶灯带是楼层几何，铺满本邻居层自己的长度（nbW =
+    // floorWidthFor(floor)）——写死 FLOOR_WIDTH 时宽邻居层右半没有顶灯，
+    // 爬梯态从梯上往下看，灯带在楼宽中段凭空断掉。与墙体/地板带/ambient
+    // 双色带/haze 同一口径；窄楼（tier1 恒 1280）数值不变。
+    const strips = buildCeilingLights(this, { width: nbW, seed: floor * 13, top: 16 });
     for (const o of strips) dimObject(o);
     add(...strips);
 
@@ -4156,7 +4174,10 @@ export class GameScene extends Phaser.Scene {
     // haze that strengthens with distance is what recedes. It goes on top of the
     // whole floor, props included, so the second neighbour reads as further
     // away even though it is now fully detailed.
-    add(this.add.rectangle(FLOOR_WIDTH / 2, FLOOR_HEIGHT / 2, FLOOR_WIDTH, FLOOR_HEIGHT, 0x1b2836, 0.2 * distance));
+    // AG-65/AG-103：距离雾（aerial perspective）同样铺满邻居层自己的宽度
+    // ——FLOOR_WIDTH 时宽楼右半没有距离雾，下半截楼比左半「近」，剖面
+    // 的纵深读不出来。窄楼数值不变。
+    add(this.add.rectangle(nbW / 2, FLOOR_HEIGHT / 2, nbW, FLOOR_HEIGHT, 0x1b2836, 0.2 * distance));
 
     // And the whole floor is set back a step. Detail alone was not enough: once
     // the neighbours were properly furnished, a warm canteen one floor down was

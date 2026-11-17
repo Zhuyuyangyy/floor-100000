@@ -71,6 +71,14 @@ export const HUD_LAYOUT = {
   // Environment chips: icon x positions, text 24px to their right.
   envChipX: [20, 300, 620, 900],
   hazardX: 1080,
+  // AG-63: 饥饿/干渴 debuff 的常驻小标记（身上绿光的名字）。它塞在两条既有
+  // lane 之间的一根 25px 线：上是「背包已满」预警（bagY=624，盒高 31，底
+  // 655），下是脚注条（DESIGN_HEIGHT - HUD_FOOT_H = 680）。中线 668 让这条
+  // caption 线的盒上下都刚好擦着不进——两条 lane 同时出现时盒距 0.5px，
+  // 字墨相距 8px；与脚注条自己的提示行（y=700）盒距 7px。x 与 hud-hint
+  // 同一条左边缘，读起来像脚注条上面的状态行，而不是又一块新板子。
+  debuffMarkX: 8,
+  debuffMarkY: 668,
 } as const;
 
 export function hudClockLabel(day: number, minute: number): string {

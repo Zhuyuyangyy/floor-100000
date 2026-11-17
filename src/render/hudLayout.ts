@@ -1,5 +1,6 @@
 import { formatClock } from '../systems/SurvivalSystem';
 import { DESIGN_WIDTH } from '../core/design';
+import { TIERS, tierOf, type TierId } from '../core/tower';
 
 // Coordinates are design-canvas pixels. Scale.FIT scales this single layout
 // across host window sizes; these lanes never move with the world camera.
@@ -148,6 +149,220 @@ export const DETAIL_CONTENT_W = DETAIL_PANEL_W - DETAIL_ROW_X - 16;
 export const DETAIL_CONTENT_ACTION_GAP = 12;
 /** Action line bottom → panel bottom edge. */
 export const DETAIL_FOOT_PAD = 16;
+
+// ── tower map: the building cross-section (AG-62) ───────────────────────────
+// The 2026-11-17 map redo. The tower overview used to be one 3px-per-sector
+// strip: 100 rows in 300px, so opening the map showed all 100000 floors at once
+// as a bar chart — the user's 「不要一下子看到 1 万层很奇怪」. It is now a
+// building cross-section: the basement (floors 1-5, the 基础发育区) as a thick
+// base, one block per tier with structural seams between them, and a default
+// camera that focuses on the segment the player stands in instead of the whole
+// spire. Zooming out still fits the whole tower.
+//
+// TWO COORDINATE MODELS, and the split is the whole trick:
+//
+//   * the internal one is a building's own: y grows UP, the foundation sits at
+//     y=0 and the summit at y=buildingHeight(). That is how a tower is
+//     reasoned about — tier 1 at the bottom, tier 6 at the top — and every
+//     pure function below is written in it.
+//   * the public one is Phaser's screen model: y grows DOWN, so the foundation
+//     ends up at the BOTTOM of the map and the summit at the top. Every
+//     exported function is one flip of the internal answer. The scene then
+//     draws with plain Phaser coordinates and never thinks about the flip.
+//
+// World units, not design-canvas pixels: the camera is the design canvas
+// (1280x720) at a fractional zoom, so a world unit is 1/zoom screen pixels.
+// Pure arithmetic only — this module keeps no Phaser import, so
+// towerMap.test.ts can assert the geometry under Node.
+
+export const TOWER_MAP = {
+  /** 1-5 层：地下基座。起始发育区（玩家宿舍在 1 层），用户点名要能看见。 */
+  baseFloors: 5,
+  /** 地基（基座之下的承台），画成比楼体宽一截的托脚。 */
+  foundationH: 20,
+  /** 基座段世界高度：5 层摊 30 单位/层，是 T1 每层楼距的 10 倍——「厚」就是
+   *  它在视觉上独立于上面六个阶层段的方式。 */
+  baseH: 150,
+  /** 每个阶层段等高。故意不按楼层数比例：阶层的大小本来就不均匀（99 层 vs
+   *  40000 层），按比例画 T1 会变成一根线；等高的段 + 段内楼层密度差才是
+   *  「一栋楼的一段」该有的读法。 */
+  tierH: 300,
+  /** 段间结构层：平台/机房。没有楼层的缝，16 单位在默认缩放下约 18px。 */
+  seamH: 16,
+  /** 楼体世界宽度，水平居中于 DESIGN_WIDTH/2。默认缩放下约 989px——楼体几乎
+   *  占满画布宽度，这是「板体要满」那条要求的落点。 */
+  buildingW: 860,
+  /** 固定 HUD 的下缘：楼体内容（含世界空间标签）不越过它，否则标题/状态签会
+   *  和阶层铭牌互压（firstChapter.spec.ts 的 15% 重叠阈值）。 */
+  topBand: 88,
+  /** 页脚带的上缘（TOWER_FOOT_TOP 之下再留 7px 余量）。 */
+  bottomBand: 672,
+  /** 默认聚焦缩放：当前段全段 + 上下各一段的大部分（可见世界高约 626 单位）。 */
+  zoomDefault: 1.15,
+  /** 细节缩放：T1 的每层楼距在屏上约 18px，可数。 */
+  zoomMax: 6,
+  /** 区段视图：1000 层在放大镜里每层 8 单位（默认缩放 8px/层）。 */
+  sectorPitch: 8,
+  sectorZoomMin: 0.3,
+  sectorZoomDefault: 1,
+  sectorZoomMax: 6,
+} as const;
+
+// ── internal model: y up, foundation at 0 ──────────────────────────────────
+
+function upBaseTop(): number {
+  return TOWER_MAP.foundationH + TOWER_MAP.baseH;
+}
+
+/** 第 tier 个阶层段（1..6）的底边世界 y（楼体自己的坐标，向上增长）。 */
+function upTierBlockBottom(tier: TierId): number {
+  return upBaseTop() + TOWER_MAP.seamH + (tier - 1) * (TOWER_MAP.tierH + TOWER_MAP.seamH);
+}
+
+function upTierBlockTop(tier: TierId): number {
+  return upTierBlockBottom(tier) + TOWER_MAP.tierH;
+}
+
+/** 楼层在楼体里的世界 y（楼体自己的坐标）。1-5 层在基座里，其余按所属阶层段均布。 */
+function upBuildingFloorY(floor: number): number {
+  if (floor >= 1 && floor <= TOWER_MAP.baseFloors) {
+    const pitch = TOWER_MAP.baseH / TOWER_MAP.baseFloors;
+    return TOWER_MAP.foundationH + (floor - 0.5) * pitch;
+  }
+  const tier = tierOf(floor); // 越界楼层在这里抛
+  const count = tier.maxFloor - tier.minFloor + 1;
+  const pitch = TOWER_MAP.tierH / count;
+  return upTierBlockBottom(tier.id) + (floor - tier.minFloor + 0.5) * pitch;
+}
+
+/**
+ * 世界 y 落在哪一层（楼体自己的坐标）。基座与阶层段内返回楼层；地基与段间结构层
+ * 没有楼层，返回 null——悬停/点击落在缝上时什么都不选中，比吸附到最近楼层
+ * 更诚实（缝里确实没有楼层）。
+ */
+function upFloorAtBuildingY(y: number): number | null {
+  if (y < 0 || y > buildingHeight()) return null;
+  if (y < upBaseTop()) {
+    if (y < TOWER_MAP.foundationH) return null;
+    const pitch = TOWER_MAP.baseH / TOWER_MAP.baseFloors;
+    const i = Math.floor((y - TOWER_MAP.foundationH) / pitch);
+    return Math.min(TOWER_MAP.baseFloors, i + 1);
+  }
+  for (const tier of TIERS) {
+    const bottom = upTierBlockBottom(tier.id);
+    const top = bottom + TOWER_MAP.tierH;
+    if (y >= bottom && y < top) {
+      const count = tier.maxFloor - tier.minFloor + 1;
+      const pitch = TOWER_MAP.tierH / count;
+      const i = Math.floor((y - bottom) / pitch);
+      return tier.minFloor + Math.min(count - 1, i);
+    }
+  }
+  return null; // 段间结构层
+}
+
+// ── public model: y down, Phaser-native, the building stands on screen ──────
+
+/** 楼体左边缘的世界 x（buildingW 居中）。 */
+export function buildingX0(): number {
+  return (1280 - TOWER_MAP.buildingW) / 2;
+}
+
+/** 楼体右边缘的世界 x。 */
+export function buildingX1(): number {
+  return buildingX0() + TOWER_MAP.buildingW;
+}
+
+/** 整栋楼的世界高度 = 塔顶到地基底。 */
+export function buildingHeight(): number {
+  return upTierBlockTop(6);
+}
+
+/** 基座段在世界里的 y 区间上沿（屏幕上沿，较小 y）。 */
+export function baseLowY(): number {
+  return buildingHeight() - upBaseTop();
+}
+
+/** 基座段在世界里的 y 区间下沿（屏幕下沿，较大 y）= 地基顶。 */
+export function baseHighY(): number {
+  return buildingHeight() - TOWER_MAP.foundationH;
+}
+
+/** 第 tier 个阶层段在世界里的 y 区间上沿（屏幕上沿）。 */
+export function tierBlockLowY(tier: TierId): number {
+  return buildingHeight() - upTierBlockTop(tier);
+}
+
+/** 第 tier 个阶层段在世界里的 y 区间下沿（屏幕下沿）。 */
+export function tierBlockHighY(tier: TierId): number {
+  return buildingHeight() - upTierBlockBottom(tier);
+}
+
+/** 楼层在楼体里的世界 y（屏幕坐标：1 层在最下，100000 层在最上）。 */
+export function buildingFloorY(floor: number): number {
+  return buildingHeight() - upBuildingFloorY(floor);
+}
+
+/** 世界 y 落在哪一层（楼体坐标，y 向下）。地基与结构层返回 null。 */
+export function floorAtBuildingY(y: number): number | null {
+  return upFloorAtBuildingY(buildingHeight() - y);
+}
+
+/** 区段 ribbon 的世界高度（1000 层）。 */
+export function sectorRibbonHeight(): number {
+  return 1000 * TOWER_MAP.sectorPitch;
+}
+
+/** 区段视图里楼层 f 的世界 y：段顶（to）在 y=0，段底（from）在 Ribbon 底部。 */
+export function sectorRibbonY(from: number, floor: number): number {
+  return (from + 999 - floor) * TOWER_MAP.sectorPitch;
+}
+
+/** 世界 y 落在区段 ribbon 的哪一层；带外返回 null。 */
+export function floorAtRibbonY(from: number, to: number, y: number): number | null {
+  if (y < 0 || y >= sectorRibbonHeight()) return null;
+  const floor = to - Math.floor(y / TOWER_MAP.sectorPitch);
+  return floor >= from && floor <= to ? floor : null;
+}
+
+/** 内容带高度（缩放与滚动夹制的可用区间）。 */
+export function contentBandHeight(): number {
+  return TOWER_MAP.bottomBand - TOWER_MAP.topBand;
+}
+
+/**
+ * 全塔缩放：整栋楼正好落进内容带。这也是总览的缩放下限——「看全塔」就是缩到
+ * 底，再小只会让楼体周围露出天空，没有信息可看。滚轮/键盘都夹在它上面。
+ */
+export function towerFitZoom(): number {
+  return contentBandHeight() / buildingHeight();
+}
+
+/**
+ * 镜头中心的夹制范围：内容必须始终盖住内容带——既不许把楼拖出屏幕留下死区，
+ * 也不许把固定 HUD 让给楼体。返回 [min, max] 世界 y。
+ *
+ * 推导（y 向下）：屏 y = (世界 y - viewTop) * zoom，viewTop = 中心 - 可见高/2。
+ *   * 带上沿（topBand）必须仍看到内容顶（世界 0）：viewTop ≥ -topBand/zoom。
+ *   * 带下沿（bottomBand）必须仍看到内容底（世界 contentHeight）：
+ *     viewTop ≤ contentHeight - bottomBand/zoom。
+ * 内容装得进内容带时（全塔视角）只有一个合法中心：内容居中于带，此时段界与
+ * 通用分支在边界缩放上严格相接（towerMap.test.ts 钉住这一点）。
+ */
+export function viewCenterBounds(contentHeight: number, zoom: number): { min: number; max: number } {
+  const viewH = 720 / zoom;
+  const half = viewH / 2;
+  // +0.001 的容差：fitZoom = 带高/楼高 在 IEEE754 下乘回去可能大出一个 ulp，
+  // 容差保证「恰好装下」时稳定走居中分支（min === max），测试才钉得住。
+  if (contentHeight * zoom <= contentBandHeight() + 0.001) {
+    const center = contentHeight / 2 + half - (TOWER_MAP.topBand + TOWER_MAP.bottomBand) / 2 / zoom;
+    return { min: center, max: center };
+  }
+  return {
+    min: half - TOWER_MAP.topBand / zoom,
+    max: contentHeight + half - TOWER_MAP.bottomBand / zoom,
+  };
+}
 
 // ── game floor: container name labels (GameScene.buildContainers) ───────────
 // How far the container name drops from the prop's base (FLOOR_HEIGHT - 68).

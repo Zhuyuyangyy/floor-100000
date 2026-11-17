@@ -57,6 +57,15 @@ const PROBE_PATHS = [
   'src/core/segments.ts',
   'src/core/tower.ts',
   'src/data/npcs.ts',
+  // AG-66/集成轮补：阻碍物与搜刮在 LootSystem.ts——2026-11-17 集成侧修可达性
+  // 裁决后重跑 stairNavigation 仍红，根因是 5199 上跑着一个修复前代码的旧
+  // dev server：守卫不探这个文件，GameScene 等探针全 match，整套测试跑的
+  // 是没有修复的 LootSystem（BUG-QA-05 的同一失效类：探针清单漏一个文件，
+  // 「复用了别人的代码」就从漏处钻进来）。搜刮/阻碍/几何三条线的修改都
+  // 落在这个文件与 worldgen/floorTemplates，一并纳入。
+  'src/systems/LootSystem.ts',
+  'src/core/worldgen.ts',
+  'src/data/floorTemplates.ts',
 ];
 const DEFAULT_BASE_URL = 'http://localhost:5199';
 const FETCH_TIMEOUT_MS = 15_000;

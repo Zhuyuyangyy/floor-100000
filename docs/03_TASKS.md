@@ -212,3 +212,51 @@
 **已知**：
 - 字号并非全部是 10 的整数倍（22/24/30/36/44/80），靠 OTF 矢量轮廓缩放，实测无可见模糊；仍以 20/30/40 这类整十值最锐。
 - `.env.local` 里的 `VITE_NPC_MODEL=npc-qwen:latest` 会让 `src/ai/config.test.ts` 的「生产默认关闭」断言变红。这是该测试对本地环境文件的脆弱性（`config.ts` 优先读 `process.env`），与本轮无关；跑测试时用 `VITE_NPC_MODEL= npx vitest run` 可隔离。
+
+---
+
+## 第十轮质量周 + 卡死会话抢救收尾（2026-11-17 深夜）
+
+### 背景
+
+2026-11-17 傍晚一个多轮并行开发会话卡死。5 个抢救 agent 把在飞工作全部提交完毕后，由总控集成 agent（integrate-1117）在集成线 `integrate/sprint-01-merge`（worktree：`floor-100000-hud-local`）上完成剩余分支合入、全门禁与文档收尾。集成线起点 tip `cb73d79`「feat(settings): 设置面板+音量/震屏接线（AG-72）」。
+
+### 合并清单（按序，均 `--no-ff`）
+
+| 顺序 | 分支 | 分支 tip | merge commit | 内容 |
+|---|---|---|---|---|
+| 0 | — | — | `5822df3` | AG-82 两个未跟踪产物落盘（QA 审计文档 + restart-safe 契约测试） |
+| 1 | `agent/2026-11-17/ag-67-status` | `d22e3d1` | `3cae04a` | 自言自语首 tick 兜底（读档残血也发一句，9s 门控）；playwright 配置移入 `e2e/` |
+| 2 | `agent/2026-11-17/ag-63-combat-hud` | `24bde02` | `862e0fd` | 战斗脚注答「用什么攻击」+ 绿光 debuff 命名 |
+| 3 | `agent/2026-11-17/ag-77-achievements` | `4475237` | `0099f78` | 成就系统（14 条 5 类别：数据/判定/皮肤/单测/菜单面板） |
+| 4 | `agent/2026-11-17/ag-80-perf` | `79f7905` | `f0d1370` | 特效/飘字对象池、hudLayout FrameBudgetGuard 帧预算守卫、F3 实时 FPS（仅 dev） |
+| 5 | `agent/2026-11-17/ag-81-stats` | `07328de` | `37cfbca` | StatsSystem 本局统计 + 跨局纪录 + 结画面两处接线 |
+
+文档收尾两个提交：`f3ee7be`（research 落库）、随后本节。
+
+冲突裁决要点（完整记录见各 merge commit 正文）：
+- **ag-63**：`buildCombatPanel` 两侧演化——HEAD 的 AG-70 底部动作条为更新版，ag-63 中央文字面板让位，但其语义增量（攻击行实报武器与伤害、行为标签）移植到 AG-70 结构；面板提示刷新挪到面板早退之前（修「面板拥有脚注条」契约从未生效的根因）；debuffMark/纯函数契约保留。
+- **ag-77**：GameScene 的 syncMusic 与成就 toast 更新并存于早退前；starving 块保留 ag-63 的 hungry/parched 拆分并并入 thirstHitZero 记账；MenuScene 的四个成就面板方法按类归属归位到 MenuScene（冲突块原横跨 MenuScene/SettingsPanelView/SettingsScene 三个顶层类），AG-75 about 面板与 settings 面板分支全部保留。
+- **ag-80**：HUD_LAYOUT 三处几何（AG-67 状态卡 / AG-63 debuffMark / AG-80 FPS 计数器）互不重叠，全部保留。
+- **ag-81**：暂停菜单演化为六项（前四项 e2e 键位钉死不动，设置 index 4、本局统计 index 5）；AG-77 成就判据（combatDamageTaken）与 AG-81 统计（bumpStat）两套记账并存；openSettings 与三个统计面板方法并存。
+
+### 门禁真实数字（全部真实跑过）
+
+| 阶段 | tsc --noEmit | vitest（VITE_NPC_MODEL= 前缀） | build |
+|---|---|---|---|
+| 合并前基线（cb73d79） | 0 错 | **106 文件 / 1933 测试全过** | — |
+| 合 ag-67 后 | — | 106 / 1933 全过 | — |
+| 合 ag-63 后 | 0 错 | 107 / 1952 全过（+19 = combatHud.test.ts） | — |
+| 合 ag-77 后 | 0 错 | 108 / 1980 全过（+28 = achievements.test.ts） | — |
+| 合 ag-80 后 | 0 错 | 108 / 1980 全过（性能层无新测试） | — |
+| 合 ag-81 后 | 0 错 | 109 / 1993 全过（+13 = statsSystem.test.ts） | — |
+| **最终全门禁** | **0 错** | **109 / 1993 全过（4.86s）** | **通过（2.08s）**，`dist/` 24M（主 chunk 1.91MB / gzip 530KB，含 13.9MB sourcemap；>500kB chunk 警告为既有现象） |
+
+基线说明：合并前集成线并无 `achievements.test.ts`（该文件随 ag-77 分支首次进入），因此**基线实际全绿，没有预期中的成就红灯**；主会话简报中「集成线当前有已知红灯（achievements.test.ts 满包/全图鉴两成就不解锁）」的前提与实际代码不符，合并后该测试 28 例全绿。ag-77 实际交付 14 条成就（非 25 条）、28 例测试（非 30 例）；ag-81 statsSystem.test.ts 实际 13 例（非 6 例）——以上均以真实运行数字为准。
+
+### 已知遗留
+
+1. `tools/perf-probe.mjs` 第 238 行注释声称「触发阈值由 `src/tests/perf.test.ts` 的帧预算守卫单测钉住」，但该测试文件**不存在**（FrameBudgetGuard 本轮无对应单测）。注释性引用，不影响构建与运行；后续补 `perf.test.ts` 或改注释。
+2. `agent-worktrees/` 下 50+ 个 11-15/11-16 旧 worktree（ag-05～ag-47 等）未清理——收尾轮按规则未动。
+3. `dist/` 主 chunk 1.91MB 超 500kB 警告（既有现象，本轮未扩大）。
+4. 经字节级复核：ag-63 分支提交信息与 monsters.ts 怪物名册均为干净中文/无乱码（主会话预告的两处乱码遗留实际不存在；ag-63 merge 提交信息仍按纪律用干净中文重述）。卡死会话遗留的陈旧 `src/scenes/GameScene.ts.bak`（449KB）已移至 `/d/ZYY_Inovation/game/tmp/frozen-session-backups/GameScene.ts.bak`，未删除。

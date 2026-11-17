@@ -136,16 +136,14 @@ export const ALL_ITEMS: Record<KnownItemId, Item> = { ...ITEMS, ...MORALE_ITEMS 
 
 export const ALL_ITEM_IDS = Object.keys(ALL_ITEMS) as KnownItemId[];
 
-export function getItem(id: KnownItemId): Item {
-  return ALL_ITEMS[id];
-}
+
 
 // 新物品 id 进 core 类型化 API（addItem/countItem/ShopEntry/SaveSystem 校验）
 // 时的唯一铸入口。core 的 ItemId 联合不可模块增强（type alias 不能合并），
 // 而所有消费侧都按 id 字符串查表——getItem/isItemId 已认识这些 id，堆叠、
 // 存读、商店买卖走的是同一条字符串路径——所以这个铸只在类型层面宽限，
 // 运行时行为与既有物品完全一致。散落的 `as ItemId` 一律收在这里。
-export function asItemId(id: MoraleItemId): ItemId {
+export function asItemId(id: MoraleItemId | DigToolId): ItemId {
   return id as ItemId;
 }
 
@@ -157,5 +155,37 @@ export function asItemId(id: MoraleItemId): ItemId {
 // 消费侧按字符串查表，不依赖联合成员）；类型层面的真正宽化要等 core 的
 // ItemId 联合（AG-25）。
 export function isItemId(value: string): value is ItemId {
-  return Object.prototype.hasOwnProperty.call(ALL_ITEMS, value);
+  return Object.prototype.hasOwnProperty.call(ALL_ITEMS, value) || Object.prototype.hasOwnProperty.call(DIG_TOOL_ITEMS, value);
+}
+
+// ── AG-66：过道工具（铲子）──────────────────────────────────────────────
+//
+// 与 MORALE_ITEMS 完全同构的第三条路：ITEMS 的 19 件被 items.test.ts /
+// survivalBalance / economyLoop 钉死（"每件物品都有世界来源、无死物品"），
+// ALL_ITEMS 的 23 件被 moraleItems.test.ts 钉死，render/artpack.ts 的
+// ITEM_ICON_FILES 又必须与 ITEMS 一件不差（itemIcons.test.ts）——铲子因此
+// 单独成表，不进那两张表的身份空间，只由 getItem/isItemId 统一发号：背包
+// （堆叠/存读/面板）、制作（craft_shovel 的 outputItemId）、存档校验全部
+// 按 id 字符串查表，无需任何改动就认得它。
+//
+// 为什么必须是一件"真物品"而不是指定既有物品顶替：阻碍物的清理是常驻玩法，
+// 撬棍同时是置物架配方的成本与拆床白名单（bunkDismantleTool），拿它兼职
+// 铲子等于把"任何武器都是万能工具"的口子再开一次；且撬棍要 3 层铁箱才
+// guaranteed，早期楼层可能整层摸不到。铲子只能做出来（recipes 的
+// craft_shovel），**不进任何 loot 池**——survivalBalance 的"每层恰好一瓶
+// guaranteed 水 + 一份食物"是钉死的，战利品里加一件工具会改写掉落曲线。
+export type DigToolId = 'shovel';
+
+/** AG-66 新增的过道清理工具。获取路径唯一：craft_shovel 配方。 */
+export const DIG_TOOL_ITEMS: Record<DigToolId, Item> = {
+  shovel: { id: asItemId('shovel'), displayName: '铲子', category: 'tool', stackable: false, maxStack: 1 },
+};
+
+export const DIG_TOOL_IDS = Object.keys(DIG_TOOL_ITEMS) as DigToolId[];
+
+// 新定义：先查既有的 23 件（一件不改），再落铲子。签名不变
+// （KnownItemId = ItemId | MoraleItemId）——背包里的铲子经 asItemId 铸成
+// ItemId 进来，运行时两条查表路径都走得通；未知 id 的语义与旧版一致。
+export function getItem(id: KnownItemId): Item {
+  return (ALL_ITEMS as Record<string, Item | undefined>)[id] ?? DIG_TOOL_ITEMS[id as DigToolId];
 }

@@ -3,7 +3,9 @@ import { addItem, countItem, removeItem } from './InventorySystem';
 import { getItem } from '../data/items';
 import { deriveSeed, makeRng } from '../core/rng';
 import type { GameState, GeneratedFloor, InventoryStack, ItemId } from '../core/gameTypes';
-import { FLOOR_WIDTH, floorWidthFor } from '../core/constants';
+import { ENTRY_X, FLOOR_WIDTH, STARTING_FLOOR, UP_EXIT_X, downExitXFor, floorWidthFor } from '../core/constants';
+import { liftDirection } from '../core/segments';
+import { hasDownExit, hasUpExit } from './FloorSystem';
 import balance from '../../config/game-balance.json' with { type: 'json' };
 
 // Turns looting into GameState so a saved + reloaded game never re-spawns loot
@@ -274,3 +276,189 @@ export function dismantleBunk(state: GameState, floor: number, bunkId: string): 
   visit.lootedItems.push(bunkGoneKey(floor, bunkId));
   return { ok: true, took, full: false };
 }
+
+// ── AG-66：过道阻碍物（瓦砾堆 / 锈闸门）────────────────────────────────
+//
+// 用户原话：「这个过道应该有阻碍物，就是用铲子等工具才能挖完才能进去」。
+// 每层过道上 seeded 放 0-2 个阻碍物，占位处玩家的横向移动被钳断，想过去
+// 必须背包里有铲子（或撬棍）花 digMs 毫秒挖掉。阻碍物不是容器：generateFloor
+// 不认识它们，因此与 AG-51 的床同模式——位置走 seeded RNG（同 (runSeed, 层)
+// 同结果），「挖过了」记 visitedFloors[floor].lootedItems 的 obstacle:<层>:<x>
+// 键（容器键空间是 containerItemKey 的 c: 前缀，床是 bunksearch:/bunkgone:，
+// 这条前缀永不撞键），回层不复活。
+//
+// 三条硬规则（全部在本文件的纯函数里，obstacles.test.ts 逐条钉死）：
+//   1. 避让——梯口（上下楼口）、电梯、楼层入口、容器、地面物各留 keepClear；
+//   2. 可通——从楼层入口 ENTRY_X 出发至少还有一个出口可达，否则从后往前删，
+//      阻碍物永远不可能把玩家软锁在层里（GAME_DESIGN_LOCK §5 禁软锁）；
+//   3. 有解——清理工具是铲子或撬棍（撬棍 3 层铁箱 guaranteed，早期楼层也
+//      摸得到），不是只有一把要合成的铲子。
+
+export type ObstacleKind = 'rubble' | 'gate';
+
+/** 过道上的一个阻碍物。x 是世界像素（楼层视图同口径，已按层宽缩放）。 */
+export interface FloorObstacle {
+  kind: ObstacleKind;
+  x: number;
+}
+
+interface ObstacleBalance {
+  maxPerFloor: number;
+  firstChance: number;
+  secondChance: number;
+  kindWeights: Record<ObstacleKind, number>;
+  blockHalfWidth: number;
+  keepClear: number;
+  digMs: number;
+  digCostMinutes: number;
+  tools: string[];
+  liftX: number;
+}
+
+// config/game-balance.json 的 obstacles 段（AG-66 自己这条线的键）。与 BUNKS
+// 同款：绕过 core/config.ts 的 GameBalanceConfig 直读 JSON（接口属主在 core，
+// 本工单不碰），缺键会在第一次调用时以 undefined 炸出来。
+const OBSTACLES = (balance as unknown as { obstacles: ObstacleBalance }).obstacles;
+
+/** 挖开/撬开一个阻碍物的动作时长（毫秒）。 */
+export const OBSTACLE_DIG_MS = OBSTACLES.digMs;
+/** 清理一个阻碍物的游戏分钟数。 */
+export const OBSTACLE_DIG_COST_MINUTES = OBSTACLES.digCostMinutes;
+/** 阻碍物的占位半宽（左右各这么宽都被拦住）。 */
+export const OBSTACLE_BLOCK_HALF_WIDTH = OBSTACLES.blockHalfWidth;
+
+/** 「挖过了」的存档键。与容器/床的键共用 lootedItems 数组，前缀不同永不撞。 */
+export const obstacleKey = (floor: number, x: number): string => `obstacle:${floor}:${x}`;
+
+export function isObstacleCleared(state: GameState, floor: number, x: number): boolean {
+  return state.visitedFloors[floor]?.lootedItems.includes(obstacleKey(floor, x)) ?? false;
+}
+
+/** 记一个阻碍物为已挖开（幂等）。调用方负责随后的视觉残骸与存档。 */
+export function clearObstacle(state: GameState, floor: number, x: number): void {
+  const visit = recordFloorVisit(state, floor);
+  const key = obstacleKey(floor, x);
+  if (!visit.lootedItems.includes(key)) visit.lootedItems.push(key);
+}
+
+/**
+ * 这一层的阻碍物全集（含已挖开的）。seeded：同 (runSeed, floor) 永远同结果，
+ * 所以「挖过的回层不复活」只需记键，位置本身重进楼层自动复现。
+ *
+ * 1 层是宿舍（家）不过道，直接空；梯口/电梯/入口/容器/地面物的 keepClear
+ * 之后再做一次可达性裁决（见下），保证不软锁。
+ */
+export function obstaclesForFloor(state: GameState, floor: number): FloorObstacle[] {
+  if (floor === STARTING_FLOOR) return [];
+  const half = OBSTACLES.blockHalfWidth;
+  const keep = OBSTACLES.keepClear;
+  const minX = UP_EXIT_X + keep;
+  const maxX = downExitXFor(floor) - keep;
+  if (maxX - minX < half * 4) return []; // 走廊放不下两个身位，不摆
+  // 避让清单只放**稳定**的 x：梯口/电梯/入口是常量，容器列表随楼层模板恒定
+  // （generateFloor 从不删容器，getFloorView 只改它的 items）。地面物刻意不进
+  // 清单——lootedItems 会把它们从视图里抹掉，清单随搜刮漂移就意味着阻碍物
+  // 的位置跨访问会变，「挖过的回层不复活」（obstacle 键）直接失效。地面物被
+  // 挡住只是延迟可拾取：挖掉阻碍物后走回去照旧 autoPickup，不是断点。
+  const view = getFloorView(state, floor);
+  const keepClearXs: number[] = [
+    UP_EXIT_X,
+    downExitXFor(floor),
+    OBSTACLES.liftX,
+    ENTRY_X,
+    ...view.containers.map((c) => c.x),
+  ];
+  const rng = makeRng(deriveSeed('obstacles', state.runSeed, floor));
+  const out: FloorObstacle[] = [];
+  const chances = [OBSTACLES.firstChance, OBSTACLES.secondChance];
+  const count = Math.min(OBSTACLES.maxPerFloor, chances.length);
+  for (let i = 0; i < count; i++) {
+    if (!rng.chance(chances[i])) break; // 第一个没摇上就没有第二个
+    let placed = false;
+    for (let attempt = 0; attempt < 8 && !placed; attempt++) {
+      const x = minX + rng.nextInt(0, Math.floor(maxX - minX));
+      const kind: ObstacleKind = rng.nextFloat() < OBSTACLES.kindWeights.rubble ? 'rubble' : 'gate';
+      if (keepClearXs.some((kx) => Math.abs(kx - x) < keep + half)) continue;
+      if (out.some((o) => Math.abs(o.x - x) < half * 4)) continue; // 两个不叠
+      out.push({ kind, x });
+      placed = true;
+    }
+  }
+  // 可达性裁决：从 ENTRY_X（电梯/首入/落地都是这个点）出发，至少还有一个
+  // 出口不被阻碍区间截断。两个阻碍物把入口夹在中间时就该删——从后往前删，
+  // 删到一个可达即止（保留多样性，又永不软锁）。
+  const exits: number[] = [];
+  if (hasUpExit(floor)) exits.push(UP_EXIT_X);
+  if (hasDownExit(floor)) exits.push(downExitXFor(floor));
+  if (liftDirection(floor) !== null) exits.push(OBSTACLES.liftX);
+  const reachable = (to: number): boolean =>
+    !out.some((o) => o.x - half > Math.min(ENTRY_X, to) && o.x + half < Math.max(ENTRY_X, to));
+  while (out.length > 0 && !exits.some(reachable)) out.pop();
+  return out;
+}
+
+/** 这一层还没挖掉的阻碍物（场景每帧钳位与 E 交互读的是这个）。 */
+export function activeObstacles(state: GameState, floor: number): FloorObstacle[] {
+  return obstaclesForFloor(state, floor).filter((o) => !isObstacleCleared(state, floor, o.x));
+}
+
+/** 交互距离内最近的一个未挖阻碍物（与 nearestContainer 同型的距离判官）。 */
+export function nearestObstacle(active: readonly FloorObstacle[], playerX: number, maxDist: number): FloorObstacle | null {
+  let best: FloorObstacle | null = null;
+  let bestDist = maxDist;
+  for (const o of active) {
+    const d = Math.abs(o.x - playerX);
+    if (d <= bestDist) {
+      bestDist = d;
+      best = o;
+    }
+  }
+  return best;
+}
+
+/**
+ * 把一帧移动的结果钳在阻碍物之外。纯函数：玩家永远进不去阻碍区间，贴着
+ * 进来那一侧的边停（上一帧就在区间里——落地/传送——则取近的一侧出）。
+ */
+export function clampXAgainstObstacles(
+  active: readonly FloorObstacle[],
+  prevX: number,
+  nextX: number,
+  halfWidth: number = OBSTACLES.blockHalfWidth,
+): number {
+  let x = nextX;
+  for (const o of active) {
+    const lo = o.x - halfWidth;
+    const hi = o.x + halfWidth;
+    if (x > lo && x < hi) {
+      x = prevX <= lo ? lo : prevX >= hi ? hi : x - lo <= hi - x ? lo : hi;
+    }
+  }
+  return x;
+}
+
+/**
+ * 背包里第一件能清阻碍物的工具，没有返回 null。
+ *
+ * 为什么是铲子和撬棍两件：铲子是本工单新增的专职工具（只能做出来），
+ * 撬棍是 v0.1 就在册的破拆工具（3 层铁箱 guaranteed）——只认铲子的话，
+ * 早期楼层可能整层摸不到也做不出，阻碍物就成了死墙。两件都能清两种阻碍
+ * （铲子挖瓦砾、撬棍撬闸门，反过来也将就），工具不消耗。与拆床白名单
+ * （撬棍+消防斧，bunkDismantleTool）同族：刃具不兼职工具。
+ */
+export function obstacleTool(inventory: GameState['player']['inventory']): ItemId | null {
+  for (const id of OBSTACLES.tools) {
+    if (countItem(inventory, id as ItemId) > 0) return id as ItemId;
+  }
+  return null;
+}
+
+/**
+ * AG-66：搜刮动作时长（毫秒）——点容器/床铺后先播 search 动画等这么久才出货。
+ * 数值进 config/game-balance.json 的 search.ms（GameScene 不硬编码）。
+ */
+interface SearchBalance {
+  ms: number;
+}
+const SEARCH_BALANCE = (balance as unknown as { search: SearchBalance }).search;
+export const SEARCH_MS = SEARCH_BALANCE.ms;

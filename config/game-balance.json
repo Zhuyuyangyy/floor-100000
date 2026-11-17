@@ -14,6 +14,23 @@
     "craft": 30,
     "trade": 15
   },
+  "search": {
+    "_comment": "AG-66：搜刮动作时长（毫秒）。点容器/床铺后先播 search 动画，ms 毫秒后才出 loot 结果；这期间任何移动输入都会取消动作——不出货、不扣时间、不标记已搜（防站着刷）。",
+    "ms": 2000
+  },
+  "obstacles": {
+    "_comment": "AG-66：过道阻碍物。每层 seeded 0-2 个（rubble 塌下来的瓦砾堆 / gate 锈死的闸门），占位处玩家移动被钳断，想过去必须清掉。清理要工具（铲子或撬棍，digMs 毫秒 dig 动作）；挖过的记 visitedFloors[floor].lootedItems 的 obstacle:<层>:<x> 键，回层不复活。放置避让梯口/电梯/楼层入口/容器/地面物，并保证从楼层入口至少还有一个出口可达——阻碍物永远不会把玩家软锁在层里。",
+    "maxPerFloor": 2,
+    "firstChance": 0.7,
+    "secondChance": 0.35,
+    "kindWeights": { "rubble": 0.6, "gate": 0.4 },
+    "blockHalfWidth": 26,
+    "keepClear": 90,
+    "digMs": 2000,
+    "digCostMinutes": 15,
+    "tools": ["shovel", "crowbar"],
+    "liftX": 1165
+  },
   "dwellPressure": {
     "rollIntervalGameMinutes": 60
   },

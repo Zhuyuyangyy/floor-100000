@@ -117,6 +117,18 @@ import { characterKeyForNpc, portraitKey } from '../render/artpack';
 import { framedButton, hitRect } from '../render/pointer';
 import { drawHazardStripe, drawHudIcon, drawHudPlate, drawStatRing, type HudIconName } from '../render/hudSkin';
 import {
+  MONOLOGUE_TRIGGER_PRIORITY,
+  STATUS_PANEL_BALANCE,
+  chooseMonologue,
+  crossedBelow,
+  freshMonologueMemory,
+  isGoodLoot,
+  monologueVoiceFor,
+  statusSummaryLine,
+  type MonologueMemory,
+  type MonologueTrigger,
+} from '../data/monologue';
+import {
   estimateTextWidth,
   DIALOG_PADDING,
   DIALOG_PANEL_H,
@@ -629,6 +641,35 @@ export class GameScene extends Phaser.Scene {
   /** the low-HP edge warning: bands with their own base weights */
   private vignetteParts: Array<{ rect: Phaser.GameObjects.Rectangle; weight: number }> = [];
   private lastGoalKey = '';
+  // ── AG-67: the bottom-right character card + the monologue ticker ──────
+  // Everything the card owns. buildHud's reset block destroys and clears
+  // these before rebuilding (a scene restart keeps the display list, and a
+  // stale Text throws on the first setText).
+  private statusCardParts: Phaser.GameObjects.GameObject[] = [];
+  private statusCardBars?: Phaser.GameObjects.Graphics;
+  private statusCardAvatar?: Phaser.GameObjects.Image;
+  private statusCardAvatarWho: CharacterKey | null = null;
+  private statusCardNameText?: Phaser.GameObjects.Text;
+  private statusCardValueTexts: Phaser.GameObjects.Text[] = [];
+  private statusCardSummaryText?: Phaser.GameObjects.Text;
+  private statusCardKey = '';
+  // The monologue ticker: a looped TimerEvent rather than a per-frame call.
+  // The gate is time-based and the tick is the resolution the throttle
+  // needs (250ms), so a frame hook would be four times the work for
+  // nothing — and Phaser's Clock already clears it on scene shutdown.
+  private monologueTimer?: Phaser.Time.TimerEvent;
+  private monologueMemory: MonologueMemory = freshMonologueMemory();
+  /** previous tick's normalised ratios, for threshold crossings (null = first tick) */
+  private monologueRatios: Record<'hp' | 'hunger' | 'thirst' | 'energy', number> | null = null;
+  private monologueNight: boolean | null = null;
+  private monologueFloor: number | null = null;
+  private monologueInv: Map<string, number> | null = null;
+  /** lowest monster hp seen while a combat was live; null when no combat */
+  private monologueCombatHp: number | null = null;
+  private monologuePending: MonologueTrigger[] = [];
+  private speechBubble?: Phaser.GameObjects.Text;
+  /** how many bubbles have gone up this scene; the e2e counts speech, not pixels */
+  private monologueSpoken = 0;
   // OVERHAUL: the floor's "?" spots and the encounter panel they open.
   private spotMarkers = new Map<string, { x: number; isBoss: boolean; dot: Phaser.GameObjects.Arc; label: Phaser.GameObjects.Text }>();
   private encounterOpen = false;
@@ -3613,6 +3654,29 @@ export class GameScene extends Phaser.Scene {
     this.floorBadge = undefined;
     this.goldText?.destroy();
     this.goldText = undefined;
+    this.statusCardParts.forEach((o) => o.destroy());
+    this.statusCardParts = [];
+    this.statusCardBars = undefined;
+    this.statusCardAvatar = undefined;
+    this.statusCardAvatarWho = null;
+    this.statusCardNameText = undefined;
+    this.statusCardValueTexts = [];
+    this.statusCardSummaryText = undefined;
+    this.statusCardKey = '';
+    // A restart already destroyed the old ticker (Clock.shutdown on scene
+    // shutdown); removing it again is harmless and keeps the field honest.
+    this.monologueTimer?.remove();
+    this.monologueTimer = undefined;
+    this.monologueMemory = freshMonologueMemory();
+    this.monologueRatios = null;
+    this.monologueNight = null;
+    this.monologueFloor = null;
+    this.monologueInv = null;
+    this.monologueCombatHp = null;
+    this.monologuePending = [];
+    this.speechBubble?.destroy();
+    this.speechBubble = undefined;
+    this.monologueSpoken = 0;
 
     // The 2026-11-14 HUD skin: one riveted plate holding three rows —
     // instruments, the day's objective, the environment readout. See
@@ -3744,6 +3808,16 @@ export class GameScene extends Phaser.Scene {
     this.lastStats = '';
     this.refreshGoalHud();
     this.buildHudButtons();
+
+    // ── AG-67: the bottom-right character card + the monologue ticker ────
+    // Built last, so the card's lane is measured against the FINISHED hud:
+    // money lane, button row, foot bar (see render/hudLayout.ts statusCard*).
+    this.buildStatusCard();
+    this.monologueTimer = this.time.addEvent({
+      delay: STATUS_PANEL_BALANCE.monologue.tickMs,
+      loop: true,
+      callback: () => this.tickMonologue(),
+    });
   }
 
   // Four clickable buttons for the four panels the keyboard opens. Placed on the
@@ -3872,6 +3946,292 @@ export class GameScene extends Phaser.Scene {
     // without reading four numbers.
     const urgent = mostUrgentStat(getGame().player);
     this.statLabels.forEach((t, i) => t.setColor(STAT_BARS[i].key === urgent ? hex(TEXT.warn) : hex(TEXT.secondary)));
+  }
+  // ── AG-67: the bottom-right character card ───────────────────────────────
+  // A compact card, not a second instrument cluster: the top plate's four
+  // rings (AG-54) already answer "how full is each tank". This answers "who
+  // is down there and how are they holding up" — the picked survivor's
+  // avatar, the same four stats as mini segmented bars with live numbers, and
+  // one line of situational summary derived from them. Every coordinate comes
+  // from HUD_LAYOUT's statusCard* keys, so the lane contract (bottom on the
+  // feedback lane, right margin shared with the button row) is assertable
+  // without a screenshot.
+  private buildStatusCard(): void {
+    const hud = HUD_LAYOUT;
+    const x = hud.statusCardX;
+    const y = hud.statusCardY;
+    const w = hud.statusCardW;
+    // The HUD text tier (103): above the world, below modal panels.
+    const depth = 103;
+    // The frame: the top plate's own riveted language. drawHudPlate draws at
+    // the graphics' origin, so the object is positioned first.
+    const frame = this.add.graphics().setScrollFactor(0).setDepth(depth);
+    frame.setPosition(x, y);
+    drawHudPlate(frame, w, hud.statusCardH, 0x0b0f12, UI.line, PALETTE.stoneLight, PALETTE.light);
+    this.statusCardParts.push(frame);
+    // The name header: right of the avatar, vertically centred on it.
+    this.statusCardNameText = this.add
+      .text(x + 58, y + 24, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
+      .setOrigin(0, 0.5)
+      .setName('hud-status-name')
+      .setScrollFactor(0)
+      .setDepth(depth + 1);
+    this.statusCardParts.push(this.statusCardNameText);
+    // Four stat rows: label, segmented mini bar (drawStatBar — the same Centum
+    // strip the panels use, cut to 8 segments on 96px), live number.
+    this.statusCardBars = this.add.graphics().setName('hud-status-bars').setScrollFactor(0).setDepth(depth + 1);
+    this.statusCardParts.push(this.statusCardBars);
+    this.statusCardValueTexts = [];
+    STAT_BARS.forEach((stat, i) => {
+      const cy = hud.statusRowFirstCY + i * hud.statusRowPitch;
+      const label = this.add
+        .text(x + hud.statusRowLabelX, cy, stat.label, { fontFamily: FONT_FAMILY, fontSize: '16px', color: hex(TEXT.secondary) })
+        .setOrigin(0, 0.5)
+        .setName(`hud-status-${stat.key}`)
+        .setScrollFactor(0)
+        .setDepth(depth + 1);
+      const value = this.add
+        .text(x + w - 12, cy, '', { fontFamily: FONT_FAMILY, fontSize: '16px', color: hex(TEXT.primary) })
+        .setOrigin(1, 0.5)
+        .setName(`hud-status-value-${stat.key}`)
+        .setScrollFactor(0)
+        .setDepth(depth + 1);
+      this.statusCardParts.push(label, value);
+      this.statusCardValueTexts.push(value);
+    });
+    // The summary line: one sentence derived from the numbers above it.
+    this.statusCardSummaryText = this.add
+      .text(x + hud.statusRowLabelX, hud.statusSummaryCY, '', { fontFamily: FONT_FAMILY, fontSize: '16px', color: hex(TEXT.secondary) })
+      .setOrigin(0, 0.5)
+      .setName('hud-status-summary')
+      .setScrollFactor(0)
+      .setDepth(depth + 1);
+    this.statusCardParts.push(this.statusCardSummaryText);
+    // Two hairlines: under the header, above the summary.
+    const rules = this.add.graphics().setScrollFactor(0).setDepth(depth + 1);
+    drawLine(rules, x + 10, 436, w - 20);
+    drawLine(rules, x + 10, 530, w - 20);
+    this.statusCardParts.push(rules);
+    this.refreshStatusCard();
+  }
+
+  /**
+   * The avatar: the walk sheet's first idle frame (columns 0-5 are walk, 6-7
+   * idle), cropped to head-and-shoulders so it reads as a portrait rather
+   * than a tiny full body. The sheet is already in memory for the player
+   * sprite, so this adds no preload. Rebuilt only when the pick changes.
+   */
+  private refreshStatusCardAvatar(who: CharacterKey): void {
+    if (this.statusCardAvatarWho === who && this.statusCardAvatar) return;
+    this.statusCardAvatar?.destroy();
+    this.statusCardAvatarWho = who;
+    const hud = HUD_LAYOUT;
+    this.statusCardAvatar = this.add
+      .image(hud.statusCardX + 10, hud.statusCardY + 8, walkSheetKey(who))
+      .setOrigin(0, 0)
+      .setCrop(0, FRAME_H * 6, FRAME_W, 44)
+      .setScale(0.68)
+      .setScrollFactor(0)
+      .setDepth(104);
+    this.statusCardParts.push(this.statusCardAvatar);
+  }
+
+  /**
+   * The card's live values. Redraws on change only — the same contract
+   * refreshStats keeps: the ticker runs four times a second and the bars are
+   * graphics, so an unconditional clear+redraw would be wasted work.
+   */
+  private refreshStatusCard(): void {
+    if (!this.statusCardNameText || !this.statusCardBars || !this.statusCardSummaryText) return;
+    // Locals, so the row callback below keeps the guard's narrowing.
+    const nameText = this.statusCardNameText;
+    const bars = this.statusCardBars;
+    const summaryText = this.statusCardSummaryText;
+    const state = getGame();
+    const who = this.metaSelectedCharacter();
+    this.refreshStatusCardAvatar(who);
+    const name = CHARACTER_NAMES[who] ?? '幸存者';
+    if (nameText.text !== name) nameText.setText(name);
+    const p = state.player;
+    const maxes = [GAME_CONFIG.player.hpMax, GAME_CONFIG.player.hungerMax, GAME_CONFIG.player.thirstMax, GAME_CONFIG.player.energyMax];
+    const values = [p.hp, p.hunger, p.thirst, p.energy];
+    const summary = statusSummaryLine(p, STATUS_PANEL_BALANCE);
+    const key = `${values.map((v) => Math.round(v)).join(',')}|${summary.text}`;
+    if (key === this.statusCardKey) return;
+    this.statusCardKey = key;
+    const hud = HUD_LAYOUT;
+    bars.clear();
+    values.forEach((v, i) => {
+      const frac = v / maxes[i];
+      const cy = hud.statusRowFirstCY + i * hud.statusRowPitch;
+      // 8 segments, and the same "running out goes red at 20%" rule the rings
+      // and every panel bar use, so the card never disagrees with them.
+      drawStatBar(bars, hud.statusCardX + hud.statusRowBarX, cy - hud.statusRowBarH / 2, hud.statusRowBarW, hud.statusRowBarH, frac, STAT_COLORS[STAT_BARS[i].key] ?? UI.good, 8);
+      this.statusCardValueTexts[i]?.setText(String(Math.round(v)));
+      this.statusCardValueTexts[i]?.setColor(frac <= 0.2 ? hex(TEXT.warn) : hex(TEXT.primary));
+    });
+    summaryText.setText(summary.text);
+    summaryText.setColor(summary.tone === 'danger' ? hex(TEXT.warn) : summary.tone === 'warn' ? hex(TEXT.highlight) : hex(TEXT.secondary));
+  }
+
+  // ── AG-67: the monologue ticker ──────────────────────────────────────────
+  // The character talks to itself about its situation: a threshold crossing
+  // (hp under 30%, starving, parched, exhausted, night falling) or an event
+  // (good loot, a won fight, a new floor). Two rules keep it from becoming
+  // noise:
+  //   · WATCHING is unconditional — every tick updates the previous-value
+  //     memory, so a crossing that happens under an open panel is not lost;
+  //   · SPEAKING is gated twice — the global gap and the per-line cooldown
+  //     live in data/monologue.ts (chooseMonologue), and a bubble only spawns
+  //     when no panel is open, so it is never spoken behind a modal.
+  private tickMonologue(): void {
+    if (!hasGame()) return;
+    this.refreshStatusCard();
+    const state = getGame();
+    const cfg = STATUS_PANEL_BALANCE.monologue;
+    const p = state.player;
+    const maxes = {
+      hp: GAME_CONFIG.player.hpMax,
+      hunger: GAME_CONFIG.player.hungerMax,
+      thirst: GAME_CONFIG.player.thirstMax,
+      energy: GAME_CONFIG.player.energyMax,
+    };
+    const ratios = {
+      hp: maxes.hp > 0 ? p.hp / maxes.hp : 1,
+      hunger: maxes.hunger > 0 ? p.hunger / maxes.hunger : 1,
+      thirst: maxes.thirst > 0 ? p.thirst / maxes.thirst : 1,
+      energy: maxes.energy > 0 ? p.energy / maxes.energy : 1,
+    };
+    const prev = this.monologueRatios;
+    if (prev) {
+      if (crossedBelow(prev.hp, ratios.hp, cfg.triggers.hpRatio)) this.queueMonologue('hp_low');
+      if (crossedBelow(prev.hunger, ratios.hunger, cfg.triggers.hungerRatio)) this.queueMonologue('hunger_low');
+      if (crossedBelow(prev.thirst, ratios.thirst, cfg.triggers.thirstRatio)) this.queueMonologue('thirst_low');
+      if (crossedBelow(prev.energy, ratios.energy, cfg.triggers.energyRatio)) this.queueMonologue('energy_low');
+    }
+    this.monologueRatios = ratios;
+
+    const night = isNight(state.gameMinuteOfDay);
+    if (cfg.triggers.night && this.monologueNight === false && night) this.queueMonologue('night_fall');
+    this.monologueNight = night;
+
+    if (cfg.triggers.newFloor && this.monologueFloor !== null && state.currentFloor !== this.monologueFloor) {
+      this.queueMonologue('new_floor');
+    }
+    this.monologueFloor = state.currentFloor;
+
+    if (cfg.triggers.goodLoot) this.watchGoodLoot(p.inventory.slots);
+    if (cfg.triggers.combatWin) this.watchCombatWin(state.combat);
+
+    // Behind a modal the bubble would be invisible, so the flush waits; the
+    // queue is deduped above and drained on the next panel-free tick.
+    if (this.anyPanelOpen()) return;
+    this.monologuePending.sort((a, b) => MONOLOGUE_TRIGGER_PRIORITY.indexOf(a) - MONOLOGUE_TRIGGER_PRIORITY.indexOf(b));
+    while (this.monologuePending.length > 0) {
+      const trigger = this.monologuePending.shift() as MonologueTrigger;
+      // One bubble at a time: the first trigger that clears the gate speaks,
+      // the rest wait for the next tick (where the gap will likely refuse
+      // them — stale news is not worth a second bubble).
+      if (this.speakMonologue(trigger, this.time.now)) break;
+    }
+  }
+
+  /** Good loot: watch the bag's stacks for a valuable item arriving. */
+  private watchGoodLoot(slots: readonly { itemId: string; quantity: number }[]): void {
+    const current = new Map<string, number>();
+    for (const s of slots) current.set(s.itemId, (current.get(s.itemId) ?? 0) + s.quantity);
+    const prev = this.monologueInv;
+    if (prev) {
+      for (const [itemId, qty] of current) {
+        if (qty - (prev.get(itemId) ?? 0) > 0 && isGoodLoot(itemId)) {
+          this.queueMonologue('good_loot');
+          break;
+        }
+      }
+    }
+    this.monologueInv = current;
+  }
+
+  /**
+   * A won fight. The killing blow zeroes the monster's hp in state before the
+   * outcome panel closes (resolveRound is pure; GameScene applies it), so
+   * watching the live combat tells a win from a flee. The line is queued for
+   * the tick after the panel is gone — the fight's own log already said it.
+   */
+  private watchCombatWin(combat: GameState['combat']): void {
+    if (combat) {
+      const hp = combat.monster.hp;
+      this.monologueCombatHp = this.monologueCombatHp === null ? hp : Math.min(this.monologueCombatHp, hp);
+      return;
+    }
+    if (this.monologueCombatHp !== null) {
+      if (this.monologueCombatHp <= 0) this.queueMonologue('combat_win');
+      this.monologueCombatHp = null;
+    }
+  }
+
+  /** Queue a trigger, deduped; the ticker flushes in priority order. */
+  private queueMonologue(trigger: MonologueTrigger): void {
+    if (this.monologuePending.includes(trigger)) return;
+    this.monologuePending.push(trigger);
+  }
+
+  /** Gate + pick + spawn. Returns true when a bubble actually went up. */
+  private speakMonologue(trigger: MonologueTrigger, now: number): boolean {
+    const voice = monologueVoiceFor(this.metaSelectedCharacter());
+    const picked = chooseMonologue(this.monologueMemory, now, trigger, voice, STATUS_PANEL_BALANCE, Math.random);
+    if (!picked) return false;
+    this.monologueMemory = picked.memory;
+    this.spawnSpeechBubble(picked.line.text);
+    return true;
+  }
+
+  /**
+   * The 头顶飘字: one Text above the survivor's head in world space (the
+   * camera keeps the player centred, so it rides along), fading in and out
+   * over the configured lifetime. Deliberately NOT the feedback lane — that
+   * lane is the game talking to the player; this is the character talking to
+   * itself.
+   */
+  private spawnSpeechBubble(text: string): void {
+    this.speechBubble?.destroy();
+    const state = getGame();
+    const bubble = this.add
+      .text(state.player.x, PLAYER_FEET_Y - FRAME_H - 14, text, {
+        fontFamily: FONT_FAMILY,
+        fontSize: '18px',
+        color: hex(TEXT.primary),
+        backgroundColor: '#0b0f12e6',
+        padding: { x: 10, y: 5 },
+      })
+      .setName('hud-status-bubble')
+      .setOrigin(0.5, 1)
+      .setDepth(105); // the furniture-label tier: over the world, under panels
+    this.speechBubble = bubble;
+    this.monologueSpoken += 1;
+    const life = STATUS_PANEL_BALANCE.monologue.bubbleMs;
+    bubble.setAlpha(0);
+    this.tweens.add({
+      targets: bubble,
+      alpha: 1,
+      duration: 140,
+      onComplete: () => {
+        // A restart or a second bubble destroys this one mid-life; `active`
+        // is the cheap guard that keeps the tail from touching a dead Text.
+        this.time.delayedCall(Math.max(120, life - 440), () => {
+          if (!bubble.active) return;
+          this.tweens.add({
+            targets: bubble,
+            alpha: 0,
+            duration: 300,
+            onComplete: () => {
+              bubble.destroy();
+              if (this.speechBubble === bubble) this.speechBubble = undefined;
+            },
+          });
+        });
+      },
+    });
   }
 
   /**

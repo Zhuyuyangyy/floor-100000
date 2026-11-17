@@ -71,6 +71,34 @@ export const HUD_LAYOUT = {
   // Environment chips: icon x positions, text 24px to their right.
   envChipX: [20, 300, 620, 900],
   hazardX: 1080,
+  // ── AG-67: the bottom-right character status card ───────────────────────
+  // A compact riveted card in the right-bottom lane: the picked survivor's
+  // avatar, the four survival stats as mini segmented bars with live numbers,
+  // and one line of situational summary derived from those numbers. The top
+  // plate already carries the four rings (AG-54), so this is deliberately NOT
+  // a second four-ring cluster — it is the character card, "who am I and how
+  // am I holding up", the money/score lane's counterpart at the other corner.
+  //
+  // The lane is pinned by its neighbours, not by taste: the card's bottom edge
+  // sits on feedbackY (556) so it never prints through the feedback lane or
+  // the bag-full warning (bagY 624), and its right edge takes the same 16px
+  // margin the HUD button row below it uses. hudLayout.test.ts's lane contract
+  // (contextBottom < feedbackY) is untouched — the card hangs under the plate,
+  // over the transient lanes, clear of the buttons at y 664.
+  statusCardX: DESIGN_WIDTH - 16 - 240,
+  statusCardY: 376,
+  statusCardW: 240,
+  statusCardH: 180,
+  /** Stat rows inside the card: label x, bar x/width/height, row pitch. */
+  statusRowLabelX: 12,
+  statusRowBarX: 52,
+  statusRowBarW: 96,
+  statusRowBarH: 8,
+  /** First row's centre, then pitch; the avatar/name header sits above. */
+  statusRowFirstCY: 448,
+  statusRowPitch: 23,
+  /** The summary line's centre, near the card's bottom. */
+  statusSummaryCY: 542,
 } as const;
 
 export function hudClockLabel(day: number, minute: number): string {

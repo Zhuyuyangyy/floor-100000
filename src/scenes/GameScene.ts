@@ -53,7 +53,7 @@ import { liftDirection, liftOutcome, liftRequirement, nextSegment, prevSegment, 
 import { crossingSummary, floorGeometryFor } from '../core/worldgen';
 import type { FloorGeometry } from '../core/worldgen';
 import { countItem, isBagFull, removeItem, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
-import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater, recipePreview } from '../systems/CraftingSystem';
+import { craft, hasUpgrade, nightOverlayAlpha, purifyWater, recipePreview } from '../systems/CraftingSystem';
 import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, isNight, spendTime } from '../systems/SurvivalSystem';
 import { ensureNightEvent, eventStatus, setEventStatus } from '../systems/EventSystem';
 import { armNextRoll, dwellRollDue, ensureDwell, isDwellExempt, rollDwellEvent, tickDwell } from '../systems/dwellPressure';
@@ -127,7 +127,6 @@ import {
   buildPanelWell,
   drawLine,
   drawStatBar,
-  fontLineBox,
 } from '../render/uiKit';
 import { characterKeyForNpc, portraitKey } from '../render/artpack';
 import { framedButton, hitRect } from '../render/pointer';
@@ -209,7 +208,19 @@ import {
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
 import { BAG_LAYOUT, CONTAINER_LABEL_DROP, HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
-import { RECIPES, getRecipe, isPassUpgrade, type RecipeId, type UpgradeId } from '../data/recipes';
+import { getRecipe, isPassUpgrade, materialSourceHint, type RecipeId, type UpgradeId } from '../data/recipes';
+import {
+  CRAFT_NODE_H,
+  CRAFT_NODE_W,
+  CRAFT_TREE_BALANCE,
+  CRAFT_TREE_EDGES,
+  CRAFT_TREE_NODES,
+  craftColumnX,
+  craftNodeStatus,
+  craftTreeBounds,
+  findCraftNode,
+  type CraftTreeNode,
+} from '../data/craftTree';
 import { WALL_DECO } from '../data/wallDeco';
 import { NPCS, NPC_FLOOR, getNpc, npcsOnFloor, type BarterOffer, type NpcDef, type NpcId } from '../data/npcs';
 import { QUEST_FLAG, QUESTS } from '../data/quests';
@@ -234,34 +245,37 @@ import {
 import type { NpcPersistedState } from '../ai/types';
 import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId, ShelterAction } from '../core/gameTypes';
 
-// Row pitch for the inventory list: 20px fits a full-size 16x16 icon with a 2px
-// gap either side, and keeps every offset an integer (no scaling, no blur).
-// Crafting rows: the pitch is the font's line box, not a hand-tuned number.
-// It used to be 24, which was tuned for the 1.1em-era face; GameSans draws a
-// 24px label as a 30px line box, so at 24 the adjacent rows printed 6px through
-// each other (AG-24 measured 10 colliding pairs in font.spec.ts:165 — the
-// overlap was 20% of the smaller box, well past the 15% threshold). Deriving it
-// from fontLineBox() means the next font swap cannot rot it again.
-const CRAFT_ROW_PITCH = fontLineBox(TYPE.body);
-// One row per recipe. This used to be a hard-coded 4, which was fine while the
-// workbench had three recipes and a purify entry — the pass chain adds five more,
-// and a fixed four rows would have let the selection walk off the bottom of the
-// list (Enter would have crafted an entry nobody could see).
-// AG-武器分支：配方从 9 条涨到 13 条（+四件武器），全部铺开需要
-// 30 + 13×30 + 12 + 200 + 40 = 672px，超出「720 画布 - HUD 60 - foot 40」的
-// 620 可用区。列表因此是滚动窗口：只画 CRAFT_VISIBLE_ROWS 行，选择走出窗口
-// 时 refreshCraft 的 first 滑动（那套逻辑 AG-44 接入时就有，见 refreshCraft
-// 的 first = Math.max(0, Math.min(...))）。10 行 = 582px 面板，居中后
-// top=69 清开 HUD 带、bottom=651 清开 foot 带。
-const CRAFT_VISIBLE_ROWS = 10;
-// AG-44：详情块（效果/档位/去哪拿）的垂直预算。最坏流：效果 2 行（加固门的
-// effect 在 494px 栏宽里换行）+ 档位/前置 1 行 + 缺料 hints 4 行（三样料、
-// 每条三列出处）= 7 行 × fontLineBox(caption) = 175，加两块间距 12，余量给
-// Phaser 真实换行比 wrapText 估计多咬一行的情形。这是行数预算不是魔法数字：
-// 改动文案后先跑 e2e/ag44-scene-wire.spec.ts 量真实 bounds。
-const CRAFT_DETAIL_H = 200;
-/** 详情块三行之间的透气。 */
-const CRAFT_DETAIL_GAP = 6;
+// AG-61：树形制作面板的几何。13 条配方的滚动列表整体换成一棵合成树
+// （用户原话：「制作可以用那种二叉树那种合成的方案去做」）：材料列在左，
+// 设施/武器列居中，凭证链沿右路梯级下行，边=合成路径。树比面板高是必然，
+// 视图变换（拖拽平移 + 滚轮缩放）的范围与节点尺寸走
+// config/game-balance.json 的 craftTree 块（src/data/craftTree.ts 载时校验），
+// 这里只留排版锚点。
+/**
+ * 树面板宽：**全画布宽**。这一版 Phaser 的 WebGL 不支持任何遮罩
+ * （GeometryMask 只有 Canvas 渲染器有，BitmapMask 整个不存在），放大平移后
+ * 节点会画出面板框、露到世界层。面板做到全宽后画布边缘即面板边缘，配合
+ * clamp 的内边（见 clampCraftPan），内容在任何缩放下都逃不出去。
+ */
+const CRAFT_TREE_PANEL_W = 1280;
+/** 树面板顶：HUD 带（60）之下。 */
+const CRAFT_TREE_PANEL_TOP = 56;
+/** 树面板高：底边 676，清开 foot 带（680）。 */
+const CRAFT_TREE_PANEL_H = 620;
+/** 详情块第一行的 y（效果 / 状态+档位 / 材料 / 去哪拿 四行流式排布）。 */
+const CRAFT_TREE_DETAIL_Y = 490;
+/**
+ * 详情文本的换行宽。右侧留出制作按钮（116px + 12px 透气）。
+ * 最坏流预算：效果 1 行 + 状态 1 行 + 材料 1 行 + 去哪拿 2 行 =
+ * 5 × fontLineBox(caption) + 3 × gap = 143px，落在 520..676 的面板内边
+ * （改动文案后跑 e2e/ag44-scene-wire.spec.ts 量真实 bounds）。
+ */
+const CRAFT_TREE_DETAIL_W = 1030;
+/** 详情块四行之间的透气。 */
+const CRAFT_TREE_DETAIL_GAP = 6;
+/** 制作按钮（Enter 的鼠标版）几何，贴在详情第一行右侧。 */
+const CRAFT_TREE_BUTTON_W = 116;
+const CRAFT_TREE_BUTTON_H = 34;
 // AG-20：终局层（统治核心）。这一层的三个容器是终局演出入口
 // （docs/plans/FINALE_UX.md §2 契约，EndgameScene 归 AG-21）。
 const FINALE_FLOOR = 100000;
@@ -904,26 +918,58 @@ export class GameScene extends Phaser.Scene {
 
   private craftingOpen = false;
   private craftObjects: PanelObject[] = [];
-  private craftRows: Array<{ band: Phaser.GameObjects.Rectangle; name: Phaser.GameObjects.Text; status: Phaser.GameObjects.Text }> = [];
   private craftMarker!: Phaser.GameObjects.Image;
   /**
-   * AG-44：选中行的详情块（原 craftReqText 单行「前置：X」的位置）。三行各司其职：
-   * effect 是「做出来会怎样」（recipePreview.effect），tier 是档位读数 + 前置
-   * （recipePreview.tierNote + requires），hints 是缺料时的「去哪拿」
-   * （canCraft().hints）。数据全部来自 AG-42 的 CraftingSystem，场景只排版。
+   * AG-61：树形面板的节点视图。每个节点四件套：底板（状态色 + 描边）、
+   * 图标或菱形纹章（设施/凭证没有物品图标）、名称、命中区。平移/缩放时
+   * 由 layoutCraftTree 统一改位置与缩放（screen = base * z + pan）。
+   */
+  private craftTreeNodes: Array<{
+    node: CraftTreeNode;
+    band: Phaser.GameObjects.Rectangle;
+    icon: Phaser.GameObjects.Image | null;
+    sigil: Phaser.GameObjects.Rectangle | null;
+    label: Phaser.GameObjects.Text;
+    hit: Phaser.GameObjects.Rectangle;
+  }> = [];
+  /** 合成路径边（一张 Graphics，layoutCraftTree 每次变换重画）。 */
+  private craftTreeEdges!: Phaser.GameObjects.Graphics;
+  /**
+   * AG-61：详情块四行。effect 是「做出来会怎样」（recipePreview.effect），
+   * status 是状态词 + 档位/前置读数（craftNodeStatus + tierNote + requires），
+   * materials 是逐项 持有/需求（旧列表只显示需求，树形态补上库存高亮），
+   * hints 是缺料时的「去哪拿」（canCraft().hints）。数据全部来自 AG-42 的
+   * CraftingSystem，场景只排版。
    */
   private craftDetailTexts!: {
     effect: Phaser.GameObjects.Text;
-    tier: Phaser.GameObjects.Text;
+    status: Phaser.GameObjects.Text;
+    materials: Phaser.GameObjects.Text;
     hints: Phaser.GameObjects.Text;
   };
-  /** 详情块第一行的 y（buildCraftPanel 时算定，refreshCraft 流式排布用）。 */
-  private craftDetailY = 0;
+  /** 制作按钮四件套（framedButton 的返回），材料节点时隐藏。 */
+  private craftButton: PanelObject[] = [];
+  /**
+   * 树面板矩形。panelBox 是「鼠标 ESC：面板外点击关闭」的判据，而 create()
+   * 里 inventory→craft→dialogue→pause 依次 build，最后一次 build 会把
+   * panelBox 覆写成暂停菜单的小盒子——树面板比那个盒子大得多，照旧判据
+   * 点面板内空白处都会当成面板外而关面板。所以打开时用它重置 panelBox。
+   */
+  private craftPanelBox: { x: number; y: number; w: number; h: number } | null = null;
   private craftSelected = 0;
-  // 当前滚动窗口的首个配方下标。鼠标悬停/点击拿到的是槽位 i，真实条目是
-  // craftFirst + i——AG-44 接入时槽位即条目（列表短于窗口），配方涨到 13 条
-  // 后这个换算是必须的，否则滚动态下悬停第 3 行选中的是第 3 条而不是第 3+first 条。
-  private craftFirst = 0;
+  /** 视图变换：缩放与平移。基准坐标 → 屏幕 = base * zoom + pan。 */
+  private craftZoom = 1;
+  private craftPanX = 0;
+  private craftPanY = 0;
+  /**
+   * 拖拽状态：pointerdown 时记起点与当时 pan，pointermove 累积出平移量。
+   * 点击不在这里执行——拖拽超过阈值的按下不算点击，真正的动作延迟到
+   * pointerup 裁决（craftPointerUpHandler），否则「节点上起手拖动」会
+   * 既平移又误触制作。
+   */
+  private craftDragStart: { x: number; y: number; panX: number; panY: number } | null = null;
+  private craftDragMoved = false;
+  private craftPending: { kind: 'node'; id: string } | { kind: 'activate' } | null = null;
   // 行商巡逻的 loop timer。buildEncounterSpots 每次楼层重建都会新建一个，
   // clearEncounterSpots 必须 remove 掉——爬梯走 clearFloor（同场景重建，不是
   // scene.restart），旧 timer 活着而旧 trader 已 destroy，回调打上去就是
@@ -4978,223 +5024,389 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildCraftPanel(): void {
-    const { width, height } = this.viewSize();
-    // 530, not 460: eight recipes means the longest row is a four-character name
-    // plus three materials, and at 460 it ran under the right-aligned status
-    // column (screenshot: 核心权限's cost sat on top of 缺前置).
-    const panelW = 530;
-    // 30 header + CRAFT_ROWS rows at the font's line box + the AG-44 detail
-    // block (effect / tier / hints) + footer clearance.
-    // This was 300, sized when the pitch was 24; at the measured 30 the last
-    // row and the footer ran past the bottom edge. AG-44 added the detail
-    // block below the rows, so the panel grew by CRAFT_DETAIL_H (its comment
-    // carries the line budget) — the whole card still clears the HUD bands
-    // (60 top / 40 foot) inside the 720 canvas.
-    const panelH = 30 + CRAFT_VISIBLE_ROWS * CRAFT_ROW_PITCH + 12 + CRAFT_DETAIL_H + 40;
+    const { width } = this.viewSize();
     const cx = width / 2;
-    const cy = height / 2;
-    const left = cx - panelW / 2;
-    const top = cy - panelH / 2;
+    const left = cx - CRAFT_TREE_PANEL_W / 2;
+    const top = CRAFT_TREE_PANEL_TOP;
     // Remembered for the mouse: a click outside this rectangle closes the panel.
-    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
+    this.craftPanelBox = { x: left, y: top, w: CRAFT_TREE_PANEL_W, h: CRAFT_TREE_PANEL_H };
+    this.panelBox = this.craftPanelBox;
 
-    this.craftObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.craft));
-    // OVERHAUL UI: header strip instead of a centred title floating on a slab.
-    this.craftObjects.push(...buildPanelHeader(this, left, top, panelW, '工作台 · 制作', UI.accent, PANEL_DEPTH.game.craft + 5));
-    const title = this.add.text(cx, top + 18, '', { fontFamily: FONT_FAMILY, fontSize: '32px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
-    this.craftObjects.push(title);
+    this.craftObjects.push(...buildPanel(this, cx, top + CRAFT_TREE_PANEL_H / 2, CRAFT_TREE_PANEL_W, CRAFT_TREE_PANEL_H, 'yellow', PANEL_DEPTH.game.craft));
+    this.craftObjects.push(...buildPanelHeader(this, left, top, CRAFT_TREE_PANEL_W, '工作台 · 制作', UI.accent, PANEL_DEPTH.game.craft + 5, left + 28));
+    // 面板内的操作提示（foot 带那份由 openPanelHint 出，内容一致）。
+    const viewHint = this.add
+      .text(left + CRAFT_TREE_PANEL_W - 28, top + 15, '拖拽平移 · 滚轮缩放', {
+        fontFamily: FONT_FAMILY,
+        fontSize: `${TYPE.caption}px`,
+        color: hex(PALETTE.clothHigh),
+      })
+      .setOrigin(1, 0.5)
+      .setDepth(PANEL_DEPTH.game.craft + 6);
+    this.craftObjects.push(viewHint);
 
-    // OVERHAUL UI: row bands + a status column.
-    //
-    // The old list was four lines of text inside an opaque slab — no banding, no
-    // columns, nothing to anchor the eye. Each row now has its own band (alternate
-    // rows tinted), a fixed-cost column and a right-aligned status, so a row reads
-    // like a row instead of a sentence.
-    this.craftRows = [];
-    for (let i = 0; i < CRAFT_VISIBLE_ROWS; i++) {      const rowY = top + 30 + i * CRAFT_ROW_PITCH;
-      const band = this.add.rectangle(left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.34).setDepth(PANEL_DEPTH.game.craft + 5);
-      // Centre on the row, not on a hand-tuned offset: the row IS the font's
-      // line box now, so the middle of the pitch is the middle of the text.
-      const name = this.add.text(left + 18, rowY + CRAFT_ROW_PITCH / 2, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-      const status = this.add.text(left + panelW - 24, rowY + CRAFT_ROW_PITCH / 2, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-      this.craftRows.push({ band, name, status });
-      this.craftObjects.push(band, name, status);
-      this.craftObjects.push(
-        this.panelHit( left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, PANEL_DEPTH.game.craft + 7, {
-          onOver: () => {
-            const index = this.craftFirst + i;
-            if (this.craftSelected === index) return;
-            this.craftSelected = index;
-            this.refreshCraft();
-          },
-          onClick: () => {
-            const index = this.craftFirst + i;
-            if (this.craftSelected !== index) {
-              this.craftSelected = index;
-              this.refreshCraft();
-              playSfx('click');
-              return;
-            }
-            this.onUse();
-          },
-        }),
-      );
+    // 合成路径的边先画，落在所有节点底板之下（同深度按创建序）。
+    this.craftTreeEdges = this.add.graphics().setDepth(PANEL_DEPTH.game.craft + 1);
+    this.craftObjects.push(this.craftTreeEdges);
+
+    // 节点：底板 + 图标/纹章 + 名称 + 命中区。顺序即堆叠顺序——applyPanelDepth
+    // 会把它们统一拉到同一深度，同深度内后创建的画在上层。
+    this.craftTreeNodes = [];
+    for (const node of CRAFT_TREE_NODES) {
+      const x = craftColumnX(node.col);
+      const band = this.add
+        .rectangle(x + CRAFT_NODE_W / 2, node.y, CRAFT_NODE_W, CRAFT_NODE_H, UI.surfaceRaised)
+        .setOrigin(0.5)
+        .setDepth(PANEL_DEPTH.game.craft + 2);
+      band.setStrokeStyle(1, UI.line, 0.5);
+      // 物品（材料/武器/脏水）有 16px 图标；设施与凭证没有物品图标，用一枚
+      // 菱形纹章占位——节点因此仍是「图标 + 名称」的同一形状。
+      const icon = node.iconKey
+        ? this.add.image(x + 16, node.y, node.iconKey).setOrigin(0.5).setScale(1.25).setDepth(PANEL_DEPTH.game.craft + 3)
+        : null;
+      const sigil = node.iconKey
+        ? null
+        : this.add.rectangle(x + 16, node.y, 12, 12, PALETTE.clothHigh).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 3);
+      sigil?.setRotation(Math.PI / 4);
+      const label = this.add
+        .text(x + 30, node.y, node.displayName, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+        .setOrigin(0, 0.5)
+        .setDepth(PANEL_DEPTH.game.craft + 3);
+      const hit = this.panelHit(x, node.y - CRAFT_NODE_H / 2, CRAFT_NODE_W, CRAFT_NODE_H, PANEL_DEPTH.game.craft + 4, {
+        // 悬停即选中：旧列表 onOver→选中的同款语义，详情块随之刷新。
+        onOver: () => this.selectCraftNode(node.id),
+        // 真正的动作延迟到 pointerup（拖拽阈值裁决），见 craftPointerUpHandler。
+        onClick: () => {
+          this.craftPending = { kind: 'node', id: node.id };
+        },
+      });
+      this.craftTreeNodes.push({ node, band, icon, sigil, label, hit });
+      this.craftObjects.push(band, label, hit);
+      if (icon) this.craftObjects.push(icon);
+      if (sigil) this.craftObjects.push(sigil);
     }
-    // AG-44：详情块——效果预览、档位/前置读数、缺料出处。修前面板只有
-    // 名称+材料，玩家在按 Enter 前看不到「做出来会怎样」（effect）、
-    // 「这条属于更高档位」（tierNote）、「差的料去哪拿」（hints）。
-    // 三份数据都由 AG-42 的 recipePreview / canCraft 打包好（docs/plans/
-    // CRAFT.md §5 的交接），这里只负责排版：行内起点在最后一行 band 之下
-    // 12px（与旧 craftReqText 同一锚点），宽度吃面板内边距 18px。
-    const detailX = left + 18;
-    const detailW = panelW - 36;
-    const detailY = top + 30 + CRAFT_VISIBLE_ROWS * CRAFT_ROW_PITCH + 12;
-    this.craftDetailY = detailY;
+
+    // 详情块四行：效果 / 状态+档位 / 材料 / 去哪拿（旧列表详情块的超集）。
+    const detailX = left + 28;
     const detailText = (color: string): Phaser.GameObjects.Text =>
       this.add
-        .text(detailX, detailY, '', {
+        .text(detailX, CRAFT_TREE_DETAIL_Y, '', {
           fontFamily: FONT_FAMILY,
           fontSize: `${TYPE.caption}px`,
           color,
-          wordWrap: { width: detailW, useAdvancedWrap: true },
+          wordWrap: { width: CRAFT_TREE_DETAIL_W, useAdvancedWrap: true },
         })
         .setOrigin(0, 0)
         .setDepth(PANEL_DEPTH.game.craft + 6);
     this.craftDetailTexts = {
       effect: detailText(hex(TEXT.primary)),
-      tier: detailText(hex(TEXT.dim)),
+      status: detailText(hex(TEXT.dim)),
+      materials: detailText(hex(TEXT.primary)),
       hints: detailText(hex(TEXT.warn)),
     };
-    this.craftObjects.push(this.craftDetailTexts.effect, this.craftDetailTexts.tier, this.craftDetailTexts.hints);
-    const footer = this.add.text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-    this.craftObjects.push(footer, this.craftMarker);
+    this.craftObjects.push(this.craftDetailTexts.effect, this.craftDetailTexts.status, this.craftDetailTexts.materials, this.craftDetailTexts.hints);
 
+    // 制作按钮：Enter 的鼠标版。点击同样走 pointerup 裁决（拖拽不算点击）。
+    this.craftButton = framedButton(
+      this,
+      left + 28 + CRAFT_TREE_DETAIL_W + 12,
+      CRAFT_TREE_DETAIL_Y,
+      CRAFT_TREE_BUTTON_W,
+      CRAFT_TREE_BUTTON_H,
+      '制作',
+      PANEL_DEPTH.game.craft + 7,
+      () => {
+        this.craftPending = { kind: 'activate' };
+      },
+      { fill: UI.accent, line: PALETTE.lightHigh, text: hex(PALETTE.ink), hover: PALETTE.lightHigh },
+    ) as PanelObject[];
+    this.craftObjects.push(...this.craftButton);
+
+    this.craftObjects.push(this.craftMarker);
     applyPanelDepth(this.craftObjects, PANEL_DEPTH.game.craft);
+    // marker 与节点同深度，而它建得最早（create() 里）——不抬深度会被节点
+    // 底板盖住。e2e 的 navTo 也靠它定位选中行。
+    this.craftMarker.setDepth(PANEL_DEPTH.game.craft + 20);
     this.assertPanelContent('craft', this.craftObjects);
     for (const o of this.craftObjects) o.setVisible(false);
   }
 
-  private craftEntries(): Array<{ kind: 'recipe' | 'purify'; id?: RecipeId }> {
-    const entries: Array<{ kind: 'recipe' | 'purify'; id?: RecipeId }> = RECIPES.map((r) => ({ kind: 'recipe', id: r.id }));
-    if (hasUpgrade(getGame(), 'purifier')) entries.push({ kind: 'purify' });
-    return entries;
+  /** 悬停/键盘选中一个节点（craftSelected 是它在导航序里的下标）。 */
+  private selectCraftNode(id: string): void {
+    const index = this.craftEntries().findIndex((e) => e.id === id);
+    if (index < 0 || this.craftSelected === index) return;
+    this.craftSelected = index;
+    this.refreshCraft();
+  }
+
+  /**
+   * 导航序：树节点的数组顺序（材料 → 设施/武器 → 凭证链 → 净化插在净水器
+   * 之后）。净化条目与旧列表同一条门——只在净水器已建造时存在。
+   * ↑/↓ 在这条线性序上移动，Enter 执行选中项。
+   */
+  private craftEntries(): Array<{ kind: 'material' | 'recipe' | 'purify'; id: string }> {
+    const state = getGame();
+    return CRAFT_TREE_NODES.filter((n) => n.kind !== 'action' || hasUpgrade(state, 'purifier')).map((n) => ({
+      kind: n.kind === 'material' ? 'material' : n.kind === 'action' ? 'purify' : 'recipe',
+      id: n.id,
+    }));
   }
 
   private refreshCraft(): void {
     const state = getGame();
     const entries = this.craftEntries();
     if (this.craftSelected >= entries.length) this.craftSelected = Math.max(0, entries.length - 1);
-    // The list can be one entry longer than the rows — the purify entry appears
-    // once the purifier is built — so the window slides instead of letting the
-    // selection sit on a row that is not drawn.
-    const rows = this.craftRows.length;
-    const first = Math.max(0, Math.min(this.craftSelected - rows + 1, entries.length - rows));
-    this.craftFirst = first;
-    for (let i = 0; i < rows; i++) {      const row = this.craftRows[i];
-      if (!row) continue;
-      const index = first + i;
-      const entry = entries[index];
-      if (!entry) {
-        row.name.setText('');
-        row.status.setText('');
-        row.band.setAlpha(0);
-        continue;
-      }
-      const selected = index === this.craftSelected;
-      row.band.setAlpha(selected ? 0.72 : 0.3);
-      row.band.setFillStyle(selected ? UI.accent : UI.surfaceRaised, 1);
-      if (entry.kind === 'recipe') {
-        const recipe = getRecipe(entry.id!);
-        // No "×" between material and count: the pass chain's rows carry a
-        // four-character name plus three three-character materials, and with the
-        // multiplier they ran under the right-aligned status column at 460px.
-        const cost = Object.entries(recipe.cost)
-          .map(([id, n]) => `${getItem(id as ItemId).displayName}${n}`)
-          .join(' ');
-        row.name.setText(`${recipe.displayName}  ${cost}`);
-        // The selected band is the warm accent, so light text on it read as a
-        // smear. Dark ink is the only colour in the palette with contrast on it.
-        row.name.setColor(selected ? hex(PALETTE.ink) : hex(TEXT.primary));
-        // 武器不是设施，没有"已建造"——只有 upgrade 才查 homeUpgrades。
-        // entry.kind 是面板自己的分类（recipe/purify），配方的 kind 要另取。
-        const built = entry.id !== undefined && getRecipe(entry.id).kind === 'upgrade' && hasUpgrade(state, entry.id as UpgradeId);
-        const check = canCraft(state, entry.id!);
-        // A missing credential is not a materials problem: say 缺前置 instead of
-        // 材料不足, or the player gathers what they already have enough of.
-        const gated = !check.ok && check.reason !== undefined;
-        row.status.setText(built ? '已建' : gated ? '缺前置' : check.ok ? '可制作' : '材料不足');
-        row.status.setColor(selected ? hex(PALETTE.ink) : built ? hex(PALETTE.clothHigh) : gated ? hex(TEXT.warn) : check.ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));      } else {
-        // AG-11: waterPurifierRuns 的显示语义。purifyWater 一次炼光整袋脏水，
-        // 没有"次数"状态可读——诚实的"剩余"是下一次开机能炼多少瓶。批次化
-        // 是这个升级的价值所在（小周 1:1 免费换，净水器赢在回来时满载），
-        // 瓶数让那份价值在按 Enter 之前就看得见。
-        const dirty = countItem(state.player.inventory, 'dirty_water');
-        const can = dirty >= 1;
-        row.name.setText('净化  脏水→净水');
-        row.name.setColor(selected ? hex(PALETTE.ink) : hex(TEXT.primary));
-        row.status.setText(can ? `可净化 ×${dirty}` : '缺脏水');
-        row.status.setColor(selected ? hex(PALETTE.ink) : can ? hex(PALETTE.clothHigh) : hex(TEXT.dim));
+    const selectedId = entries[this.craftSelected]?.id;
+    // ── 节点三态：可做=亮边、不足=灰、缺前置=暗+警告边、已建=青、材料根=素面 ──
+    for (const view of this.craftTreeNodes) {
+      const shown = entries.some((e) => e.id === view.node.id);
+      view.band.setVisible(shown);
+      view.label.setVisible(shown);
+      view.hit.setVisible(shown);
+      if (view.icon) view.icon.setVisible(shown);
+      if (view.sigil) view.sigil.setVisible(shown);
+      if (!shown) continue;
+      const status = craftNodeStatus(state, view.node);
+      const selected = view.node.id === selectedId;
+      const fill =
+        status.tone === 'accent' ? UI.accent
+        : status.tone === 'good' ? UI.good
+        : status.tone === 'warn' ? TEXT.warn
+        : UI.surfaceRaised;
+      const fillAlpha = status.tone === 'neutral' ? 0.3 : status.tone === 'dim' ? 0.28 : 0.34;
+      view.band.setFillStyle(fill, fillAlpha);
+      view.band.setStrokeStyle(
+        selected ? 2 : 1,
+        selected ? PALETTE.lightHigh
+          : status.tone === 'accent' ? UI.accent
+          : status.tone === 'good' ? UI.good
+          : status.tone === 'warn' ? TEXT.warn
+          : UI.line,
+        selected ? 1 : status.tone === 'dim' || status.tone === 'neutral' ? 0.45 : 0.9,
+      );
+      view.label.setColor(
+        hex(
+          status.tone === 'accent' ? PALETTE.lightHigh
+          : status.tone === 'warn' ? TEXT.warn
+          : status.tone === 'neutral' ? TEXT.dim
+          : TEXT.primary,
+        ),
+      );
+      if (view.sigil) {
+        view.sigil.setFillStyle(
+          status.tone === 'accent' ? UI.accent
+          : status.tone === 'good' ? UI.good
+          : status.tone === 'warn' ? TEXT.warn
+          : PALETTE.clothHigh,
+          status.tone === 'dim' || status.tone === 'neutral' ? 0.5 : 0.95,
+        );
       }
     }
-    // AG-44：详情块——「做出来会怎样」（effect）、「这条属于第几档 / 前置拿没拿」
-    // （tierNote + requires）、「差的料去哪拿」（hints）。数据全部来自 AG-42 的
-    // recipePreview / canCraft（CRAFT.md §5 的交接契约），本场景只排版：
-    // 三行从最后一行 band 之下 12px 起流式排布，行高取 Text 自己的测量值
-    // （GameSans 的真实行盒），空行不占位。
-    const selectedEntry = entries[this.craftSelected];
+    this.layoutCraftTree(selectedId);
+    this.refreshCraftDetail(state, selectedId);
+  }
+
+  /**
+   * 视图变换后的统一重排：screen = base * zoom + pan。节点、边、marker 一起
+   * 走——拖拽与滚轮缩放都只改 craftPan/craftZoom 后调这里。
+   */
+  private layoutCraftTree(selectedId: string | undefined): void {
+    const z = this.craftZoom;
+    const sx = (base: number): number => base * z + this.craftPanX;
+    const sy = (base: number): number => base * z + this.craftPanY;
+    for (const view of this.craftTreeNodes) {
+      const x = craftColumnX(view.node.col);
+      view.band.setPosition(sx(x + CRAFT_NODE_W / 2), sy(view.node.y)).setScale(z);
+      view.label.setPosition(sx(x + 30), sy(view.node.y)).setScale(z);
+      if (view.icon) view.icon.setPosition(sx(x + 16), sy(view.node.y)).setScale(z * 1.25);
+      if (view.sigil) view.sigil.setPosition(sx(x + 16), sy(view.node.y)).setScale(z);
+      view.hit.setPosition(sx(x), sy(view.node.y - CRAFT_NODE_H / 2)).setScale(z);
+    }
+    // 边：选中节点的入边高亮（它要什么），材料节点高亮出边（它做什么用）。
+    this.craftTreeEdges.clear();
+    for (const edge of CRAFT_TREE_EDGES) {
+      const from = findCraftNode(edge.from);
+      const to = findCraftNode(edge.to);
+      if (!from || !to) continue;
+      const hot = edge.to === selectedId || edge.from === selectedId;
+      this.craftTreeEdges.lineStyle(1, hot ? UI.accent : UI.line, hot ? 0.9 : 0.35);
+      this.craftTreeEdges.beginPath();
+      this.craftTreeEdges.moveTo(sx(craftColumnX(from.col) + CRAFT_NODE_W), sy(from.y));
+      this.craftTreeEdges.lineTo(sx(craftColumnX(to.col)), sy(to.y));
+      this.craftTreeEdges.strokePath();
+    }
+    // marker：选中节点名称的左侧。e2e/crafting.spec.ts 的 navTo 用
+    // 「marker.y ±4 之内找标签」定位选中行，位置必须与标签同行。
+    const selectedView = this.craftTreeNodes.find((v) => v.node.id === selectedId);
+    this.craftMarker.setVisible(selectedView !== undefined);
+    if (selectedView) placeMarkerLeftOf(this.craftMarker, selectedView.label);
+  }
+
+  /** 详情块：效果 / 状态+档位 / 材料 / 去哪拿 + 制作按钮的显隐与标签。 */
+  private refreshCraftDetail(state: GameState, selectedId: string | undefined): void {
     const detail = this.craftDetailTexts;
+    const node = selectedId ? findCraftNode(selectedId) : undefined;
     let effectLine = '';
-    let tierLine = '';
+    let statusLine = '';
+    let materialsLine = '';
     let hintsLine = '';
-    let tierColor = hex(TEXT.dim);
-    if (selectedEntry?.kind === 'recipe') {
-      const preview = recipePreview(state, selectedEntry.id!);
+    let statusColor = hex(TEXT.dim);
+    let showButton = false;
+    if (node?.kind === 'recipe') {
+      const preview = recipePreview(state, node.id as RecipeId);
+      const status = craftNodeStatus(state, node);
       effectLine = `效果：${preview.effect}`;
-      // tierNote 与前置合并成一行：两者都是「这条配方现在够不够格」的读数，
-      // 分两行会在 4 行 hints 之外再吃掉 25px 的详情预算。
-      tierLine = preview.tierNote ?? '';
+      // 状态词与档位/前置合并成一行：两者都是「这条配方现在够不够格」的读数。
+      statusLine = `状态：${status.label}`;
+      if (preview.tierNote) statusLine += ` · ${preview.tierNote}`;
       if (preview.requires) {
-        const req = `前置：${preview.requires.displayName} ${preview.requires.met ? '已获得' : '未获得'}`;
-        tierLine = tierLine ? `${tierLine} · ${req}` : req;
+        statusLine += ` · 前置：${preview.requires.displayName} ${preview.requires.met ? '已获得' : '未获得'}`;
       }
-      // 未达档位 / 未获前置都走警告色：进度感与卡点都要在按 Enter 前可见。
-      tierColor = preview.tierLocked || (preview.requires && !preview.requires.met) ? hex(TEXT.warn) : hex(TEXT.dim);
-      if (preview.hints && preview.hints.length > 0) {
-        // hints 的每条是「材料：出处」。分隔符用「；」而不是默认的逗号，免得
-        // 出处里的「6/7/9/10层概率」被读成同一处的并列。
-        hintsLine = `去哪拿：${preview.hints.join('；')}`;
-      }
-    } else if (selectedEntry?.kind === 'purify') {
-      // 净化行的效果文案取净水器配方自己的 effect（数据唯一来源，不另写一套）；
-      // purify 条目只在净水器已建造时存在，所以这里永远读得到。
+      statusColor = hex(
+        status.tone === 'accent' ? PALETTE.lightHigh
+        : status.tone === 'good' ? PALETTE.clothHigh
+        : status.tone === 'warn' ? TEXT.warn
+        : TEXT.dim,
+      );
+      // 材料行：持有/需求逐项——旧列表只印需求，树形态补上库存读数。
+      materialsLine = `材料：${preview.cost.map((c) => `${c.displayName} ${c.have}/${c.need}`).join(' · ')}`;
+      if (preview.hints && preview.hints.length > 0) hintsLine = `去哪拿：${preview.hints.join('；')}`;
+      showButton = true;
+    } else if (node?.kind === 'action') {
+      // 净化行的效果文案取净水器配方自己的 effect（数据唯一来源）。
       effectLine = `效果：${getRecipe('purifier').effect}`;
+      const status = craftNodeStatus(state, node);
+      statusLine = `状态：${status.label}`;
+      statusColor = hex(status.tone === 'accent' ? PALETTE.lightHigh : TEXT.dim);
+      showButton = true;
+    } else if (node?.kind === 'material') {
+      // 材料节点：出处（去哪拿）+ 用处（树里以它为 input 的配方，边的反查）。
+      const hint = materialSourceHint(node.id as ItemId);
+      effectLine = `出处：${hint ?? '世界各处'}`;
+      const consumers = CRAFT_TREE_NODES.filter((n) => n.inputs.includes(node.id)).map((n) => n.displayName);
+      statusLine = consumers.length > 0 ? `状态：基础材料 · 用来合成：${consumers.join('、')}` : '状态：基础材料';
     }
     detail.effect.setText(effectLine);
-    detail.tier.setText(tierLine);
-    detail.tier.setColor(tierColor);
+    detail.status.setText(statusLine);
+    detail.status.setColor(statusColor);
+    detail.materials.setText(materialsLine);
     detail.hints.setText(hintsLine);
     // 流式布局：每行按自己的真实高度占位，空行收起。
-    let dy = this.craftDetailY;
-    for (const t of [detail.effect, detail.tier, detail.hints]) {
+    let dy = CRAFT_TREE_DETAIL_Y;
+    for (const t of [detail.effect, detail.status, detail.materials, detail.hints]) {
       if (t.text) {
         t.setPosition(t.x, dy);
         t.setVisible(true);
-        dy += t.height + CRAFT_DETAIL_GAP;
+        dy += t.height + CRAFT_TREE_DETAIL_GAP;
       } else {
         t.setVisible(false);
       }
     }
-    const selectedRow = this.craftRows[this.craftSelected - first];
-    this.craftMarker.setVisible(entries[this.craftSelected] !== undefined && selectedRow !== undefined);
-    if (entries[this.craftSelected] && selectedRow) placeMarkerLeftOf(this.craftMarker, selectedRow.name);
+    const buttonVisible = showButton && this.craftingOpen;
+    for (const o of this.craftButton) o.setVisible(buttonVisible);
+    if (buttonVisible && this.craftButton[2] instanceof Phaser.GameObjects.Text) {
+      this.craftButton[2].setText(node?.kind === 'action' ? '净化' : '制作');
+    }
   }
 
+  /**
+   * 平移 clamp：树内容不许被拖出活动带。活动带横向是面板内边，纵向止于
+   * 详情块之上——平移不许把节点拖进详情文字里。缩放 1 时排版即到位
+   * （pan=0 恒在带内），放大后树比带宽，才给到头部的平移自由。
+   *
+   * 曾经的写法在这里栽过一次：「树比可视区大时给到底的自由，小时居中」的
+   * 分支把 min/max 写反了——树放大后每次回调都被重置回中心值，平移纹丝
+   * 不动（实测位移恒 0）。现在只有一道 Clamp，min/max 随缩放方向互换。
+   */
+  private clampCraftPan(): void {
+    const z = this.craftZoom;
+    const b = craftTreeBounds();
+    const box = this.panelBox;
+    const interiorLeft = (box?.x ?? 0) + 32;
+    const interiorRight = (box ? box.x + box.w : 1280) - 32;
+    const interiorTop = (box?.y ?? 56) + 38;
+    const interiorBottom = CRAFT_TREE_DETAIL_Y - 8;
+    const loX = interiorRight - b.maxX * z;
+    const hiX = interiorLeft - b.minX * z;
+    this.craftPanX = Phaser.Math.Clamp(this.craftPanX, Math.min(loX, hiX), Math.max(loX, hiX));
+    const loY = interiorBottom - b.maxY * z;
+    const hiY = interiorTop - b.minY * z;
+    this.craftPanY = Phaser.Math.Clamp(this.craftPanY, Math.min(loY, hiY), Math.max(loY, hiY));
+  }
+
+  /** pointerdown：记拖拽起点。任何按下都记——节点上起手的拖动也要能平移。 */
+  private beginCraftDrag(pointer: Phaser.Input.Pointer, onInteractive: boolean): void {
+    this.craftDragStart = { x: pointer.x, y: pointer.y, panX: this.craftPanX, panY: this.craftPanY };
+    this.craftDragMoved = false;
+    // 落在节点/按钮上的按下，其 onClick 已经在本事件之前跑完（Phaser 先发
+    // 游戏对象事件再发场景事件），pending 是本次按下的；落在空白处的按下
+    // 没有 onClick，清掉上一拍可能残留的 pending（在画布外松手就不会有
+    // pointerup 来清它）。
+    if (!onInteractive) this.craftPending = null;
+  }
+
+  /**
+   * pointermove 事件驱动：按住并移动 → 平移（树单位 = 屏幕增量 / 缩放）。
+   * 必须是事件而不是 update() 轮询 isDown——一次快速拖拽的
+   * down→move×N→up 会在同一帧的输入批次里全部消费完，轮询看到 isDown
+   * 已经是 false，平移一步都不会发生（实测：位移恒 0）。
+   */
+  private readonly craftPointerMoveHandler = (pointer: Phaser.Input.Pointer): void => {
+    if (!this.craftingOpen) return;
+    const start = this.craftDragStart;
+    if (!start || !pointer.isDown) return;
+    const dx = pointer.x - start.x;
+    const dy = pointer.y - start.y;
+    if (!this.craftDragMoved && Math.abs(dx) + Math.abs(dy) > CRAFT_TREE_BALANCE.dragThresholdPx) this.craftDragMoved = true;
+    if (!this.craftDragMoved) return;
+    this.craftPanX = start.panX + dx / this.craftZoom;
+    this.craftPanY = start.panY + dy / this.craftZoom;
+    this.clampCraftPan();
+    this.layoutCraftTree(this.craftEntries()[this.craftSelected]?.id);
+  };
+
+  /** pointerup：没拖过才算点击。点击先补选中，再执行（与 Enter 同一条路）。 */
+  private readonly craftPointerUpHandler = (): void => {
+    if (!this.craftingOpen) return;
+    const pending = this.craftPending;
+    const moved = this.craftDragMoved;
+    this.craftPending = null;
+    this.craftDragStart = null;
+    this.craftDragMoved = false;
+    if (!pending || moved) return;
+    if (pending.kind === 'node') this.selectCraftNode(pending.id);
+    this.activateCraftEntry();
+  };
+
+  /** 滚轮缩放：以指针为锚点，指针下的树点在缩放前后保持不动。 */
+  private readonly craftWheelHandler = (pointer: Phaser.Input.Pointer, _over: unknown[], _dx: number, dy: number): void => {
+    if (!this.craftingOpen) return;
+    const z0 = this.craftZoom;
+    const factor = dy < 0 ? 1 + CRAFT_TREE_BALANCE.zoomStep : 1 - CRAFT_TREE_BALANCE.zoomStep;
+    const z1 = Phaser.Math.Clamp(z0 * factor, CRAFT_TREE_BALANCE.zoomMin, CRAFT_TREE_BALANCE.zoomMax);
+    if (z1 === z0) return;
+    const tx = (pointer.x - this.craftPanX) / z0;
+    const ty = (pointer.y - this.craftPanY) / z0;
+    this.craftZoom = z1;
+    this.craftPanX = pointer.x - tx * z1;
+    this.craftPanY = pointer.y - ty * z1;
+    this.clampCraftPan();
+    this.layoutCraftTree(this.craftEntries()[this.craftSelected]?.id);
+  };
 
   private toggleCrafting(): void {
     this.craftingOpen = !this.craftingOpen;
     for (const o of this.craftObjects) o.setVisible(this.craftingOpen);
     if (this.craftingOpen) {
+      // 每次打开都回到全树视图：缩放/平移是临时查看手段，不跨开关保留。
+      this.panelBox = this.craftPanelBox;
       this.craftSelected = 0;
+      this.craftZoom = 1;
+      this.craftPanX = 0;
+      this.craftPanY = 0;
+      this.craftDragStart = null;
+      this.craftDragMoved = false;
+      this.craftPending = null;
       this.refreshCraft();
     }
   }
@@ -5301,8 +5513,15 @@ export class GameScene extends Phaser.Scene {
     const state = getGame();
     const entry = this.craftEntries()[this.craftSelected];
     if (!entry) return;
+    if (entry.kind === 'material') {
+      // 材料不是配方：Enter 给出去处提示（与详情块同源），不做任何扣减。
+      const itemId = entry.id as ItemId;
+      const hint = materialSourceHint(itemId);
+      this.flash(hint ? `${getItem(itemId).displayName}：${hint}` : `${getItem(itemId).displayName}是基础材料，用来合成右侧配方`);
+      return;
+    }
     if (entry.kind === 'recipe') {
-      const result = craft(state, entry.id!);
+      const result = craft(state, entry.id as RecipeId);
       if (result.ok) {
         saveToStorage(state);
         this.refreshCraft();
@@ -5313,7 +5532,7 @@ export class GameScene extends Phaser.Scene {
         // was a sound and a line of text with nothing on screen; the burst is
         // anchored to the station the player is standing at, not to the player.
         playFx(this, 'collect-burst', CRAFT_X, PLAYER_FEET_Y - 40, LIGHT_DEPTH);
-        const recipe = getRecipe(entry.id!);
+        const recipe = getRecipe(entry.id as RecipeId);
         this.flash(`${recipe.kind === 'upgrade' ? '建造了' : '制作了'} ${recipe.displayName}（-${ACTION_COSTS.craft} 分钟）`);
         this.chargeTime(ACTION_COSTS.craft);
       } else {
@@ -6075,6 +6294,17 @@ export class GameScene extends Phaser.Scene {
     // plugin is not reset with it.
     this.input.off('pointerdown', this.pointerHandler);
     this.input.on('pointerdown', this.pointerHandler);
+    // AG-61：树形制作面板的视图变换。滚轮缩放只在制作面板开着时生效；
+    // pointerup 在场景与画布外各绑一份——在画布外松手也要清算点击/拖拽，
+    // 否则残留的 pending 会在下一拍空白按下时被误执行。
+    this.input.off('wheel', this.craftWheelHandler);
+    this.input.on('wheel', this.craftWheelHandler);
+    this.input.off('pointermove', this.craftPointerMoveHandler);
+    this.input.on('pointermove', this.craftPointerMoveHandler);
+    this.input.off('pointerup', this.craftPointerUpHandler);
+    this.input.on('pointerup', this.craftPointerUpHandler);
+    this.input.off('pointerupoutside', this.craftPointerUpHandler);
+    this.input.on('pointerupoutside', this.craftPointerUpHandler);
   }
 
   /**
@@ -6237,6 +6467,9 @@ export class GameScene extends Phaser.Scene {
     // anyPanelOpen 的那个分支——那会走到 onEsc()，在只有任务面板开着时把暂停
     // 菜单顶起来。
     if (this.questsOpen) return;
+    // AG-61：树形制作面板的拖拽平移。在任何早退之前记起点——节点上的按下
+    // 也要能变成平移（点击则延迟到 pointerup 裁决，见 craftPointerUpHandler）。
+    if (this.craftingOpen) this.beginCraftDrag(pointer, currentlyOver.length > 0);
     // A row or a button already took this press.
     if (currentlyOver.length > 0) return;
 
@@ -6754,7 +6987,7 @@ export class GameScene extends Phaser.Scene {
     if (this.nightChoiceOpen) return '↑/↓ 选择 · Enter 确认 · ESC 今晚再想想';
     if (this.shelterOpen) return getGame().shelterPlan?.resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回';
     if (this.inventoryOpen) return '↑/↓ 选择 · Enter 使用 · I 关闭';
-    if (this.craftingOpen) return '↑/↓ 选择 · Enter 制作 · C 关闭';
+    if (this.craftingOpen) return '↑/↓ 选择 · Enter 制作 · 拖拽平移 · 滚轮缩放 · C 关闭';
     if (this.ventureOpen) return '↑/↓ 选择 · Enter 入股 · G 关闭';
     if (this.dialogueOpen) return '↑/↓ 选择 · Enter 确定 · ESC 返回';
     if (this.pauseOpen) return '↑/↓ 选择 · Enter 确认 · ESC 继续';

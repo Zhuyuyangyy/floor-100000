@@ -1994,17 +1994,25 @@ export class GameScene extends Phaser.Scene {
     const w = this.weapon;
     if (!w || !w.active) return;
     const flip = this.player.flipX;
+    // AG-90 接线 R1 修复：一次性动作 key 的生成侧（playActionAnim 的调用处）
+    // 用的是 attackAnimKey(this.metaSelectedCharacter()) 等按角色取的 key，
+    // 同步侧的比较对象也必须跟着 who 走——硬编码 'player' 会让选了
+    // alin/xiaozhou/wanderer 的玩家整个 attack GIF 期间撬棍静止在髋部持握位、
+    // 死亡时不淡出（QA 第 1 轮 R1）。who 每帧读一次 meta：loadMeta 是
+    // localStorage.getItem + 小对象 JSON.parse，微秒级；update() 后半的
+    // walk/idle 挑选段本就同频调用 metaSelectedCharacter()，不引入新量级。
+    const who = this.metaSelectedCharacter();
     // A dying survivor lets go of it. The fall clip drops the body through the
     // height the grip is anchored at, so a held crowbar would hover over the
     // corpse at waist height. Fading it out and back in on the next non-death
     // frame is cheaper than a drop animation nobody will be watching the end
     // card over.
-    if (this.time.now < this.actionAnimUntil && this.actionAnimKey === dieAnimKey('player')) {
+    if (this.time.now < this.actionAnimUntil && this.actionAnimKey === dieAnimKey(who)) {
       w.setAlpha(0);
       return;
     }
     const swinging =
-      this.time.now < this.actionAnimUntil && this.actionAnimKey === attackAnimKey('player');
+      this.time.now < this.actionAnimUntil && this.actionAnimKey === attackAnimKey(who);
 
     if (swinging) {
       // AG-90：帧号映射同时认两个来源——程序化 walk sheet 把 attack 段放在
@@ -5089,7 +5097,15 @@ export class GameScene extends Phaser.Scene {
     }
     // 具名 hud-*：存量 e2e 的面板文本采集按名字跳过它（它是 HUD，不是面板）。
     this.tutorialSkipParts[2]?.setName('hud-tutorial-skip');
-    this.tutorialSkipShown = false;
+    // QA 第 1 轮 R2 修复：flag 的契约是「零件此刻处于可见态」，而上面
+    // framedButton 新建的四个零件（底/边/字/hitRect）默认可见——所以这里必须
+    // 记 true。记 false 时，refreshTutorialChrome 的相等守卫
+    // （showButton !== flag）在终态教程（上局跳过/完成 → showButton=false）
+    // 下判定「无需转换」，新建零件就带着默认可见态挂完整局：右上角「跳过
+    // 教程」按钮对开局即终态的玩家残留。记 true 后：终态 → false!==true 走
+    // 转换收起；新教程 → showButton=true 与 flag 相等，零件本就可见，无需
+    // 转换。局内跳过/完成（状态翻转 true→false）本就走转换分支，不受影响。
+    this.tutorialSkipShown = true;
     this.refreshTutorialChrome();
   }
 

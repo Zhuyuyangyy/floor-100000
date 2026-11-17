@@ -143,7 +143,7 @@ export const ALL_ITEM_IDS = Object.keys(ALL_ITEMS) as KnownItemId[];
 // 而所有消费侧都按 id 字符串查表——getItem/isItemId 已认识这些 id，堆叠、
 // 存读、商店买卖走的是同一条字符串路径——所以这个铸只在类型层面宽限，
 // 运行时行为与既有物品完全一致。散落的 `as ItemId` 一律收在这里。
-export function asItemId(id: MoraleItemId | DigToolId): ItemId {
+export function asItemId(id: MoraleItemId | DigToolId | MusicItemId): ItemId {
   return id as ItemId;
 }
 
@@ -155,7 +155,7 @@ export function asItemId(id: MoraleItemId | DigToolId): ItemId {
 // 消费侧按字符串查表，不依赖联合成员）；类型层面的真正宽化要等 core 的
 // ItemId 联合（AG-25）。
 export function isItemId(value: string): value is ItemId {
-  return Object.prototype.hasOwnProperty.call(ALL_ITEMS, value) || Object.prototype.hasOwnProperty.call(DIG_TOOL_ITEMS, value);
+  return Object.prototype.hasOwnProperty.call(ALL_ITEMS, value) || Object.prototype.hasOwnProperty.call(DIG_TOOL_ITEMS, value) || Object.prototype.hasOwnProperty.call(MUSIC_ITEMS, value);
 }
 
 // ── AG-66：过道工具（铲子）──────────────────────────────────────────────
@@ -187,5 +187,32 @@ export const DIG_TOOL_IDS = Object.keys(DIG_TOOL_ITEMS) as DigToolId[];
 // （KnownItemId = ItemId | MoraleItemId）——背包里的铲子经 asItemId 铸成
 // ItemId 进来，运行时两条查表路径都走得通；未知 id 的语义与旧版一致。
 export function getItem(id: KnownItemId): Item {
-  return (ALL_ITEMS as Record<string, Item | undefined>)[id] ?? DIG_TOOL_ITEMS[id as DigToolId];
+  return (ALL_ITEMS as Record<string, Item | undefined>)[id] ?? DIG_TOOL_ITEMS[id as DigToolId] ?? MUSIC_ITEMS[id as MusicItemId];
 }
+
+// ── AG-74：收音机（TWOM 的音乐通道）────────────────────────────────────────
+//
+// 与 MORALE_ITEMS / DIG_TOOL_ITEMS 同构的第四条路：收音机不是消耗品（"使用"
+// 是打开而不是吃掉，用了不消失），因此不进 ITEMS（19 件被 items.test.ts /
+// survivalBalance / economyLoop 钉死）也不进 MORALE_ITEMS（ALL_ITEMS 的 23 件
+// 被 moraleItems.test.ts 钉死），单独成表、只由 getItem/isItemId 统一发号——
+// 背包堆叠、存档校验（SaveSystem 的 isItemId 门）、商摊收购全部按 id 字符串
+// 查表，无需任何改动就认得它。
+//
+// TWOM 的五类精神物品里收音机原本缺席是有意的（见上方 MORALE_ITEMS 注释）：
+// TWOM 把音乐单开一条通道（AvgDepressionChangeForCheerfulMusic），那是设施级
+// 的持续效果，不该塞进消耗品表。AG-74 把这条通道落地为 systems/AudioSystem.ts
+// 的音乐层：从背包"使用"收音机 → 当前楼层 BGM 切成「电台音乐」，持续
+// RADIO_MINUTES 个游戏分钟后让位回场景氛围。没有收音机，废土只剩环境声。
+//
+// 获取路径：只能搜刮/交易获得，**不进任何制作配方**（survivalBalance 与
+// craftLoop 钉着配方数量，加配方会红）。loot 池/商摊的具体接线归楼层数据与
+// shop 属主（与铲子的分工同款，见 AG-66 注释）——本工单只发号。
+export type MusicItemId = 'radio';
+
+/** AG-74 的收音机：打开它 = 打开电台（AudioSystem.useRadioFromSlot）。 */
+export const MUSIC_ITEMS: Record<MusicItemId, Item> = {
+  radio: { id: asItemId('radio'), displayName: '收音机', category: 'tool', stackable: false, maxStack: 1 },
+};
+
+export const MUSIC_ITEM_IDS = Object.keys(MUSIC_ITEMS) as MusicItemId[];

@@ -58,6 +58,10 @@ import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES,
 import { ensureNightEvent, eventStatus, setEventStatus } from '../systems/EventSystem';
 import { armNextRoll, dwellRollDue, ensureDwell, isDwellExempt, rollDwellEvent, tickDwell } from '../systems/dwellPressure';
 import { freshWandererAI, stepWandererAI, type WandererAI } from '../systems/wandererAI';
+// AG-74：BGM 音乐层。接线刻意保持一行一处——create 起楼层音乐、战斗/入夜/
+// 场景销毁各一切换、update 里每帧同步（夜晚/电台到期由 syncMusic 按上下文
+// 重解，命中同一曲目是 no-op）。
+import { RADIO_MINUTES, startFloorMusic, stopBgm, syncMusic, useRadioFromSlot } from '../systems/AudioSystem';
 import { ensureDailyGoal, grantDailyGoalReward, isDailyGoalDone } from '../systems/dailyGoals';
 import {
   BODY_TEMP_MAX,
@@ -1297,6 +1301,10 @@ export class GameScene extends Phaser.Scene {
     // 画一把 16×16 顶着（render/artpack.ts 不归本工单，见 ensureShovelIcon）。
     this.ensureShovelIcon();
 
+    // AG-74：楼层 BGM。按当前上下文起（入夜/带电台都由 resolveTrackId 决定），
+    // AudioContext 未获手势前只记待播、不发声（自动播放策略）。
+    startFloorMusic(getGame());
+
     this.drawFloor();
 
     this.buildHud();
@@ -1373,6 +1381,7 @@ export class GameScene extends Phaser.Scene {
       this.cameras.main?.stopFollow();
       this.feedbackTimer?.remove(false);
       this.unbindInput();
+      stopBgm(); // AG-74：离开楼层就静默（收音机的截止时间保留，回来按上下文重解）
     });
   }
 
@@ -2516,6 +2525,7 @@ export class GameScene extends Phaser.Scene {
     this.encounterOpen = true; // the same panel slot and the same input routing
     this.combatSelected = 0;
     playSfx('alert');
+    syncMusic(getGame()); // AG-74：战斗 BGM（优先级高于夜晚/电台/楼层）
     this.refreshStats();
     if (state.player.hp <= 0) {
       state.status = 'lost';
@@ -2543,6 +2553,7 @@ export class GameScene extends Phaser.Scene {
     this.destroyCombatStage();
     // The floor's spots are rebuilt so a resolved one disappears.
     this.buildEncounterSpots();
+    syncMusic(getGame()); // AG-74：战斗音乐让位，按夜晚/电台/楼层重解
   }
 
   // ── AG-70: the combat stage ─────────────────────────────────────────────
@@ -7377,6 +7388,12 @@ export class GameScene extends Phaser.Scene {
     if (this.inventoryOpen) {
       const stack = getGame().player.inventory.slots[this.invSelected];
       if (!stack) return;
+      // AG-74：收音机是"打开"不是"吃掉"——从背包用它即开电台 N 游戏分钟
+      // （TWOM 的音乐通道；用了不消失，tool 类不进 useConsumable）。
+      if (useRadioFromSlot(getGame(), this.invSelected)) {
+        this.flash(`打开收音机 · 电台音乐 ${RADIO_MINUTES} 分钟`);
+        return;
+      }
       const result = useConsumable(getGame(), stack.itemId);
       if (result.ok) {
         saveToStorage(getGame());
@@ -8833,6 +8850,9 @@ export class GameScene extends Phaser.Scene {
     // 的早退都在更后面，教程因此在那些状态下也照常推进）。
     this.runTutorialTick();
     this.refreshBagFullWarning();
+    // AG-74：音乐上下文同步与导航条同款理由放在所有早退之前——入夜氛围、
+    // 电台到期都不该因为背包开着而停更（战斗/撤退的显式切换在各自事件处）。
+    syncMusic(getGame());
     // The dorm's sleeping roommates breathe. Each Z carries its own phase, so
     // five beds do not pulse in unison — a shared phase reads as one blinking
     // overlay rather than as five people asleep. Driven from here rather than by

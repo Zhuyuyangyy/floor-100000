@@ -6,6 +6,10 @@ import { startNewGame, tryContinue } from '../core/session';
 import { devEntry } from '../core/devMode';
 import { clearSave, hasSave } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
+// AG-74：BGM 音乐层。菜单是音频的入口——这里惰性建 AudioContext（suspended
+// 态诞生不违规），首次点击/按键时 resume 并播主菜单 BGM；离开菜单（SHUTDOWN）
+// 静默。游戏内音乐由 GameScene 的 startFloorMusic 接管。
+import { startMenuBgm, stopBgm } from '../systems/AudioSystem';
 import { applyPanelDepth, buildPanel, createMarker, PANEL_DEPTH, placeMarker, type PanelObject } from '../render/panels';
 import { buildPhotoTitleBackdrop, buildTitleBackdrop, type TitleBackdrop } from '../render/titleBackdrop';
 import { TITLE_BG_KEY } from '../render/artpack';
@@ -73,6 +77,9 @@ export class MenuScene extends Phaser.Scene {
     // Survives a scene restart; left true, the help panel would still swallow
     // navigation on the fresh title screen.
     this.helpOpen = false;
+
+    // AG-74：主菜单 BGM。幂等——从游戏返回菜单再进 create 只是续播同一首。
+    startMenuBgm();
     // Same for the about panel (AG-75).
     this.aboutOpen = false;
 
@@ -97,6 +104,7 @@ export class MenuScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.backdrop?.destroy();
       this.backdrop = undefined;
+      stopBgm(); // AG-74：离开标题画面——楼层音乐由 GameScene.create 接管
     });
 
     // The type scale was authored at 80/44/36, but the fontSize strings used to

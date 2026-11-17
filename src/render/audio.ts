@@ -22,7 +22,14 @@ export type SfxName =
   // OVERHAUL W4：开箱 / 追击预警 / 每日目标完成。
   | 'chest'
   | 'alert'
-  | 'goal';
+  | 'goal'
+  // AG-74：补齐缺失的音效钩子——面板开关 / 金币 / 升级 / 入夜警告。
+  // 全部程序化短音（零素材）；调用侧按需接，音量由 playSfx 的 volumeScale
+  // 统一折算（AG-72 的 sfxVolume 设置接在那个参数上）。
+  | 'panel'
+  | 'coin'
+  | 'upgrade'
+  | 'night';
 
 type AudioContextCtor = new (options?: AudioContextOptions) => AudioContext;
 
@@ -135,9 +142,11 @@ function playTone(spec: ToneSpec): void {
       osc.frequency.exponentialRampToValueAtTime(Math.max(1, spec.to), end);
     }
 
+    // AG-74：volumeScale（playSfx 的可选音量系数）在这里折算进每个音符。
+    const peak = Math.max(SILENCE, spec.gain * volumeScale);
     const env = context.createGain();
     env.gain.setValueAtTime(SILENCE, start);
-    env.gain.linearRampToValueAtTime(spec.gain, start + attack);
+    env.gain.linearRampToValueAtTime(peak, start + attack);
     env.gain.exponentialRampToValueAtTime(SILENCE, end);
 
     const chain: AudioNode[] = [osc, env];
@@ -202,7 +211,7 @@ function playNoise(spec: NoiseSpec): void {
 
     const env = context.createGain();
     env.gain.setValueAtTime(SILENCE, start);
-    env.gain.linearRampToValueAtTime(spec.gain, start + 0.004);
+    env.gain.linearRampToValueAtTime(Math.max(SILENCE, spec.gain * volumeScale), start + 0.004);
     env.gain.exponentialRampToValueAtTime(SILENCE, end);
 
     const chain: AudioNode[] = [src, env];
@@ -307,6 +316,37 @@ function sfxGoal(): void {
   });
 }
 
+// AG-74：面板开关。一记带通噪声的"噗"（布料/木板感）+ 向下的三角短滑——
+// 开和关用同一个声音的两半，听得出"界面在呼吸"但分不出方向也不恼人。
+function sfxPanel(): void {
+  playNoise({ duration: 0.09, gain: 0.22, bandpass: 1100 });
+  playTone({ type: 'triangle', from: 320, to: 240, duration: 0.09, gain: 0.14, attack: 0.002, lowpass: 1600 });
+}
+
+// AG-74：金币。掌机味最正的两级方波跳（B5 → E6），接在交易结算/拾金上。
+function sfxCoin(): void {
+  playTone({ type: 'square', from: 987.77, duration: 0.05, gain: 0.16, attack: 0.001 });
+  playTone({ type: 'square', from: 1318.51, duration: 0.16, gain: 0.16, attack: 0.001, delay: 0.05 });
+}
+
+// AG-74：升级。比 goal 更满一档的四音琶音（C5-E5-G5-C6），底下垫一个方波
+// 八度根音，让"家里又添了一样东西"听起来像件事。
+function sfxUpgrade(): void {
+  [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+    playTone({ type: 'triangle', from: freq, duration: 0.12, gain: 0.2, attack: 0.003, delay: i * 0.08 });
+  });
+  playTone({ type: 'square', from: 261.63, to: 523.25, duration: 0.4, gain: 0.1, attack: 0.01, lowpass: 2200, delay: 0.24 });
+}
+
+// AG-74：入夜警告。两拍低沉方波（G4 → 滑向 Eb4 的不舒服收尾）+ 一阵风噪，
+// 与 alert（追击预警，上扬两级）刻意相反：夜晚是往下走的。
+function sfxNight(): void {
+  [392, 311.13].forEach((freq, i) => {
+    playTone({ type: 'square', from: freq, duration: 0.22, gain: 0.16, attack: 0.008, delay: i * 0.3, lowpass: 1300 });
+  });
+  playNoise({ duration: 0.7, gain: 0.07, highpass: 900, delay: 0.1 });
+}
+
 const SFX: Record<SfxName, () => void> = {
   click: sfxClick,
   pickup: sfxPickup,
@@ -318,19 +358,31 @@ const SFX: Record<SfxName, () => void> = {
   chest: sfxChest,
   alert: sfxAlert,
   goal: sfxGoal,
+  panel: sfxPanel,
+  coin: sfxCoin,
+  upgrade: sfxUpgrade,
+  night: sfxNight,
 };
+
+// AG-74：playSfx 的可选音量系数。调用侧（AG-72 的 sfxVolume 设置等）按
+// 0..1 传；默认 1 = 旧行为逐字节兼容。实现是模块级作用域变量而非给每条
+// 配方加参数——SFX 表里的闭包同步执行完即复位，重入/竞态无窗口。
+let volumeScale = 1;
 
 // Fire-and-forget: safe before unlockAudio (no context yet), while muted, and
 // if the browser refuses to hand us an AudioContext at all.
-export function playSfx(name: SfxName): void {
+export function playSfx(name: SfxName, volume = 1): void {
   if (muted) return;
   const context = ctx;
   if (!context || context.state === 'closed') return;
   const synth = SFX[name];
   if (!synth) return;
+  volumeScale = Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1;
   try {
     synth();
   } catch {
     // Silence is an acceptable outcome; a crash is not.
+  } finally {
+    volumeScale = 1;
   }
 }

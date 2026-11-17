@@ -5140,6 +5140,15 @@ export class GameScene extends Phaser.Scene {
       if (crossedBelow(prev.hunger, ratios.hunger, cfg.triggers.hungerRatio)) this.queueMonologue('hunger_low');
       if (crossedBelow(prev.thirst, ratios.thirst, cfg.triggers.thirstRatio)) this.queueMonologue('thirst_low');
       if (crossedBelow(prev.energy, ratios.energy, cfg.triggers.energyRatio)) this.queueMonologue('energy_low');
+    } else {
+      // The first tick has no previous value, so a crossing cannot be SEEN —
+      // but a stat already under its line (a run loaded while hurt, or a
+      // change that landed before the first tick) is still a situation worth
+      // one remark. The 9s gate keeps it to a single line, never a stream.
+      if (ratios.hp < cfg.triggers.hpRatio) this.queueMonologue('hp_low');
+      if (ratios.hunger < cfg.triggers.hungerRatio) this.queueMonologue('hunger_low');
+      if (ratios.thirst < cfg.triggers.thirstRatio) this.queueMonologue('thirst_low');
+      if (ratios.energy < cfg.triggers.energyRatio) this.queueMonologue('energy_low');
     }
     this.monologueRatios = ratios;
 

@@ -120,7 +120,9 @@ describe('obstaclesForFloor — 每层 seeded 0-2 个', () => {
         if (hasDownExit(floor)) exits.push(downExitXFor(floor));
         if (liftDirection(floor) !== null) exits.push(LIFT_X);
         const starts: number[] = [ENTRY_X];
-        if (hasUpExit(floor)) starts.push(UP_EXIT_X);
+        // 与实现同口径：UP_EXIT_X 无条件——段顶层没有上楼梯，但玩家从下层
+        // 爬上来就落在那里（落点 ≠ 出口，见 LootSystem 可达性裁决注释）。
+        starts.push(UP_EXIT_X);
         if (hasDownExit(floor)) starts.push(downExitXFor(floor));
         const obstacles = obstaclesForFloor(s, floor);
         const reachableFrom = (from: number, to: number): boolean => {
@@ -157,7 +159,11 @@ describe('obstaclesForFloor — 每层 seeded 0-2 个', () => {
     }
     expect(kinds.has('rubble')).toBe(true);
     expect(kinds.has('gate')).toBe(true);
-    expect(total).toBeGreaterThan(20); // 密度确实存在，不是永远为空
+    // 阈值随可达性口径调过：口径加强为「每个落点（ENTRY_X/上梯口/下梯口）
+    // 到每个其它出口都可达」后，跨 seed 密度从 >20 降到实测 13（2026-11-17
+    // 集成轮修 110 层 gate 漏网时同批实测）。防软锁是 GAME_DESIGN_LOCK §5
+    // 的硬规则，多样性是软的——这里只钉「两种类型都出现、密度确实存在」。
+    expect(total).toBeGreaterThanOrEqual(10);
   });
 
   it('two obstacles on one floor never overlap', () => {

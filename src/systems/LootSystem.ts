@@ -399,7 +399,13 @@ export function obstaclesForFloor(state: GameState, floor: number): FloorObstacl
   // 这个缺口的概率从 0 变实在）。口径：每个起点到每个**其它**出口都可达
   // （排除自身，否则起点=出口时恒真、检查形同虚设）。删到全通即止。
   const starts: number[] = [ENTRY_X];
-  if (hasUpExit(floor)) starts.push(UP_EXIT_X);
+  // UP_EXIT_X 无条件进起点：段顶层（110/1010/10010/50010）没有上楼梯
+  // （stairNeighbour 同段约束，爬上去要坐电梯），hasUpExit 为 false——但
+  // 玩家恰恰是从下一层爬上来、落在 UP_EXIT_X 的。第一版把 UP_EXIT_X 的
+  // 进集条件挂在 hasUpExit 上，110 层 gate x=173（挡 40→648/1165）因此
+  // 漏网：stairNavigation「110 层 rideLiftUp」实测仍被闸门钳住。落点与
+  // 出口是两套语义，起点集按「玩家可能站在哪」收，不按「这层有什么出口」。
+  starts.push(UP_EXIT_X);
   if (hasDownExit(floor)) starts.push(downExitXFor(floor));
   const reachableFrom = (from: number, to: number): boolean =>
     !out.some((o) => o.x - half > Math.min(from, to) && o.x + half < Math.max(from, to));

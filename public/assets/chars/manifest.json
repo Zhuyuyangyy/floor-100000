@@ -1,0 +1,377 @@
+{
+  "bakedBy": "tools/bake-char-anims.py",
+  "characterKeys": "GIF folder name -> game key (artpack.ts CHARACTER_KEYS)",
+  "characters": {
+    "npc_alin": {
+      "attack": {
+        "durations": [
+          600,
+          600,
+          600
+        ],
+        "file": "npc_alin-attack.png",
+        "frames": 3,
+        "sourceFeetRows": [
+          93,
+          93,
+          93
+        ],
+        "sourceGif": "alin/attack.gif",
+        "totalMs": 1800
+      },
+      "die": {
+        "durations": [
+          900,
+          900,
+          900
+        ],
+        "file": "npc_alin-die.png",
+        "frames": 3,
+        "sourceFeetRows": [
+          92,
+          93,
+          94
+        ],
+        "sourceGif": "alin/die.gif",
+        "totalMs": 2700
+      },
+      "hurt": {
+        "durations": [
+          650,
+          650
+        ],
+        "file": "npc_alin-hurt.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          93,
+          93
+        ],
+        "sourceGif": "alin/hurt.gif",
+        "totalMs": 1300
+      },
+      "idle": {
+        "durations": [
+          1000,
+          1000
+        ],
+        "file": "npc_alin-idle.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          93,
+          93
+        ],
+        "sourceGif": "alin/idle.gif",
+        "totalMs": 2000
+      },
+      "pickup": {
+        "durations": [
+          650,
+          650
+        ],
+        "file": "npc_alin-pickup.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          93,
+          92
+        ],
+        "sourceGif": "alin/pickup.gif",
+        "totalMs": 1300
+      },
+      "search": {
+        "durations": [
+          750,
+          750
+        ],
+        "file": "npc_alin-search.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          93,
+          93
+        ],
+        "sourceGif": "alin/search.gif",
+        "totalMs": 1500
+      }
+    },
+    "npc_xiaozhou": {
+      "attack": {
+        "durations": [
+          600,
+          600,
+          600
+        ],
+        "file": "npc_xiaozhou-attack.png",
+        "frames": 3,
+        "sourceFeetRows": [
+          93,
+          94,
+          93
+        ],
+        "sourceGif": "xiaozhou/attack.gif",
+        "totalMs": 1800
+      },
+      "die": {
+        "durations": [
+          900,
+          900,
+          900
+        ],
+        "file": "npc_xiaozhou-die.png",
+        "frames": 3,
+        "sourceFeetRows": [
+          93,
+          92,
+          93
+        ],
+        "sourceGif": "xiaozhou/die.gif",
+        "totalMs": 2700
+      },
+      "hurt": {
+        "durations": [
+          650,
+          650
+        ],
+        "file": "npc_xiaozhou-hurt.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          93,
+          93
+        ],
+        "sourceGif": "xiaozhou/hurt.gif",
+        "totalMs": 1300
+      },
+      "idle": {
+        "durations": [
+          1000,
+          1000
+        ],
+        "file": "npc_xiaozhou-idle.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          93,
+          93
+        ],
+        "sourceGif": "xiaozhou/idle.gif",
+        "totalMs": 2000
+      },
+      "pickup": {
+        "durations": [
+          650,
+          650
+        ],
+        "file": "npc_xiaozhou-pickup.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          93,
+          93
+        ],
+        "sourceGif": "xiaozhou/pickup.gif",
+        "totalMs": 1300
+      },
+      "search": {
+        "durations": [
+          750,
+          750
+        ],
+        "file": "npc_xiaozhou-search.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          93,
+          93
+        ],
+        "sourceGif": "xiaozhou/search.gif",
+        "totalMs": 1500
+      }
+    },
+    "player": {
+      "attack": {
+        "durations": [
+          600,
+          600,
+          600
+        ],
+        "file": "player-attack.png",
+        "frames": 3,
+        "sourceFeetRows": [
+          92,
+          93,
+          92
+        ],
+        "sourceGif": "player/attack.gif",
+        "totalMs": 1800
+      },
+      "die": {
+        "durations": [
+          900,
+          900,
+          900
+        ],
+        "file": "player-die.png",
+        "frames": 3,
+        "sourceFeetRows": [
+          92,
+          92,
+          93
+        ],
+        "sourceGif": "player/die.gif",
+        "totalMs": 2700
+      },
+      "hurt": {
+        "durations": [
+          650,
+          650
+        ],
+        "file": "player-hurt.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          92,
+          92
+        ],
+        "sourceGif": "player/hurt.gif",
+        "totalMs": 1300
+      },
+      "idle": {
+        "durations": [
+          1000,
+          1000
+        ],
+        "file": "player-idle.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          92,
+          92
+        ],
+        "sourceGif": "player/idle.gif",
+        "totalMs": 2000
+      },
+      "pickup": {
+        "durations": [
+          650,
+          650
+        ],
+        "file": "player-pickup.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          92,
+          92
+        ],
+        "sourceGif": "player/pickup.gif",
+        "totalMs": 1300
+      },
+      "search": {
+        "durations": [
+          750,
+          750
+        ],
+        "file": "player-search.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          92,
+          92
+        ],
+        "sourceGif": "player/search.gif",
+        "totalMs": 1500
+      }
+    },
+    "wanderer": {
+      "attack": {
+        "durations": [
+          600,
+          600,
+          600
+        ],
+        "file": "wanderer-attack.png",
+        "frames": 3,
+        "sourceFeetRows": [
+          93,
+          94,
+          93
+        ],
+        "sourceGif": "wanderer/attack.gif",
+        "totalMs": 1800
+      },
+      "die": {
+        "durations": [
+          900,
+          900,
+          900
+        ],
+        "file": "wanderer-die.png",
+        "frames": 3,
+        "sourceFeetRows": [
+          92,
+          92,
+          93
+        ],
+        "sourceGif": "wanderer/die.gif",
+        "totalMs": 2700
+      },
+      "hurt": {
+        "durations": [
+          650,
+          650
+        ],
+        "file": "wanderer-hurt.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          93,
+          93
+        ],
+        "sourceGif": "wanderer/hurt.gif",
+        "totalMs": 1300
+      },
+      "idle": {
+        "durations": [
+          1000,
+          1000
+        ],
+        "file": "wanderer-idle.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          93,
+          93
+        ],
+        "sourceGif": "wanderer/idle.gif",
+        "totalMs": 2000
+      },
+      "pickup": {
+        "durations": [
+          650,
+          650
+        ],
+        "file": "wanderer-pickup.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          93,
+          93
+        ],
+        "sourceGif": "wanderer/pickup.gif",
+        "totalMs": 1300
+      },
+      "search": {
+        "durations": [
+          750,
+          750
+        ],
+        "file": "wanderer-search.png",
+        "frames": 2,
+        "sourceFeetRows": [
+          93,
+          92
+        ],
+        "sourceGif": "wanderer/search.gif",
+        "totalMs": 1500
+      }
+    }
+  },
+  "feetRow": 95,
+  "frame": {
+    "h": 96,
+    "w": 64
+  },
+  "palette": "src/render/palette.ts; every opaque pixel verified in-palette",
+  "skipped": {
+    "all-actions.gif": "20-frame contact sheet, not an action",
+    "walk.gif": "walk cycle is hand-posed in render/walkcycle.ts (B3-14); the GIF is not wired"
+  },
+  "source": "docs/art-previews/<char>/<action>.gif (2026-11-18 delivery)"
+}

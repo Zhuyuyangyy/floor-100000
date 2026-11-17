@@ -227,6 +227,7 @@ import {
   walkSheetKey,
 } from '../render/walkcycle';
 import { WEAPON_GRIP_X, WEAPON_GRIP_Y, WEAPON_H, WEAPON_KEY, WEAPON_W } from '../render/weapon.ts';
+import { attackFrameIndex, charAnimHoldMs, isCharAnimBacked } from '../render/charAnims';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom, drawCrowd, drawStairwell, floorKeyFor, placeDoor, placeWindow, stairClimbPose, wallKeyFor } from '../render/corridors';
@@ -1878,10 +1879,38 @@ export class GameScene extends Phaser.Scene {
 
   // OVERHAUL: plays a one-shot action clip and holds it for `ms`. The frame
   // loop's walk/idle pick stands down while the clip runs.
+  //
+  // AG-90：hold 时长对 GIF 图集取两者大者（render/charAnims.ts）——attack
+  // GIF 是 3x600ms=1800ms，程序姿态只要 320ms；按 320ms hold 会在 GIF 第一
+  // 帧就把它切回 idle。没有 GIF 的角色/动作（walk、五名未烘焙角色）原样
+  // 用调用方的 ms。
+  //
+  // timeScale 复位到 1：站立待机会把 0.2 的防滑步底线留在精灵上（见 update
+  // 的 walk/idle 挑选段），一次性动作从站立态出手时若不复位，GIF 会以 1/5
+  // 速播放（攻击 9 秒），程序姿态更是从来只播得出第一帧。播完 update 的
+  // 挑选会重新按速度压时间，这里只负责出手这一下。
   private playActionAnim(key: string, ms: number): void {
     this.actionAnimKey = key;
-    this.actionAnimUntil = this.time.now + ms;
+    this.actionAnimUntil = this.time.now + charAnimHoldMs(key, ms);
+    this.player.anims.timeScale = 1;
     this.player.play(key, true);
+  }
+
+  /**
+   * AG-90：巡游体自己的 attack GIF。它和玩家一样是有贴图的角色（walk sheet
+   * + 六个动作图集），不是程序化怪物——所以它打人时演的是自己的挥击，
+   * 伤害反馈（震屏/闪白/飘字）仍走现有 fx 层。repeat:0 停在末帧，到点切回
+   * walk；没有图集（加载失败回退）时静默跳过。
+   */
+  private playWandererAttack(): void {
+    const w = this.wanderer;
+    if (!w?.active) return;
+    const key = attackAnimKey('wanderer');
+    if (!this.anims.exists(key)) return;
+    w.play(key, true);
+    this.time.delayedCall(charAnimHoldMs(key, 0), () => {
+      if (w.active && w.anims.currentAnim?.key === key) w.play(walkAnimKey('wanderer'), true);
+    });
   }
 
   private clearFloor(): void {
@@ -1960,8 +1989,12 @@ export class GameScene extends Phaser.Scene {
       this.time.now < this.actionAnimUntil && this.actionAnimKey === attackAnimKey('player');
 
     if (swinging) {
+      // AG-90：帧号映射同时认两个来源——程序化 walk sheet 把 attack 段放在
+      // 8..10（ATTACK_FRAME_START），GIF 图集（char-anim-*-attack.png）的
+      // 三帧就叫 0..2。都以 attackPose(f) 的同一个 f 收尾，撬棍的挥砍同步
+      // 逻辑（weapon.ts 持握 + 这里的每帧定位）原样保留。
       const frameNo = Number(this.player.frame?.name ?? ATTACK_FRAME_START);
-      const f = Math.max(0, Math.min(ATTACK_FRAMES - 1, frameNo - ATTACK_FRAME_START));
+      const f = Math.max(0, attackFrameIndex(frameNo, ATTACK_FRAME_START, ATTACK_FRAMES));
       const pose = attackPose(f);
       const swing = pose.armSwing;
       // Same construction drawArm() uses for the near arm, so the grip lands on
@@ -2863,7 +2896,7 @@ export class GameScene extends Phaser.Scene {
     const stage = this.combatStage;
     if (!stage) return;
     playSfx('danger');
-    this.playActionAnim(hurtAnimKey('player'), 400);
+    this.playActionAnim(hurtAnimKey(this.metaSelectedCharacter()), 400);
     shakeIfEnabled(this, 160, 0.008); // AG-72: 震屏开关
     stage.monster.lunge();
     this.time.delayedCall(130, () => {
@@ -3156,7 +3189,9 @@ export class GameScene extends Phaser.Scene {
     // playerDamage > 0 meant a miss had no swing either, so the crowbar stayed
     // slung across the survivor's back while the arc played out of thin air. The
     // arm and the weapon have to agree, and the arc is the arm's.
-    if (action === 'attack') this.playActionAnim(attackAnimKey('player'), 320);
+    // （AG-90：key 按 meta 选的当前角色取——原来硬编码 'player'，玩 Alin 时
+    // 出手会闪一下玩家的贴图；GIF 换血后每个角色有自己的 attack 动画。）
+    if (action === 'attack') this.playActionAnim(attackAnimKey(this.metaSelectedCharacter()), 320);
     if (round.playerDamage > 0) {
       combat.monster.hp = Math.max(0, combat.monster.hp - round.playerDamage);
       bumpStat(state, 'damageDealt', round.playerDamage); // AG-81：命中的每一口都计数
@@ -3192,7 +3227,7 @@ export class GameScene extends Phaser.Scene {
       // 与 AG-81 统计（bumpStat）两套记账并存。
       bumpStat(state, 'damageTaken', dmg); // AG-81：敌人反击命中计数（软化后的实扣）
       this.combatDamageTaken += dmg; // AG-77：零伤守门人的判据在这里记账
-      if (action === 'guard') this.playActionAnim(hurtAnimKey('player'), 400);
+      if (action === 'guard') this.playActionAnim(hurtAnimKey(this.metaSelectedCharacter()), 400);
       shakeIfEnabled(this, 160, 0.008); // AG-72: 震屏开关
       // AG-70：敌人反击要看见——前冲 38px + 玩家掉血飘字 + 头顶血条收缩。
       this.stageMonsterCounter(dmg);
@@ -3205,7 +3240,16 @@ export class GameScene extends Phaser.Scene {
       state.status = 'lost';
       bumpStat(state, 'deaths'); // AG-81：战死计数
       saveToStorage(state);
-      this.scene.start('End');
+      // AG-90：战死也倒地——原来这里直接 scene.start('End')，玩家的最后一
+      // 帧是战斗面板。与世界循环的死亡同一演法：die clip 播完（GIF 3x900ms）
+      // 再切结局卡。combatBusy 锁死输入，延迟切场不会塞进新回合（也不会
+      // 重复结算一次战死计数）。
+      this.combatBusy = true;
+      const dieKey = dieAnimKey(this.metaSelectedCharacter());
+      this.playActionAnim(dieKey, 520);
+      this.time.delayedCall(charAnimHoldMs(dieKey, 520) + 100, () => {
+        if (this.scene.isActive()) this.scene.start('End');
+      });
       return;
     }
     if (round.monsterDead) {
@@ -3416,8 +3460,9 @@ export class GameScene extends Phaser.Scene {
     if (result.items.length > 0) playSfx('chest');
     // A swing reads as a swing: the attack clip plays whenever the player chose
     // to fight, win or lose - and so does the arc, for the same reason.
+    // （AG-90：同上，按当前角色取 attack key。）
     if (choice === 'fight') {
-      this.playActionAnim(attackAnimKey('player'), 300);
+      this.playActionAnim(attackAnimKey(this.metaSelectedCharacter()), 300);
       this.playSwingFx();
     }
     if (result.hpChange < 0) {
@@ -9628,7 +9673,14 @@ export class GameScene extends Phaser.Scene {
       const runKey = runAnimKey(who);
       const want = moving ? (runActive && this.anims.exists(runKey) ? runKey : walkAnimKey(who)) : idleAnimKey(who);
       if (this.player.anims.currentAnim?.key !== want) this.player.play(want, true);
-      this.player.anims.timeScale = runActive ? MOVEMENT_BALANCE.runAnimTimeScale : Math.max(0.2, Math.min(1, speedFraction));
+      // AG-90：GIF 待机按自带节奏播（1000ms/帧）——0.2 的底线是行走防滑步
+      // 的减速，待机不涉速；未接 GIF 的五名角色维持原速。行走段不变。
+      this.player.anims.timeScale =
+        runActive
+          ? MOVEMENT_BALANCE.runAnimTimeScale
+          : moving || !isCharAnimBacked(this, want)
+            ? Math.max(0.2, Math.min(1, speedFraction))
+            : 1;
     }
 
     // AG-20: 帧循环跨日时产业结算在 advanceTime 内部发生。前后对比账本，
@@ -9803,10 +9855,13 @@ export class GameScene extends Phaser.Scene {
       // The survivor now goes down - three frames, 500ms, ending on the fallen
       // pose - and the end card waits for it. Winning still cuts immediately:
       // reaching the top is not a fall.
+      // （AG-90：倒地动画换成 GIF 后是 3x900ms=2700ms，切场的 delayedCall
+      // 跟着拉到 GIF 总时长+100ms，否则结局卡会在倒地第一帧就顶掉它。）
       if (tick.died) {
         bumpStat(state, 'deaths'); // AG-81：帧循环里的死亡（饥渴/体温/伤势）
-        this.playActionAnim(dieAnimKey(this.metaSelectedCharacter()), 520);
-        this.time.delayedCall(620, () => {
+        const dieKey = dieAnimKey(this.metaSelectedCharacter());
+        this.playActionAnim(dieKey, 520);
+        this.time.delayedCall(charAnimHoldMs(dieKey, 520) + 100, () => {
           if (this.scene.isActive()) this.scene.start('End');
         });
         return;
@@ -9819,8 +9874,9 @@ export class GameScene extends Phaser.Scene {
     if (state.status !== 'playing') {
       saveToStorage(state);
       if (state.status === 'lost') {
-        this.playActionAnim(dieAnimKey(this.metaSelectedCharacter()), 520);
-        this.time.delayedCall(620, () => {
+        const dieKey = dieAnimKey(this.metaSelectedCharacter());
+        this.playActionAnim(dieKey, 520);
+        this.time.delayedCall(charAnimHoldMs(dieKey, 520) + 100, () => {
           if (this.scene.isActive()) this.scene.start('End');
         });
         return;
@@ -10076,7 +10132,12 @@ export class GameScene extends Phaser.Scene {
       // KosovoMoraleTraumaProbability。纯函数内部掷，同 seed 同状态同结果。
       witnessTrauma(state);
       this.refreshStats();
-      this.playActionAnim(hurtAnimKey('player'), 400);
+      this.playActionAnim(hurtAnimKey(this.metaSelectedCharacter()), 400);
+      // AG-90：动手的也要看得见——巡游体是四个有 GIF 的角色之一，它的
+      // attack 图集就播在它自己的 sprite 上（程序化怪物没有 GIF，打击反馈
+      // 仍走现有 fx 层）。repeat:0 播完停在末帧，所以到点显式切回 walk，
+      // 否则它会保持挥击姿势走完全程。
+      this.playWandererAttack();
       playSfx('hurt');
       shakeIfEnabled(this, 160, 0.008); // AG-72: 震屏开关
       this.cameras.main.flash(140, 230, 109, 99);

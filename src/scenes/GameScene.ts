@@ -3790,7 +3790,12 @@ export class GameScene extends Phaser.Scene {
     // pools and the ambient wash tint everything the room already drew.
     this.lightLayer?.destroy();
     this.lightLayer = buildLightLayer(this, {
-      width: FLOOR_WIDTH,
+      // AG-65：氛围层是楼层几何，不是设计画布——ambient 双色带与四边 vignette
+      // 必须铺满本层实际宽度（4-9 间 × 320px，宽楼至 2880px）。写死 FLOOR_WIDTH
+      // 时，相机右移后 x>1280 的右半楼没有任何氛围层，左右半楼观感断裂。与上面
+      // 墙体/地板带/haze 同一口径：this.floorW = floorWidthFor(floor)，
+      // drawFloor 入口（本文件 1610 行）赋值，窄楼（tier1 恒 1280）数值不变。
+      width: this.floorW,
       height: FLOOR_HEIGHT,
       isDorm: false,
       hasUpExit: hasUpExit(floor),

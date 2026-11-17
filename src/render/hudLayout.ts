@@ -159,3 +159,37 @@ export const DETAIL_FOOT_PAD = 16;
 // the band — and lands it on exactly the band the stair labels already use
 // (FLOOR_HEIGHT - 104 = 96), so every nameplate on the floor shares one line.
 export const CONTAINER_LABEL_DROP = 36;
+
+// ── AG-60: the bag panel (GameScene.buildInventoryPanel) ────────────────────
+// 背包面板的布局语言。尺寸数值（面板宽高/列数/格子/图标倍率）不走这里——它们在
+// config/game-balance.json 的 bag 块，由 GameScene 的 BAG_BALANCE 读取；这里
+// 只放「部件怎么拼」：标题栏多高、危险条纹多厚、内容区距顶多少、详情三行锚点、
+// 页脚沉深、铆钉内缩。与上面 HUD 三视口同款的响应式契约：设计画布固定
+// 1280x720，窗口 900x600 / 1920x1080 由 Scale.FIT letterbox 消化，这些设计
+// 像素一个都不动，面板永远居中、不出板（e2e/ag60-bag-panel.spec.ts 三视口
+// getBounds 实测）。改版前 440x236（34% 宽）/40px 格 /12 格；改版后 880x360
+// （69% 宽）/76px 格 /14 格（基础容量 12 + 置物架 2，未解锁格压暗画斜纹）。
+export const BAG_LAYOUT = {
+  /** 标题栏高：与 uiKit 的 PANEL_HEADER_H 同值，背包不另起一套标题语言。 */
+  headerH: 30,
+  /** 标题栏下方的危险条纹带厚——HUD 概念图的签名条，hudSkin.drawHazardStripe 画。 */
+  stripeH: 10,
+  /** 条纹相对面板左右内缘的缩进。 */
+  stripeInset: 4,
+  /** 内容区（格子区与详情井共用一根顶线）距面板顶：标题栏 + 条纹 + 8px 气。 */
+  contentTop: 30 + 10 + 8,
+  /** 格子区左内边距。选区箭头落在 left+8，不压框筋。 */
+  padX: 20,
+  /** 详情井右内边距。 */
+  padRight: 16,
+  /** 详情三行锚点（相对详情井顶）：名称 / 元信息 / 正文。 */
+  detailNameY: 12,
+  detailMetaY: 62,
+  detailBodyY: 104,
+  /** 详情文字左内边距。 */
+  detailPadX: 8,
+  /** 页脚提示行的中心距面板底。 */
+  footerDrop: 18,
+  /** 四角铆钉距面板内缘的缩进（铆钉本体 2x2，hudSkin 的语言）。 */
+  rivetInset: 8,
+} as const;

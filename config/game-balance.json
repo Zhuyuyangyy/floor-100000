@@ -117,6 +117,17 @@
       { "itemId": "flashlight", "displayName": "低电量手电", "quantity": 1, "batteryState": "low" }
     ]
   },
+  "bag": {
+    "_comment": "AG-60 背包面板放大改版（用户 2026-11-17：『这个背包界面可以稍微做大一点』）。改版前 440x236（设计宽 1280 的 34%）、40px 格子 12 格；改版后 880x360（69%）、76px 格子 14 格。容量仍由 inventory.slotCount 决定（基础 12 + 置物架 2），格子按 gridSlots 一次建满，超出当前 slotCount 的画成未解锁（压暗+斜纹），置物架做成后由 refreshInventory 点亮。数值全部走这里，hudLayout 的 BAG_LAYOUT 与 GameScene 只放布局语言（行锚点/内边距/斜纹），不重复这些尺寸。",
+    "panelWidth": 880,
+    "panelHeight": 360,
+    "gridCols": 5,
+    "gridSlots": 14,
+    "cellSize": 76,
+    "cellGap": 8,
+    "iconScale": 3,
+    "detailGap": 12
+  },
   "world": {
     "startingFloor": 1,
     "playableFloorsV01": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010, 10000, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010, 50000, 50001, 50002, 50003, 50004, 50005, 50006, 50007, 50008, 50009, 50010, 100000],

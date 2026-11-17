@@ -289,7 +289,7 @@ export function dismantleBunk(state: GameState, floor: number, bunkId: string): 
 //
 // 三条硬规则（全部在本文件的纯函数里，obstacles.test.ts 逐条钉死）：
 //   1. 避让——梯口（上下楼口）、电梯、楼层入口、容器、地面物各留 keepClear；
-//   2. 可通——从楼层入口 ENTRY_X 出发至少还有一个出口可达，否则从后往前删，
+//   2. 可通——每个落点至少还有一个出口不被阻碍区间截断，否则从后往前删，
 //      阻碍物永远不可能把玩家软锁在层里（GAME_DESIGN_LOCK §5 禁软锁）；
 //   3. 有解——清理工具是铲子或撬棍（撬棍 3 层铁箱 guaranteed，早期楼层也
 //      摸得到），不是只有一把要合成的铲子。
@@ -345,8 +345,8 @@ export function clearObstacle(state: GameState, floor: number, x: number): void 
  * 这一层的阻碍物全集（含已挖开的）。seeded：同 (runSeed, floor) 永远同结果，
  * 所以「挖过的回层不复活」只需记键，位置本身重进楼层自动复现。
  *
- * 1 层是宿舍（家）不过道，直接空；梯口/电梯/入口/容器/地面物的 keepClear
- * 之后再做一次可达性裁决（见下），保证不软锁。
+ * 1 层是宿舍（家）不过道，直接空；梯口/电梯/入口/容器/下梯落点的避让之
+ * 后再做一次可达性裁决（见下），保证不软锁。
  */
 export function obstaclesForFloor(state: GameState, floor: number): FloorObstacle[] {
   if (floor === STARTING_FLOOR) return [];
@@ -368,6 +368,13 @@ export function obstaclesForFloor(state: GameState, floor: number): FloorObstacl
     ENTRY_X,
     ...view.containers.map((c) => c.x),
   ];
+  // R3：下梯落点。AG-65 起下行梯口按楼层号 seeded（tier1 仍是右端 1240），
+  // 从上一层爬下时落在**出发层**的梯口正下方 downExitXFor(floor+1)——它不
+  // 是本层的口位，却是玩家真实会站上的 x。避让的 buffer 比口位小：落点不是
+  // 口位，只要保证「落地从不在占位区里、可达性公式不踩落点贴在占位沿的边
+  // 界情形」，留一个占位半宽（half）就够；50000 层夹具（seed 1 瓦砾@1392，
+  // 距落点 1280 有 112）因此原样保留。
+  const landingXs: number[] = hasUpExit(floor) ? [downExitXFor(floor + 1)] : [];
   const rng = makeRng(deriveSeed('obstacles', state.runSeed, floor));
   const out: FloorObstacle[] = [];
   const chances = [OBSTACLES.firstChance, OBSTACLES.secondChance];
@@ -379,42 +386,81 @@ export function obstaclesForFloor(state: GameState, floor: number): FloorObstacl
       const x = minX + rng.nextInt(0, Math.floor(maxX - minX));
       const kind: ObstacleKind = rng.nextFloat() < OBSTACLES.kindWeights.rubble ? 'rubble' : 'gate';
       if (keepClearXs.some((kx) => Math.abs(kx - x) < keep + half)) continue;
+      if (landingXs.some((lx) => Math.abs(lx - x) < half * 2)) continue;
       if (out.some((o) => Math.abs(o.x - x) < half * 4)) continue; // 两个不叠
       out.push({ kind, x });
       placed = true;
     }
   }
-  // 可达性裁决：从 ENTRY_X（电梯/首入/落地都是这个点）出发，至少还有一个
-  // 出口不被阻碍区间截断。两个阻碍物把入口夹在中间时就该删——从后往前删，
-  // 删到一个可达即止（保留多样性，又永不软锁）。
+  // 可达性裁决（GAME_DESIGN_LOCK §5 禁软锁）：每个落点都有它能走的出口，
+  // 且下梯落点必须够得到「向下」的口——否则删。删法：从后往前找第一个
+  // 「删掉它就恢复安全」的阻碍物；两个互相把同一个落点夹死就清空（两个都
+  // 碍事时删任何一个都不够，只能都不摆）。
+  //
+  // 口径演变（R3 修复，2026-11-18）：
+  //   第一版（AG-66 初版）=「ENTRY_X 至少一个出口可达」。1-10 层因此有
+  //     阻碍物——e2e/ag66-obstacles.spec.ts 钉的 seed 42 F2 rubble@222、
+  //     F3 rubble@251 就是那时生成的。
+  //   集成轮加固（AG-65 楼层几何后）=「每个落点到每个**其它**出口都可
+  //     达」，为修 stairNavigation 的 110 层 gate 漏网，连 self-pair 也排
+  //     除。但楼层是**一维过道**：上梯口钉在左端 40、下梯口在右端
+  //     （tier1 1240），任何落在开区间 (40,1240) 里的阻碍物都截断
+  //     (40↔1240) 这一对，而摆放带 [40+keep, 1240-keep] 整体嵌在该开区
+  //     间内——可采纳集退化成空集。实测 60 seed × 53 层只剩 50000 层 13
+  //     个（该层没有下梯口，躲过了这一对），1-10 层数学上不可能出阻碍物
+  //     （QA 第 1 轮 R3：挖掘玩法对普通玩家不可达）。
+  //   本版回到「每个落点至少一个出口可达」，三点修正让它重新安全：
+  //     ① self-pair 算可达——玩家爬梯落在 40 就站在上梯口上（落点=梯
+  //        口，keepClear 保证占位区不贴口），这本身就是出口；排除 self
+  //        正是退化区间的直接成因；
+  //     ② 只把**免费下行电梯**算出口——段顶的上行电梯要下一段的通行证，
+  //        「够得着电梯但没证」仍是软锁，不能算路（GameScene.takeLift 的
+  //        need-pass 分支）。段底的下行电梯免费（「已经付过上来的钱」，
+  //        是回宿舍的路），算；
+  //     ③ 下梯落点（从上层爬下、落在 downExitXFor(floor+1) 的那个人）
+  //        必须够得到本层下梯口（段底没有下梯，必须够到免费下行电梯）
+  //        ——从这里往上爬只会绕段顶一圈再落回同一点，只有向下才回得了
+  //        家；这是 R3 首版修复漏掉的一角，拓扑 BFS 实测在段底死循环
+  //        （1000 层落点被障碍物与电梯隔开），本条把它钉死。
+  //   安全属性不削弱，反而更准：任一落点脚下必有一个可达梯口；中段层两
+  //     个贴口落点（40/下梯口）天然安全；段顶从 40 出发必须够得到下梯口
+  //     （电梯不计数）；段底从落点/640 出发必须够得到电梯或上梯。一维过道
+  //     里「贴梯口落地」⇒ 上爬必到段顶 ⇒ 段顶必通 ⇒ 沿下梯落点链一路下
+  //     到家——无铲子也回得了宿舍（拓扑 BFS 逐 seed 实证见
+  //     tools/obstacle-reachability-recheck.mjs）。AG-65 的两个漏网案例依
+  //     旧被堵：110 层 gate@173（挡 40→下梯口，段顶无上梯）与 1010 层挡
+  //     40→640 的阻碍物，在「至少一个出口」下都因 40 落点无路而被删。
   const exits: number[] = [];
   if (hasUpExit(floor)) exits.push(UP_EXIT_X);
   if (hasDownExit(floor)) exits.push(downExitXFor(floor));
-  if (liftDirection(floor) !== null) exits.push(OBSTACLES.liftX);
-  // 起点 = 玩家在层里的全部合法落点：ENTRY_X（电梯/首入）之外，爬梯落点是
-  // 上梯口 UP_EXIT_X（AG-53 的梯脚）与下梯口。只从 ENTRY_X 出发的裁决会漏
-  // 「阻碍物挡在 40→640 之间」：玩家爬梯落在 40，被钳在阻碍物边，而 640
-  // 出发的路明明畅通——stairNavigation「1010 层 rideLiftUp」20s 超时的根因
-  // （AG-65 几何把 tier4 层长拉到 2176-2688 后，阻碍物可放区间变大，撞上
-  // 这个缺口的概率从 0 变实在）。口径：每个起点到每个**其它**出口都可达
-  // （排除自身，否则起点=出口时恒真、检查形同虚设）。删到全通即止。
-  const starts: number[] = [ENTRY_X];
-  // UP_EXIT_X 无条件进起点：段顶层（110/1010/10010/50010）没有上楼梯
-  // （stairNeighbour 同段约束，爬上去要坐电梯），hasUpExit 为 false——但
-  // 玩家恰恰是从下一层爬上来、落在 UP_EXIT_X 的。第一版把 UP_EXIT_X 的
-  // 进集条件挂在 hasUpExit 上，110 层 gate x=173（挡 40→648/1165）因此
-  // 漏网：stairNavigation「110 层 rideLiftUp」实测仍被闸门钳住。落点与
-  // 出口是两套语义，起点集按「玩家可能站在哪」收，不按「这层有什么出口」。
-  starts.push(UP_EXIT_X);
-  if (hasDownExit(floor)) starts.push(downExitXFor(floor));
-  const reachableFrom = (from: number, to: number): boolean =>
-    !out.some((o) => o.x - half > Math.min(from, to) && o.x + half < Math.max(from, to));
-  while (out.length > 0) {
-    const allThrough = starts.every((from) =>
-      exits.filter((to) => to !== from).every((to) => reachableFrom(from, to)),
-    );
-    if (allThrough) break;
-    out.pop();
+  if (liftDirection(floor) === 'down') exits.push(OBSTACLES.liftX); // 只有免费下行电梯算出口
+  // 落点 → 它必须够到的出口（null = 任一口子可达即可）。self-pair 恒真：
+  // 贴在梯口上就是「可达」，不需要走动。
+  const starts: Array<{ at: number; must: number[] | null }> = [
+    // ENTRY_X：电梯/首入/乘梯落地。往上绕或往下绕都回得了家，任选。
+    { at: ENTRY_X, must: null },
+    // 爬梯落点 40：有上梯就贴在梯口上；段顶（与 100000）没有上梯，此时
+    // 必须够到一个口子——段顶只剩下梯口，100000 只剩免费下行电梯。
+    { at: UP_EXIT_X, must: hasUpExit(floor) ? [UP_EXIT_X] : null },
+  ];
+  if (hasDownExit(floor)) starts.push({ at: downExitXFor(floor), must: [downExitXFor(floor)] });
+  if (hasUpExit(floor)) {
+    // 下梯落点：必须够到本层下梯口；段底没有下梯，必须够到免费下行电梯。
+    const must = hasDownExit(floor)
+      ? [downExitXFor(floor)]
+      : liftDirection(floor) === 'down'
+        ? [OBSTACLES.liftX]
+        : [];
+    starts.push({ at: downExitXFor(floor + 1), must });
+  }
+  const reachableFrom = (list: FloorObstacle[], from: number, to: number): boolean =>
+    !list.some((o) => o.x - half > Math.min(from, to) && o.x + half < Math.max(from, to));
+  const safe = (list: FloorObstacle[]): boolean =>
+    starts.every(({ at, must }) => (must ?? exits).some((to) => reachableFrom(list, at, to)));
+  while (out.length > 0 && !safe(out)) {
+    const idx = [...out.keys()].reverse().find((i) => safe(out.filter((_, j) => j !== i)));
+    if (idx === undefined) out.length = 0;
+    else out.splice(idx, 1);
   }
   return out;
 }

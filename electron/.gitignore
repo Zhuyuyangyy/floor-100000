@@ -1,0 +1,3 @@
+# electron/ 自包含：依赖与打包产物都不进主工程仓库
+node_modules/
+dist-electron/

@@ -190,6 +190,40 @@ export function combatBarX(): number {
   return (DESIGN_WIDTH - (3 * COMBAT_BAR.btnW + 2 * COMBAT_BAR.gap)) / 2;
 }
 
+// ── AG-72: the settings panel (MenuScene 覆盖层 / SettingsScene) ──────────
+// 上架 Steam 的硬缺口：设置面板五件套（SFX 音量 / BGM 音量 / 震屏 /
+// 文本速度 / 语言）+ 恢复默认 + 返回，共 7 行。几何钉在这里，与 HUD/塔楼
+// 同款契约：设计画布固定 1280x720，Scale.FIT 消化窗口尺寸，这些设计像素
+// 一个都不动。两个宿主（标题屏覆盖层、暂停菜单的 SettingsScene）共用同一
+// 组数字，settings.test.ts 按算术断言行区不出板。
+export const SETTINGS_PANEL = {
+  /** 面板宽。右内边距留给 ▶ 箭头（arrowRX 20px 字，中心 544）。 */
+  w: 580,
+  /** 面板高。页脚提示行（footY 348，25px 线盒）之下留 15px 沉深。 */
+  h: 376,
+  /** 行区第一行的顶（相对面板顶）：标题栏 30 + 22 气。 */
+  rowsTop: 52,
+  /** 行高：24px GameSans 的 30px 线盒 + 6px 气。 */
+  rowH: 36,
+  /** 行距：36 + 4px 气。 */
+  rowPitch: 40,
+  /** 行标签左内边距（相对面板左缘）。选区箭头落在 labelX-12。 */
+  labelX: 24,
+  /** 音量滑条左缘（相对面板左缘）。 */
+  barX: 190,
+  /** 音量滑条宽。barX+barW=390，值列从 402 起。 */
+  barW: 200,
+  /** 音量滑条厚。 */
+  barH: 12,
+  /** 值列左缘（相对面板左缘）。'100' 24px 实测约 40px 宽。 */
+  valueX: 402,
+  /** ◀ ▶ 两枚箭头的中心 x（相对面板左缘）。 */
+  arrowLX: 480,
+  arrowRX: 524,
+  /** 页脚提示行的中心 y（相对面板顶）。 */
+  footY: 348,
+} as const;
+
 // ── tower overview (TowerOverviewScene) ─────────────────────────────────────
 // The map's fixed lanes, exported so uiLayout.test.ts can assert the fit
 // arithmetically (estimateTextWidth) instead of by screenshot. Everything the

@@ -143,6 +143,8 @@ import {
   WORLD_DEFAULT_HINT,
 } from '../data/tutorial';
 import { playSfx } from '../render/audio';
+import { shakeIfEnabled } from '../systems/SettingsSystem';
+import { SettingsScene } from './MenuScene';
 import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, PANEL_FILL_BANDS, PANEL_FRAME_PIECES, PANEL_SLICE, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import {
   FONT_FAMILY,
@@ -495,7 +497,10 @@ const AILMENT_LABEL: Record<string, string> = {
 // bar each), then the right-aligned score and gold. These are computed once
 // here rather than sprinkled through buildHud, so moving a column is one edit.
 // All doubled with the design canvas (640x360 -> 1280x720).
-const PAUSE_OPTIONS = ['继续游戏', '塔楼地图', '重新开始', '返回标题'];
+// AG-72: 「设置」挂在暂停菜单末位（返回标题之后）。音量/震屏/文本速度/语言
+// 是 Steam 玩家的基本期待；放在末尾不动前四项既有的键盘/鼠标序号（存量
+// e2e 按 继续/地图/重新开始/返回标题 导航，一个都不用改）。
+const PAUSE_OPTIONS = ['继续游戏', '塔楼地图', '重新开始', '返回标题', '设置'];
 
 // OVERHAUL: the daily objective's one-line label, per goal kind.
 const GOAL_LABELS: Record<'water' | 'containers' | 'upgrade' | 'floor', (target: number) => string> = {
@@ -2679,7 +2684,7 @@ export class GameScene extends Phaser.Scene {
     if (!stage) return;
     playSfx('danger');
     this.playActionAnim(hurtAnimKey('player'), 400);
-    this.cameras.main.shake(160, 0.008);
+    shakeIfEnabled(this, 160, 0.008); // AG-72: 震屏开关
     stage.monster.lunge();
     this.time.delayedCall(130, () => {
       if (!this.combatStage) return;
@@ -2996,7 +3001,7 @@ export class GameScene extends Phaser.Scene {
       const dmg = Math.max(1, Math.round(round.monsterDamage * soften));
       state.player.hp = Math.max(0, state.player.hp - dmg);
       if (action === 'guard') this.playActionAnim(hurtAnimKey('player'), 400);
-      this.cameras.main.shake(160, 0.008);
+      shakeIfEnabled(this, 160, 0.008); // AG-72: 震屏开关
       // AG-70：敌人反击要看见——前冲 38px + 玩家掉血飘字 + 头顶血条收缩。
       this.stageMonsterCounter(dmg);
     }
@@ -3220,7 +3225,7 @@ export class GameScene extends Phaser.Scene {
       this.playSwingFx();
     }
     if (result.hpChange < 0) {
-      this.cameras.main.shake(160, 0.008);
+      shakeIfEnabled(this, 160, 0.008); // AG-72: 震屏开关
       this.refreshStats();
     }
     // Outcome panel: the message, and the item flow the player actually got.
@@ -6077,7 +6082,10 @@ export class GameScene extends Phaser.Scene {
   private buildPausePanel(): void {
     const { width, height } = this.viewSize();
     const panelW = 460;
-    const panelH = 264;
+    // AG-72: 264 -> 304. A fifth row (设置) at the same 40px pitch keeps the
+    // old bottom margin: 96 + 5*40 = 256, leaving 48px under the last row,
+    // exactly what four rows had under the old 264 height.
+    const panelH = 304;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -6151,9 +6159,28 @@ export class GameScene extends Phaser.Scene {
       // other new run — otherwise the pick screen would be skippable and the
       // survivor choice would silently stop mattering.
       this.scene.start('MetaSelect');
+    } else if (this.pauseSelected === 4) {
+      this.openSettings(); // 设置
     } else {
       this.scene.start('Menu'); // 返回标题
     }
+  }
+
+  // AG-72: the pause menu's 设置 entry. The panel lives in SettingsScene (the
+  // class sits next to the title screen's copy of the same panel in
+  // MenuScene.ts, both sharing SettingsPanelView). Scene handoff, the same
+  // contract as openTowerOverview: GameScene stops, the survival clock stops
+  // with it, and coming back re-runs create() against the same module-level
+  // GameState — nothing about the run is reset, and create() re-closes the
+  // pause menu on the way in.
+  //
+  // Registered lazily rather than in core/gameConfig's scene list: that config
+  // is the shared boot contract, and only this one menu branch needs the scene
+  // (the same reasoning main.ts uses for QuestPanel/Endgame). The get() guard
+  // keeps the add idempotent across runs.
+  private openSettings(): void {
+    if (!this.scene.get('Settings')) this.scene.add('Settings', SettingsScene);
+    this.scene.start('Settings');
   }
 
   // Opening the map hands the scene off entirely: GameScene is stopped, so the
@@ -9399,7 +9426,7 @@ export class GameScene extends Phaser.Scene {
       this.refreshStats();
       this.playActionAnim(hurtAnimKey('player'), 400);
       playSfx('hurt');
-      this.cameras.main.shake(160, 0.008);
+      shakeIfEnabled(this, 160, 0.008); // AG-72: 震屏开关
       this.cameras.main.flash(140, 230, 109, 99);
       playFx(this, 'ground-slam', state.player.x, PLAYER_FEET_Y - 6, LIGHT_DEPTH);
       this.flash(`被巡游体击中！HP -${damage}，快回宿舍或换层！`);

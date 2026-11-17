@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { FONT_FAMILY } from '../render/uiKit';
+import { FONT_FAMILY, TYPE, UI, buildPanelHeader, drawStatBar } from '../render/uiKit';
 
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { startNewGame, tryContinue } from '../core/session';
@@ -10,6 +10,15 @@ import { playSfx } from '../render/audio';
 // 态诞生不违规），首次点击/按键时 resume 并播主菜单 BGM；离开菜单（SHUTDOWN）
 // 静默。游戏内音乐由 GameScene 的 startFloorMusic 接管。
 import { startMenuBgm, stopBgm } from '../systems/AudioSystem';
+import {
+  LANGUAGE_LABELS,
+  TEXT_SPEEDS,
+  TEXT_SPEED_LABELS,
+  VOLUME_STEP,
+  getSettings,
+  resetSettings,
+  updateSettings,
+} from '../systems/SettingsSystem';
 import { applyPanelDepth, buildPanel, createMarker, PANEL_DEPTH, placeMarker, type PanelObject } from '../render/panels';
 import { buildPhotoTitleBackdrop, buildTitleBackdrop, type TitleBackdrop } from '../render/titleBackdrop';
 import { TITLE_BG_KEY } from '../render/artpack';
@@ -17,9 +26,11 @@ import { hitRect, textClickable } from '../render/pointer';
 // AG-75: the About panel's version line comes from the manifest, so a release
 // bump can never leave the menu advertising a stale number.
 import pkg from '../../package.json';
+import { SETTINGS_PANEL } from '../render/hudLayout';
 
 // Title screen: a keyboard-navigable option list — 开始新游戏 / 继续游戏 (when a
-// save exists) / 操作说明 / 关于. ↑/↓ to move, Enter to choose (docs/03_TASKS.md#p0-08).
+// save exists) / 操作说明 / 关于 (AG-75) / 设置 (AG-72). ↑/↓ to move, Enter to
+// choose (docs/03_TASKS.md#p0-08).
 //
 // OVERHAUL: the screen used to be a flat colour with text on it, and the
 // owner's one-glance verdict was "this alone makes me not want to play". A
@@ -35,9 +46,9 @@ import pkg from '../../package.json';
 //   • a standing version tag in the corner (Steam-store etiquette: a player can
 //     always tell a support person what build they are on);
 //   • an 关于 panel — version, engine, credits — the store-page basic.
-// The entry order puts 关于 last so the existing e2e index probes
-// (ArrowDown → 操作说明) keep their meaning.
-type InputSlot = 'up' | 'down' | 'enter' | 'esc';
+// AG-72 加 left/right 两个槽：设置覆盖层开着时 ←/→ 调音量/档位，标题屏上
+// 空转（与以前一致）。
+type InputSlot = 'up' | 'down' | 'left' | 'right' | 'enter' | 'esc';
 
 export class MenuScene extends Phaser.Scene {
   private optionTexts: Phaser.GameObjects.Text[] = [];
@@ -46,12 +57,18 @@ export class MenuScene extends Phaser.Scene {
   private cursors!: { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key };
   private keyEnter!: Phaser.Input.Keyboard.Key;
   private keyEsc!: Phaser.Input.Keyboard.Key;
+  private keyLeft!: Phaser.Input.Keyboard.Key;
+  private keyRight!: Phaser.Input.Keyboard.Key;
   private helpOpen = false;
   private helpObjects: PanelObject[] = [];
+  // AG-72: the settings overlay. Same show/hide pattern as the help panel
+  // (one flat object list), driven by the shared SettingsPanelView below.
+  private settingsOpen = false;
+  private settingsPanel!: SettingsPanelView;
   private marker!: Phaser.GameObjects.Image;
   private messageText!: Phaser.GameObjects.Text;
   private messageTimer?: Phaser.Time.TimerEvent;
-  private lastInputFrame: Record<InputSlot, number> = { up: -1, down: -1, enter: -1, esc: -1 };
+  private lastInputFrame: Record<InputSlot, number> = { up: -1, down: -1, left: -1, right: -1, enter: -1, esc: -1 };
   private backdrop?: TitleBackdrop;
   private titleText?: Phaser.GameObjects.Text;
   private subtitleText?: Phaser.GameObjects.Text;
@@ -61,7 +78,7 @@ export class MenuScene extends Phaser.Scene {
   // update() keeps their alpha locked to their headline's flicker.
   private titleShadow?: Phaser.GameObjects.Text;
   private subtitleShadow?: Phaser.GameObjects.Text;
-  // AG-75: the 关于 panel's state and objects, mirroring the help panel.
+  // AG-75: 关于 panel's state and objects, mirroring the help panel.
   private aboutOpen = false;
   private aboutObjects: PanelObject[] = [];
 
@@ -73,10 +90,13 @@ export class MenuScene extends Phaser.Scene {
     // Field initialisers do not re-run on scene restart, and the frame counter is
     // monotonic across the session, so a stale slot would never match anyway —
     // reset anyway to keep the per-create state honest.
-    this.lastInputFrame = { up: -1, down: -1, enter: -1, esc: -1 };
+    this.lastInputFrame = { up: -1, down: -1, left: -1, right: -1, enter: -1, esc: -1 };
     // Survives a scene restart; left true, the help panel would still swallow
     // navigation on the fresh title screen.
     this.helpOpen = false;
+    // The settings overlay is rebuilt below, so it starts closed — a restart
+    // must not come back with the panel already up (and its old objects dead).
+    this.settingsOpen = false;
 
     // AG-74：主菜单 BGM。幂等——从游戏返回菜单再进 create 只是续播同一首。
     startMenuBgm();
@@ -145,9 +165,10 @@ export class MenuScene extends Phaser.Scene {
     this.entries = [{ label: '开始新游戏', run: () => this.startNew() }];
     if (hasSave()) this.entries.push({ label: '继续游戏', run: () => this.continueRun() });
     this.entries.push({ label: '操作说明', run: () => this.toggleHelp() });
-    // AG-75: 关于 goes last — after 操作说明 — so every existing e2e index
-    // probe (ArrowDown → 操作说明) keeps its meaning.
+    // AG-75: 关于 / AG-72: 设置 都挂在 操作说明 之后——前三个入口的键盘/鼠标
+    // 序号（以及存量 e2e 的「ArrowDown → 继续游戏 / 操作说明」导航）一个都不动。
     this.entries.push({ label: '关于', run: () => this.toggleAbout() });
+    this.entries.push({ label: '设置', run: () => this.toggleSettings() });
     this.selected = 0;
 
     // Bind input first: waitForScene() reports the scene active as soon as its
@@ -159,10 +180,21 @@ export class MenuScene extends Phaser.Scene {
       this.cursors = keyboard.addKeys({ up: 'UP', down: 'DOWN' }) as typeof this.cursors;
       this.keyEnter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
       this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+      this.keyLeft = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
+      this.keyRight = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
       this.cursors.up.on('down', () => this.onNav('up', -1), this);
       this.cursors.down.on('down', () => this.onNav('down', 1), this);
       this.keyEnter.on('down', () => this.onConfirm('enter'), this);
       this.keyEsc.on('down', () => this.onConfirm('esc'), this);
+      // AG-72: ←/→ only mean anything while the settings overlay is up (volume
+      // steps, toggles,档位). On the plain title screen they do nothing, the
+      // same as before.
+      this.keyLeft.on('down', () => {
+        if (this.settingsOpen && this.accept('left')) this.settingsPanel.adjust(-1);
+      }, this);
+      this.keyRight.on('down', () => {
+        if (this.settingsOpen && this.accept('right')) this.settingsPanel.adjust(1);
+      }, this);
     }
 
     this.optionTexts = [];
@@ -181,12 +213,13 @@ export class MenuScene extends Phaser.Scene {
       // than styling the text alone.
       textClickable(t, hex(TEXT.primary), hex(PALETTE.lightHigh), {
         onOver: () => {
-          if (this.helpOpen || this.aboutOpen) return;
+          if (this.helpOpen || this.aboutOpen || this.settingsOpen) return;
           this.selected = i;
           this.refreshOptions();
           this.hideMessage();
         },
         onClick: () => {
+          if (this.settingsOpen) return; // the overlay owns the pointer
           this.selected = i;
           this.refreshOptions();
           this.activate();
@@ -221,6 +254,7 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(1, 0.5);
     this.buildHelp(width, height);
     this.buildAbout(width, height);
+    this.buildSettings(width, height);
   }
 
   // The per-frame life of the title screen: the backdrop's tower drift, window
@@ -257,10 +291,16 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private onNav(slot: 'up' | 'down', delta: number): void {
+    // AG-72: while the settings overlay is up, ↑/↓ walk its rows instead of the
+    // title list behind it — the same guard helpOpen already uses.
+    if (this.settingsOpen) {
+      if (this.accept(slot)) this.settingsPanel.move(delta);
+      return;
+    }
     // AG-75: the about panel swallows navigation the same way the help panel
     // does — Enter and Esc both close it, arrows do not move the cursor
     // behind it.
-    if (this.helpOpen || this.aboutOpen || !this.accept(slot)) return;
+    if (this.helpOpen || this.aboutOpen || this.settingsOpen || !this.accept(slot)) return;
     this.move(delta);
   }
 
@@ -272,6 +312,13 @@ export class MenuScene extends Phaser.Scene {
     }
     if (this.aboutOpen) {
       this.toggleAbout(); // ...and the about panel (AG-75)
+      return;
+    }
+    if (this.settingsOpen) {
+      // Enter activates the highlighted row; Esc is 返回 (the panel's own last
+      // row does the same thing for the mouse).
+      if (slot === 'esc') this.toggleSettings();
+      else this.settingsPanel.activateSelected();
       return;
     }
     if (slot === 'enter') this.activate();
@@ -426,5 +473,423 @@ export class MenuScene extends Phaser.Scene {
   private toggleAbout(): void {
     this.aboutOpen = !this.aboutOpen;
     for (const o of this.aboutObjects) o.setVisible(this.aboutOpen);
+  }
+
+  // ── AG-72: the settings overlay ─────────────────────────────────────────
+  // Built once per create() like the help panel (field initialisers do not
+  // re-run on scene restart, so the object list is rebuilt here and starts
+  // hidden). The controller itself is stateless between opens — it re-reads
+  // SettingsSystem on every refresh, so a change made from the pause menu's
+  // SettingsScene shows up here too.
+  private buildSettings(width: number, height: number): void {
+    this.settingsPanel = new SettingsPanelView(this, PANEL_DEPTH.menu.help, () => this.toggleSettings());
+    this.settingsPanel.build(width, height);
+  }
+
+  private toggleSettings(): void {
+    this.settingsOpen = !this.settingsOpen;
+    this.settingsPanel.setVisible(this.settingsOpen);
+    if (this.settingsOpen) this.settingsPanel.refresh();
+  }
+}
+
+// ── AG-72: the settings panel, shared by two hosts ─────────────────────────
+//
+// 上架 Steam 的硬缺口：游戏此前没有任何设置入口。面板七行——SFX 音量 /
+// BGM 音量 / 震屏 / 文本速度 / 语言 + 恢复默认 + 返回——延用铆钉板语言
+// （buildPanel + buildPanelHeader + drawStatBar 分段滑条），几何钉在
+// render/hudLayout.ts 的 SETTINGS_PANEL。
+//
+// 两个宿主共用这一个控制器：
+//   * MenuScene —— 标题屏的覆盖层面板（与「操作说明」同款的显隐模式）；
+//   * SettingsScene —— 暂停菜单「设置」入口的独立场景（GameScene 停场
+//     交接，返回 Game 时模块级 GameState 不丢——塔楼地图同款契约）。
+//
+// 所有读写走 systems/SettingsSystem（localStorage `floor100000.settings`，
+// 坏 JSON/坏字段回退默认）：每次调整即时生效 + 即时持久化。音量行调整后
+// 会以新音量播一声 click——滑到 0 就是静默，反馈即所见。
+type SettingsRowKind = 'volume' | 'toggle' | 'cycle' | 'action';
+
+interface SettingsRowDef {
+  kind: SettingsRowKind;
+  label: string;
+}
+
+const SETTINGS_ROWS: SettingsRowDef[] = [
+  { kind: 'volume', label: 'SFX 音量' },
+  { kind: 'volume', label: 'BGM 音量' },
+  { kind: 'toggle', label: '震屏' },
+  { kind: 'cycle', label: '文本速度' },
+  { kind: 'cycle', label: '语言' },
+  { kind: 'action', label: '恢复默认' },
+  { kind: 'action', label: '返回' },
+];
+
+const SETTINGS_HINT = '↑/↓ 选择 · ←/→ 调整 · Enter 确认 · ESC 返回';
+
+class SettingsPanelView {
+  private readonly scene: Phaser.Scene;
+  private readonly depth: number;
+  private readonly onBack: () => void;
+  private objects: PanelObject[] = [];
+  private labels: Phaser.GameObjects.Text[] = [];
+  /** Sparse by row index: the two action rows have no value column. */
+  private values: Array<Phaser.GameObjects.Text | undefined> = [];
+  /** Sparse by row index: only adjustable rows carry arrows (语言 is single-option). */
+  private arrows: Array<{ left: Phaser.GameObjects.Text; right: Phaser.GameObjects.Text } | undefined> = [];
+  private barGfx?: Phaser.GameObjects.Graphics;
+  private hintText?: Phaser.GameObjects.Text;
+  private marker?: Phaser.GameObjects.Image;
+  private messageTimer?: Phaser.Time.TimerEvent;
+  private selected = 0;
+
+  constructor(scene: Phaser.Scene, depth: number, onBack: () => void) {
+    this.scene = scene;
+    this.depth = depth;
+    this.onBack = onBack;
+  }
+
+  build(width: number, height: number): void {
+    this.messageTimer?.remove();
+    this.messageTimer = undefined;
+    const cx = width / 2;
+    const cy = height / 2;
+    const panelW = SETTINGS_PANEL.w;
+    const panelH = SETTINGS_PANEL.h;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+
+    this.objects.push(...buildPanel(this.scene, cx, cy, panelW, panelH, 'green', this.depth));
+    this.objects.push(...buildPanelHeader(this.scene, left, top, panelW, '设置', UI.good, this.depth + 5));
+
+    // One Graphics for both volume bars; refresh() clears and redraws it.
+    this.barGfx = this.scene.add.graphics().setScrollFactor(0);
+    this.objects.push(this.barGfx);
+
+    this.hintText = this.scene.add
+      .text(cx, top + SETTINGS_PANEL.footY, SETTINGS_HINT, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+      .setOrigin(0.5)
+      .setScrollFactor(0);
+    this.objects.push(this.hintText);
+
+    // A full-panel swallow rect: the title entries behind the overlay are still
+    // interactive, and a click in the gap between rows must not leak through to
+    // them (the help panel's dismiss rect plays the same role). Created BEFORE
+    // the rows so the rows' own hit targets stay on top of it — Phaser picks the
+    // topmost interactive object under the pointer.
+    this.objects.push(hitRect(this.scene, left, top, panelW, panelH, this.depth + 1, { onClick: () => undefined }));
+
+    this.labels = [];
+    this.values = [];
+    this.arrows = [];
+    SETTINGS_ROWS.forEach((row, i) => {
+      const rowTop = top + SETTINGS_PANEL.rowsTop + i * SETTINGS_PANEL.rowPitch;
+      const rowCY = rowTop + SETTINGS_PANEL.rowH / 2;
+      const label = this.scene.add
+        .text(left + SETTINGS_PANEL.labelX, rowCY, row.label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
+        .setOrigin(0, 0.5)
+        .setScrollFactor(0);
+      this.labels.push(label);
+      this.objects.push(label);
+
+      if (row.kind !== 'action') {
+        // 语言是唯一选项：值压暗且不给箭头，「框架已就位、暂无 English」。
+        const dim = row.label === '语言';
+        const value = this.scene.add
+          .text(left + SETTINGS_PANEL.valueX, rowCY, this.valueOf(i), { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: dim ? hex(TEXT.dim) : hex(TEXT.highlight) })
+          .setOrigin(0, 0.5)
+          .setScrollFactor(0);
+        this.values[i] = value;
+        this.objects.push(value);
+      }
+
+      if (row.kind !== 'action' && row.label !== '语言') {
+        const arrowL = this.scene.add
+          .text(left + SETTINGS_PANEL.arrowLX, rowCY, '◀', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+          .setOrigin(0.5)
+          .setScrollFactor(0);
+        const arrowR = this.scene.add
+          .text(left + SETTINGS_PANEL.arrowRX, rowCY, '▶', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+          .setOrigin(0.5)
+          .setScrollFactor(0);
+        this.arrows[i] = { left: arrowL, right: arrowR };
+        this.objects.push(arrowL, arrowR);
+        // Arrow targets sit ABOVE the row target (created after it), so a click
+        // on ◀/▶ adjusts instead of activating the row.
+        this.objects.push(
+          hitRect(this.scene, left + SETTINGS_PANEL.arrowLX - 14, rowTop, 28, SETTINGS_PANEL.rowH, this.depth + 3, {
+            onOver: () => this.select(i),
+            onClick: () => {
+              this.select(i);
+              this.adjust(-1);
+            },
+          }),
+        );
+        this.objects.push(
+          hitRect(this.scene, left + SETTINGS_PANEL.arrowRX - 14, rowTop, 28, SETTINGS_PANEL.rowH, this.depth + 3, {
+            onOver: () => this.select(i),
+            onClick: () => {
+              this.select(i);
+              this.adjust(1);
+            },
+          }),
+        );
+      }
+
+      // The row itself: hover moves the cursor, click does what Enter does.
+      this.objects.push(
+        hitRect(this.scene, left + 16, rowTop, panelW - 32, SETTINGS_PANEL.rowH, this.depth + 2, {
+          onOver: () => this.select(i),
+          onClick: () => {
+            this.select(i);
+            this.activateSelected();
+          },
+        }),
+      );
+    });
+
+    this.marker = createMarker(this.scene);
+    this.objects.push(this.marker);
+
+    applyPanelDepth(this.objects, this.depth);
+    for (const o of this.objects) o.setVisible(false);
+  }
+
+  setVisible(visible: boolean): void {
+    for (const o of this.objects) o.setVisible(visible);
+  }
+
+  /** ↑/↓: walk the rows. Clamped, like every other list in the game. */
+  move(delta: number): void {
+    const next = Phaser.Math.Clamp(this.selected + delta, 0, SETTINGS_ROWS.length - 1);
+    if (next === this.selected) return;
+    this.selected = next;
+    this.refresh();
+  }
+
+  /**
+   * ←/→ (and the ◀/▶ targets): adjust the highlighted row.
+   *   volume — ±5， clamp 0..100，改完以新音量播一声 click 试听；
+   *   toggle — 震屏开/关；
+   *   cycle  — 文本速度按档位序循环；语言唯一选项，no-op；
+   *   action — no-op（恢复默认/返回归 Enter 管）。
+   * 每次调整都经 updateSettings 即时持久化。
+   */
+  adjust(delta: number): void {
+    const settings = getSettings();
+    let changed = false;
+    if (this.selected === 0 || this.selected === 1) {
+      const current = this.selected === 0 ? settings.sfxVolume : settings.bgmVolume;
+      const next = Phaser.Math.Clamp(current + delta * VOLUME_STEP, 0, 100);
+      if (next === current) return;
+      updateSettings(this.selected === 0 ? { sfxVolume: next } : { bgmVolume: next });
+      changed = true;
+    } else if (this.selected === 2) {
+      updateSettings({ screenShake: !settings.screenShake });
+      changed = true;
+    } else if (this.selected === 3) {
+      const index = TEXT_SPEEDS.indexOf(settings.textSpeed);
+      const next = TEXT_SPEEDS[(index + delta + TEXT_SPEEDS.length) % TEXT_SPEEDS.length];
+      updateSettings({ textSpeed: next });
+      changed = true;
+    }
+    if (!changed) return;
+    // 音量行：以新音量试听一声。滑到 0 时 playSfx 自己静默——所见即所听。
+    playSfx('click');
+    this.refresh();
+  }
+
+  /** Enter (and a row click): toggle/cycle a value row, preview a volume row,
+   *  or run 恢复默认 / 返回. */
+  activateSelected(): void {
+    if (this.selected <= 3) {
+      if (this.selected <= 1) playSfx('click'); // 音量行：试听
+      else this.adjust(1); // 开关 / 档位：切到下一档
+      return;
+    }
+    if (this.selected === 4) return; // 语言：唯一选项
+    if (this.selected === 5) {
+      resetSettings();
+      playSfx('click');
+      this.refresh();
+      this.showMessage('已恢复默认设置');
+      return;
+    }
+    this.close(); // 返回
+  }
+
+  /** Esc / 返回 row: hand control back to the host. */
+  close(): void {
+    this.onBack();
+  }
+
+  private select(i: number): void {
+    if (this.selected === i) return;
+    this.selected = i;
+    this.refresh();
+  }
+
+  /** Transient confirmation on the hint line (恢复默认). */
+  private showMessage(text: string): void {
+    this.messageTimer?.remove();
+    if (!this.hintText) return;
+    this.hintText.setText(text).setColor(hex(TEXT.warn));
+    this.messageTimer = this.scene.time.delayedCall(1800, () => {
+      this.hintText?.setText(SETTINGS_HINT).setColor(hex(PALETTE.clothHigh));
+    });
+  }
+
+  private valueOf(row: number): string {
+    const settings = getSettings();
+    switch (row) {
+      case 0:
+        return String(settings.sfxVolume);
+      case 1:
+        return String(settings.bgmVolume);
+      case 2:
+        return settings.screenShake ? '开' : '关';
+      case 3:
+        return TEXT_SPEED_LABELS[settings.textSpeed];
+      case 4:
+        return LANGUAGE_LABELS[settings.language];
+      default:
+        return '';
+    }
+  }
+
+  /** Re-read every value from SettingsSystem and repaint. Cheap: two bars. */
+  refresh(): void {
+    const settings = getSettings();
+    this.labels.forEach((t, i) => t.setColor(i === this.selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary)));
+    this.values.forEach((t, i) => {
+      if (t) t.setText(this.valueOf(i));
+    });
+    this.arrows.forEach((pair, i) => {
+      if (!pair) return;
+      const color = i === this.selected ? hex(PALETTE.lightHigh) : hex(PALETTE.clothHigh);
+      pair.left.setColor(color);
+      pair.right.setColor(color);
+    });
+    if (this.barGfx) {
+      this.barGfx.clear();
+      for (const i of [0, 1]) {
+        const rowTop = this.rowsTopOf(i);
+        const frac = (i === 0 ? settings.sfxVolume : settings.bgmVolume) / 100;
+        drawStatBar(
+          this.barGfx,
+          this.barLeftOf(),
+          rowTop + (SETTINGS_PANEL.rowH - SETTINGS_PANEL.barH) / 2,
+          SETTINGS_PANEL.barW,
+          SETTINGS_PANEL.barH,
+          frac,
+          UI.accent,
+          10,
+        );
+      }
+    }
+    const label = this.labels[this.selected];
+    this.marker?.setVisible(label !== undefined);
+    if (label && this.marker) placeMarker(this.marker, label);
+  }
+
+  // Panel-relative anchors, kept as methods so build() does not have to stash
+  // left/top on the instance (the controller outlives a rebuild otherwise).
+  private panelLeft(): number {
+    return this.scene.cameras.main.width / 2 - SETTINGS_PANEL.w / 2;
+  }
+
+  private panelTop(): number {
+    return this.scene.cameras.main.height / 2 - SETTINGS_PANEL.h / 2;
+  }
+
+  private barLeftOf(): number {
+    return this.panelLeft() + SETTINGS_PANEL.barX;
+  }
+
+  private rowsTopOf(row: number): number {
+    return this.panelTop() + SETTINGS_PANEL.rowsTop + row * SETTINGS_PANEL.rowPitch;
+  }
+}
+
+// ── AG-72: SettingsScene — the pause menu's 设置 entry ─────────────────────
+//
+// GameScene's pause menu hands the scene off here the same way it hands off to
+// TowerOverview: GameScene stops, the survival clock stops with it, and coming
+// back re-runs create() against the same module-level GameState — nothing about
+// the run is reset (see GameScene.openTowerOverview's note). Returning lands
+// straight back in the game, unpaused.
+//
+// The scene class lives here, next to the title screen's copy of the same
+// panel, because both hosts share SettingsPanelView — GameScene registers it
+// lazily on first use (scene.add + scene.start) rather than paying for a core
+// gameConfig entry that only one menu branch needs.
+export class SettingsScene extends Phaser.Scene {
+  private panel!: SettingsPanelView;
+  private cursors!: { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key };
+  private keyEnter!: Phaser.Input.Keyboard.Key;
+  private keyEsc!: Phaser.Input.Keyboard.Key;
+  private keyLeft!: Phaser.Input.Keyboard.Key;
+  private keyRight!: Phaser.Input.Keyboard.Key;
+  private lastInputFrame: Record<InputSlot, number> = { up: -1, down: -1, left: -1, right: -1, enter: -1, esc: -1 };
+
+  constructor() {
+    super('Settings');
+  }
+
+  create(): void {
+    this.lastInputFrame = { up: -1, down: -1, left: -1, right: -1, enter: -1, esc: -1 };
+    const { width, height } = this.cameras.main;
+
+    // A dark scrim over the frozen game world: the panel is the only thing in
+    // focus, the same reading as every other modal in the game.
+    this.add.rectangle(width / 2, height / 2, width, height, UI.surface).setDepth(-30);
+    this.add.rectangle(width / 2, height / 2, width, height, PALETTE.ink).setAlpha(0.55).setDepth(-29);
+
+    this.panel = new SettingsPanelView(this, PANEL_DEPTH.menu.help, () => this.scene.start('Game'));
+    this.panel.build(width, height);
+    this.panel.setVisible(true);
+    this.panel.refresh();
+
+    const keyboard = this.input.keyboard;
+    if (keyboard) {
+      this.cursors = keyboard.addKeys({ up: 'UP', down: 'DOWN' }) as typeof this.cursors;
+      this.keyEnter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+      this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+      this.keyLeft = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
+      this.keyRight = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
+      this.cursors.up.on('down', () => this.onNav('up', -1), this);
+      this.cursors.down.on('down', () => this.onNav('down', 1), this);
+      this.keyEnter.on('down', () => this.onConfirm('enter'), this);
+      this.keyEsc.on('down', () => this.onConfirm('esc'), this);
+      this.keyLeft.on('down', () => {
+        if (this.accept('left')) this.panel.adjust(-1);
+      }, this);
+      this.keyRight.on('down', () => {
+        if (this.accept('right')) this.panel.adjust(1);
+      }, this);
+    }
+  }
+
+  // Phaser can deliver one keydown several times inside a single frame; accept
+  // each key at most once per frame (GHI-03 m9, the MenuScene pattern).
+  private accept(slot: InputSlot): boolean {
+    const frame = this.game.getFrame();
+    if (this.lastInputFrame[slot] === frame) return false;
+    this.lastInputFrame[slot] = frame;
+    return true;
+  }
+
+  private onNav(slot: 'up' | 'down', delta: number): void {
+    if (!this.accept(slot)) return;
+    this.panel.move(delta);
+  }
+
+  private onConfirm(slot: 'enter' | 'esc'): void {
+    if (!this.accept(slot)) return;
+    if (slot === 'esc') {
+      this.panel.close();
+      return;
+    }
+    this.panel.activateSelected();
   }
 }

@@ -8,13 +8,15 @@ import type { QuestBranch, QuestEvaluation } from '../data/quests';
 import { clearFlag, hasFlag, setFlag } from '../systems/WorldFlags';
 import { addItem, removeItem } from '../systems/InventorySystem';
 import { saveToStorage } from '../systems/SaveSystem';
-import { depthRecord } from '../systems/progress';
+import { recordRows, runStatRows, settleRun } from '../systems/StatsSystem';
 import { estimateLineHeight, wrapText } from '../render/dialogueLayout';
 import { buildPanelHeader, FONT_FAMILY, TYPE, UI } from '../render/uiKit';
 import { buildPanel } from '../render/panels';
 import type { PanelAccent } from '../render/panels';
 import { PALETTE, ROLE, TEXT, hex } from '../render/palette.ts';
 import { playSfx } from '../render/audio';
+import { STATS_PANEL } from '../render/hudLayout';
+import { buildStatsTable } from './EndScene';
 
 // EndgameScene — 阶层 6「统治核心」的终局演出（100000 层，Q6 `same-pen`）。
 //
@@ -682,14 +684,12 @@ export class EndgameScene extends Phaser.Scene {
     const ending = this.ending ? ENDINGS[this.ending] : null;
     if (!ending) return;
 
-    const best = this.state.records?.bestScore ?? 0;
+    // 第一段：这一局怎么收场的（结局/路线/本结局得分）。三项就够——楼层、
+    // 存活、得分都进了下面的统计表，不在这里重复。
     const rows: ReadonlyArray<readonly [string, string, boolean]> = [
       ['结局', ending.title, true],
       ['路线', ending.route, false],
       ['本结局得分', `+${this.scoreDelta}`, false],
-      ['纪录得分', `${best}`, false],
-      ['最深楼层', `第 ${depthRecord(this.state)} 层`, false],
-      ['存活', `${this.state.day} 天`, false],
     ];
     let y = top + ENDGAME_BODY_TOP + 24;
     for (const [label, value, highlight] of rows) {
@@ -697,9 +697,34 @@ export class EndgameScene extends Phaser.Scene {
       this.addText(x + ENDGAME_TEXT_W, y, value, TYPE.body, hex(highlight ? TEXT.highlight : TEXT.primary), { x: 1, y: 0.5 });
       y += 40;
     }
+
+    // 第二段：本局统计表（AG-81，与死亡结算同一组件 buildStatsTable + 同一
+    // 行几何 hudLayout.STATS_PANEL）。16 行四列：3 项定场 + 120px 的网格，
+    // 终局面板 760 宽撑得下。
+    y += 8;
+    const divider = this.addObject(this.add.graphics().setDepth(DEPTH + 6));
+    divider.fillStyle(UI.line, 0.6);
+    divider.fillRect(x, y, ENDGAME_TEXT_W, 1);
+    y += 16;
+    this.addText(x, y, '本局统计', TYPE.caption, hex(TEXT.dim), { x: 0, y: 0.5 });
+    y += 24;
+    const statColW = (ENDGAME_TEXT_W - STATS_PANEL.colGap * 3) / 4;
+    const stats = buildStatsTable(this, x, y, statColW, runStatRows(this.state), DEPTH + 5, 4);
+    for (const o of stats.objects) this.addObject(o);
+    y += stats.height + 16;
+
+    // 第三段：历史纪录对比（localStorage 'floor100000.records'）。破纪录的
+    // 行由 buildStatsTable 盖「新纪录」章——走到终局的人值得知道自己破了什么。
+    this.addText(x, y, '历史纪录', TYPE.caption, hex(TEXT.dim), { x: 0, y: 0.5 });
+    y += 24;
+    const recColW = (ENDGAME_TEXT_W - STATS_PANEL.colGap) / 2;
+    const records = buildStatsTable(this, x, y, recColW, recordRows(this.state, settleRun(this.state)), DEPTH + 5, 2);
+    for (const o of records.objects) this.addObject(o);
+    y += records.height + 20;
+
     this.addText(
       x,
-      y + 12,
+      y,
       '权限已经落定。塔继续运转——以你知道的那种方式。',
       TYPE.caption,
       hex(TEXT.secondary),

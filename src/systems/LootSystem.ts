@@ -330,6 +330,27 @@ export const OBSTACLE_BLOCK_HALF_WIDTH = OBSTACLES.blockHalfWidth;
 /** 「挖过了」的存档键。与容器/床的键共用 lootedItems 数组，前缀不同永不撞。 */
 export const obstacleKey = (floor: number, x: number): string => `obstacle:${floor}:${x}`;
 
+/**
+ * 这一层的「口子」全集：上梯口 + 下梯口 + 免费下行电梯。
+ * 与 obstaclesForFloor 的可达性裁决同口径——生成侧与 R4 护栏（见
+ * rescueSealedPlayerX）共用一份导出，免得两边各算一套。
+ */
+export function floorExitXs(floor: number): number[] {
+  const exits: number[] = [];
+  if (hasUpExit(floor)) exits.push(UP_EXIT_X);
+  if (hasDownExit(floor)) exits.push(downExitXFor(floor));
+  if (liftDirection(floor) === 'down') exits.push(OBSTACLES.liftX); // 只有免费下行电梯算出口
+  return exits;
+}
+
+/** 其中指向「家」的口子：下梯口 + 免费下行电梯（上梯口是离家向上的方向）。 */
+export function homewardExitXs(floor: number): number[] {
+  const exits: number[] = [];
+  if (hasDownExit(floor)) exits.push(downExitXFor(floor));
+  if (liftDirection(floor) === 'down') exits.push(OBSTACLES.liftX);
+  return exits;
+}
+
 export function isObstacleCleared(state: GameState, floor: number, x: number): boolean {
   return state.visitedFloors[floor]?.lootedItems.includes(obstacleKey(floor, x)) ?? false;
 }
@@ -430,10 +451,7 @@ export function obstaclesForFloor(state: GameState, floor: number): FloorObstacl
   //     tools/obstacle-reachability-recheck.mjs）。AG-65 的两个漏网案例依
   //     旧被堵：110 层 gate@173（挡 40→下梯口，段顶无上梯）与 1010 层挡
   //     40→640 的阻碍物，在「至少一个出口」下都因 40 落点无路而被删。
-  const exits: number[] = [];
-  if (hasUpExit(floor)) exits.push(UP_EXIT_X);
-  if (hasDownExit(floor)) exits.push(downExitXFor(floor));
-  if (liftDirection(floor) === 'down') exits.push(OBSTACLES.liftX); // 只有免费下行电梯算出口
+  const exits = floorExitXs(floor);
   // 落点 → 它必须够到的出口（null = 任一口子可达即可）。self-pair 恒真：
   // 贴在梯口上就是「可达」，不需要走动。
   const starts: Array<{ at: number; must: number[] | null }> = [
@@ -503,6 +521,76 @@ export function clampXAgainstObstacles(
     }
   }
   return x;
+}
+
+/**
+ * R4 护栏：旧档玩家被新布局封死时的一次性迁移目标（QA 第 2 轮 probeA-R3）。
+ *
+ * 背景：AG-96（R3 修复）让正常楼层按 roll 率生成阻碍物，生成侧的防软锁保证
+ * 的是「每个**落点**至少还有一个出口可达」（BFS 实证 4920 落点全通）——新档
+ * 因此永远安全。但修复前创建的旧档重进这些层时，玩家位置是旧布局留下的，
+ * 可能正好落在新布局的「无口区间」里：没铲子就到不了任何梯口（实测 seed 4
+ * 第 2 层 x=365，夹在 rubble@272 与 gate@458 之间，可行走区间 [298,432]，
+ * 上梯口 40 与下梯口 1240 都够不着，软锁）。
+ *
+ * 规则（只挪 x，不跨层、不动其它任何状态）：
+ *   - 所在可走区间已有可达口子 → 不迁（新档/正常情况零行为变化）；
+ *   - 站在阻碍物占位区里 → 不迁：每帧 clampXAgainstObstacles 会把玩家挤出
+ *     到近侧（QA 实测 inside-obstacle 案例走路就能出来），不是本护栏的案例；
+ *   - 否则迁到**最近**的安全 x：两侧阻碍物的远侧边缘（跨过它就进了相邻的
+ *     可走区间），并列时优先「向家」的一侧（够得到下梯口/免费下行电梯），
+ *     再并列取左；相邻区间也不通时退到口子自身（口位有 keepClear 保护，
+ *     恒不被占位区覆盖）。
+ *
+ * 为什么不动生成侧：AG-96 的防软锁是「落点」属性，为兼容旧档位置去改布局
+ * 等于把楼层重新摇一遍，既保不住那个属性也会改变新档体验；旧档位置问题在
+ * 加载/进层时一次性修掉才是最小面。调用方是 GameScene.drawFloor——新档、
+ * 继续、dev 入口与每次爬梯落地都走那一条路，安全位置上这里是纯 no-op。
+ */
+export function rescueSealedPlayerX(
+  active: readonly FloorObstacle[],
+  playerX: number,
+  exits: readonly number[],
+  homewardExits: readonly number[],
+  halfWidth: number = OBSTACLES.blockHalfWidth,
+): number | null {
+  if (active.length === 0 || exits.length === 0) return null;
+  const blocks = active
+    .map((o) => ({ lo: o.x - halfWidth, hi: o.x + halfWidth }))
+    .sort((a, b) => a.lo - b.lo);
+  const insideBlock = (x: number): boolean => blocks.some((b) => b.lo < x && x < b.hi);
+  // 站在占位区里：交给每帧钳位推出（QA 第 2 轮确认走得出来），不迁。
+  if (insideBlock(playerX)) return null;
+  const reachable = (from: number, to: number): boolean =>
+    !blocks.some((b) => b.lo > Math.min(from, to) && b.hi < Math.max(from, to));
+  const safeAt = (x: number): boolean => !insideBlock(x) && exits.some((to) => reachable(x, to));
+  if (safeAt(playerX)) return null;
+  // 封死了。候选：左阻碍物的远侧边缘、右阻碍物的远侧边缘、各口子自身。
+  const left = blocks.filter((b) => b.hi <= playerX);
+  const right = blocks.filter((b) => b.lo >= playerX);
+  const candidates: number[] = [];
+  if (left.length > 0) candidates.push(left[left.length - 1].lo);
+  if (right.length > 0) candidates.push(right[0].hi);
+  candidates.push(...exits);
+  let best: number | null = null;
+  let bestDist = Infinity;
+  let bestHome = 1;
+  for (const c of candidates) {
+    if (!safeAt(c)) continue;
+    const dist = Math.abs(c - playerX);
+    const home = homewardExits.some((to) => reachable(c, to)) ? 0 : 1;
+    if (
+      best === null ||
+      dist < bestDist ||
+      (dist === bestDist && home < bestHome) ||
+      (dist === bestDist && home === bestHome && c < best)
+    ) {
+      best = c;
+      bestDist = dist;
+      bestHome = home;
+    }
+  }
+  return best;
 }
 
 /**

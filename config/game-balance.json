@@ -124,6 +124,17 @@
     "preloadAllFloors": false,
     "fixedQaSeeds": [1, 42, 2026]
   },
+  "craftTree": {
+    "_comment": "AG-61 二叉树合成面板：节点几何与视图变换范围。树比面板高是必然，缩放/拖拽的边界与步长全部走这里，GameScene 与 src/data/craftTree.ts 不硬编码；改节点大小时同步看 craftTree.test.ts 的排版断言。",
+    "nodeWidth": 136,
+    "nodeHeight": 36,
+    "columnPitch": 170,
+    "firstColumnX": 147,
+    "zoomMin": 0.5,
+    "zoomMax": 1.8,
+    "zoomStep": 0.12,
+    "dragThresholdPx": 6
+  },
   "notes": [
     "这些是首版初始平衡值，必须通过真实试玩调整。",
     "不要为补齐配置而自行添加未在设计文档中批准的复杂系统。",

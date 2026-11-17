@@ -103,42 +103,77 @@ describe('obstaclesForFloor — 每层 seeded 0-2 个', () => {
     }
   });
 
-  it('never traps the player: every landing spot reaches every other exit', () => {
-    // 独立复算可达性（不借用实现的表达式）：起点集合 = 玩家在层里的全部合法
-    // 落点（ENTRY_X 电梯/首入 + 上梯口爬梯落点 + 下梯口），每个起点到每个
-    // **其它**出口之间的开区间不能含任何阻碍区间的任一部分。全楼层 × 多 seed
-    // 扫描——这条是防软锁的硬规则（GAME_DESIGN_LOCK §5）。
-    // 口径从「ENTRY_X 至少一个出口」加强为「每个落点到每个其它出口」：
-    // 旧口径漏「阻碍物挡在上梯口(40)与 ENTRY_X(640)之间」——玩家爬梯落在
-    // 40 被钳住，而 640 出发的路畅通（stairNavigation 1010 层 20s 超时）。
+  it('never traps the player: every landing spot has a way out (R3 口径)', () => {
+    // 独立复算可达性（不借用实现的表达式）。R3 修复（2026-11-18）后的口径：
+    //   - 落点 = 玩家真实会站上的 x：ENTRY_X（电梯/首入/乘梯落地）、爬梯落点
+    //     40、站在自己下梯口、以及**下梯落点 downExitXFor(floor+1)**（从上层
+    //     爬下时落在出发层梯口正下方——AG-65 起梯口按楼层 seeded，落点不再
+    //     贴本层口位）；
+    //   - self-pair 算可达：落点贴在梯口上就是出口（keepClear 保证占位区
+    //     不贴口），排除 self 正是旧口径把 1-10 层清空的直接成因；
+    //   - 只有**免费下行电梯**算出口——段顶上行电梯要下一段通行证，「够得
+    //     着电梯但没证」仍是软锁；
+    //   - 下梯落点必须够到本层下梯口（段底没有下梯：必须够到免费下行电梯）
+    //     ——从那里往上爬只会绕段顶一圈落回同一点，只有向下才回得了家；
+    //   - ENTRY_X 任一口子可达即可（往上绕或往下绕都回得了家）。
+    // 这条与 tools/obstacle-reachability-recheck.mjs 的拓扑 BFS 互补：这里
+    // 钉每层局部不变量，那边用真实楼梯/电梯图逐 seed 证明「无铲子也到得了家」。
     for (const seed of [1, 42, 2026, 7, 99, 1234, 55555, 987654, 31337]) {
       const s = createNewGame(seed);
       for (const floor of PLAYABLE_FLOORS_V01) {
         if (floor === 1) continue;
+        const obstacles = obstaclesForFloor(s, floor);
         const exits: number[] = [];
         if (hasUpExit(floor)) exits.push(UP_EXIT_X);
         if (hasDownExit(floor)) exits.push(downExitXFor(floor));
-        if (liftDirection(floor) !== null) exits.push(LIFT_X);
-        const starts: number[] = [ENTRY_X];
-        // 与实现同口径：UP_EXIT_X 无条件——段顶层没有上楼梯，但玩家从下层
-        // 爬上来就落在那里（落点 ≠ 出口，见 LootSystem 可达性裁决注释）。
-        starts.push(UP_EXIT_X);
-        if (hasDownExit(floor)) starts.push(downExitXFor(floor));
-        const obstacles = obstaclesForFloor(s, floor);
-        const reachableFrom = (from: number, to: number): boolean => {
-          const lo = Math.min(from, to);
-          const hi = Math.max(from, to);
-          return !obstacles.some((o) => o.x - HALF > lo && o.x + HALF < hi);
-        };
-        for (const from of starts) {
-          const others = exits.filter((to) => to !== from);
-          if (others.length === 0) continue;
+        if (liftDirection(floor) === 'down') exits.push(LIFT_X);
+        const checks: Array<{ at: number; must: number[] | null; why: string }> = [
+          { at: ENTRY_X, must: null, why: '电梯/首入落点' },
+          { at: UP_EXIT_X, must: hasUpExit(floor) ? [UP_EXIT_X] : null, why: '爬梯落点' },
+        ];
+        if (hasDownExit(floor)) {
+          checks.push({ at: downExitXFor(floor), must: [downExitXFor(floor)], why: '站在下梯口' });
+        }
+        if (hasUpExit(floor)) {
+          checks.push({
+            at: downExitXFor(floor + 1),
+            must: hasDownExit(floor)
+              ? [downExitXFor(floor)]
+              : liftDirection(floor) === 'down'
+                ? [LIFT_X]
+                : [],
+            why: '下梯落点',
+          });
+        }
+        const reachable = (from: number, to: number): boolean =>
+          !obstacles.some((o) => o.x - HALF > Math.min(from, to) && o.x + HALF < Math.max(from, to));
+        for (const { at, must, why } of checks) {
           expect(
-            others.every((to) => reachableFrom(from, to)),
-            `seed ${seed} F${floor} 从落点 ${from} 有出口被堵`,
+            (must ?? exits).some((to) => reachable(at, to)),
+            `seed ${seed} F${floor} ${why} ${at} 有出口被堵`,
           ).toBe(true);
         }
       }
+    }
+  });
+
+  it('hosts obstacles on the normal early floors across seeds (R3 回归)', () => {
+    // R3（QA 第 1 轮）根因回归：旧口径「每个落点到每个其它出口都可达」把
+    // 1-10 层退化成空集——上梯口钉在 40、下梯口在 1240，摆放带整体嵌在
+    // (40,1240) 开区间里，任何阻碍物都截断 40↔1240 那一对，60 seed 复算
+    // 只剩 50000 层 13 个。修复后 2-9 层每层在 30 个 seed 里都应有阻碍物；
+    // 1 层是宿舍、10 层是段顶（从 40 落点必须够到 1240），按设计保持为空。
+    const perFloor: Record<number, number> = {};
+    for (let seed = 1; seed <= 30; seed++) {
+      const s = createNewGame(seed);
+      for (let floor = 2; floor <= 9; floor++) {
+        perFloor[floor] = (perFloor[floor] ?? 0) + obstaclesForFloor(s, floor).length;
+      }
+      expect(obstaclesForFloor(s, 1), `seed ${seed} 宿舍不过道`).toEqual([]);
+      expect(obstaclesForFloor(s, 10), `seed ${seed} 段顶从 40 必须够到 1240`).toEqual([]);
+    }
+    for (let floor = 2; floor <= 9; floor++) {
+      expect(perFloor[floor], `F${floor} 在 30 个 seed 里应有阻碍物（实测 ${perFloor[floor]}）`).toBeGreaterThan(0);
     }
   });
 
@@ -159,10 +194,11 @@ describe('obstaclesForFloor — 每层 seeded 0-2 个', () => {
     }
     expect(kinds.has('rubble')).toBe(true);
     expect(kinds.has('gate')).toBe(true);
-    // 阈值随可达性口径调过：口径加强为「每个落点（ENTRY_X/上梯口/下梯口）
-    // 到每个其它出口都可达」后，跨 seed 密度从 >20 降到实测 13（2026-11-17
-    // 集成轮修 110 层 gate 漏网时同批实测）。防软锁是 GAME_DESIGN_LOCK §5
-    // 的硬规则，多样性是软的——这里只钉「两种类型都出现、密度确实存在」。
+    // 阈值历史：集成轮把可达性口径加强为「每个落点到每个其它出口」后，跨
+    // seed 密度从 >20 降到实测 13（全落 50000 层），阈值随口径调到 10——
+    // 那正是 R3 的病象（正常楼层数学上不可达）。R3 修复（2026-11-18，口径
+    // 回到「每个落点至少一个出口可达」）后密度回到 ~2000，这里只钉「两种
+    // 类型都出现、密度确实存在」，不钉具体总数。
     expect(total).toBeGreaterThanOrEqual(10);
   });
 

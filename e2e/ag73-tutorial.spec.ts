@@ -46,7 +46,11 @@ async function startGame(page: Page, seed = 42): Promise<void> {
   await waitForScene(page, 'Game');
 }
 
-/** 场景里的教程状态（step = 已完成步数，6 = 全过）。 */
+/**
+ * 场景里的教程状态（step = 已完成步数，6 = 全过）。
+ * RC-03 拆分第 3 步：状态随 TutorialController 迁走，场景字段 tutorial 现为
+ * 控制器本体，step/skipped 走它暴露的同名 getter（读法不变）。
+ */
 const tutorial = (page: Page): Promise<TutorialView> =>
   page.evaluate(() => {
     const s = (window.__PHASER_GAME__?.scene.getScene('Game') as unknown as { tutorial?: TutorialView } | null)?.tutorial;
@@ -70,10 +74,15 @@ const hudVisible = (page: Page, name: string): Promise<boolean> =>
     return !!scene?.children.list.find((c) => c.name === n)?.visible;
   }, name);
 
-const gfxVisible = (page: Page, field: 'tutorialWorldGfx' | 'tutorialHudGfx'): Promise<boolean> =>
+/**
+ * 教程两个高亮框的可见性。RC-03 拆分第 3 步：框随 TutorialController 迁走，
+ * 场景侧的 tutorialWorldGfx/tutorialHudGfx 字段改为控制器上的
+ * worldGfxVisible/hudGfxVisible getter（场景字段 tutorial 现为控制器本体）。
+ */
+const gfxVisible = (page: Page, field: 'worldGfxVisible' | 'hudGfxVisible'): Promise<boolean> =>
   page.evaluate((f) => {
-    const s = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as Record<string, { visible?: boolean } | undefined> | null;
-    return !!s?.[f]?.visible;
+    const s = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as { tutorial?: Record<string, boolean> } | null;
+    return !!s?.tutorial?.[f];
   }, field);
 
 /** 按住方向键走到目标 x（真实输入——教程的移动检测只认这个）。 */
@@ -150,7 +159,7 @@ test('a fresh run opens on tutorial step 1: contextual hint + skip button', asyn
   expect(await hudText(page, 'hud-tutorial-skip')).toBe('跳过教程');
   expect(await hudVisible(page, 'hud-tutorial-skip')).toBe(true);
   // 移动步没有目标物件：不画世界呼吸框。
-  expect(await gfxVisible(page, 'tutorialWorldGfx')).toBe(false);
+  expect(await gfxVisible(page, 'worldGfxVisible')).toBe(false);
   expect((await tutorial(page)).step).toBe(0);
   await page.screenshot({ path: 'output/ag73/01-step1-move.png' });
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
@@ -170,7 +179,7 @@ test('moving advances to the loot step, and the cabinet gets a breathing box', a
   // 链之前的过期值：1 层两排室友床铺满走廊，900 处世界说的是「搜刮床铺」。
   expect(await hudText(page, 'hud-nav-context')).toBe('搜刮床铺');
   // 呼吸框已经盯上储物柜（世界坐标，160）。
-  expect(await gfxVisible(page, 'tutorialWorldGfx')).toBe(true);
+  expect(await gfxVisible(page, 'worldGfxVisible')).toBe(true);
   // 走到床铺区的缺口（上梯口 44px 与柜子 44px 之间）出搜刮提示：1 层两排
   // 室友床（DORM_FRONT/BACK_BEDS，AG-51）占满走廊中段，床铺 44px 内世界
   // 的「按 E 搜刮床铺」会按 tutorialYieldsToWorld 接棒——修前走 300 正是
@@ -203,11 +212,11 @@ test('opening the cabinet advances to the rings step, then to crafting on its ow
   );
   await expect.poll(async () => tutorial(page), { timeout: 5000 }).toEqual({ step: 2, skipped: false });
   // HUD 圆环高亮（屏幕坐标框）这 3 秒在线。
-  expect(await gfxVisible(page, 'tutorialHudGfx')).toBe(true);
+  expect(await gfxVisible(page, 'hudGfxVisible')).toBe(true);
   await page.screenshot({ path: 'output/ag73/03-step3-stats-rings.png' });
   // 无强制等待：3 秒后自动进下一步。
   await expect.poll(async () => tutorial(page), { timeout: 8000 }).toEqual({ step: 3, skipped: false });
-  expect(await gfxVisible(page, 'tutorialHudGfx')).toBe(false);
+  expect(await gfxVisible(page, 'hudGfxVisible')).toBe(false);
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
 

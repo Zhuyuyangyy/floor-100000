@@ -129,8 +129,9 @@ import { VENTURES, invest, settleInvestments } from '../systems/shop';
 // AG-81：本局统计。只加钩子不改逻辑——各事件点 bumpStat 一行，读写都在
 // StatsSystem（纯函数 + 旧存档补零）。buildStatsTable 是结算画面的共享统计
 // 表组件，暂停菜单的统计面板复用同一件。
-import { bumpStat, noteFloorReached, noteGoldEarned, runStatRows } from '../systems/StatsSystem';
+import { bumpStat, noteFloorReached, noteGoldEarned } from '../systems/StatsSystem';
 import { buildStatsTable } from './EndScene';
+import { StatsPanelController, type PanelBox, type StatsPanelHost } from './controllers/StatsPanelController';
 import { charge, recordShortcut, shortcutAvailable, shortcutPlan } from '../systems/shortcut';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
@@ -262,7 +263,7 @@ import {
   buildWallDressing,
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
-import { BAG_LAYOUT, COMBAT_BAR, CONTAINER_LABEL_DROP, HUD_LAYOUT, NAV_BAR, STATS_PANEL, combatBarX, hudClockLabel, navSlotX } from '../render/hudLayout';
+import { BAG_LAYOUT, COMBAT_BAR, CONTAINER_LABEL_DROP, HUD_LAYOUT, NAV_BAR, combatBarX, hudClockLabel, navSlotX } from '../render/hudLayout';
 import {
   BEHAVIOR_LABELS,
   MONSTER_BAR_COLORS,
@@ -629,12 +630,6 @@ const AILMENT_LABEL: Record<string, string> = {
 // 「本局统计」固定在设置之后（index 5）：统计是只读面板，放最后不碍事。
 const PAUSE_OPTIONS = ['继续游戏', '塔楼地图', '重新开始', '返回标题', '设置', '本局统计'];
 
-// AG-81 统计面板（暂停菜单 → 本局统计）的画布尺寸。表格每次打开都按当前
-// state 重建（QA-01），buildStatsPanel / refreshStatsTable / openStatsPanel
-// 的 panelBox 必须同源——三处各写一遍 480/330 正是旧代码允许漂移的口子。
-const STATS_PANEL_W = 480;
-const STATS_PANEL_H = 330;
-
 // OVERHAUL: the daily objective's one-line label, per goal kind.
 const GOAL_LABELS: Record<'water' | 'containers' | 'upgrade' | 'floor', (target: number) => string> = {
   water: (n) => `带回 ${n} 瓶净水`,
@@ -862,7 +857,7 @@ function npcStrollPose(npcId: string, floor: number, stationary: boolean, elapse
  */
 const TUTORIAL_DONE_FLASH_DELAY_MS = 1700;
 
-export class GameScene extends Phaser.Scene {
+export class GameScene extends Phaser.Scene implements StatsPanelHost {
   private player!: Phaser.GameObjects.Sprite;
   /** The crowbar in the survivor's hand. Follows the attack pose's fist. */
   private weapon?: Phaser.GameObjects.Image;
@@ -1312,7 +1307,7 @@ export class GameScene extends Phaser.Scene {
   // The dorm's sleeping roommates: the floating Z is animated from update(), so it
   // lives here rather than in a tween that would outlive the floor it belongs to.
   private dormSleepers: Array<{ z: Phaser.GameObjects.Text; baseY: number; phase: number }> = [];
-  private panelBox: { x: number; y: number; w: number; h: number } | null = null;
+  private panelBox: PanelBox | null = null;
   // ── AG-71: the bottom navigation bar ────────────────────────────────────
   // 六个槽的常驻栏（见 render/hudLayout.ts 的 NAV_BAR）。它接替了旧的
   // hudButtons 按钮行：五个固定槽各带一个 hitRect（同一套 stairClimb /
@@ -1348,13 +1343,13 @@ export class GameScene extends Phaser.Scene {
   private pauseOptionTexts: Phaser.GameObjects.Text[] = [];
   private pauseMarker!: Phaser.GameObjects.Image;
   private pauseSelected = 0;
-  // AG-81：本局统计面板——暂停菜单的「本局统计」项打开的只读子面板。
-  // statsOpen 期间 pauseOpen 保持 true（游戏仍暂停），ESC 先回暂停菜单。
-  private statsOpen = false;
-  private statsObjects: PanelObject[] = [];
-  // QA-01：统计表格的行件单列一池——打开时整池销毁重建（refreshStatsTable），
-  // 与面板框/页眉/脚注（statsObjects 的其余部分，create 时建一次）分开管。
-  private statsTableObjects: PanelObject[] = [];
+  // AG-81：本局统计面板——暂停菜单的「本局统计」项打开的只读子面板
+  // （RC-03 拆分第 1 步：面板件/表格行池/开关标志全在 StatsPanelController，
+  // 这里只留实例；isOpen 期间 pauseOpen 保持 true，ESC 先回暂停菜单）。
+  // 字段初始化器在场景重启时不重跑——create() 里 statsPanel.reset() 清池，
+  // 与旧代码 statsObjects/statsTableObjects = [] 同惯例。构造只存 host 引用
+  // 与共享表构建件，不碰任何 Phaser API，字段初始化期调用安全。
+  private readonly statsPanel = new StatsPanelController(this, buildStatsTable);
   private lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
   // B3-01 D9: last save-failure count we already warned about. Survives a scene
   // restart on purpose — the page's storage is still broken after 重新开始, so
@@ -1402,9 +1397,7 @@ export class GameScene extends Phaser.Scene {
     this.pauseObjects = [];
     this.pauseOptionTexts = [];
     this.pauseMarker = createMarker(this);
-    this.statsObjects = [];
-    this.statsTableObjects = [];
-    this.statsOpen = false;
+    this.statsPanel.reset();
     this.dialogueObjects = [];
     this.dialogueOptions = [];
     this.dialogueOptionIcons = [];
@@ -1514,7 +1507,7 @@ export class GameScene extends Phaser.Scene {
     this.buildCraftPanel();
     this.buildDialoguePanel();
     this.buildPausePanel();
-    this.buildStatsPanel();
+    this.statsPanel.build();
     this.bindInput();
 
     // AG-11: QuestPanel 的回报通道（UI.md「quests:changed」契约，AG-12）：
@@ -1603,8 +1596,11 @@ export class GameScene extends Phaser.Scene {
    * and mostly outside the viewport. The crafting e2e caught it because its
    * navTo() pairs the arrow marker with the row label by y, and the label had
    * left the screen.
+   *
+   * public：同时是 StatsPanelHost 的视口面——统计面板控制器（StatsPanel-
+   * Controller）构造注入后按打开时刻的画布定位，与场景各面板同一口径。
    */
-  private viewSize(): { width: number; height: number } {
+  viewSize(): { width: number; height: number } {
     const cam = this.cameras.main;
     return { width: cam.width * cam.zoom, height: cam.height * cam.zoom };
   }
@@ -6684,10 +6680,11 @@ export class GameScene extends Phaser.Scene {
 
   private togglePause(): void {
     // 统计面板是暂停菜单的子层：关暂停必须连它一起收，否则暂停菜单没了、
-    // 统计表面板还挂在屏幕上（ESC 逃生舱判据全踩空）。
-    if (this.pauseOpen && this.statsOpen) {
-      this.statsOpen = false;
-      for (const o of this.statsObjects) o.setVisible(false);
+    // 统计表面板还挂在屏幕上（ESC 逃生舱判据全踩空）。hide() 只收可见性——
+    // 暂停菜单的显隐紧接着由下面的 pauseObjects 一趟做完；不走 close() 的
+    // 「还菜单 + panelBox 复位 + 音效」，那是 ESC/鼠标单收统计面板的路。
+    if (this.pauseOpen && this.statsPanel.isOpen) {
+      this.statsPanel.hide();
     }
     this.pauseOpen = !this.pauseOpen;
     for (const o of this.pauseObjects) o.setVisible(this.pauseOpen);
@@ -6719,8 +6716,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   // 裁决记录（merge ag-81）：HEAD 的 openSettings（AG-72 设置面板的场景交接）
-  // 与 ag-81 的 buildStatsPanel/openStatsPanel/closeStatsPanel（AG-81 本局统计
-  // 只读子面板）是两个不同功能的面板入口，全部保留。
+  // 与 ag-81 的本局统计只读子面板（RC-03 拆分后本体在 StatsPanelController，
+  // 本场景留 openStatsPanel/closeStatsPanel 两行委托）是两个不同功能的面板
+  // 入口，全部保留。
   // AG-72: the pause menu's 设置 entry. The panel lives in SettingsScene (the
   // class sits next to the title screen's copy of the same panel in
   // MenuScene.ts, both sharing SettingsPanelView). Scene handoff, the same
@@ -6739,102 +6737,34 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ── AG-81：本局统计面板（暂停菜单 → 只读子面板）────────────────────────
-  // 布局：480×330 绿板，16 行统计两列网格（8 行 × STATS_PANEL.rowPitch），
-  // 行件与死亡/通关结算共用 buildStatsTable——「一局的账」三个画面同一张脸。
-  // 纪录对比不在这里：跨局纪录是结局时刻的炫耀，见 EndScene / EndgameScene。
-  //
-  // QA-01（P1）根因：表格文本曾在这里由当次 runStatRows(getGame()) 生成，
-  // 而本方法只在 create() 跑一次——游玩中累积的爬梯/开箱/击杀/伤害永远
-  // 停在开局零值，只有创建时即非零的存活天数/得分两行对得上。表格因此改为
-  // 每次打开整池重建（refreshStatsTable），而不是 create() 的一次性快照。
-  private buildStatsPanel(): void {
-    const { width, height } = this.viewSize();
-    const cx = width / 2;
-    const cy = height / 2;
-    const left = cx - STATS_PANEL_W / 2;
-    const top = cy - STATS_PANEL_H / 2;
-
-    this.statsObjects.push(...buildPanel(this, cx, cy, STATS_PANEL_W, STATS_PANEL_H, 'green', PANEL_DEPTH.game.pause));
-    this.statsObjects.push(...buildPanelHeader(this, left, top, STATS_PANEL_W, '本局统计', UI.good, PANEL_DEPTH.game.pause + 5));
-    this.refreshStatsTable();
-    this.statsObjects.push(
-      this.add
-        .text(cx, top + STATS_PANEL_H - 16, '历史纪录见死亡 / 通关结算画面', {
-          fontFamily: FONT_FAMILY,
-          fontSize: `${TYPE.caption}px`,
-          color: hex(TEXT.dim),
-        })
-        .setOrigin(0.5),
-    );
-    applyPanelDepth(this.statsObjects, PANEL_DEPTH.game.pause);
-    this.assertPanelContent('stats', this.statsObjects);
-    for (const o of this.statsObjects) o.setVisible(false);
-  }
-
-  /**
-   * QA-01：按当前 state 重建统计表格——暂停面板每次打开都走这里。
-   *
-   * 为什么是「打开时整池销毁重建」而不是「存行件 setText」：
-   * ① runStatRows(getGame()) 是唯一数据源，重建走的正是 create() 首建同一
-   *    条构造路径，面板内容永远不可能与数据函数漂移；setText 按索引刷要求
-   *    行序/行数被两处分别记住，上游哪天改行数（STAT_KEYS 或末尾三项）就
-   *    静默错位——QA 这类「数字对不上」的 bug 正是那么养出来的。
-   * ② 代码库同款先例在手：EndgameScene.buildMode 切模式即销毁重建整池，
-   *    GameScene create() 重启 likewise 重置对象池重建（见 1364 行注释）。
-   * ③ 成本可忽略：16 行 × 2 个 Text，且只在人类打开暂停子面板时发生——
-   *    面板不可见时刷新才是浪费（QA 建议的「打开时刷新」语义）。
-   * ④ 不动共享件 buildStatsTable 的签名（EndScene/EndgameScene 零改动）。
-   *
-   * 几何用当前 viewSize 与 STATS_PANEL_W/H 常量：面板框在 create() 时按
-   * 当时画布定位，表格跟随打开时刻的画布——两者同源常量化，不存在漂移。
-   */
-  private refreshStatsTable(): void {
-    if (this.statsTableObjects.length > 0) {
-      const stale = new Set<PanelObject>(this.statsTableObjects);
-      for (const o of this.statsTableObjects) o.destroy();
-      this.statsTableObjects = [];
-      this.statsObjects = this.statsObjects.filter((o) => !stale.has(o));
-    }
-    const { width, height } = this.viewSize();
-    const cx = width / 2;
-    const cy = height / 2;
-    const left = cx - STATS_PANEL_W / 2;
-    const top = cy - STATS_PANEL_H / 2;
-    const colW = (STATS_PANEL_W - 32 - STATS_PANEL.colGap) / 2;
-    const grid = buildStatsTable(this, left + 16, top + 46, colW, runStatRows(getGame()), PANEL_DEPTH.game.pause + 5, 2);
-    this.statsTableObjects.push(...grid.objects);
-    this.statsObjects.push(...grid.objects);
-    // 与 create() 首建同款收尾：锁屏 + 深度归位（网格件非 PANEL_OWNED，
-    // 压到 pause 深度），可见性跟随 statsOpen——刷新不是显示开关
-    // （refreshInventory 的同款约定：不可见时刷新不得把内容浮上屏）。
-    applyPanelDepth(grid.objects, PANEL_DEPTH.game.pause);
-    for (const o of grid.objects) o.setVisible(this.statsOpen);
-  }
-
+  // RC-03 拆分第 1 步：面板本体（面板框/页眉/表格行池/开关标志/刷新语义）
+  // 在 controllers/StatsPanelController.ts——plain TS 类，不 import Phaser
+  // 场景类型，Node 下可用记录型假件单测。本场景只留：
+  //   * openStatsPanel / closeStatsPanel 两行委托（暂停菜单 index 5 入口、
+  //     onEsc 的 isOpen 分支原样调它们）；
+  //   * StatsPanelHost 两处协调面（pauseObjects 显隐、panelBox 判据）；
+  //   * create() 的 build/reset（见上）。
+  // QA-01「每次打开按当前 state 重建」的契约由控制器 open()→refresh() 落地，
+  // 回归断言在 tests/statsPanelRefresh.test.ts（源码级，盯这层委托形态）。
   /** 打开统计面板：暂停菜单让位（pauseOpen 不变——游戏仍然暂停着）。 */
   private openStatsPanel(): void {
-    this.statsOpen = true;
-    // QA-01：先按当前 state 重建表格再显形——旧代码只切可见性，面板永远
-    // 显示 create() 时刻的快照（QA 第 0 轮 20a 截图：游玩后全 0）。
-    this.refreshStatsTable();
-    for (const o of this.pauseObjects) o.setVisible(false);
-    for (const o of this.statsObjects) o.setVisible(true);
-    // 面板矩形现取统计面板自己的（STATS_PANEL_W/H，与 buildStatsPanel 同源）：
-    // 点它外面 = ESC 返回暂停菜单（onEsc 的 statsOpen 分支），与暂停菜单既有的
-    // 「点外面关面板」同构。
-    const { width, height } = this.viewSize();
-    this.panelBox = { x: width / 2 - STATS_PANEL_W / 2, y: height / 2 - STATS_PANEL_H / 2, w: STATS_PANEL_W, h: STATS_PANEL_H };
-    playSfx('panel');
+    this.statsPanel.open();
   }
 
   /** 关闭统计面板，回到暂停菜单。 */
   private closeStatsPanel(): void {
-    this.statsOpen = false;
-    for (const o of this.statsObjects) o.setVisible(false);
-    for (const o of this.pauseObjects) o.setVisible(true);
-    const { width, height } = this.viewSize();
-    this.panelBox = { x: width / 2 - 230, y: height / 2 - 152, w: 460, h: 304 };
-    playSfx('panel');
+    this.statsPanel.close();
+  }
+
+  // ── StatsPanelHost：统计面板控制器的场景协调面 ──────────────────────────
+  /** 打开统计面板时藏起暂停菜单、关闭时恢复（pauseObjects 归本场景管）。 */
+  setPauseMenuVisible(visible: boolean): void {
+    for (const o of this.pauseObjects) o.setVisible(visible);
+  }
+
+  /** panelBox 是「鼠标 ESC：面板外点击关闭」的判据，随当前打开的面板几何走。 */
+  setPanelBox(box: PanelBox): void {
+    this.panelBox = box;
   }
 
   // Opening the map hands the scene off entirely: GameScene is stopped, so the
@@ -7890,7 +7820,7 @@ export class GameScene extends Phaser.Scene {
     // AG-81：统计面板是暂停菜单的子层——ESC 先合它回暂停菜单，暂停菜单再接
     // 住下一记 ESC 继续游戏。没有这一分支，统计面板开着时 ESC 会直接
     // togglePause 把暂停菜单也关掉，统计表面板却还挂在屏幕上。
-    if (this.statsOpen) {
+    if (this.statsPanel.isOpen) {
       this.closeStatsPanel();
       return;
     }
@@ -8001,7 +7931,7 @@ export class GameScene extends Phaser.Scene {
     } else if (this.dialogueOpen && this.dialogue) {
       this.dialogue.selected = Math.max(0, this.dialogue.selected - 1);
       this.refreshDialogue();
-    } else if (this.pauseOpen && !this.statsOpen) {
+    } else if (this.pauseOpen && !this.statsPanel.isOpen) {
       // AG-81：统计面板开着时暂停菜单隐藏着，↑ 不挪它的光标（同 onNavDown）。
       this.pauseSelected = Math.max(0, this.pauseSelected - 1);
       this.refreshPause();
@@ -8050,7 +7980,7 @@ export class GameScene extends Phaser.Scene {
       const count = this.dialogueOptionsCount();
       this.dialogue.selected = Math.min(Math.max(0, count - 1), this.dialogue.selected + 1);
       this.refreshDialogue();
-    } else if (this.pauseOpen && !this.statsOpen) {
+    } else if (this.pauseOpen && !this.statsPanel.isOpen) {
       // AG-81：统计面板开着时暂停菜单是隐藏的，别让 ↓ 偷偷挪它的光标——
       // 否则 ESC 合下面板，标记停在一个玩家没看见过的选项上。
       this.pauseSelected = Math.min(PAUSE_OPTIONS.length - 1, this.pauseSelected + 1);
@@ -8132,7 +8062,7 @@ export class GameScene extends Phaser.Scene {
     }
     // AG-81：统计面板是只读子面板，Enter 不当确认键——它在暂停菜单里就是
     // 被按下的那一键，再按一次只是重开一遍同一个面板。
-    if (this.pauseOpen && !this.statsOpen) this.activatePause();
+    if (this.pauseOpen && !this.statsPanel.isOpen) this.activatePause();
   }
 
   /**
@@ -8336,7 +8266,9 @@ export class GameScene extends Phaser.Scene {
   // UI can produce: it looks like the game broke. This runs in dev only and
   // names the panel in the console the moment it opens empty, so a report of
   // "a big empty box appeared" becomes a one-line diagnosis instead of a hunt.
-  private assertPanelContent(panel: string, objects: ReadonlyArray<Phaser.GameObjects.GameObject>): void {
+  // public：StatsPanelHost 面之一——统计面板控制器 build() 后当场自查
+  // （面板件在控制器里生命周期自治，守卫仍走场景这一份实现，不复制）。
+  assertPanelContent(panel: string, objects: ReadonlyArray<Phaser.GameObjects.GameObject>): void {
     if (!import.meta.env.DEV) return;
     const texts = objects.filter((o): o is Phaser.GameObjects.Text => o instanceof Phaser.GameObjects.Text);
     const readable = texts.some((o) => o.visible && (o.text ?? '').trim().length > 0);
@@ -8375,7 +8307,7 @@ export class GameScene extends Phaser.Scene {
     if (this.ventureOpen) return '↑/↓ 选择 · Enter 入股 · G 关闭';
     if (this.dialogueOpen) return '↑/↓ 选择 · Enter 确定 · ESC 返回';
     // AG-81：统计面板只有一条出路——回暂停菜单。Enter 不当确认（只读面板）。
-    if (this.statsOpen) return 'ESC 返回暂停菜单';
+    if (this.statsPanel.isOpen) return 'ESC 返回暂停菜单';
     if (this.pauseOpen) return '↑/↓ 选择 · Enter 确认 · ESC 继续';
     return null;
   }

@@ -97,12 +97,39 @@ async function walkToUpExit(page: Page): Promise<void> {
   await walkUntil(page, 'ArrowLeft', 44, false);
 }
 
-/** 走到本层真实下行口（场景的 downExit 字段，tier2+ 是随机口位）内 20px。 */
+/**
+ * 走到本层真实下行口（场景的 downExit 字段，tier2+ 是随机口位）内 20px。
+ *
+ * AG-66 起 tier2+ 按 roll 率摆阻碍物、且没有 2-9 层那样的可达性护栏
+ * （obstacles.test.ts 的可达性只覆盖 tier1）：seed42 的 102 层 gate@170 正好
+ * 封死「落点 40 → downX 496」的直走（占位区 [144,196]，玩家被钳在 146）。
+ * 本 test 验的是同层重进的口位不变与竖井落点，不是阻碍物可达性——先做 BFS
+ * 式预检，直走被封就用 setX 绕过闸门到口位（仓库既有定位手法，见 rideLiftUp
+ * 的注释；AG-109 修 survivalJourney 的同款「封了就绕」先例）。
+ */
 async function walkToDownExit(page: Page): Promise<void> {
-  const downX = await page.evaluate(() => {
-    const g = (window.__PHASER_GAME__ as unknown as { scene: { getScene: (k: string) => { downExit?: number } | null } }).scene.getScene('Game');
-    return g?.downExit ?? 1240;
+  const { downX, blocked } = await page.evaluate(() => {
+    const sc = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as {
+      downExit?: number;
+      activeObstacleList?: Array<{ x: number }>;
+    } | null;
+    const downX = sc?.downExit ?? 1240;
+    const from = window.__PHASER_SESSION__?.getState()?.player.x ?? 0;
+    const to = downX - 20;
+    const lo = Math.min(from, to);
+    const hi = Math.max(from, to);
+    // 阻碍物占位区 [x-26, x+26]（OBSTACLES.blockHalfWidth）与直走路线相交即封路。
+    const blocked = (sc?.activeObstacleList ?? []).some((o) => o.x - 26 < hi && o.x + 26 > lo);
+    return { downX, blocked };
   });
+  if (blocked) {
+    await page.evaluate((v) => {
+      const s = window.__PHASER_SESSION__?.getState();
+      if (s) s.player.x = v;
+    }, downX - 20);
+    await page.waitForTimeout(120);
+    return;
+  }
   await walkUntil(page, 'ArrowRight', downX - 20, true);
 }
 

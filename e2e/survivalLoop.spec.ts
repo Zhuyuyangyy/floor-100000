@@ -123,20 +123,56 @@ async function pickUpGround(page: Page, floor: number, x: number): Promise<void>
 }
 
 // Walk to a container and open it, retrying against a dropped keypress.
+//
+// AG-66：开容器是 2s 搜刮动作，openedContainers 到动作落地才记；期间再按 E
+// = 收手取消（onInteract 的 pendingAction 分支）。旧的「按 E → 固定 220ms →
+// 重按」会把每一轮搜索都掐死在半路，箱子永远开不成（实测 3 层木箱/铁箱全挂）。
+// 改轮询真实完成条件——与 actionCosts 修 AG-66 搜刮时长同一手法。
 async function openContainer(page: Page, key: string): Promise<void> {
   const x = CONTAINER_X[key];
   if (x === undefined) throw new Error(`no known position for ${key}`);
   const floor = Number(key.split('/')[0]);
   const id = key.split('/')[1];
+  const opened = async (): Promise<boolean> =>
+    ((await readState(page)).visitedFloors[floor]?.openedContainers ?? []).includes(id);
   for (let attempt = 0; attempt < 8; attempt++) {
     const s = await readState(page);
     if (s.currentFloor !== floor) throw new Error(`on floor ${s.currentFloor}, expected ${floor}`);
-    if ((s.visitedFloors[floor]?.openedContainers ?? []).includes(id)) return;
+    if (await opened()) return;
     await setX(page, x);
     await page.keyboard.press('E');
-    await page.waitForTimeout(220);
+    const deadline = Date.now() + 3000; // > SEARCH_MS(2s)：给搜索跑完的时间
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(100);
+      if (await opened()) return;
+    }
   }
   throw new Error(`could not open ${key}`);
+}
+
+// AG-66：阻碍物的 E 交互优先于 NPC（onInteract 阻碍物 → NPC）。seed42 的 2 层
+// 瓦砾@222 嵌在 alin 的巡逻带 [196.5,224.5] 里，贴她身上按 E 开的是瓦砾提示
+// 而不是对话。站位改挑「够得到她、又不在阻碍物交互距离内」的点。同
+// e2e/npc.spec.ts 的修法。
+async function alinStandSpot(page: Page): Promise<number | null> {
+  const both = await page.evaluate(() => {
+    const sc = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as {
+      npcObjs?: Map<string, { sprite: { x: number } }>;
+      activeObstacleList?: Array<{ x: number }>;
+    } | null;
+    const rec = sc?.npcObjs?.get('alin');
+    return {
+      npcX: rec ? rec.sprite.x : null,
+      obstacleXs: (sc?.activeObstacleList ?? []).map((o) => o.x),
+    };
+  });
+  if (both.npcX === null) return null;
+  for (const d of [0, -12, 12, -24, 24, -34, 34, -42, 42]) {
+    const s = both.npcX + d;
+    if (s < 8) continue;
+    if (both.obstacleXs.every((ox) => Math.abs(ox - s) > 44)) return s;
+  }
+  return null;
 }
 
 // Move the dialogue cursor onto `target`, self-correcting against a dropped or
@@ -174,6 +210,7 @@ async function selectInMenu(page: Page, options: string[], target: string): Prom
 const MAIN_OPTIONS = ['问候', '询问', '交易', '退出'];
 
 test('a player can gather every upgrade material and build all three upgrades', async ({ page }) => {
+  test.setTimeout(150_000); // AG-66：5 次开箱各带 2s 搜刮动作，30s 默认顶不住
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
 
@@ -253,6 +290,7 @@ test('a player can gather every upgrade material and build all three upgrades', 
 });
 
 test('barter converts resources and never creates them', async ({ page }) => {
+  test.setTimeout(120_000); // AG-66：开铁箱带 2s 搜刮动作
   await page.goto('/?seed=42');
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter');
@@ -286,19 +324,21 @@ test('barter converts resources and never creates them', async ({ page }) => {
 
   // The dialogue opening itself needs retrying: Phaser's frame-based input
   // occasionally drops a single synthetic keypress. 阿林 also walks (AG-11), so
-  // 480 is her spawn anchor, not her position — re-seat on the live sprite.
+  // 480 is her spawn anchor, not her position — re-seat beside the live sprite,
+  // clear of the obstacle's interact radius (AG-66: 瓦砾@222 sits inside her
+  // patrol band, standing on her opens the rubble instead of the dialogue).
   for (let i = 0; i < 6; i++) {
     if (await hasVisibleText(page, '阿林（维修工）')) break;
     // 阿林 walks (AG-11 autonomy): the constant above is her spawn anchor in
-    // npcs.ts, not where she is now (measured 224 vs 480). Re-seat the player on
-    // her live sprite before each try, or E opens nothing.
-    const alinX = await page.evaluate(() => {
-      const g = window.__PHASER_GAME__;
-      const sc = g?.scene.getScene('Game') as unknown as { npcObjs?: Map<string, { sprite: { x: number } }> } | null;
-      const rec = sc?.npcObjs?.get('alin');
-      return rec ? Math.round(rec.sprite.x) : null;
-    });
-    if (alinX !== null) await setX(page, alinX);
+    // npcs.ts, not where she is now (measured 224 vs 480). Re-seat the player
+    // beside her live sprite before each try, or E opens nothing.
+    let spot: number | null = null;
+    for (let w = 0; w < 8 && spot === null; w++) {
+      spot = await alinStandSpot(page);
+      if (spot === null) await page.waitForTimeout(250);
+    }
+    if (spot === null) continue;
+    await setX(page, spot);
     await page.keyboard.press('E');
     await page.waitForTimeout(220);
   }

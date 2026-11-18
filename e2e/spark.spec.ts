@@ -70,16 +70,6 @@ async function setX(page: Page, x: number): Promise<void> {
   }, x);
 }
 
-async function npcSpriteX(page: Page, npcId: string): Promise<number | null> {
-  return page.evaluate((id) => {
-    const g = window.__PHASER_GAME__ as unknown as {
-      scene: { getScene: (k: string) => { npcObjs?: Map<string, { sprite: { x: number } }> } | null };
-    };
-    const rec = g?.scene.getScene('Game')?.npcObjs?.get(id);
-    return rec ? Math.round(rec.sprite.x) : null;
-  }, npcId);
-}
-
 interface DialogueSnapshot {
   message: string;
   sessionId: number;
@@ -95,14 +85,58 @@ async function dialogueSnapshot(page: Page): Promise<DialogueSnapshot | null> {
   });
 }
 
+// AG-66：过道阻碍物的 E 交互优先于 NPC（onInteract 的顺序：阻碍物 → NPC，
+// GameScene.ts:8192-8201，有意设计）。seed42 的 2 层瓦砾@222 正嵌在 alin 的
+// 巡逻带 [196.5,224.5] 里：贴她身上按 E，开的是瓦砾提示而不是对话。挑一个
+// 既够得到 NPC、又不在任何阻碍物交互距离内的站位；她恰好压在瓦砾正上方
+// （无解）时等几步——她按日程会走开。同 e2e/npc.spec.ts 的修法。
+const INTERACT_DIST = 44;
+
+/** NPC 精灵实时 x + 本层还没挖掉的阻碍物 x（同一帧快照里读，免得坐标漂移）。 */
+async function npcAndObstacleXs(page: Page, npcId: string): Promise<{ npcX: number | null; obstacleXs: number[] }> {
+  return page.evaluate((id) => {
+    const g = window.__PHASER_GAME__ as unknown as {
+      scene: {
+        getScene: (k: string) => {
+          npcObjs?: Map<string, { sprite: { x: number } }>;
+          activeObstacleList?: Array<{ x: number }>;
+        } | null;
+      };
+    };
+    const sc = g?.scene.getScene('Game');
+    const rec = sc?.npcObjs?.get(id);
+    return {
+      npcX: rec ? rec.sprite.x : null,
+      obstacleXs: (sc?.activeObstacleList ?? []).map((o) => o.x),
+    };
+  }, npcId);
+}
+
+/** 由近及远挑站位：|站位-NPC| ≤ 44 且每个阻碍物都 > 44；无解返回 null。 */
+function standSpotNear(npcX: number, obstacleXs: readonly number[]): number | null {
+  for (const d of [0, -12, 12, -24, 24, -34, 34, -42, 42]) {
+    const s = npcX + d;
+    if (s < 8) continue;
+    if (obstacleXs.every((ox) => Math.abs(ox - s) > INTERACT_DIST)) return s;
+  }
+  return null;
+}
+
 /** 站在走动居民当前的 x 上按 E，直到对话打开（居民按日程巡逻，坐标会漂移）。 */
 async function pressEAtNpc(page: Page, npcId: string, tries = 6): Promise<void> {
   await page.waitForTimeout(700);
   for (let i = 0; i < tries; i++) {
     if ((await dialogueSnapshot(page)) !== null) return;
-    const x = await npcSpriteX(page, npcId);
-    if (x === null) throw new Error(`resident "${npcId}" is not on this floor`);
-    await setX(page, x);
+    // AG-66：先挑不被阻碍物抢占的站位（她压着瓦砾时等几步，巡逻会走开）。
+    let spot: number | null = null;
+    for (let w = 0; w < 8 && spot === null; w++) {
+      const { npcX, obstacleXs } = await npcAndObstacleXs(page, npcId);
+      if (npcX === null) throw new Error(`resident "${npcId}" is not on this floor`);
+      spot = standSpotNear(npcX, obstacleXs);
+      if (spot === null) await page.waitForTimeout(250);
+    }
+    if (spot === null) continue;
+    await setX(page, spot);
     await page.waitForTimeout(60);
     await page.keyboard.press('E');
     const deadline = Date.now() + 1200;

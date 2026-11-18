@@ -76,7 +76,13 @@ test('looting a container fills the bag and a reload does not re-loot', async ({
   await startGame(page, 42);
 
   // 100000 cabinet (x=160) holds a guaranteed 净水. Walk to it and open it.
-  await walkLeftTo(page, 204);
+  //
+  // AG-51：1 层的室友床是可交互家具（前排在 236/332/…，GameScene.drawDormBeds），
+  // 且床铺的 E 判定排在容器之前（onInteract：阻碍物 → NPC → 床铺 → 容器）。
+  // 站在 204 时柜子（距 44）与 236 的床（距 32）同时够到，E 开的是床铺——
+  // 柜子从未被打开，增量断言必红。改站 180：柜子距 20，最近的床距 56，
+  // 只有柜子在交互距离内。
+  await walkLeftTo(page, 180);
   const before = await waterCount(page);
   await page.keyboard.press('E');
   await page.waitForFunction(
@@ -108,7 +114,8 @@ test('looting a container fills the bag and a reload does not re-loot', async ({
     { timeout: 10_000 },
   );
 
-  await walkLeftTo(page, 190);
+  // 同样只够柜子的站位（204 会同时够到 236 的床——AG-51 床铺优先）。
+  await walkLeftTo(page, 180);
   await page.keyboard.press('E');
   await page.waitForTimeout(250);
   expect(await waterCount(page)).toBe(afterLoot); // no re-loot

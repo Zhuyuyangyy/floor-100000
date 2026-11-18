@@ -54,21 +54,24 @@ async function readStoredSettings(page: Page): Promise<StoredSettings | null> {
   });
 }
 
-// 主菜单 -> 「设置」。无存档时入口是三行：开始新游戏 / 操作说明 / 设置，
-// 两次下移即选中（与存量 ui.spec 的导航语义一致：设置挂在最后）。
+// 主菜单 -> 「设置」。无存档时入口是五行：开始新游戏 / 成就 / 操作说明 /
+// 关于 / 设置（AG-77 把「成就」插进了「操作说明」之前），四次下移即选中。
 async function openSettingsFromTitle(page: Page): Promise<void> {
   await page.goto('/?seed=42');
   await waitForScene(page, 'Menu');
   await page.waitForTimeout(300);
-  await page.keyboard.press('ArrowDown');
-  await page.waitForTimeout(120);
-  await page.keyboard.press('ArrowDown');
-  await page.waitForTimeout(120);
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(120);
+  }
   await page.keyboard.press('Enter');
   await page.waitForTimeout(250);
 }
 
 async function startGame(page: Page, seed = 42): Promise<void> {
+  // AG-73：教程进行中第一下 ESC = 跳过教程（有意设计，ag73-tutorial.spec.ts
+  // 钉死）——本 spec 的暂停流程与教程无关，开局即按约定跳过，ESC 留给暂停。
+  await page.addInitScript(() => localStorage.setItem('floor100000.tutorial.skipped', '1'));
   await page.goto(`/?seed=${seed}`);
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter'); // 开始新游戏
@@ -87,10 +90,12 @@ test('the title menu has a 设置 entry that opens the seven-row settings panel'
   await page.waitForTimeout(300);
   expect(await hasVisibleText(page, '设置')).toBe(true);
 
-  await page.keyboard.press('ArrowDown'); // -> 操作说明
-  await page.waitForTimeout(120);
-  await page.keyboard.press('ArrowDown'); // -> 设置
-  await page.waitForTimeout(120);
+  // AG-77 后在「操作说明」之前插入的「成就」：无存档时下移四次到「设置」
+  // （开始新游戏 -> 成就 -> 操作说明 -> 关于 -> 设置）。
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press('ArrowDown'); // -> 设置
+    await page.waitForTimeout(120);
+  }
   await page.keyboard.press('Enter');
   await page.waitForTimeout(300);
 

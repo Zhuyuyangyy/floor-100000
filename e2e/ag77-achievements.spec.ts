@@ -29,6 +29,9 @@ async function waitForScene(page: Page, key: string): Promise<void> {
 }
 
 async function startGame(page: Page, seed = 42): Promise<void> {
+  // AG-73：教程进行中第一下 ESC = 跳过教程（有意设计，ag73-tutorial.spec.ts
+  // 钉死）——本 spec 与教程无关，开局即按约定跳过， contextual 让回世界链。
+  await page.addInitScript(() => localStorage.setItem('floor100000.tutorial.skipped', '1'));
   await page.goto(`/?seed=${seed}`);
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter');
@@ -178,22 +181,24 @@ test.describe('AG-77 成就系统', () => {
     expect(unlocked).toContain('loot_single_3');
 
     // 爬到 2 层（真实楼梯）：从 1 层上梯口走起。
+    // 谓词的括号不能省：?? 优先级低于 <，x ?? 999 < 80 会解析成
+    // x ?? (999 < 80)——x=160 时即 truthy，「等走到梯口」变成立刻通过。
     await page.keyboard.down('ArrowLeft');
     await page.waitForFunction(
-      () => (window.__PHASER_SESSION__?.getState() as { player: { x: number } } | null)?.player.x ?? 999 < 80,
+      () => ((window.__PHASER_SESSION__?.getState() as { player: { x: number } } | null)?.player.x ?? 999) < 80,
       undefined,
       { timeout: 15_000 },
     );
     await page.keyboard.up('ArrowLeft');
-    // 脚注必须点名上楼（E 落在梯口上，不是柜子/床）。
-    const hint = await page.evaluate(() => {
+    // 脚注必须点名上楼（E 落在梯口上，不是柜子/床）。松键后世界链还有
+    // 一两帧才改口（走进 zone 与读 hint 之间差一两帧），轮询到它改口。
+    await expect.poll(async () => page.evaluate(() => {
       const g = window.__PHASER_GAME__;
       const scene = g?.scene.getScene('Game') as unknown as {
         children: { list: Array<{ name?: string; text?: string }> };
       } | null;
       return (scene?.children.list ?? []).find((o) => o.name === 'hud-hint')?.text ?? '';
-    });
-    expect(hint).toContain('上楼');
+    }), { timeout: 5000 }).toContain('上楼');
     await page.keyboard.press('E');
     await page.waitForFunction(
       () => (window.__PHASER_SESSION__?.getState() as { currentFloor: number } | null)?.currentFloor === 2,

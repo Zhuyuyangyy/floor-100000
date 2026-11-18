@@ -85,6 +85,10 @@ async function waitForScene(page: Page, key: string): Promise<void> {
 }
 
 async function startGame(page: Page, seed = 42): Promise<void> {
+  // AG-73：教程进行中第一下 ESC = 跳过教程（有意设计，ag73-tutorial.spec.ts
+  // 钉死）——本 spec 与教程无关，开局即按约定跳过（教程期的 contextual
+  // 文案会盖住世界链，跳过后方可断言电梯口等真实脚注）。
+  await page.addInitScript(() => localStorage.setItem('floor100000.tutorial.skipped', '1'));
   await page.goto(`/?seed=${seed}`);
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter');

@@ -75,10 +75,26 @@ async function walkLeftTo(page: Page, x: number): Promise<void> {
 }
 
 // Floor 1's cabinet (x=160) holds a guaranteed 净水.
+//
+// AG-66 起搜刮是一个 2s 动作（config search.ms）：E 按下先播 search 动画，
+// 到点才出货、才扣 ACTION_COSTS.searchContainer 的时间。早期版本只等 250ms
+// 就读表——动作还没落地，量到的只有帧循环自然流动的十几分钟，断言全红
+// （RC-01 分诊：探针缺陷，非产品回归）。改为轮询真实完成条件：反馈条出现
+// 「获得」（与 ag66-obstacles.spec 同口径）。
 async function searchFloorOneCabinet(page: Page): Promise<void> {
   await walkLeftTo(page, 160);
   await page.keyboard.press('E');
-  await page.waitForTimeout(250);
+  await page.waitForFunction(
+    () => {
+      const g = (window as unknown as {
+        __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; name?: string; text?: string }> } } | null } };
+      }).__PHASER_GAME__;
+      const fb = g?.scene.getScene('Game')?.children.list.find((x) => x.name === 'hud-feedback');
+      return (fb?.text ?? '').includes('获得');
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
 }
 
 // 上楼 is the LEFT end of every floor (UP_EXIT_X); floor 1 has no down exit at
@@ -114,7 +130,23 @@ test('the action cost is visible to the player', async ({ page }) => {
   await startGame(page, 42);
   await walkLeftTo(page, 160);
   await page.keyboard.press('E');
-  await page.waitForTimeout(200);
+  // AG-66：飘字在 2s 搜刮动作落地后才出现，固定 200ms 是一次性赌博。
+  // 轮询真实条件：任一可见 Text 带上「分钟」（RC-01 分诊：探针缺陷）。
+  await page.waitForFunction(
+    () => {
+      const g = (window as unknown as {
+        __PHASER_GAME__?: { scene: { scenes: Array<{ children: { list: Array<{ type: string; text?: string; visible: boolean }> } }> } };
+      }).__PHASER_GAME__;
+      for (const sc of g?.scene.scenes ?? []) {
+        for (const o of sc.children.list ?? []) {
+          if (o.type === 'Text' && o.visible && (o.text ?? '').includes('分钟')) return true;
+        }
+      }
+      return false;
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
   const shown = await page.evaluate(() => {
     const g = (window as unknown as {
       __PHASER_GAME__?: { scene: { scenes: Array<{ children: { list: Array<{ type: string; text?: string; visible: boolean }> } }> } };

@@ -10,6 +10,7 @@ interface SceneHandle {
   walkTarget: { x: number; interact: boolean; run: boolean } | null;
   stairClimb: unknown;
   speedX: number;
+  pendingAction?: unknown;
   player: {
     x: number;
     y: number;
@@ -98,6 +99,36 @@ const markerCount = (page: Page): Promise<number> =>
     return sceneOf().children.list.filter((o) => o.depth === 40).length;
   });
 
+/**
+ * 等播放头回到移动族（idle/walk/run-{who}）且没有待落地动作——即没有一次性
+ * 动作 clip（search/pickup/hurt/attack/die）占着，也没有 pendingAction 在跑。
+ * AG-66 起搜刮/挖掘动作的 clip 按 charAnimHoldMs 播满时长（容器/床 2s、挖掘
+ * 2s、拆床 520ms），且被移动输入取消后 actionAnimUntil 依旧占位到点才释放
+ * （cancelPendingAction 不碰它），这期间 update 的选段逻辑判「clip still
+ * playing」不给换动画。RC-01 实测两类采样污染：
+ *   A 段点击落点若贴在可交互物 36px 内（hasInteractableNear，实测
+ *     INTERACT_DISTANCE=44），到达会自动起一段搜刮，B 段到达后 400ms 就按
+ *     Shift、900ms 采样恰好落进 2s hold 窗口，量到 search-player 而非
+ *     run-player；
+ *   C 段 walk-AB 落点贴在床铺（bunk@744，落点 740）到达即起搜刮，紧接着的
+ *     双击跑订单被下一帧「移动输入取消动作」连带吞掉——beginPendingAction
+ *     /cancelPendingAction 都清 walkTarget（GameScene 9084/9111，AG-66 有意
+ *     设计：动作中移动 = 收手重来，ag66-obstacles.spec 钉死），订单从未生效，
+ *     waitArrive 20s 超时。游戏行为正确，是探针没等动作窗口。
+ * 修法：进纯移动窗口前先等动作 clip 播完、pendingAction 清空。
+ */
+async function waitMovementClip(page: Page, timeoutMs = 10_000): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const sceneOf = (): SceneHandle => (window.__PHASER_GAME__ as unknown as Game).scene.getScene('Game') as SceneHandle;
+      const key = sceneOf().player.anims.currentAnim?.key ?? '';
+      return (key === 'idle-player' || key === 'walk-player' || key === 'run-player') && !sceneOf().pendingAction;
+    },
+    undefined,
+    { timeout: timeoutMs },
+  );
+}
+
 test('AG-50 探针：点击走 / 双击跑 / 跑动画 / 标记 / Shift / 爬梯', async ({ page }) => {
   test.setTimeout(180_000);
   const errors: string[] = [];
@@ -123,6 +154,11 @@ test('AG-50 探针：点击走 / 双击跑 / 跑动画 / 标记 / Shift / 爬梯
   expect(await markerCount(page), '标记 400ms 后自动销毁').toBe(0);
 
   // ── B. Shift 键盘跑 ─────────────────────────────────────────────────
+  // RC-01 分诊：先等播放头回到移动族再进纯移动窗口——A 段落点若贴着可交互物
+  // （床铺/阻碍物/容器，hasInteractableNear 36px 内），到达会自动起一段搜刮
+  // （AG-66 beginPendingAction），search clip 的 2s hold 会盖住紧接着的 Shift
+  // 跑采样（取消动作不释放占位）。旧探针在这里量到过 search-player。
+  await waitMovementClip(page);
   await page.keyboard.down('Shift');
   await page.keyboard.down('ArrowRight');
   await page.waitForTimeout(900);
@@ -135,7 +171,10 @@ test('AG-50 探针：点击走 / 双击跑 / 跑动画 / 标记 / Shift / 爬梯
   await page.keyboard.up('Shift');
   console.log(`[ag50 shift-run] speedX=${shiftSample.speedX.toFixed(0)} timeScale=${shiftSample.timeScale} anim=${shiftSample.anim}`);
   expect(shiftSample.speedX, 'Shift+→ 达到跑速').toBeGreaterThan(200);
-  expect(shiftSample.timeScale, '跑动画倍率生效').toBeGreaterThan(1.2);
+  // AG-55 起跑速由 run-player 动画自身的注册帧率（walk×1.6，runAnim.spec 钉死）
+  // 承担，player.anims.timeScale 保持 1——旧探针量的 timeScale>1.2 是已被替换
+  // 的机制（RC-01 分诊：探针缺陷）。改断言真实播放的 clip。
+  expect(shiftSample.anim, 'Shift 跑播的是 run-player（1.6 倍帧率注册）').toBe('run-player');
 
   // ── C. 双击跑 A-B（同距离、反方向，计时口径一致） ───────────────────
   const runFrom = (await page.evaluate(() => window.__PHASER_SESSION__?.getState()?.player.x ?? 0)) as number;
@@ -151,6 +190,10 @@ test('AG-50 探针：点击走 / 双击跑 / 跑动画 / 标记 / Shift / 爬梯
   const runTargetX = await pickSafeTargetX(page, runFrom2, 300);
   const dist3 = Math.abs(runTargetX - runFrom2);
   const pr = await worldToPage(page, runTargetX, 150);
+  // RC-01：walk-AB 落点贴在床铺（bunk@744）时到达即起 2s 搜刮，紧随的点击
+  // 订单会被「动作中移动 = 收手」连同订单一起吞掉（GameScene 9084/9111）。
+  // 先等动作窗口过去再下跑单。
+  await waitMovementClip(page);
   await page.mouse.dblclick(pr.x, pr.y);
   const runOrder = await readOrder(page);
   expect(runOrder.run, '第二击判为跑单').toBe(true);
@@ -162,6 +205,9 @@ test('AG-50 探针：点击走 / 双击跑 / 跑动画 / 标记 / Shift / 爬梯
   expect(runRate, '跑速约为步速 2 倍').toBeGreaterThan(walkRate * 1.6);
 
   // ── C2. 第三次跑：采样速度与动画 ─────────────────────────────────────
+  // RC-01：先等动作窗口过去再起采样器——采样循环只跑 1000ms，若等待发生在
+  // 起采样之后，采到的全是动作 hold 期间的 idle（同 B 段分诊）。
+  await waitMovementClip(page);
   const runFrom3 = (await page.evaluate(() => window.__PHASER_SESSION__?.getState()?.player.x ?? 0)) as number;
   const runTarget3 = await pickSafeTargetX(page, runFrom3, 300);
   const p3 = await worldToPage(page, runTarget3, 150);
@@ -181,8 +227,8 @@ test('AG-50 探针：点击走 / 双击跑 / 跑动画 / 标记 / Shift / 爬梯
   const peak = runSamples.reduce((a, b) => (Math.abs(a.speedX) > Math.abs(b.speedX) ? a : b));
   console.log(`[ag50 run-anim] peak |speedX|=${Math.abs(peak.speedX).toFixed(0)} timeScale=${peak.timeScale} anim=${peak.anim}`);
   expect(Math.abs(peak.speedX), '双击跑达到跑速').toBeGreaterThan(200);
-  expect(peak.timeScale, '跑动画 timeScale≈1.6').toBeGreaterThan(1.2);
-  // AG-55 已注册 run-{who}（与 walk 同帧、帧率 x1.6），跑单现在播的就是它。
+  // AG-55 已注册 run-{who}（与 walk 同帧、帧率 x1.6），跑单现在播的就是它；
+  // timeScale 机制已被注册帧率替换，不再单独断言（同 B 段）。
   expect(peak.anim).toBe('run-player');
   await waitArrive(page, runTarget3, 20_000);
 

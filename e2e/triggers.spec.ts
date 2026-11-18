@@ -12,14 +12,11 @@ import { expect, test, type Page } from '@playwright/test';
 //      真的把灯一盏盏灭掉）、HUD 仍实时算每日目标 ✓；evaluateTriggers 只写
 //      flags，不碰任何存量字段。
 //
-// 方法说明（重要，读 spec 前先读这段）：
-// 游戏循环目前**没有**调用 evaluateTriggers（AG-26 的实现说明明确留了接线
-// 清单给总控：GameScene.update 每帧求值一处尚未落）。所以本 spec 的求值是
-// 在页面里 import 产品自己的 triggers 模块、对**真实运行中的 GameState** 调用
-// evaluateTriggers——Vite dev server 的模块图与应用同源，import 到的是同一个
-// 模块实例（WorldFlags 注册表共享）。这测的是产品代码对真实状态的行为，不是
-//  mock；缺的那块（每帧接线）作为已知缺口写进报告，不改 spec 期望值。
-//
+// 方法说明（RC-01 起）：GameScene.update 每帧调用 evaluateTriggers（AG-26
+// 实现说明留给总控的接线处，已落地）。所以本 spec 的正例断言「不显式求值，
+// 旗也由主循环置上」——waitForFunction 盯 flags 而不是调 evaluateInPage，
+// 这比显式求值更强：它证明接线真的在跑。evaluateInPage 仍保留，用于「只报
+// 新旗」的反例（循环早已置过的旗，显式再求值返回空）。
 // 配套：生存维度/心情物品/楼层环境三个 spec 在对应 Agent 合入前是 skip 态，
 // 取消条件写在各文件头。
 
@@ -160,6 +157,21 @@ async function flagValue(page: Page, name: string): Promise<number> {
   }, name);
 }
 
+/**
+ * 等主循环把旗置上（RC-01 接线：GameScene.update 每帧 evaluateTriggers）。
+ * 不显式求值——这证明接线真的在跑，而不是 spec 自己调的。
+ */
+async function waitForFlag(page: Page, name: string): Promise<void> {
+  await page.waitForFunction(
+    (n) => {
+      const s = window.__PHASER_SESSION__?.getState() as { flags?: Record<string, number> } | null;
+      return (s?.flags?.[n] ?? 0) > 0;
+    },
+    name,
+    { timeout: 8000 },
+  );
+}
+
 // ── 1. 注册表完整 ───────────────────────────────────────────────────────────
 
 test('the trigger registry holds the contract list: 22 triggers, unique ids, all families', async ({ page }) => {
@@ -223,7 +235,6 @@ test('ev:blackout: an active blackout sets the flag, and the scene still dims th
     return (sc?.lightFixtures ?? []).every((f) => f.alpha > 0.9);
   });
   expect(lampsLit, 'lamps must be lit before any event').toBe(true);
-  expect(await evaluateInPage(page)).not.toContain('ev:blackout');
   expect(await flagValue(page, 'ev:blackout')).toBe(0);
 
   // 正例：置上停电。场景的直读路径（deprecated 但未迁）真的把灯一盏盏灭掉。
@@ -237,13 +248,12 @@ test('ev:blackout: an active blackout sets the flag, and the scene still dims th
     { timeout: 8000 },
   );
 
-  // 新路径：触发器对同一状态置旗，且 ev:active 存在性旗一起置。
-  const fired = await evaluateInPage(page);
-  expect(fired).toContain('ev:blackout');
-  expect(fired).toContain('ev:active');
-  expect(await flagValue(page, 'ev:blackout')).toBe(1);
+  // RC-01：主循环每帧求值——不调 evaluateInPage，旗也由循环置上（ev:active
+  // 存在性旗一起置）。这比显式求值更强：接线真的在跑。
+  await waitForFlag(page, 'ev:blackout');
+  await waitForFlag(page, 'ev:active');
 
-  // 只报新旗：同状态再求值一次，什么都没有。
+  // 只报新旗：现在显式求值一次，什么都没有（循环早已置过）。
   expect(await evaluateInPage(page)).toEqual([]);
   expect(await flagValue(page, 'ev:blackout')).toBe(1); // 旗不清
 
@@ -284,19 +294,19 @@ test('st:night-exposed: night on a hostile floor sets it; night in the dorm does
   expect(premises.floor3Hostile, 'floor 3 must be hostile').toBe(true);
   expect(premises.dormHostile, 'the dorm must not be hostile').toBe(false);
 
-  // 反例：夜间但在宿舍——不置。
+  // 反例：夜间但在宿舍——不置（主循环也不置）。
   await setNightOnFloor(page, 1320, 1);
-  expect(await evaluateInPage(page)).not.toContain('st:night-exposed');
   expect(await flagValue(page, 'st:night-exposed')).toBe(0);
 
   // 反例：白天在敌意楼层——不置。
   await setNightOnFloor(page, 720, 3);
-  expect(await evaluateInPage(page)).not.toContain('st:night-exposed');
+  expect(await flagValue(page, 'st:night-exposed')).toBe(0);
 
-  // 正例：夜间 + 敌意楼层——置，且只报一次。
+  // 正例：夜间 + 敌意楼层——主循环求值置旗（RC-01 接线），只置一次。
   await setNightOnFloor(page, 1320, 3);
-  expect(await evaluateInPage(page)).toContain('st:night-exposed');
+  await waitForFlag(page, 'st:night-exposed');
   expect(await flagValue(page, 'st:night-exposed')).toBe(1);
+  // 只报新旗：显式再求值一次，什么都没有。
   expect(await evaluateInPage(page)).not.toContain('st:night-exposed');
 
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
@@ -309,23 +319,23 @@ test('st:bag-overflowing: a full bag sets it; a bag with room does not', async (
 
   await startGame(page, 42);
 
-  // 反例：起始背包（3 格 / 12 容量）不满。
+  // 反例：起始背包（3 格 / 12 容量）不满——主循环也不置。
   const before = await page.evaluate(() => {
     const s = window.__PHASER_SESSION__?.getState();
     return { slots: s?.player.inventory.slots.length ?? -1, slotCount: s?.player.inventory.slotCount ?? -1 };
   });
   expect(before.slotCount).toBeGreaterThan(before.slots);
-  expect(await evaluateInPage(page)).not.toContain('st:bag-overflowing');
+  expect(await flagValue(page, 'st:bag-overflowing')).toBe(0);
 
-  // 正例：填满 12 格（补 9 件不同物品）——置。
+  // 正例：填满 12 格（补 9 件不同物品）——主循环求值置旗（RC-01 接线）。
   await fillBag(page);
   const full = await page.evaluate(() => {
     const s = window.__PHASER_SESSION__?.getState();
     return { slots: s?.player.inventory.slots.length ?? -1, slotCount: s?.player.inventory.slotCount ?? -1 };
   });
   expect(full.slots).toBe(full.slotCount);
-  expect(await evaluateInPage(page)).toContain('st:bag-overflowing');
-  expect(await flagValue(page, 'st:bag-overflowing')).toBe(1);
+  await waitForFlag(page, 'st:bag-overflowing');
+  expect(await evaluateInPage(page)).not.toContain('st:bag-overflowing');
 
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
@@ -337,12 +347,13 @@ test('combat:active: state.combat existing sets it; no combat does not', async (
 
   await startGame(page, 42);
 
-  expect(await evaluateInPage(page)).not.toContain('combat:active');
   expect(await flagValue(page, 'combat:active')).toBe(0);
 
   await setCombat(page);
-  expect(await evaluateInPage(page)).toContain('combat:active');
+  // RC-01：主循环求值置旗（不显式调 evaluateInPage）。
+  await waitForFlag(page, 'combat:active');
   expect(await flagValue(page, 'combat:active')).toBe(1);
+  // 只报新旗：显式再求值一次，什么都没有。
   expect(await evaluateInPage(page)).toEqual([]);
 
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
@@ -355,7 +366,7 @@ test('goal:met: a satisfied daily goal sets the flag AND the HUD still shows its
 
   await startGame(page, 42);
 
-  // 反例：目标定到够不着——HUD 无 ✓，旗不置。
+  // 反例：目标定到够不着——HUD 无 ✓，旗不置（主循环也不置）。
   await setDailyGoal(page, 100);
   await expect.poll(async () => hasVisibleText(page, '带回'), { timeout: 8000 }).toBe(true);
   const goalTextFar = await page.evaluate(() => {
@@ -364,9 +375,10 @@ test('goal:met: a satisfied daily goal sets the flag AND the HUD still shows its
     return t?.text ?? '';
   });
   expect(goalTextFar).not.toContain('✓');
-  expect(await evaluateInPage(page)).not.toContain('goal:met');
+  expect(await flagValue(page, 'goal:met')).toBe(0);
 
-  // 正例：目标定到起始存量就够（3 瓶净水 ≥ 2）——HUD 实时出 ✓，旗也置。
+  // 正例：目标定到起始存量就够（3 瓶净水 ≥ 2）——HUD 实时出 ✓，主循环求值
+  // 也置旗（RC-01 接线：两条路径互不替代）。
   await setDailyGoal(page, 2);
   await expect
     .poll(
@@ -380,7 +392,7 @@ test('goal:met: a satisfied daily goal sets the flag AND the HUD still shows its
     )
     .toContain('✓');
 
-  expect(await evaluateInPage(page)).toContain('goal:met');
+  await waitForFlag(page, 'goal:met');
   expect(await flagValue(page, 'goal:met')).toBe(1);
 
   // 两条路径互不替代：HUD 的 ✓ 是实时判定（目标改成够不着会消失），旗是
@@ -440,8 +452,24 @@ test('evaluateTriggers only ever writes flags — every legacy field is byte-ide
     });
   });
 
+  // RC-01：主循环每帧求值——上面摆的多触发器状态早已让循环置齐旗（快照之前
+  // 就置了，连背包面板开着的时候也置——接线在面板早退之前）。这里显式再求值
+  // 一次：只报新旗的契约下返回空，且存量字段字节不变。
   const fired = await evaluateInPage(page);
-  expect(fired.length, 'several triggers should fire at once').toBeGreaterThan(2);
+  expect(fired, 'flags already latched by the main loop; nothing new to report').toEqual([]);
+  const latched = await page.evaluate(() => {
+    const s = window.__PHASER_SESSION__?.getState() as { flags?: Record<string, number> } | null;
+    return {
+      nightExposed: s?.flags?.['st:night-exposed'] ?? 0,
+      bagOverflowing: s?.flags?.['st:bag-overflowing'] ?? 0,
+      leak: s?.flags?.['ev:leak'] ?? 0,
+      active: s?.flags?.['ev:active'] ?? 0,
+    };
+  });
+  expect(latched.nightExposed, 'st:night-exposed latched by the loop').toBe(1);
+  expect(latched.bagOverflowing, 'st:bag-overflowing latched by the loop').toBe(1);
+  expect(latched.leak, 'ev:leak latched by the loop').toBe(1);
+  expect(latched.active, 'ev:active latched by the loop').toBe(1);
 
   const after = await page.evaluate(() => {
     const s = window.__PHASER_SESSION__?.getState();

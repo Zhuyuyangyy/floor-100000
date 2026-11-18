@@ -4,7 +4,8 @@
 // 调用方写回 GameState.npcStates。记忆有界——超出上限时淘汰
 // 「权重最低 → 最旧」的条目，防止存档与 prompt 无限膨胀。
 
-import type { DiaryEvent, GameState } from '../core/gameTypes';
+import type { GameState } from '../core/gameTypes';
+import type { DiaryEntry, DiaryKind } from './DiarySystem';
 import { isItemId } from '../data/items';
 import { ARCHETYPES } from '../data/npcPersonalities';
 import type { MemoryEntry, NpcInventory, NpcPersistedState } from '../ai/types';
@@ -36,20 +37,25 @@ export function nextMemoryId(prefix = 'mem'): string {
 //
 // 全局日记不是「所有人都知道的事实」。阿林不会平白知道玩家夜袭了流浪者，
 // 除非他在场。只有通过可见性过滤的事件才能进 NPC 的 prompt。
+//
+// RC-01 起读结构化日记（DiaryEntry）：个体条目带 actorId（亲历判定从
+// 「actorIds 含 npcId」变成「actorId === npcId」——结构化日记一个条目
+// 只有一个当事人，群体条目为 null），公共事件从 'shelter_attacked' 换成
+// 同义的 'shelterAttacked'。
 
 export type EventVisibility = 'witnessed' | 'public' | 'unknown';
 
 /** 公共事件：整个楼层都察觉得到的（广播级）。 */
-const PUBLIC_EVENT_KINDS: ReadonlySet<string> = new Set(['shelter_attacked']);
+const PUBLIC_EVENT_KINDS: ReadonlySet<DiaryKind> = new Set(['shelterAttacked']);
 
-export function eventVisibility(npcId: string, event: Pick<DiaryEvent, 'kind' | 'actorIds'>): EventVisibility {
-  if (event.actorIds.includes(npcId)) return 'witnessed'; // 亲历
+export function eventVisibility(npcId: string, event: Pick<DiaryEntry, 'kind' | 'actorId'>): EventVisibility {
+  if (event.actorId !== null && event.actorId === npcId) return 'witnessed'; // 亲历
   if (PUBLIC_EVENT_KINDS.has(event.kind)) return 'public'; // 公共
   return 'unknown'; // 不在场即不知道（'told' 告知留待玩家传话机制）
 }
 
 /** 过滤出该 NPC 有权知道的事件，保持时间顺序。 */
-export function visibleEvents(npcId: string, events: DiaryEvent[]): DiaryEvent[] {
+export function visibleEvents(npcId: string, events: DiaryEntry[]): DiaryEntry[] {
   return events.filter((e) => eventVisibility(npcId, e) !== 'unknown');
 }
 

@@ -78,7 +78,10 @@ import {
   moraleLabel,
   witnessTrauma,
 } from '../systems/MoraleSystem';
-import { recentDiary } from '../systems/DiarySystem';
+import { diaryOf } from '../systems/DiarySystem';
+// AG-26 / RC-01：统一触发器。import 本模块即完成启动注册（副作用），求值在
+// update() 里每帧跑——见那边的接线注释。
+import { evaluateTriggers } from '../systems/triggers';
 import { availableShelterActions, finishNight, resolveShelterAction } from '../systems/ShelterSystem';
 import {
   nightChoicePending,
@@ -8540,9 +8543,11 @@ export class GameScene extends Phaser.Scene {
     this.shelterObjects.push(...buildPanelHeader(this, left, top, panelW, '夜间安排 · 宿舍', UI.good, depth + 5));
     this.shelterObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 44, depth + 5));
     const stress = Math.round(state.player.stress ?? 20);
-    const latest = recentDiary(state, 1)[0];
+    // RC-01：宿舍面板的「上次：…」读结构化日记（唯一的一套日记）。生产
+    // 写入方是 ShelterSystem 的四个行动与夜袭，文案即当年旧格式的 message。
+    const latest = diaryOf(state, 1)[0];
     this.shelterObjects.push(
-      this.add.text(left + 24, top + 40, `压力 ${stress}/100${latest ? ` · 上次：${latest.message}` : ' · 今天还没有记录'}`, {
+      this.add.text(left + 24, top + 40, `压力 ${stress}/100${latest ? ` · 上次：${latest.text}` : ' · 今天还没有记录'}`, {
         fontFamily: FONT_FAMILY,
         fontSize: `${TYPE.caption}px`,
         color: hex(stress >= 70 ? TEXT.warn : TEXT.primary),
@@ -9803,6 +9808,18 @@ export class GameScene extends Phaser.Scene {
     // AG-77：toast 的出票与退场必须在面板早退之前——解锁可能发生在任何面板
     // 开着的时候（制作面板里做出第一件武器），那时世界模拟整段被跳过。
     this.updateAchievementToasts();
+    // AG-26 / RC-01：统一触发器求值接线（AG-26 实现说明留给总控的那一处）。
+    // triggers 模块的 import 副作用已完成启动注册；这里每帧求值，把「本 run
+    // 曾经如此」的一次性事实（ev:*/st:*/goal:met/combat:active/stat:*/
+    // tier:*:arrived/npc:*:regular）写进 flags。evaluateTriggers 只置不清、
+    // 只写 flags 不碰任何存量字段（e2e/triggers.spec.ts 钉死字节级不变），
+    // 所以这行不改变任何既有行为——它让旗成为活的查询与存档事实，供任务/
+    // 对话/日记条件与「第一次发生时的一次性反应」查。
+    // 放在所有面板早退之前：战斗开打、背包塞满、目标达标都可能发生在面板里。
+    // 与自言自语（tickMonologue）的分界：那边是边沿事件（可重复、带冷却、
+    // 出气泡），旗装不下「又掉一次」——latch 与 edge 是两类问题，见
+    // src/systems/triggers.ts 文件头与 src/tests/triggers.test.ts 的钉法。
+    if (hasGame()) evaluateTriggers(getGame());
     // The dorm's sleeping roommates breathe. Each Z carries its own phase, so
     // five beds do not pulse in unison — a shared phase reads as one blinking
     // overlay rather than as five people asleep. Driven from here rather than by

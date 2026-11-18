@@ -71,7 +71,9 @@ export function createNewGame(seed: number): GameState {
     npcStates: {},
     visitedFloors: {},
     worldEvents: { history: [], activeEvent: null },
-    diary: [],
+    // 结构化日记（DiarySystem.diaryOf/recordDiary）：新档不预建字段，首次
+    // 写入时懒创建——与 flags 同款兼容语义，旧存档没有它就是空日记。
+    // RC-01 前这里是旧 DiaryEvent[]（diary: []），双轨制统一后移除。
     // OVERHAUL (docs/OVERHAUL_M1.md): the day's objective, the cross-run
     // records, and the resolved encounter spots. Initialised here so a new run
     // has them from the first frame; old saves simply lack them and the systems

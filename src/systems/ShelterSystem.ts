@@ -3,7 +3,7 @@ import { GAME_CONFIG } from '../core/config';
 import type { GameState, ShelterAction, ShelterPlan } from '../core/gameTypes';
 import { deriveSeed, makeRng } from '../core/rng';
 import { craft } from './CraftingSystem';
-import { appendDiaryEvent, makeDiaryEvent } from './DiarySystem';
+import { recordDiary, recordShelterAttackedDiary, stressAfterEvent, type DiaryKind } from './DiarySystem';
 import { AILMENTS, applyCure, cure, hasAilment } from './SicknessSystem';
 import { countItem, removeItem } from './InventorySystem';
 import { sleep } from './SurvivalSystem';
@@ -65,23 +65,40 @@ function readyForShelter(state: GameState, action: ShelterAction): ShelterResolu
   return null;
 }
 
+// RC-01 日记统一：四种宿舍行动写结构化日记。契约 §5 的 11 种 kind 里没有
+// 「休息/加固/照顾邻居」的专属种类，归到最相近的，message 原样进 text——
+// 故事精度不丢，宿舍面板的「上次：…」与 NPC 对话读到的都是这一条：
+//   休息/加固——身心与居所的恢复 → dwellerMorale（个体态，玩家自己）；
+//   处理伤势 → dwellerWounded（个体态）；
+//   照顾邻居——关于小周这个人的事实 → visitor（个体态 actorId='xiaozhou'，
+//     他因此亲历这条，能进他的对话上下文——与旧 actorIds ['player',
+//     'xiaozhou'] 的可见性语义一致）。
+// 压力变化旧路径寄生在旧日记的 appendDiaryEvent（stressDelta）里，现在显式
+// 应用：数值与旧路径逐字节一致（ShelterSystem.test.ts 钉住）。
+const SHELTER_ACTION_DIARY: Record<ShelterAction, { kind: DiaryKind; actorId: string }> = {
+  rest: { kind: 'dwellerMorale', actorId: 'player' },
+  treat: { kind: 'dwellerWounded', actorId: 'player' },
+  repair: { kind: 'dwellerMorale', actorId: 'player' },
+  care: { kind: 'visitor', actorId: 'xiaozhou' },
+};
+
 function resolveSuccess(
   state: GameState,
   action: ShelterAction,
-  kind: 'shelter_rested' | 'shelter_treated' | 'shelter_repaired' | 'neighbor_cared',
   message: string,
   itemChanges: Array<{ itemId: ShelterItemId; quantity: number }>,
 ): ShelterResolution {
   const stressDelta = STRESS_DELTA[action];
   state.shelterPlan = { day: state.day, action, resolved: true } satisfies ShelterPlan;
-  appendDiaryEvent(state, makeDiaryEvent(state, {
-    floor: STARTING_FLOOR,
+  const { kind, actorId } = SHELTER_ACTION_DIARY[action];
+  recordDiary(state, {
     kind,
-    actorIds: action === 'care' ? ['player', 'xiaozhou'] : ['player'],
-    itemChanges,
-    stressDelta,
-    message,
-  }));
+    day: state.day,
+    minute: state.gameMinuteOfDay,
+    text: message,
+    actorId,
+  });
+  state.player.stress = stressAfterEvent(state, stressDelta);
   return { ok: true, action, message, events: [kind], itemChanges, stressDelta };
 }
 
@@ -95,7 +112,7 @@ export function resolveShelterAction(state: GameState, action: ShelterAction): S
   if (blocked) return blocked;
 
   if (action === 'rest') {
-    return resolveSuccess(state, action, 'shelter_rested', '你把门关好，先让身体恢复一点。', []);
+    return resolveSuccess(state, action, '你把门关好，先让身体恢复一点。', []);
   }
 
   if (action === 'treat') {
@@ -106,7 +123,7 @@ export function resolveShelterAction(state: GameState, action: ShelterAction): S
     removeItem(state.player.inventory, 'medkit', 1);
     const healed = applyCure(state, 'medkit');
     state.player.hp = Math.min(GAME_CONFIG.player.hpMax, state.player.hp + 40);
-    return resolveSuccess(state, action, 'shelter_treated', healed.length > 0 ? '你用医疗包处理了伤口。' : '你用医疗包处理了身体状况。', [
+    return resolveSuccess(state, action, healed.length > 0 ? '你用医疗包处理了伤口。' : '你用医疗包处理了身体状况。', [
       { itemId: 'medkit', quantity: -1 },
     ]);
   }
@@ -114,7 +131,7 @@ export function resolveShelterAction(state: GameState, action: ShelterAction): S
   if (action === 'repair') {
     const result = craft(state, 'reinforced_door');
     if (!result.ok) return failure(action, result.reason);
-    return resolveSuccess(state, action, 'shelter_repaired', '你把宿舍门重新加固，夜里少了一处漏风口。', [
+    return resolveSuccess(state, action, '你把宿舍门重新加固，夜里少了一处漏风口。', [
       { itemId: 'wood', quantity: -2 },
       { itemId: 'tape', quantity: -1 },
     ]);
@@ -122,7 +139,7 @@ export function resolveShelterAction(state: GameState, action: ShelterAction): S
 
   if (countItem(state.player.inventory, 'ration_pack') < 1) return failure(action, '没有多余口粮可以照顾邻居');
   removeItem(state.player.inventory, 'ration_pack', 1);
-  return resolveSuccess(state, action, 'neighbor_cared', '你把一份口粮分给小周，屋里安静了一点。', [
+  return resolveSuccess(state, action, '你把一份口粮分给小周，屋里安静了一点。', [
     { itemId: 'ration_pack', quantity: -1 },
   ]);
 }
@@ -167,14 +184,11 @@ export function finishNight(state: GameState): NightResolution {
   const attackDamage = attacked ? Math.min(SHELTER_ATTACK_DAMAGE, state.player.hp) : 0;
   if (attacked) {
     state.player.hp = Math.max(0, state.player.hp - SHELTER_ATTACK_DAMAGE);
-    appendDiaryEvent(state, makeDiaryEvent(state, {
-      floor: STARTING_FLOOR,
-      kind: 'shelter_attacked',
-      actorIds: ['player'],
-      itemChanges: [],
-      stressDelta: 10,
-      message: '夜里有人撞门；你庆幸自己还来得及醒来。',
-    }));
+    // RC-01：夜袭日记走结构化入口（群体态 shelterAttacked，伤害进文案）。
+    // 压力 +10 显式应用——旧路径由 appendDiaryEvent 的 stressDelta 顺带
+    // 完成，数值不变（finishNight 返回的 stressDelta 因此也不变）。
+    recordShelterAttackedDiary(state, attackDamage);
+    state.player.stress = stressAfterEvent(state, 10);
     if (state.player.hp <= 0) state.status = 'lost';
   }
   state.shelterPlan = undefined;

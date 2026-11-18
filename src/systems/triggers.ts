@@ -23,6 +23,15 @@
 // 在场、HUD 的 ✓）继续直读 state；旗服务的是「第一次发生时该有一次性
 // 反应」（日记、flash、任务/对话条件）的那类查询。
 //
+// 接线状态（RC-01）：GameScene.update 每帧调用 evaluateTriggers（AG-26
+// 实现说明留给总控的那一处，已落地）。旗自此是活的查询与存档事实，但目前
+// 还没有任务/对话/日记条件消费者——那是内容侧接线，不属于本机制。
+//
+// 与自言自语（GameScene.tickMonologue / data/monologue.ts）的分界：那是
+// 边沿事件（掉过低阈值、入夜、到新层、打完架——可重复、带冷却、出气泡），
+// latch 旗装不下「又掉一次」。两者不是同一问题的两套实现，各自留任；
+// 阈值与语义互不重叠（stat:hunger-critical 是归零，hunger_low 是 25%）。
+//
 // 导入本模块即完成启动注册（import 的副作用）；求值走 WorldFlags 的
 // evaluateTriggers（此处 re-export，场景只 import 这一个模块即可）。
 // 全部 when 为纯判定，禁 Math.random——同 state 必然同结果。

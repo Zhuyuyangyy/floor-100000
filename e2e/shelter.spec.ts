@@ -65,7 +65,15 @@ test.describe('first-floor shelter loop', () => {
     const state = await page.evaluate(() => window.__PHASER_SESSION__?.getState());
     expect(state?.gameMinuteOfDay).toBeGreaterThanOrEqual(360);
     expect(state?.player.stress).toBeLessThan(20);
-    expect(state?.diary?.some((event) => event.kind === 'shelter_rested')).toBe(true);
+    // RC-01：休息写结构化日记（dwellerMorale），宿舍面板「上次：…」读它
+    const diary = await page.evaluate(async () => {
+      const mod = '/src/systems/DiarySystem.ts';
+      const m = (await import(mod)) as {
+        diaryOf: (s: unknown) => Array<{ kind: string; text: string }>;
+      };
+      return m.diaryOf(window.__PHASER_SESSION__?.getState());
+    });
+    expect(diary.some((e) => e.kind === 'dwellerMorale' && e.text.includes('把门关好'))).toBe(true);
     await page.screenshot({ path: 'e2e/screenshots/shelter-next-day.png' });
 
     await page.reload();
@@ -126,6 +134,20 @@ test.describe('first-floor shelter loop', () => {
 
     const state = await page.evaluate(() => window.__PHASER_SESSION__?.getState());
     expect(state?.player.hp).toBe(88);
-    expect(state?.diary?.some((event) => event.kind === 'shelter_attacked')).toBe(true);
+    // RC-01：夜袭写结构化 shelterAttacked（群体态，伤害进文案，可按旗查询）
+    const attacked = await page.evaluate(async () => {
+      const mod = '/src/systems/DiarySystem.ts';
+      const m = (await import(mod)) as {
+        diaryOf: (s: unknown) => Array<{ kind: string; text: string }>;
+        hasDiaryKind: (s: unknown, k: string) => boolean;
+      };
+      const s = window.__PHASER_SESSION__?.getState();
+      return {
+        entries: m.diaryOf(s),
+        hasAttack: m.hasDiaryKind(s, 'shelterAttacked'),
+      };
+    });
+    expect(attacked.hasAttack).toBe(true);
+    expect(attacked.entries.some((e) => e.kind === 'shelterAttacked' && e.text.includes('HP -12'))).toBe(true);
   });
 });

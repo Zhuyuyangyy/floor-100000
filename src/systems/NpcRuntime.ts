@@ -4,6 +4,7 @@
 // 哪条路；source 字段供测试与日志断言「这次为什么用了降级」。
 
 import { isNight } from '../systems/SurvivalSystem';
+import { diaryOf } from '../systems/DiarySystem';
 import { recall, visibleEvents } from '../systems/NpcMemory';
 import { ARCHETYPE_ACTIONS } from '../data/npcPersonalities';
 import { validateProposal, type NpcFact, type ValidatedAction } from '../ai/rulesExecutor';
@@ -69,8 +70,10 @@ export function buildObservation(
     // 信誉分级由关系值确定性推导：模型可以参照它组织台词，
     // 但价格/商品差异走 npcEconomy 纯函数，不依赖推理时序。
     reputation: reputationOf(npcState),
-    // 只带该 NPC 有权知道的事件（亲历/公共），全局日记不过滤等于情报泄漏
-    recentEvents: visibleEvents(npc.id, state.diary ?? []).slice(-3).map((d) => d.message),
+    // 只带该 NPC 有权知道的事件（亲历/公共），全局日记不过滤等于情报泄漏。
+    // RC-01：读结构化日记。diaryOf 是 day 倒序（新的在前），取前三新的再
+    // 翻回时间正序——与旧路径（chronological.slice(-3)）同结果。
+    recentEvents: visibleEvents(npc.id, diaryOf(state)).slice(0, 3).reverse().map((d) => d.text),
   };
 }
 

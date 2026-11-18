@@ -3,6 +3,7 @@ import { createNewGame } from '../core/gameState';
 import { SCHEMA_VERSION } from '../core/constants';
 import { GAME_CONFIG } from '../core/config';
 import { deserialize, saveFailureCount, saveToStorage, serialize, validateGameState } from '../systems/SaveSystem';
+import { diaryOf } from '../systems/DiarySystem';
 import { getFloorView } from '../systems/LootSystem';
 import { tryContinue } from '../core/session';
 import type { GameState } from '../core/gameTypes';
@@ -155,6 +156,34 @@ describe('shelter slice save compatibility', () => {
     const state = createNewGame(42);
     state.player.stress = 101;
     expect(validateGameState(state).some((e) => e.includes('stress'))).toBe(true);
+  });
+
+  it('rejects a malformed legacy diary (old DiaryEvent[] still validates)', () => {
+    // RC-01：旧 diary 字段退出生产，但旧档里可能有。形状校验保留——坏档
+    // 仍然整体拒绝（不白屏也不静默丢数据）；合法的才在 deserialize 里迁移。
+    const badKind = createNewGame(42) as unknown as Record<string, unknown>;
+    badKind.diary = [{
+      id: 'x', day: 1, minute: 600, floor: 1, kind: 'not_a_legacy_kind',
+      actorIds: ['player'], itemChanges: [], stressDelta: 0, message: 'x',
+    }];
+    expect(validateGameState(badKind).some((e) => e.includes('diary'))).toBe(true);
+
+    const notArray = createNewGame(42) as unknown as Record<string, unknown>;
+    notArray.diary = 'garbage';
+    expect(validateGameState(notArray).some((e) => e.includes('diary'))).toBe(true);
+  });
+
+  it('accepts a well-formed legacy diary (it migrates on load)', () => {
+    const state = createNewGame(42) as unknown as Record<string, unknown>;
+    state.diary = [{
+      id: 'x', day: 1, minute: 600, floor: 1, kind: 'shelter_attacked',
+      actorIds: ['player'], itemChanges: [], stressDelta: 10, message: '夜里有人撞门',
+    }];
+    expect(validateGameState(state)).toEqual([]);
+    const back = deserialize(serialize(state as unknown as GameState));
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    expect(diaryOf(back.state).map((e) => e.kind)).toEqual(['shelterAttacked']);
   });
 });
 

@@ -1,18 +1,25 @@
-import type { DiaryEvent, GameState } from '../core/gameTypes';
+import type { GameState } from '../core/gameTypes';
 import { STARTING_FLOOR } from '../core/constants';
 import { STAT_MAX } from './InventorySystem';
 import { NIGHT_START_MINUTE } from './SurvivalSystem';
 import { AILMENTS, type SicknessTick } from './SicknessSystem';
 import { bumpFlag, flagCount, hasFlag, setFlag } from './WorldFlags';
 
-export const DIARY_LIMIT = 64;
 const DEFAULT_STRESS = 20;
 
 function clampStress(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
-/** Return the next stress value without changing any other state. */
+/**
+ * 应用一次压力变化并返回新值（夹在 0..100）。
+ *
+ * RC-01 之前，压力变化寄生在旧日记的 appendDiaryEvent 里（每条旧条目带
+ * stressDelta，写日记顺带改压力）。旧日记随双轨制统一退出生产后，压力
+ * 应用改为显式调用——ShelterSystem 的休息降压（-6/-10/-4/-12）与夜袭
+ * 增压（+10）直接调它，数值与旧路径逐字节一致。缺 stress 字段的旧存档
+ * 按 20 起算（与 SaveSystem 的旧档修补同源）。
+ */
 export function stressAfterEvent(state: GameState, delta: number): number {
   const current = typeof state.player.stress === 'number' && Number.isFinite(state.player.stress)
     ? state.player.stress
@@ -20,42 +27,12 @@ export function stressAfterEvent(state: GameState, delta: number): number {
   return clampStress(current + delta);
 }
 
-/** Build an event with a stable id from the current run state and event sequence. */
-export function makeDiaryEvent(
-  state: GameState,
-  input: Omit<DiaryEvent, 'id' | 'day' | 'minute'>,
-): DiaryEvent {
-  const sequence = state.diary?.length ?? 0;
-  const minute = Math.floor(state.gameMinuteOfDay);
-  return {
-    ...input,
-    id: `day-${state.day}-minute-${minute}-${input.kind}-${sequence}`,
-    day: state.day,
-    minute,
-  };
-}
-
-/** Append a fact and apply its stress delta, keeping the most recent 64 facts. */
-export function appendDiaryEvent(state: GameState, event: DiaryEvent): void {
-  const diary = state.diary ?? (state.diary = []);
-  diary.push(event);
-  if (diary.length > DIARY_LIMIT) diary.splice(0, diary.length - DIARY_LIMIT);
-  state.player.stress = stressAfterEvent(state, event.stressDelta);
-}
-
-export function recentDiary(state: GameState, limit = 5): DiaryEvent[] {
-  const diary = state.diary ?? [];
-  if (limit <= 0) return [];
-  return diary.slice(-limit);
-}
-
 // ────────────────────────────────────────────────────────────────────────────
 // 契约 §5：结构化日记（docs/plans/TWOM_ALIGNMENT.md 第五节，类型定死）
 //
-// 上面那套 DiaryEvent 是「发生过的一则事实」的宽记录（id/floor/itemChanges/
-// stressDelta 全带上），只服务旧调用方。这一套是 11 bit 在 TWOM 里用 42 种
-// KosovoDiaryEntry* 类回答的问题——「什么值得玩家记住」。形状刻意收窄到五个
-// 字段：kind 决定语义，actorId 决定个体/群体双轨，其余交给时间戳。
+// 这是 11 bit 在 TWOM 里用 42 种 KosovoDiaryEntry* 类回答的问题——「什么
+// 值得玩家记住」。形状刻意收窄到五个字段：kind 决定语义，actorId 决定
+// 个体/群体双轨，其余交给时间戳。
 //
 // 三条从 TWOM 抄来的规律，实现里逐条对应：
 //   1. 个体与群体双轨——dwellerHungry（actorId='player'，一个人饿是私事）
@@ -64,6 +41,12 @@ export function recentDiary(state: GameState, limit = 5): DiaryEvent[] {
 //      告知。系统看在眼里，只是这次没事；
 //   3. 迟归单独成条——lateFromScavenge：外出的人没按时回来，本身就是事件，
 //      不用等出事。
+//
+// RC-01 之前这里还有第二套日记：旧 DiaryEvent[]（state.diary，8 种宽记录
+// kind，生产者只有 ShelterSystem，读者是宿舍面板与 NPC 对话）。双轨制已
+// 统一到本套：ShelterSystem 改写 recordDiary，读者改读 diaryOf，旧档里的
+// 旧日记由 migrateLegacyDiary 迁进来（见文件末尾）。旧 API
+// （makeDiaryEvent/appendDiaryEvent/recentDiary）与 DiaryEvent 类型已移除。
 //
 // 不替代 flash()：flash 是即时反馈（一秒后消失），diary 是「什么值得记住」
 // 的结构化记录（进存档、可回放、可按 flag 查询）。两者并存。
@@ -102,27 +85,19 @@ export const DIARY_KIND_LABELS: Record<DiaryKind, string> = {
   requestFulfilled: '委托完成',
 };
 
-/** 新日记的容量上限，与旧日记的 DIARY_LIMIT 对齐。 */
+/** 日记的容量上限：超出裁掉最旧的（旗不被裁剪影响，见 recordDiary）。 */
 export const DIARY_ENTRY_LIMIT = 64;
 
-// ── 存储位置（文件归属下的最小妥协，必读）───────────────────────────────────
+// ── 存储位置 ────────────────────────────────────────────────────────────────
 //
-// 契约 §5 把 DiaryEntry 的类型放在本文件，而 GameState 在 src/core（AG-25
-// 属主，我不能加字段）；既有的 state.diary 是旧 DiaryEvent[]，SaveSystem 的
-// validateDiary 用 8 种旧 kind 的白名单严格校验它——新条目放进去会被判
-// 「存档损坏」。所以新日记存在 state.diaryEntries 上，一个运行期字段：
-//   - serialize 是 JSON.stringify(state)，它随之进存档；
-//   - validateGameState 只校验已知字段，不拒绝它；
-//   - 读取走 diaryOf()，缺字段按 [] 处理——老存档没有它照样加载；
-//   - 不升 schemaVersion。
-// 干净的结局是 AG-25 在 gameTypes 里补 `diaryEntries?: DiaryEntry[]`
-// （类型从本文件 re-export）——纯类型改动，无行为差异。已记档在
-// docs/plans/TWOM_ALIGNMENT.md 的「AG-27 实现说明」。
-type DiaryHost = GameState & { diaryEntries?: DiaryEntry[] };
+// 契约 §5 把 DiaryEntry 的类型放在本文件，GameState 在 src/core（AG-25
+// 属主）；GameState.diaryEntries 已是声明位（缺省按 [] 懒创建），serialize
+// 是 JSON.stringify(state)，条目随之进存档；validateGameState 只校验已知
+// 字段，不拒绝它；读取走 diaryOf()——老存档没有它就是空数组，由
+// migrateLegacyDiary 在加载时把旧 diary 迁进来，不需要为此升 schemaVersion。
 
 function entriesOf(state: GameState): DiaryEntry[] {
-  const host = state as DiaryHost;
-  return host.diaryEntries ?? (host.diaryEntries = []);
+  return state.diaryEntries ?? (state.diaryEntries = []);
 }
 
 /** 日记计数的旗名。旗是「这事发生过吗」的唯一查询入口（WorldFlags）。 */
@@ -135,7 +110,7 @@ export function diaryFlagKey(kind: DiaryKind): string {
  *
  * minute 必须 Math.floor：gameMinuteOfDay 是帧推进的小数（480.34…），
  * AG-06 的小数分钟 bug 就是这么来的——不 floor 就会把小数写进存档，
- * 之后任何按整数假设的读者（isValidMemory、validateDiary）都会失配。
+ * 之后任何按整数假设的读者（isValidMemory、旧档校验）都会失配。
  * 写入口统一 floor 并夹回 0..1439，调用方传小数也安全。
  *
  * 同时给对应 kind 的计数旗 +1：条目有 64 条上限、会被裁剪，旗不会——
@@ -277,9 +252,8 @@ export function checkSurvivalDiary(state: GameState): DiaryEntry[] {
 // 回放、可被旗 diary:shelterAttacked 查询、进存档。袭击是宿舍级事件，
 // 不是某个人的状态——群体态，actorId 为 null。
 //
-// 调用点：ShelterSystem.finishNight 里 attacked 为真的分支，紧挨现有
-// appendDiaryEvent(shelter_attacked) 之处（ShelterSystem 属既有文件，
-// 由接线方补一行）。
+// 调用点：ShelterSystem.finishNight 里 attacked 为真的分支（RC-01 已接线，
+// 取代原来的旧格式 appendDiaryEvent；压力 +10 由 ShelterSystem 显式应用）。
 export function recordShelterAttackedDiary(state: GameState, damage: number): DiaryEntry {
   return recordDiary(state, {
     kind: 'shelterAttacked',
@@ -433,3 +407,80 @@ export function checkLateReturnDiary(state: GameState): DiaryEntry | null {
 // 饥饿态下最诚实的 kind 就是 dwellerHungry，「这次没事」由文案承载；
 // 若总控想要对称的 NoEffect kind，这是第一候选。与 SEVERITY_BITING 同档
 // 的 25% 阈值让「预警」和「开始咬人」是同一条线，玩家只需要记一个数。
+
+// ── 旧档迁移（RC-01 日记统一）───────────────────────────────────────────────
+//
+// 旧日记 DiaryEvent[]（state.diary，8 种宽记录 kind，带 id/floor/
+// itemChanges/stressDelta）随本轮统一退出生产：唯一的生产者 ShelterSystem
+// 改为写结构化条目，两个读者（宿舍面板「上次：…」、NPC 对话的
+// recentEvents）改读 diaryEntries。旧档里的旧日记在此迁成结构化条目——
+// 「昨晚被袭击过吗」对一个老存档仍然答得出来。
+//
+// 迁移只搬事实，不重放效果：stressDelta 在旧档运行时就已经 applied 过
+// （旧 appendDiaryEvent 写日记顺带改压力），再 apply 一次就是双扣。
+// 形状校验留在 SaveSystem（坏档仍然整体拒绝，不白屏也不静默丢数据），
+// 这里只回答「一条旧条目对应哪种新 kind、谁是当事人」。
+
+/** 旧 DiaryEvent 的 8 种 kind → 新 DiaryKind。无专属种类的归到最相近的：
+ *  搜刮归来/休息/加固都是「身心与居所的恢复」→ dwellerMorale；
+ *  战斗受伤/处理伤势 → dwellerWounded；迟归 → lateFromScavenge；
+ *  照顾邻居是关于小周这个人的事实 → visitor（个体态，他因此亲历）；
+ *  夜袭是宿舍级事件 → shelterAttacked（群体态）。 */
+const LEGACY_KIND_MAP: Record<string, DiaryKind> = {
+  returned_from_scavenge: 'dwellerMorale',
+  late_return: 'lateFromScavenge',
+  combat_wounded: 'dwellerWounded',
+  shelter_rested: 'dwellerMorale',
+  shelter_treated: 'dwellerWounded',
+  shelter_repaired: 'dwellerMorale',
+  neighbor_cared: 'visitor',
+  shelter_attacked: 'shelterAttacked',
+};
+
+/** 旧档 diary 字段里的条目形状（未校验的 JSON，逐个字段看过再用）。 */
+interface LegacyDiaryEntry {
+  kind?: unknown;
+  day?: unknown;
+  minute?: unknown;
+  actorIds?: unknown;
+  message?: unknown;
+}
+
+/** 旧 kind 是否认识（SaveSystem 的旧档校验与这里的迁移共用一张表）。 */
+export function isLegacyDiaryKind(kind: unknown): kind is keyof typeof LEGACY_KIND_MAP {
+  return typeof kind === 'string' && kind in LEGACY_KIND_MAP;
+}
+
+/**
+ * 把旧档的 DiaryEvent[] 迁进结构化日记，然后删掉旧字段。
+ *
+ * 调用点：SaveSystem.deserialize（校验通过之后）。幂等——第二次调用时
+ * diary 已删，直接返回。迁移条目走 recordDiary：64 条裁剪、minute floor、
+ * diary:<kind> 计数旗全部随新写入口一致，老存档因此和新档同构。
+ */
+export function migrateLegacyDiary(state: GameState): void {
+  const legacy = (state as GameState & { diary?: unknown }).diary;
+  if (!Array.isArray(legacy)) return;
+  for (const raw of legacy) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const entry = raw as LegacyDiaryEntry;
+    if (!isLegacyDiaryKind(entry.kind)) continue;
+    if (typeof entry.day !== 'number' || typeof entry.minute !== 'number' || typeof entry.message !== 'string') continue;
+    const actorIds = Array.isArray(entry.actorIds)
+      ? entry.actorIds.filter((actor): actor is string => typeof actor === 'string')
+      : [];
+    // 个体态取第一个非玩家 actor（照顾邻居 → 小周，他因此亲历这条）；
+    // 宿舍袭击是群体态（与新写入口一致），其余取玩家自己。
+    const actorId = entry.kind === 'shelter_attacked'
+      ? null
+      : actorIds.find((actor) => actor !== 'player') ?? (actorIds.includes('player') ? 'player' : null);
+    recordDiary(state, {
+      kind: LEGACY_KIND_MAP[entry.kind],
+      day: entry.day,
+      minute: entry.minute,
+      text: entry.message,
+      actorId,
+    });
+  }
+  delete (state as GameState & { diary?: unknown }).diary;
+}

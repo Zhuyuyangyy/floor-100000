@@ -32,10 +32,11 @@ describe('createNewGame', () => {
     expect(s.player.energy).toBe(p.energyStart);
   });
 
-  it('starts with low stress and an empty diary', () => {
+  it('starts with low stress and no diary yet', () => {
     const s = createNewGame(42);
     expect(s.player.stress).toBe(20);
-    expect(s.diary).toEqual([]);
+    // 结构化日记懒创建：新档没有字段，读出来是空（RC-01 统一后的唯一日记）。
+    expect(s.diaryEntries).toBeUndefined();
     expect(s.shelterPlan).toBeUndefined();
   });
 });

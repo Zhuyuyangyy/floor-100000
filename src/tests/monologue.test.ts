@@ -378,13 +378,16 @@ describe('AG-67 monologue determinism (seeded pick, no Math.random)', () => {
     }
   });
 
-  it('GameScene 的选句站点已接派生 rng、不再出现 Math.random（源码断言）', () => {
-    const src = readFileSync(join(process.cwd(), 'src/scenes/GameScene.ts'), 'utf8');
-    const site = src.slice(src.indexOf('private speakMonologue'), src.indexOf('private spawnSpeechBubble'));
+  it('控制器的选句站点已接派生 rng、不再出现 Math.random（源码断言）', () => {
+    // RC-03 拆分第 2 步：选句站点随面板 ticker 迁入 MonologueController
+    // （原 GameScene.speakMonologue→私有 speak）——断言改盯控制器文件，
+    // 守护的不变量没变：选句必须走 monologueRng 派生、禁 Math.random。
+    const src = readFileSync(join(process.cwd(), 'src/scenes/controllers/MonologueController.ts'), 'utf8');
+    const site = src.slice(src.indexOf('private speak('), src.indexOf('private spawnBubble('));
     expect(site).toContain('monologueRng(state.runSeed');
     // 旧的违规调用（chooseMonologue 第六参直接收 Math.random）必须绝迹；
     // 注释里出现「Math.random」字样是文档，不算违规——所以按调用模式断言。
-    expect(site, '5585 站点禁把 Math.random 传给 chooseMonologue').not.toContain('STATUS_PANEL_BALANCE, Math.random');
+    expect(site, '选句站点禁把 Math.random 传给 chooseMonologue').not.toContain('STATUS_PANEL_BALANCE, Math.random');
     expect(site).toContain('STATUS_PANEL_BALANCE, rng)');
   });
 });

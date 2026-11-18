@@ -191,6 +191,7 @@ import {
   crossedBelow,
   freshMonologueMemory,
   isGoodLoot,
+  monologueRng,
   monologueVoiceFor,
   statusSummaryLine,
   type MonologueMemory,
@@ -5585,7 +5586,12 @@ export class GameScene extends Phaser.Scene {
   /** Gate + pick + spawn. Returns true when a bubble actually went up. */
   private speakMonologue(trigger: MonologueTrigger, now: number): boolean {
     const voice = monologueVoiceFor(this.metaSelectedCharacter());
-    const picked = chooseMonologue(this.monologueMemory, now, trigger, voice, STATUS_PANEL_BALANCE, Math.random);
+    // 硬规则（CLAUDE.md：世界生成与事件判定禁 Math.random）：选句随机由
+    // (runSeed, day, floor, trigger, 已飘字数) 派生——同 seed 同场景重放选
+    // 同一句，换 seed 换句子；不碰 Math.random。
+    const state = getGame();
+    const rng = monologueRng(state.runSeed, state.day, state.currentFloor, trigger, this.monologueSpoken);
+    const picked = chooseMonologue(this.monologueMemory, now, trigger, voice, STATUS_PANEL_BALANCE, rng);
     if (!picked) return false;
     this.monologueMemory = picked.memory;
     this.spawnSpeechBubble(picked.line.text);

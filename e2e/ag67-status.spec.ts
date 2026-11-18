@@ -74,11 +74,13 @@ async function setState(page: Page, mutate: (s: E2EGameState) => void): Promise<
   }, mutate.toString());
 }
 
-/** 这一幕已经飘过几句（场景字段，e2e 数「说没说话」，不数像素）。 */
+/** 这一幕已经飘过几句（控制器字段，e2e 数「说没说话」，不数像素）。
+ * RC-03 拆分第 2 步：monologueSpoken 随 ticker 迁入 MonologueController，
+ * 场景字段改为控制器上的 spokenCount getter（ag67-status.spec.ts 同步）。 */
 async function spokenCount(page: Page): Promise<number> {
   return page.evaluate(() => {
-    const scene = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as { monologueSpoken?: number } | null;
-    return scene?.monologueSpoken ?? -1;
+    const scene = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as { monologue?: { spokenCount?: number } } | null;
+    return scene?.monologue?.spokenCount ?? -1;
   });
 }
 

@@ -1,7 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { ENTRY_X, PLAYABLE_FLOORS_V01, UP_EXIT_X, downExitXFor, floorWidthFor } from '../core/constants';
 import { asItemId } from '../data/items';
+import { ACTOR_DEPTH, LIGHT_DEPTH } from '../render/lighting';
 import {
   OBSTACLE_DIG_COST_MINUTES,
   OBSTACLE_DIG_MS,
@@ -346,5 +349,22 @@ describe('obstacleTool — 有解：铲子或撬棍', () => {
       }
       for (const g of view.groundItems) expect(g.itemId).not.toBe('shovel');
     }
+  });
+});
+
+describe('阻碍物 depth 接线（QA-3 收官视觉洞防回归）', () => {
+  // AG-96 上线即有：阻碍物 graphics 建在默认 depth 0，2 层前排室友床铺在
+  // depth 4，瓦砾整堆被床压住——玩家看见床，不知道墙边有东西要挖。修法是把
+  // 阻碍物画到演员层（ACTOR_DEPTH）。这里用源码断言钉住接线与层序关系：
+  // 压过床铺，但不越过灯光/前景剪影/HUD，角色与高亮的相对关系不变。
+  it('阻碍物 graphics 上演员层：压过床铺，不越过灯光与前景', () => {
+    const src = readFileSync(join(process.cwd(), 'src/scenes/GameScene.ts'), 'utf8');
+    const build = src.slice(src.indexOf('private buildObstacles()'), src.indexOf('private drawObstacle('));
+    expect(build, 'buildObstacles 必须给阻碍物 graphics 显式 setDepth').toContain('this.add.graphics().setDepth(ACTOR_DEPTH)');
+    // 前排室友床铺的 depth 从源码自读（drawDormBeds 前排分支），改床高测试自动跟随。
+    const bedDepth = Number(/env-bunk-sleeper'\)\.setOrigin\(0\.5, 1\)\.setDepth\((\d+)\)/.exec(src)?.[1]);
+    expect(Number.isFinite(bedDepth), 'drawDormBeds 前排床铺的 setDepth 可解析').toBe(true);
+    expect(ACTOR_DEPTH, '阻碍物必须压过床铺（家具层）').toBeGreaterThan(bedDepth);
+    expect(ACTOR_DEPTH, '但不能越过灯光层').toBeLessThan(LIGHT_DEPTH);
   });
 });

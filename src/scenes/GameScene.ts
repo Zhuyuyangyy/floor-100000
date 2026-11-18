@@ -9149,7 +9149,14 @@ export class GameScene extends Phaser.Scene {
     this.refreshFloorObstacles();
     const state = getGame();
     for (const o of this.floorObstacles) {
-      const g = this.add.graphics();
+      // ACTOR_DEPTH（5），不是默认的 0。阻碍物是玩家要贴着按 E 的实体，必须
+      // 画在家具层之上：2 层前排室友床铺在 depth 4，默认 0 的瓦砾整堆被床
+      // 压住——玩家看见的是床，不知道墙边有一堆该挖的东西（QA-3 收官判定的
+      // 视觉洞，AG-96 上线即有）。选演员层而不是随手一个 >4 的数：与角色、
+      // 怪物同一平面，玩家（同层且后插入）照旧画在瓦砾边上；头顶的灯光
+      // （LIGHT_DEPTH 24）、前景剪影（26）、飘字（29）与 HUD（100+）都在
+      // 其上，相对关系一概不动。挖掉后的残骸用同一个对象重画，depth 不变。
+      const g = this.add.graphics().setDepth(ACTOR_DEPTH);
       this.drawObstacle(g, o, isObstacleCleared(state, state.currentFloor, o.x));
       this.obstacleObjs.set(`${o.x}`, g);
       this.floorObjects.push(g);

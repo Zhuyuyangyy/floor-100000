@@ -289,14 +289,20 @@ describe('createStatRingsBaker', () => {
   });
 });
 
-// ── GameScene 接线（源码断言：场景 import Phaser，Node 下跑不了真场景） ──────
+// ── HUD 接线（源码断言：场景/控制器都 import Phaser，Node 下跑不了真场景） ──
+// RC-03 拆分第 9 步：四联圆环的创建/重烤/先毁后建随 HUD 带迁入
+// HudController——接线断言改双读：控制器持 baker 本体（reset 先毁后建 +
+// refreshStats 的 key 守卫后重烤），场景留 createStatRings 薄封装
+// （createStatRingsBaker 第一参钉死 Phaser.Scene，HudHost 面之一）。
 const sceneSrc = readFileSync('src/scenes/GameScene.ts', 'utf-8');
+const hudSrc = readFileSync('src/scenes/controllers/HudController.ts', 'utf-8');
 const skinSrc = readFileSync('src/render/hudSkin.ts', 'utf-8');
 
-describe('GameScene ring bake wiring (AG-102)', () => {
+describe('HUD ring bake wiring (AG-102)', () => {
   it('replaced the live rings Graphics with a RenderTexture', () => {
     expect(sceneSrc).not.toContain('barsGfx');
-    expect(sceneSrc).toContain('createStatRingsBaker(this, hud)');
+    expect(sceneSrc).toContain('createStatRingsBaker(this, HUD_LAYOUT)');
+    expect(hudSrc).toContain('this.host.createStatRings()');
     // RT 挂在旧 Graphics 的同 tier：scrollFactor 0、深度 103、'all' 渲染模式
     // （默认 'render' 不执行命令缓冲，圆环会全空）。
     expect(skinSrc).toMatch(/\.setScrollFactor\(0\)\s*\n\s*\.setDepth\(103\)/);
@@ -306,10 +312,10 @@ describe('GameScene ring bake wiring (AG-102)', () => {
 
   it('redraws on change inside refreshStats, never per frame', () => {
     // 重烤调用在 key 守卫之后（同一 if (key === this.lastStats) return; 之下），
-    // 即只在取整数值变化时重画。
-    // RC-03 拆分第 7 步：refreshStats 转 public（CombatHost 面之一——战斗
-    // 回合推进后的 HUD 刷新走这份实现），方法体原位未动。
-    const body = sceneSrc.slice(sceneSrc.indexOf('refreshStats(): void {'));
+    // 即只在取整数值变化时重画。第 9 步后 refreshStats 本体在 HudController
+    // （场景留同名公开委托给 CombatHost/DialogueHost/冻结探针），接线断言
+    // 跟着迁到控制器源。
+    const body = hudSrc.slice(hudSrc.indexOf('refreshStats(): void {'));
     const guard = body.indexOf('if (key === this.lastStats) return;');
     const redraw = body.indexOf('this.statRings?.redraw(');
     expect(guard).toBeGreaterThan(0);
@@ -317,6 +323,6 @@ describe('GameScene ring bake wiring (AG-102)', () => {
   });
 
   it('destroys the previous run\'s baker before rebuilding (restart-safe)', () => {
-    expect(sceneSrc).toContain('this.statRings?.destroy();');
+    expect(hudSrc).toContain('this.statRings?.destroy();');
   });
 });

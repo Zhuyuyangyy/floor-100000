@@ -381,7 +381,10 @@ describe('RC-01 接线：GameScene.update 每帧求值', () => {
     expect(callIdx, 'update 里调用了 evaluateTriggers（AG-26 留给总控的接线）').toBeGreaterThan(-1);
     // 必须早于面板早退行：战斗开打、背包塞满、目标达标都可能发生在面板里，
     // 事实要照常 latch（与 updateAchievementToasts 同款理由）。
-    const earlyReturnIdx = src.indexOf('if (this.inventoryOpen || this.craftingOpen', updateIdx);
+    // RC-03 拆分第 9 步：背包面板态迁入 HudController——早退行的读面从
+    // this.inventoryOpen 变成 this.hud.isOpen（场景留 getter 给 e2e），
+    // 「早退仍然在求值之前」这条契约逐字保留。
+    const earlyReturnIdx = src.indexOf('if (this.hud.isOpen || this.craftingOpen', updateIdx);
     expect(earlyReturnIdx, '面板早退行存在').toBeGreaterThan(-1);
     expect(callIdx).toBeLessThan(earlyReturnIdx);
   });

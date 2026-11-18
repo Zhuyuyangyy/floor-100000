@@ -18,6 +18,9 @@ const audioSrc = readFileSync('src/systems/AudioSystem.ts', 'utf-8');
 // RC-03 拆分第 3 步：教程四件随 TutorialController 迁走，先毁再建的首段现在
 // 住在控制器里（init() 首段）——契约测试跟着搬家，不断言来源。
 const tutorialControllerSrc = readFileSync('src/scenes/controllers/TutorialController.ts', 'utf-8');
+// RC-03 拆分第 7 步：战斗段（含 closeCombat/destroyCombatStage）随
+// CombatController 迁走——战斗舞台的拆除契约同样跟着搬家。
+const combatControllerSrc = readFileSync('src/scenes/controllers/CombatController.ts', 'utf-8');
 
 describe('restart-safe contracts (Setback 标准，源码级)', () => {
   it('GameScene 的 SHUTDOWN 摘掉音乐与楼层级订阅', () => {
@@ -46,9 +49,16 @@ describe('restart-safe contracts (Setback 标准，源码级)', () => {
     expect(tutorialControllerSrc).toContain('for (const o of this.skipParts) o.destroy();');
   });
 
-  it('战斗舞台随 closeCombat 完整拆除', () => {
-    // AG-70：combatStage/combatMonsterHit 活过整个战斗，closeCombat 必须拆。
-    expect(sceneSrc).toContain('this.destroyCombatStage();');
+  it('战斗舞台随 close() 完整拆除', () => {
+    // AG-70：combatStage/combatMonsterHit 活过整个战斗，close() 必须拆。
+    // RC-03 拆分第 7 步：closeCombat 的本体（清战斗态 + 拆面板 + 拆舞台 +
+    // 重建问号点 + 音乐让位）迁入 CombatController.close()，拆除三件套
+    // （剪影/名签/世界热区）在 destroyStage() 里——契约不断言来源。
+    expect(combatControllerSrc).toMatch(/close\(\)[\s\S]*?this\.destroyStage\(\)/);
+    expect(combatControllerSrc).toContain('this.monsterHit?.destroy();');
+    expect(combatControllerSrc).toContain('stage.monster.destroy();');
+    expect(combatControllerSrc).toContain('stage.playerTag.stop();');
+    expect(combatControllerSrc).toContain('stage.playerTag.root.destroy();');
   });
 
   it('音频手势监听用 once（一次触发自动摘，不跨局累积）', () => {

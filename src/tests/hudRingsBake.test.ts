@@ -307,7 +307,9 @@ describe('GameScene ring bake wiring (AG-102)', () => {
   it('redraws on change inside refreshStats, never per frame', () => {
     // 重烤调用在 key 守卫之后（同一 if (key === this.lastStats) return; 之下），
     // 即只在取整数值变化时重画。
-    const body = sceneSrc.slice(sceneSrc.indexOf('private refreshStats()'));
+    // RC-03 拆分第 7 步：refreshStats 转 public（CombatHost 面之一——战斗
+    // 回合推进后的 HUD 刷新走这份实现），方法体原位未动。
+    const body = sceneSrc.slice(sceneSrc.indexOf('refreshStats(): void {'));
     const guard = body.indexOf('if (key === this.lastStats) return;');
     const redraw = body.indexOf('this.statRings?.redraw(');
     expect(guard).toBeGreaterThan(0);

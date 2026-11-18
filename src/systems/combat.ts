@@ -7,8 +7,9 @@
 //    只回 hpChange 的做法一致）；
 //  - 所有随机走 makeRng(deriveSeed(...))，测试可用固定 seed 钉住每个分支。
 import { GAME_CONFIG } from '../core/config';
-import type { GameState } from '../core/gameTypes';
+import type { GameState, ItemId } from '../core/gameTypes';
 import type { Rng } from '../core/rng';
+import { getItem } from '../data/items';
 
 // 战斗中任意一方的数值快照（玩家或怪物）。由调用方在开打前构造，
 // 例如 A2 的 rollMonster 把 MonsterDef 映射成 Combatant。
@@ -187,4 +188,52 @@ export function playerCombatant(state: GameState): Combatant {
     evasion: PLAYER_EVASION,
     name: '你',
   };
+}
+
+// ── AG-63：战斗脚注与行为标签的纯函数契约 ─────────────────────────────────
+//
+// RC-03 拆分第 7 步随 CombatController 迁来（原 GameScene.ts 的
+// combatWeaponLabel/combatBehaviorLabel 两份导出）——与 playerCombatant 同一
+// 口径的家：标签的武器名与伤害数都从真来源读，不另养一套。GameScene 留
+// re-export（combatHud.test.ts 的 import 路径 '../scenes/GameScene' 不变）。
+
+/**
+ * 战斗脚注的武器优先序。撬棍排第一不是审美：playerCombatant 的伤害口径
+ * 只有它（+3），幸存者手里挥的也是它；四件刃具（消防斧/砍刀/短剑/匕首）
+ * 在 lootPool 与配方里，但装备系统是 v0.2 的预留（gameTypes.player.equipped
+ * 至今无人读写），伤害仍按空手算。名字照实说最重的那件，伤害照实报引擎的
+ * 数——两个数对不上时，玩家至少没被谎话敷衍。
+ */
+const COMBAT_WEAPON_PRIORITY: readonly ItemId[] = ['crowbar', 'fire_axe', 'cleaver', 'short_sword', 'dagger'];
+
+/** 包里有什么武器决定脚注怎么回答「用什么攻击」。一件都没有 → 空手。 */
+export function combatWeaponLabel(slots: ReadonlyArray<{ itemId: string }>): string {
+  for (const id of COMBAT_WEAPON_PRIORITY) {
+    if (slots.some((slot) => slot.itemId === id)) return getItem(id).displayName;
+  }
+  return '空手';
+}
+
+/**
+ * 敌人的行为标签：面板血条行末尾那两个字。七种行为（monsters.ts）翻译成
+ * 玩家能拿去决策的词——「怯战」意味着残血它会自己跑，「伏击」意味着见面
+ * 先挨一下。default 收 normal 与任何未知值。
+ */
+export function combatBehaviorLabel(behavior: string): string {
+  switch (behavior) {
+    case 'fast':
+      return '迅捷';
+    case 'slow':
+      return '笨重';
+    case 'ranged':
+      return '远程';
+    case 'ambusher':
+      return '伏击';
+    case 'coward':
+      return '怯战';
+    case 'brute':
+      return '蛮力';
+    default:
+      return '普通';
+  }
 }

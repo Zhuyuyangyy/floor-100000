@@ -102,6 +102,41 @@ const setMinute = (page: Page, minute: number): Promise<void> =>
     if (s) s.gameMinuteOfDay = m;
   }, minute);
 
+/**
+ * 关制作面板：按 C，等到面板真关上；没关上就补按（每枪之间隔着轮询，必有
+ * 帧边界）。等真实状态，不假设按键即生效。
+ *
+ * 为什么不能裸按第二枪 C：Phaser 的键盘事件队列在每个 DOM 键事件上同步排空
+ * （KeyboardManager 发 MANAGER_PROCESS → KeyboardPlugin.update 当场排空，
+ * 不是等游戏步），而 GameScene 的 per-frame guard（GHI-03 m9）一帧只收一个
+ * 同键指令（读 game.loop.frame）。两次 C 落在同一个游戏帧内（60fps = 16.7ms），
+ * 第二枪就被 guard 丢弃，且队列的重复事件 bailout 保证它不会在后续帧重放——
+ * 面板留在开态，紧跟其后的 E 全被面板吃掉（onInteract 的 craftingOpen 早退），
+ * 「爬梯到 2 层」的等待整个超时。实测该序列约 1/4 概率踩中（探针 zz-probe4：
+ * 30 次双按丢 7 次；Playwright 的 waitForFunction 首次求值是同步立即的，面板
+ * 已开着时两次按下只隔几毫秒，正好落进一帧）。真人不可能 16ms 内按两次 C，
+ * 这是测试特有的时序——补丁在 spec 侧：等到 craft 面板真关上再继续。
+ */
+async function closeCraftingPanel(page: Page): Promise<void> {
+  for (let i = 0; i < 6; i++) {
+    const open = await page.evaluate(
+      () => (window.__PHASER_GAME__?.scene.getScene('Game') as unknown as { craftingOpen: boolean } | null)?.craftingOpen === true,
+    );
+    if (!open) return;
+    await page.keyboard.press('C');
+    const closed = await page
+      .waitForFunction(
+        () => (window.__PHASER_GAME__?.scene.getScene('Game') as unknown as { craftingOpen: boolean } | null)?.craftingOpen === false,
+        undefined,
+        { timeout: 1000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    if (closed) return;
+  }
+  throw new Error('制作面板连按 6 次 C 仍未关上');
+}
+
 test('a fresh run opens on tutorial step 1: contextual hint + skip button', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -201,7 +236,7 @@ test('the crafting panel advances to the stairs step, the climb to the bed step'
     { timeout: 5000 },
   );
   await expect.poll(async () => tutorial(page), { timeout: 5000 }).toEqual({ step: 4, skipped: false });
-  await page.keyboard.press('C'); // 关面板
+  await closeCraftingPanel(page); // 关面板（等到真关上——同帧双按会被 guard 吞）
   await expect.poll(async () => hudText(page, 'hud-nav-context'), { timeout: 5000 }).toBe(HINT_STAIRS);
   await page.screenshot({ path: 'output/ag73/04-step5-stairs.png' });
 
@@ -253,7 +288,7 @@ test('nightfall finishes all six steps and the tutorial never comes back', async
     undefined,
     { timeout: 5000 },
   );
-  await page.keyboard.press('C');
+  await closeCraftingPanel(page); // 关面板（等到真关上——同帧双按会被 guard 吞）
   await page.evaluate(() => {
     const s = window.__PHASER_SESSION__?.getState();
     if (s) s.player.x = 40;
@@ -269,8 +304,15 @@ test('nightfall finishes all six steps and the tutorial never comes back', async
 
   // 入夜：收尾 flash + 教程永久完成。
   await setMinute(page, 20 * 60);
-  await expect.poll(async () => hudText(page, 'hud-feedback'), { timeout: 5000 }).toContain('你已掌握基本生存');
-  await expect.poll(async () => tutorial(page), { timeout: 5000 }).toEqual({ step: 6, skipped: false });
+  // 先钉真实状态：入夜当帧教程就收尾（step 5→6，runTutorialTick 在 update()
+  // 最前面跑，面板/爬梯都拦不住）。flash 是游戏内 1700ms 之后补的那一枪
+  // （排到夜事件消息之后，见 runTutorialTick 的 nightRollover 分支）——它是
+  // delayedCall 的游戏时间，低帧率下 Phaser 把 delta 钳到平滑均值（帧间隔超过
+  // 200ms 即 <5fps 时每帧最多推进 ~17ms），游戏时钟被拉长、flash 随之迟到，
+  // 5s 实轮窗口在负载下不够（合入 worktree 实跑就等到过空串）。先等状态，
+  // flash 窗口放到 15s：3 倍拉伸下 1700ms 游戏时间 ≈ 5.1s，仍有余量。
+  await expect.poll(async () => tutorial(page), { timeout: 10_000 }).toEqual({ step: 6, skipped: false });
+  await expect.poll(async () => hudText(page, 'hud-feedback'), { timeout: 15_000 }).toContain('你已掌握基本生存');
   expect(await hudVisible(page, 'hud-tutorial-skip')).toBe(false);
   await page.screenshot({ path: 'output/ag73/06-done.png' });
 
@@ -363,7 +405,7 @@ test('finding the bed on floor 1 finishes the tutorial before nightfall', async 
     { timeout: 5000 },
   );
   await expect.poll(async () => tutorial(page), { timeout: 5000 }).toEqual({ step: 4, skipped: false });
-  await page.keyboard.press('C'); // 关面板
+  await closeCraftingPanel(page); // 关面板（等到真关上——同帧双按会被 guard 吞）
   await page.evaluate(() => {
     const s = window.__PHASER_SESSION__?.getState();
     if (s) s.player.x = 40;

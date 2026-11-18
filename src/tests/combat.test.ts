@@ -296,13 +296,16 @@ describe('messages', () => {
 });
 
 describe('playerCombatant：从 GameState 推导', () => {
-  it('无撬棍：damage=2 / accuracy=5 / defense=2 / evasion=3，hp 读当前值', () => {
+  it('无撬棍：damage=4 / accuracy=7 / defense=2 / evasion=3，hp 读当前值', () => {
+    // XP-1（2026-11-18）：damage 2→4、accuracy 5→7（RC-02 前段刮痧修复，
+    // 数值现走 GAME_CONFIG.combat）。本断言钉的是「从 state 正确推导」这一
+    // 行为，具体数值以 config/game-balance.json 的 combat 段为准。
     const s = createNewGame(1);
     const c = playerCombatant(s);
-    expect(c.damage).toBe(2);
-    expect(c.accuracy).toBe(5);
-    expect(c.defense).toBe(2);
-    expect(c.evasion).toBe(3);
+    expect(c.damage).toBe(GAME_CONFIG.combat.baseDamage);
+    expect(c.accuracy).toBe(GAME_CONFIG.combat.accuracy);
+    expect(c.defense).toBe(GAME_CONFIG.combat.defense);
+    expect(c.evasion).toBe(GAME_CONFIG.combat.evasion);
     expect(c.hp).toBe(s.player.hp);
     expect(c.maxHp).toBe(GAME_CONFIG.player.hpMax);
   });
@@ -312,7 +315,7 @@ describe('playerCombatant：从 GameState 推导', () => {
     const s = createNewGame(1);
     addItem(s.player.inventory, 'crowbar', 1);
     const armed = playerCombatant(s);
-    expect(armed.damage).toBe(5);
+    expect(armed.damage).toBe(bare.damage + GAME_CONFIG.combat.crowbarDamageBonus);
     expect(armed.damage - bare.damage).toBe(3);
     // 其余数值不受装备影响。
     expect(armed.accuracy).toBe(bare.accuracy);
@@ -324,7 +327,7 @@ describe('playerCombatant：从 GameState 推导', () => {
     // createNewGame(1) 的 startingItems 里有 flashlight 等工具，但没有 crowbar。
     const s = createNewGame(1);
     expect(s.player.inventory.slots.some((slot) => slot.itemId === 'crowbar')).toBe(false);
-    expect(playerCombatant(s).damage).toBe(2);
+    expect(playerCombatant(s).damage).toBe(GAME_CONFIG.combat.baseDamage);
   });
 
   it('hp 读当前状态、maxHp 恒为配置上限（医疗包效果体现在 hp 上）', () => {

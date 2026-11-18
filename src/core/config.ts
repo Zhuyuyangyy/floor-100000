@@ -55,6 +55,23 @@ export interface GameBalanceConfig {
     lowEnergySpeedFactor: number;
     lowEnergyThreshold: number;
   };
+  // XP-1（2026-11-18）：玩家裸装战斗数值。原先写死在 systems/combat.ts 的
+  // 常量里，调前段平衡要改代码；搬到 balance 文件后只挪数值不改公式。
+  // 出处：RC-02 试玩 XP-1「前段战斗刮痧」（HP10 弹弓顽童空手 8 回合），
+  // 根因是 d20 命中公式下 acc5×dmg2 的期望 DPS 只有 1.14，详见
+  // game-balance.json combat 段注释与提交说明。
+  combat: {
+    /** 赤手基础伤害 */
+    baseDamage: number;
+    /** 包里有撬棍时的伤害加成（撬棍总伤 = baseDamage + 本值） */
+    crowbarDamageBonus: number;
+    /** 命中加值（d20：roll 0..20 + accuracy > 10 + defense + evasion） */
+    accuracy: number;
+    /** 防御（伤害公式按 floor(defense/2) 减伤） */
+    defense: number;
+    /** 闪避（同时抬怪物命中阈值与逃跑成功率） */
+    evasion: number;
+  };
   player: {
     startingFloor: number;
     hpMax: number;
@@ -95,6 +112,11 @@ const REQUIRED_NUMBERS: Array<[string, (c: GameBalanceConfig) => number]> = [
   ['time.victoryMinute', (c) => c.time.victoryMinute],
   ['time.maxMajorEventsPerDay', (c) => c.time.maxMajorEventsPerDay],
   ['player.startingFloor', (c) => c.player.startingFloor],
+  ['combat.baseDamage', (c) => c.combat.baseDamage],
+  ['combat.crowbarDamageBonus', (c) => c.combat.crowbarDamageBonus],
+  ['combat.accuracy', (c) => c.combat.accuracy],
+  ['combat.defense', (c) => c.combat.defense],
+  ['combat.evasion', (c) => c.combat.evasion],
   ['player.hpMax', (c) => c.player.hpMax],
   ['player.hpStart', (c) => c.player.hpStart],
   ['player.hungerMax', (c) => c.player.hungerMax],

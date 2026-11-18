@@ -153,6 +153,14 @@
     "lowEnergySpeedFactor": 0.75,
     "lowEnergyThreshold": 20
   },
+  "combat": {
+    "_comment": "XP-1 修复（2026-11-18，RC-02 试玩「前段刮痧」）：玩家裸装战斗数值从 combat.ts 常量搬来此处，公式不动只挪数值，后续调前段手感改这里即可。改前 baseDamage=2/accuracy=5：d20 命中公式（roll0..20 + accuracy > 10 + defense + evasion）下打 evasion3 的弹弓顽童只有 57.1% 命中、每击 2 伤，期望 8.75 回合（试玩实测 8）；瞌睡宿管 defense 5+slow2=7 更把赤手每击砍到保底 1、期望 21 回合。改后 baseDamage=4/accuracy=7：同两口怪期望均降至 4.50 回合（蒙特卡洛 4000 场验证），且每场玩家期望掉血 14.2→7.3、12.0→2.6（连带缓解 XP-1b HP 滑坡）。survivalBalance/survivalSim 不读战斗数值，7 日生存压力曲线不受影响。",
+    "baseDamage": 4,
+    "crowbarDamageBonus": 3,
+    "accuracy": 7,
+    "defense": 2,
+    "evasion": 3
+  },
   "player": {
     "startingFloor": 1,
     "hpMax": 100,

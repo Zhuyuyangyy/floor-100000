@@ -40,11 +40,15 @@ export interface CombatRound {
 
 // 玩家裸装基础数值。出处：docs/OVERNIGHT_PLAN.md A1 工单；
 // 先集中成常量，等 Wave B 的角色系统上线后按角色覆写即可，不用改公式。
-const PLAYER_BASE_DAMAGE = 2;
-const CROWBAR_DAMAGE_BONUS = 3;
-const PLAYER_ACCURACY = 5;
-const PLAYER_DEFENSE = 2;
-const PLAYER_EVASION = 3;
+// XP-1（2026-11-18）：数值本身已搬到 config/game-balance.json 的 combat 段
+// （RC-02 试玩「前段刮痧」修复），这里只做读取——命中/伤害公式原样未动。
+// 改前 baseDamage=2/accuracy=5：打 evasion3 的弹弓顽童期望 8.75 回合
+// （试玩实测 8）；改后 4/7 期望 4.50 回合（蒙特卡洛 4000 场验证）。
+const PLAYER_BASE_DAMAGE = GAME_CONFIG.combat.baseDamage;
+const CROWBAR_DAMAGE_BONUS = GAME_CONFIG.combat.crowbarDamageBonus;
+const PLAYER_ACCURACY = GAME_CONFIG.combat.accuracy;
+const PLAYER_DEFENSE = GAME_CONFIG.combat.defense;
+const PLAYER_EVASION = GAME_CONFIG.combat.evasion;
 
 // guard 额外返还的精力点。数值只在这里声明一次：GameScene 在回合结束后应用，
 // 测试直接钉这个常量，避免两边各写一个 3 慢慢走偏。
@@ -153,11 +157,12 @@ export function resolveRound(
 //  - hp / maxHp：当前血量与配置上限（config/game-balance.json → player.hpMax）。
 //    医疗包不在本函数里加血——它经 InventorySystem 抬高 state.player.hp，
 //    这里读到的 hp 天然已包含医疗包的效果；
-//  - damage：赤手 2 点；包里任一格 itemId==='crowbar'（撬棍）则 +3。
+//  - damage：赤手 GAME_CONFIG.combat.baseDamage（XP-1 修复后为 4，原 2）；
+//    包里任一格 itemId==='crowbar'（撬棍）则 + crowbarDamageBonus（3）。
 //    撬棍是不可堆叠工具（maxStack 1），用 some() 扫一遍槽位即可，
 //    数量堆叠不影响判定——有就生效；
-//  - accuracy 5 / defense 2 / evasion 3：生存者基础体能，写死成常量，
-//    Wave B 角色系统上线后再按角色覆写。
+//  - accuracy / defense / evasion：生存者基础体能，数值走 balance 文件
+//    combat 段（7/2/3），Wave B 角色系统上线后再按角色覆写。
 export function playerCombatant(state: GameState): Combatant {
   const hasCrowbar = state.player.inventory.slots.some((slot) => slot.itemId === 'crowbar');
   return {

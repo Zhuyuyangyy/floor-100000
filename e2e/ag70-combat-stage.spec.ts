@@ -84,43 +84,32 @@ async function probeFloater(page: Page): Promise<string | null> {
   });
 }
 
-/**
- * 页内逐帧记录器：从安装起记录敌人剪影 x 的极值。动作链是 260-330ms 的
- * 往返 tween，测试侧两次 evaluate 的间隔就够它跑完——单点采样会错过，
- * 逐帧记录把「击退/闪避/前冲确实发生过」钉成数据而不是运气。
- */
-async function installMonsterXTracer(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const g = window.__PHASER_GAME__ as unknown as {
-      scene: {
-        getScene: (k: string) => {
-          children: { list: Array<{ name?: string; x: number }> };
-        } | null;
-      };
-    };
-    const w = window as unknown as { __ag70Trace?: { spot: number; min: number; max: number; running: boolean } };
-    const scene = g.scene.getScene('Game');
-    const find = (): { x: number } | undefined => scene?.children.list.find((c) => c.name === 'combat-monster-view') as { x: number } | undefined;
-    const m = find();
-    w.__ag70Trace = { spot: m?.x ?? 0, min: m?.x ?? 0, max: m?.x ?? 0, running: true };
-    const tick = (): void => {
-      const live = find();
-      if (live) {
-        w.__ag70Trace!.min = Math.min(w.__ag70Trace!.min, live.x);
-        w.__ag70Trace!.max = Math.max(w.__ag70Trace!.max, live.x);
-      }
-      if (w.__ag70Trace!.running) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
+/** 敌人剪影视图的当前 x（-1 = 不在场）。 */
+async function monsterViewX(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const scene = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as {
+      children: { list: Array<{ name?: string; x: number }> };
+    } | null;
+    const v = scene?.children.list.find((c) => c.name === 'combat-monster-view') as { x: number } | undefined;
+    return v?.x ?? -1;
   });
 }
 
-async function readMonsterXTrace(page: Page): Promise<{ spot: number; min: number; max: number }> {
+/**
+ * 为什么从 Node 侧步进采样而不是页面内 rAF 记录器：
+ * RC-01 分诊：探针缺陷——原实现是页面内 rAF 采样器，它的回调与页面渲染同
+ * 一条命：本 spec 自己的 page.screenshot / page.evaluate 往返能把 rAF 饿死
+ * 百来 ms，恰够漏掉 ③ 的整个 130ms 前冲窗口（run10 实测：怪物命中、日志
+ * 「击中你」、玩家掉血，但采样一帧没落到前冲上，误走「落空」分支报「扑空」
+ * 缺失）。Node 侧评估往返不走页面 rAF，260-330ms 的动作链窗口必被 25ms
+ * 步进的采样覆盖。两个 test 各自内联步进循环（②/③ 中途还要插同帧取证）。
+ */
+
+/** 战斗日志末尾两行（回合结算的权威记录——分支判据，不靠动画采样）。 */
+async function combatLogTail(page: Page): Promise<string> {
   return page.evaluate(() => {
-    const w = window as unknown as { __ag70Trace?: { spot: number; min: number; max: number; running: boolean } };
-    const t = w.__ag70Trace;
-    if (t) t.running = false;
-    return { spot: t?.spot ?? 0, min: t?.min ?? 0, max: t?.max ?? 0 };
+    const s = window.__PHASER_SESSION__?.getState() as unknown as { combat?: { log: string[] } } | null;
+    return s?.combat?.log.slice(-2).join(' | ') ?? '';
   });
 }
 
@@ -239,7 +228,10 @@ test('① 双方上场：站位、剪影、头顶血条、动作条、日志', a
   expect(stage.playerX).toBeGreaterThan(stage.floorW * 0.2);
   expect(stage.playerX).toBeLessThan(stage.floorW * 0.3);
   expect(stage.monsterX).toBeGreaterThan(stage.floorW * 0.7);
-  expect(stage.monsterX).toBeLessThan(stage.floorW * 0.8);
+  // 上界含等号：行商避让链把怪物钳在 [spot-60, spot+64]，spot=0.75×层宽，
+  // 上限恰为 0.8×层宽（GameScene 2846-2850 的有意设计）——严格小于会在
+  // seed 42 的 2 层（shop 924）恰好落在钳上限时红（RC-01 分诊：探针缺陷）。
+  expect(stage.monsterX).toBeLessThanOrEqual(stage.floorW * 0.8);
   // 双方都在屏幕上（相机 zoom 1、bounds 一层宽）。
   expect(stage.playerScreenX).toBeGreaterThan(0);
   expect(stage.playerScreenX).toBeLessThan(stage.floorW);
@@ -262,7 +254,13 @@ test('① 双方上场：站位、剪影、头顶血条、动作条、日志', a
   }
 
   // 导航条常驻：contextual 槽交棒战斗提示（AG-71 存量语义）。
-  await expect.poll(() => hudText(page, 'hud-nav-context'), { timeout: 5000 }).toBe('↑/↓ 选择 · Enter 出招 · ESC 撤退');
+  // RC-01 分诊：探针缺陷——旧断言钉的是 AG-70 之前导航槽的短文案
+  // 「↑/↓ 选择 · Enter 出招 · ESC 撤退」。当前战斗脚注带武器前缀
+  // （combatFootHint，GameScene.ts:513「当前武器：X（伤害 N）· Enter 出招 ·
+  // ↑/↓ 选择 · ESC 撤退」），导航槽按槽宽 fitHudLine 截断（尾带 …，ESC 段
+  // 被截掉）——全串在 hud-hint，ag63-1 第 1 节同源断言三条都在。改钉当前
+  // 契约：槽内以武器行开头、含主操作 Enter 出招。
+  await expect.poll(() => hudText(page, 'hud-nav-context'), { timeout: 5000 }).toMatch(/^当前武器：.+· Enter 出招/);
 
   await page.screenshot({ path: 'output/ag70/01-stage.png' });
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
@@ -279,25 +277,34 @@ test('② 点攻击：挥击 + 闪白 + 击退 + 掉血飘字同帧', async ({ p
   await page.waitForTimeout(1200);
 
   const before = await probeStage(page);
-  await installMonsterXTracer(page);
   await page.keyboard.press('Enter');
   // 挥击 clip 320ms；命中链路 90ms 出飘字+火花、击退 90ms 出 170ms 回。
   // 180ms 这一帧：clip 在挥、敌人在退、飘字在飘——「同帧」取证点。
-  await page.waitForTimeout(180);
-  const floater = await probeFloater(page);
-  await page.screenshot({ path: 'output/ag70/02-attack.png' });
-  await page.waitForTimeout(500);
+  // RC-01：采样改 Node 侧步进（25ms），第 7 步（≈180ms）插同帧取证；
+  // 页面内 rAF 采样器会被本 test 自己的截图/评估往返饿死（见 sampleMonsterX）。
+  const xs: number[] = [before.monsterX];
+  let floater: string | null = '';
+  for (let i = 1; i <= 24; i++) {
+    await page.waitForTimeout(25);
+    xs.push(await monsterViewX(page));
+    if (i === 7) {
+      floater = await probeFloater(page);
+      await page.screenshot({ path: 'output/ag70/02-attack.png' });
+    }
+  }
+  const min = Math.min(...xs);
+  const max = Math.max(...xs);
+  await page.waitForTimeout(300);
 
   const after = await probeStage(page);
-  const trace = await readMonsterXTrace(page);
   // 回合推进（引擎语义没动）。
   expect(after.turn).toBe(before.turn + 1);
   // 命中：敌人被击退（x 曾大于 spot）且最终归位；未命中：敌人闪避（x 曾小于
   // spot）。两者都看得见——飘字（-N 或 未命中）在 180ms 帧上必然在场。
   expect(floater, 'hit floater on the attack frame').toMatch(/^(-\d+|未命中)$/);
-  const knocked = trace.max > trace.spot + 4;
-  const dodged = trace.min < trace.spot - 4;
-  expect(knocked || dodged, `monster moved during the hit chain (spot ${trace.spot}, min ${trace.min}, max ${trace.max})`).toBe(true);
+  const knocked = max > before.monsterX + 4;
+  const dodged = min < before.monsterX - 4;
+  expect(knocked || dodged, `monster moved during the hit chain (spot ${before.monsterX}, min ${min}, max ${max})`).toBe(true);
   // 归位：动作链结束后敌人回到 spotX（±2px tween 容差）。
   expect(Math.abs(after.monsterX - before.monsterX)).toBeLessThanOrEqual(2);
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
@@ -317,32 +324,38 @@ test('③ 敌人反击：前冲 + 受伤 + 震屏 + 掉血飘字', async ({ page
   // 选格挡再出招：本回合不出手，怪物正常结算一击——反击链的专用机位。
   await page.keyboard.press('ArrowDown'); // 格挡
   await page.waitForTimeout(120);
-  await installMonsterXTracer(page);
+  const spotX = await monsterViewX(page);
   await page.keyboard.press('Enter');
-  // 前冲 130ms 到位、140ms 飘字、震屏 160ms——100ms 帧上前冲正在路上，
-  // 截图落在这半程；逐帧记录器把整条往返链（330ms）钉成数据。
-  await page.waitForTimeout(100);
+  // 前冲 130ms 到位、140ms 飘字、震屏 160ms。RC-01：采样改 Node 侧 25ms
+  // 步进（页面内 rAF 采样器曾被截图/评估往返饿死，漏掉整个前冲窗口，把命中
+  // 误判成「落空」——探针缺陷，见 sampleMonsterX 注释）；第 5 步（≈130ms）
+  // 截图落在前冲到位的半程。
+  const xs: number[] = [spotX];
+  let floater: string | null = '';
+  for (let i = 1; i <= 24; i++) {
+    await page.waitForTimeout(25);
+    xs.push(await monsterViewX(page));
+    if (i === 5) floater = await probeFloater(page);
+  }
+  const min = Math.min(...xs);
   await page.screenshot({ path: 'output/ag70/03-counter.png' });
-  await page.waitForTimeout(200);
-  const floater = await probeFloater(page);
   await page.waitForTimeout(400);
 
   const after = await probeStage(page);
-  const trace = await readMonsterXTrace(page);
   expect(after.turn).toBe(before.turn + 1);
-  // 反击命中：敌人前冲（trace.min 曾小于 spot）+ 玩家掉血 + 飘字在场；
+  // 反击命中：敌人前冲（x 曾小于 spot）+ 玩家掉血 + 飘字在场；
   // 反击落空：日志「扑空了」，无伤——两种都是合法演出，探针分别取证。
-  const lunged = trace.min < trace.spot - 8;
-  const log = await page.evaluate(() => {
-    const s = window.__PHASER_SESSION__?.getState() as unknown as { combat?: { log: string[] } } | null;
-    return s?.combat?.log.slice(-2).join(' | ') ?? '';
-  });
-  if (lunged) {
+  // RC-01：分支改押游戏权威状态（日志），采样只作前冲的佐证——判定不再
+  // 依赖「动画采样恰好采到」这种运气。
+  const lunged = min < spotX - 8;
+  const log = await combatLogTail(page);
+  if (log.includes('击中你')) {
+    expect(lunged, `命中的反击要前冲（spot ${spotX}, min ${min}）`).toBe(true);
     expect(floater, 'counter floater').toMatch(/^-\d+$/);
     expect(after.playerHp).toBeLessThan(before.playerHp);
-    expect(log).toContain('击中你');
   } else {
     expect(log).toContain('扑空');
+    expect(after.playerHp).toBe(before.playerHp);
   }
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });

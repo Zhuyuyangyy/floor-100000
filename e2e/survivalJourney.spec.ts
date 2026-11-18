@@ -28,14 +28,18 @@ const BALANCE = JSON.parse(readFileSync(join(process.cwd(), 'config/game-balance
 // Route:
 //   1  cabinet@160           -> up
 //   2                         -> up            (shelf skipped: 50% empty, 1.5km detour)
-//   3  crate_metal@800, crate_wood@480 -> up   (loose battery picked up en route)
+//   3  (loose battery@160)    -> up            (crates deferred: AG-66 rubble seals
+//                                               them from the spawn side — 见下行注释)
 //   4  fuse_box@640 (arrival), water_tank@240 -> up
-//   5  counter@480, pantry@1120 -> down
+//   5  counter@480, pantry@1120, loaf@160 -> down   (loaf eaten here — 见 eatOneBread)
 //   4                         -> down
-//   3                         -> down          (loose cloth picked up en route)
+//   3  crate_metal@800, crate_wood@480 -> down  (opened from the down-exit side)
 //   2                         -> down
 //   1  cabinet re-check (no duplicate) -> bed@1120 -> sleep
 // then reload and 继续游戏 to prove the save round-trips.
+// RC-01 2026-11-18：AG-66 阻碍物上线后 seed 42 的 3 层出生侧与两只箱子之间
+// 有瓦砾@251（无早期工具，撬棍自己就在箱子里），直走路线永久卡死。本脚本
+// 改为「上去再从上层下口掉回右侧」的开箱路线（BFS 实证可达），其余流程原样。
 
 const UP_EXIT_X = 40;
 const DOWN_EXIT_X = 1240;
@@ -101,17 +105,37 @@ test.describe('B3-02 full survival journey', () => {
     }
   }
 
-  // Walk to a container and open it with a real E, retrying only against a
-  // dropped keypress (Phaser's frame-based input), never against a wrong position.
+  // Walk to a container and open it with a real E.
+  //
+  // AG-66 起搜刮是一个 2s 动作（config search.ms）：E 按下先播 search 动画，
+  // 到点才出货、才写 openedContainers；动作期间再按 E = 收手取消。旧实现是
+  // 「E + 220ms」连打 8 次——总时长 1.76s 不到 2s，且每一发多余的 E 都把上一
+  // 次动作取消重来，永远开不了（RC-01 全量跑实测红，分诊：探针缺陷）。
+  // 改为一发 E + 轮询真实完成条件；只有确认没有动作在跑（丢键）时才补发。
   async function openContainer(page: Page, floor: number, id: string, x: number): Promise<void> {
     const opened = async (): Promise<boolean> =>
       ((await readState(page)).visitedFloors[floor]?.openedContainers ?? []).includes(id);
+    const busy = (): Promise<boolean> =>
+      page.evaluate(() => {
+        const sc = (window.__PHASER_GAME__ as unknown as {
+          scene: { getScene: (k: string) => { pendingAction?: unknown } | null };
+        }).scene.getScene('Game');
+        return !!sc?.pendingAction;
+      });
     await walkTo(page, x);
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 4; i++) {
       if (await opened()) return;
-      await page.keyboard.press('E');
-      await page.waitForTimeout(220);
+      if (!(await busy())) await page.keyboard.press('E');
+      await page.waitForFunction(
+        (args) => {
+          const s = window.__PHASER_SESSION__?.getState();
+          return !!s && ((s.visitedFloors[args[0]]?.openedContainers ?? []).includes(args[1] as string));
+        },
+        [floor, id] as const,
+        { timeout: 6000 },
+      ).catch(() => undefined);
     }
+    if (await opened()) return;
     throw new Error(`could not open ${floor}/${id}`);
   }
 
@@ -125,13 +149,43 @@ test.describe('B3-02 full survival journey', () => {
   // consume the bottle anyway, so three presses at the start emptied the stack in
   // one go; now the second and third are refused, and the ration can only be
   // finished by spreading it across the walk — which is also what a player does.
-  // Draining the stack is what frees the slot the floor-3 cloth needs on the way
-  // home, so the calls sit at the start, after floor 3 and on floor 5.
+  // Draining the stack keeps the twelve-slot bag under its cap across the haul.
+  // RC-01：AG-66 起 3 层箱子改在回程开（瓦砾封路，见文件头 Route 注释），
+  // 三瓶的位置
+  // 变为「出发前 / 5 层 / 回程 3 层两箱之间」——第三瓶 freed slot 是
+  // crate_wood 整批 loot 进包的前提（lootContainer 单箱全拿或全不拿）。
   async function drinkOneBottle(page: Page): Promise<void> {
     if (await count(page, 'clean_water') < 1) return;
     await page.keyboard.press('I');
     await page.waitForTimeout(250);
     await page.keyboard.press('Enter'); // 净水 is slot 0 for as long as any remain
+    await page.waitForTimeout(240);
+    await page.keyboard.press('I'); // close
+    await page.waitForTimeout(200);
+  }
+
+  // Eat one loaf through the real inventory panel.
+  //
+  // RC-01（AG-66 瓦砾改道后新增）：新城路（上去→从上层下口掉回 3 层右侧开箱）
+  // 比旧路多捡一件——3 层地上的布料@1120 在走进铁箱的必经路上，而旧路从不
+  // 经过它。旧路 12 个 Stack 恰好填满 12 格背包、零冗余；新路 13 个，
+  // crate_wood 的木材+胶带整批会被 lootContainer 拒（单箱全拿或全不拿，
+  // 容器仍记 opened）。面包是这条多出来的 Stack 里唯一能「正当消耗」的
+  // （F5 地面 x=160 走过就捡，+20 饥饿），在 5 层吃掉它把背包压回 12。
+  // 位置在 beforeReturn 之前：饱食只随这条咀嚼上升，之后的回程只剩衰减，
+  // 「回家时饱食 ≤ 出发时」的断言方向才不变。
+  async function eatOneBread(page: Page): Promise<void> {
+    const index = await page.evaluate(() =>
+      (window.__PHASER_SESSION__?.getState()?.player.inventory.slots ?? []).findIndex((s) => s.itemId === 'bread'),
+    );
+    if (index < 0) return;
+    await page.keyboard.press('I');
+    await page.waitForTimeout(250);
+    for (let i = 0; i < index; i++) {
+      await page.keyboard.press('ArrowDown');
+      await page.waitForTimeout(90);
+    }
+    await page.keyboard.press('Enter');
     await page.waitForTimeout(240);
     await page.keyboard.press('I'); // close
     await page.waitForTimeout(200);
@@ -222,15 +276,17 @@ test.describe('B3-02 full survival journey', () => {
     await page.screenshot({ path: 'e2e/screenshots/41-journey-2-floor2.png' });
 
     await takeStairs(page, 'up', 3);
-    await openContainer(page, 3, 'crate_metal', 800);
-    expect(await count(page, 'scrap_metal')).toBe(3); // guaranteed, no slack
-    expect(await count(page, 'crowbar')).toBe(1);
-    await openContainer(page, 3, 'crate_wood', 480);
-    expect(await count(page, 'wood')).toBe(2);
-    expect(await count(page, 'tape')).toBe(1);
-    // Second bottle: thirst has decayed over the walk, so this one lands for real.
-    await drinkOneBottle(page);
-    // The loose battery at x=160 is picked up by walking over it, on the way out.
+    await page.screenshot({ path: 'e2e/screenshots/41-journey-2-floor2.png' });
+
+    // AG-66 起 3 层出生侧（x=40）与两只箱子之间有瓦砾@251（seed 42 实测，
+    // BFS 探针输出见 REPORT.md）：没有早期工具挖不开，而 crate_metal 里的撬棍
+    // 自己就在瓦砾后面——直走 800 永远到不了。RC-01 分诊：探针缺陷——旧脚本
+    // 按 AG-66 之前的世界直走；游戏设计没坏（AG-96 保每个落点至少一个可达
+    // 口，本层上口@40 就可达），正确路线是「上去再从上层下口掉回右侧」。
+    // 箱子改在回程开（见第 3 节），这里只补捡地上电池@160——旧路线从
+    // crate_wood 走回梯子时经过它，新路线不经过，往返一次补上。
+    await walkTo(page, 160);
+    await walkTo(page, 40);
     await takeStairs(page, 'up', 4);
     expect(await count(page, 'battery')).toBeGreaterThanOrEqual(1);
     await page.screenshot({ path: 'e2e/screenshots/42-journey-3-floor3.png' });
@@ -247,7 +303,8 @@ test.describe('B3-02 full survival journey', () => {
     await openContainer(page, 5, 'counter', 480);
     // 2 starting + 3 from the counter. A floor rather than an exact count: the
     // OVERHAUL daily-goal reward hands out a ration when the day's objective
-    // closes, and this route closes it on the way up.
+    // closes — on the AG-66 route the third container (floor 3's crates) is
+    // opened on the way HOME, so the goal closes later, not on the way up.
     expect(await count(page, 'ration_pack')).toBeGreaterThanOrEqual(5);
     // The longer, physical stair route can fill the bag before the counter.
     // Ration is the progression-critical stack; dirty water may correctly stay
@@ -255,17 +312,45 @@ test.describe('B3-02 full survival journey', () => {
     const top = await readState(page);
     expect(top.currentFloor).toBe(5);
     expect(top.visitedFloors[5].openedContainers).toEqual(['counter']);
-    // Third and last bottle, which empties the stack and frees its slot — the slot
-    // the floor-3 cloth needs on the way home.
+    // Second bottle: thirst has decayed over the walk, so this one lands for
+    // real. The third and last one waits for the homeward leg, between floor
+    // 3's two crates (its freed slot is what keeps the crate loot inside the
+    // twelve-slot bag).
     await drinkOneBottle(page);
-    expect(await count(page, 'clean_water')).toBe(0);
+    expect(await count(page, 'clean_water')).toBe(1);
+    // The loaf picked up on the walk in (ground bread at x=160) goes here: the
+    // AG-66 homeward route also picks up floor 3's cloth, which is the one
+    // stack that pushes the twelve-slot bag over on the way down. Eating it
+    // before the return is what keeps the whole haul inside the bag — and it
+    // happens before beforeReturn so the hunger assertions still only decay.
+    await eatOneBread(page);
     await page.screenshot({ path: 'e2e/screenshots/44-journey-5-floor5.png' });
 
     // ── 3. come home ────────────────────────────────────────────────────
     const beforeReturn = await readState(page);
     await takeStairs(page, 'down', 4);
     await takeStairs(page, 'down', 3);
-    // The loose cloth at x=1120 is picked up walking back to the stairwell.
+    // AG-66：3 层两只箱子在上层路线里被瓦砾@251 封在出生侧，改在这里开——
+    // 从 4 层下口(1240)落地在瓦砾右侧，crate_metal@800 / crate_wood@480 可达
+    // （BFS 实证：探针输出见 REPORT.md）。开箱顺序保持铁箱→木箱：撬棍与废金属
+    // 是这段行程的意义本体，也给回程腾位置的动作链收尾。
+    await openContainer(page, 3, 'crate_metal', 800);
+    expect(await count(page, 'scrap_metal')).toBe(3); // guaranteed, no slack
+    expect(await count(page, 'crowbar')).toBe(1);
+    // Third and last bottle, between the two crates: lootContainer is
+    // all-or-nothing per container (a stack that does not fit is undone and the
+    // rest of that container is skipped, while the container is still marked
+    // opened), and on the AG-66 homeward route the twelve-slot bag is exactly
+    // one stack short here — the route picks up floor 3's cloth at x=1120 on
+    // the walk in (the up-route never walked past it) while the balancing loaf
+    // was eaten back on floor 5. The freed water slot is what fits wood+tape.
+    // Thirst pacing: start / floor 5 / homeward between floor 3's crates.
+    await drinkOneBottle(page);
+    expect(await count(page, 'clean_water')).toBe(0);
+    await openContainer(page, 3, 'crate_wood', 480);
+    expect(await count(page, 'wood')).toBe(2);
+    expect(await count(page, 'tape')).toBe(1);
+    // The loose cloth at x=1120 was picked up on the walk in to the metal crate.
     await takeStairs(page, 'down', 2);
     await takeStairs(page, 'down', 1);
 

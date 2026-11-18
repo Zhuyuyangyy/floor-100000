@@ -41,7 +41,10 @@ async function allTexts(page: Page): Promise<TextBound[]> {
 }
 
 async function hudText(page: Page, name: string): Promise<string> {
-  const found = (await allTexts(page)).find((o) => o.name === name && o.visible);
+  // AG-71 起 hud-hint 退居不可见的状态对象（导航条 contextual 槽是它的显示层），
+  // 但文案全串保留不变、仍是 contextual 槽的唯一数据源（GameScene 4996 行注释：
+  // "e2e 按 name 断言"）。RC-01 分诊：ag63-1 曾因可见性过滤永远读到空串。
+  const found = (await allTexts(page)).find((o) => o.name === name && (o.visible || name === 'hud-hint'));
   return found?.text ?? '';
 }
 
@@ -153,13 +156,29 @@ test('AG-63-1: 战斗中左下角答「用什么攻击」，HUD 与敌方面板�
   expect(joined).toMatch(/第 \d+ 回合/); // 血条读数行
   expect(joined).toMatch(/普通|迅捷|笨重|远程|伏击|怯战|蛮力/); // 行为标签
   expect(joined).toMatch(/(撬棍|匕首|短剑|砍刀|消防斧|空手) · 伤害 \d+/); // 攻击行带武器
-  expect(joined).toContain('按 Enter');
-  expect(joined).toContain('按 ESC');
+  // AG-70 起战斗面板改为底部动作条（图标+效果说明），三个动作的键位提示不在
+  // 面板文本里，移驻左下角脚注 combatFootHint（GameScene.ts:513「Enter 出招 ·
+  // ↑/↓ 选择 · ESC 撤退」，全文无「按」字）。RC-01 分诊：探针缺陷——旧断言钉的
+  // 是 AG-70 之前中央面板的「按 Enter / 按 ESC」两行，当前文案已无这两行。
+  // 改按当前文案的位置断言（脚注按 name 取，与第 1 节同源）。
+  const keyHint = await hudText(page, 'hud-hint');
+  expect(keyHint).toContain('Enter 出招');
+  expect(keyHint).toContain('ESC 撤退');
 
-  // ── 4. 面板不压 HUD：模态文本全部落在面板带（y 244..476）内 ──
+  // ── 4. 模态文本不压 HUD：两块互不相交的允许区 ──
+  // RC-01 分诊：探针缺陷——旧带（244..476）钉的是 AG-70 之前的中央文字面板。
+  // AG-70 起「面板」是底部动作条 + 左下角三行回合日志（hudLayout.ts
+  // COMBAT_BAR：日志 logY=540 三行到 613、动作条 y=604..656、回合标签
+  // turnY=588，全部收在 660 硬线内、导航条之上），双方头顶名签留在世界带
+  // （scrollFactor 1，相机 zoom 1，screenY≈245..360）。两块区都不碰顶部
+  // HUD 板（<230）与底部导航条（>660）。
   for (const t of panelTexts) {
-    expect(t.y, `面板文本 ${t.text.slice(0, 12)} 应在面板带内`).toBeGreaterThan(230);
-    expect(t.y + t.height, `面板文本 ${t.text.slice(0, 12)} 应在面板带内`).toBeLessThan(490);
+    const inWorldBand = t.y >= 230 && t.y + t.height <= 500;
+    const inCombatCluster = t.y >= 530 && t.y + t.height <= 660;
+    expect(
+      inWorldBand || inCombatCluster,
+      `面板文本 ${t.text.slice(0, 12)}（y ${t.y.toFixed(0)}..${(t.y + t.height).toFixed(0)}）应落在世界带或战斗集群内`,
+    ).toBe(true);
   }
 
   // ── 5. 打一个回合，证明面板刷新后上述都在 ──

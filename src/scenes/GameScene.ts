@@ -9844,7 +9844,14 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     const finaleContainer = this.nearestFinaleContainer();
     const container = this.nearestContainer();
     const zone = currentInteractionZone(state);
-    if (this.nearestEncounterSpot()) this.hintText.setText('按 E 查看问号点');
+    // R6-2：第一分支先分辨最近的遭遇点是不是行商——'shop' 是会走动的行商
+    // 标记，按 E 走的是 onInteract 的 openShop（交易面板），与问号遭遇不是
+    // 一回事。修前不区分类型，行商走进 44px 交互距离时脚注错显「按 E 查看
+    // 问号点」，提示与按 E 实际开的面板不符；现在 shop 说交易，其余遭遇点
+    // 维持原文案（e2e/ag63 等对同源文案的注释不受影响——无断言此串）。
+    const nearSpot = this.nearestEncounterSpot();
+    if (nearSpot === 'shop') this.hintText.setText('按 E 与行商交易');
+    else if (nearSpot) this.hintText.setText('按 E 查看问号点');
     // The lift outranks containers on the hint chain. 中产区多个层的容器正好
     // 压在电梯窗上（10004/10005/10006 的安保柜 x=1140、收银台 x=1160，
     // 电梯窗 1135..1195），修前站在电梯口脚注读的是「按 E 打开 安保柜」——

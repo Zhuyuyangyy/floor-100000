@@ -215,7 +215,7 @@ await page.waitForTimeout(1600);
 proofs.floatStorm = await page.evaluate(() => {
   const scene = window.__PHASER_GAME__.scene.getScene('Game');
   for (let i = 0; i < 30; i++) scene.combatFloatText(640 + (i % 7) * 14, 320, `-${i}`, '#e8907c');
-  return { spawned: 30, created: scene.floatText.createdCount, active: scene.floatText.activeCount };
+  return { spawned: 30, ...scene.perf.floatTextCounts };
 });
 rows.push(await sample(page, 'float-storm'));
 
@@ -233,7 +233,8 @@ proofs.fxStorm = await page.evaluate(() => {
 rows.push(await sample(page, 'fx-storm'));
 
 // 10. 降级路径（--degrade）：F3 计数器 + 强制降级 + no-op 取证 + 恢复取证。
-//    强制方式：直接翻场景的 applyPerfDegrade（真实触发是帧时间持续 >25ms，
+//    强制方式：直接翻控制器的 applyDegrade（RC-03 第 4 步起性能层住在
+//    scene.perf——PerfController；真实触发是帧时间持续 >25ms，
 //    探针机器上是 2-3ms/帧，等不到——这里只验开关与显示，不验触发本身；
 //    触发阈值由 src/tests/perf.test.ts 的帧预算守卫单测钉住）。
 if (DEGRADE) {
@@ -247,13 +248,13 @@ if (DEGRADE) {
       scene.children.list.filter((o) => o.type === 'Sprite' && (o.texture?.key ?? '') === 'sword-slash' && o.visible).length;
     scene.playSwingFx(false);
     const spawned = countSlash();
-    scene.applyPerfDegrade(true);
+    scene.perf.applyDegrade(true);
     scene.playSwingFx(false);
     const during = countSlash();
     return {
-      text: scene.perfHudText.text,
-      color: scene.perfHudText.style.color,
-      degraded: scene.perfDegraded,
+      text: scene.perf.counterText,
+      color: scene.perf.counterColor,
+      degraded: scene.perf.isDegraded,
       spawnedBeforeDegrade: spawned,
       spawnedWhileDegraded: during - spawned,
     };
@@ -264,10 +265,10 @@ if (DEGRADE) {
     const scene = window.__PHASER_GAME__.scene.getScene('Game');
     const countSlash = () =>
       scene.children.list.filter((o) => o.type === 'Sprite' && (o.texture?.key ?? '') === 'sword-slash' && o.visible).length;
-    scene.applyPerfDegrade(false);
+    scene.perf.applyDegrade(false);
     const before = countSlash();
     scene.playSwingFx(false);
-    return { degraded: scene.perfDegraded, spawnedAfterRecover: countSlash() - before };
+    return { degraded: scene.perf.isDegraded, spawnedAfterRecover: countSlash() - before };
   });
 }
 

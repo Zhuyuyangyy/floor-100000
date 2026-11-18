@@ -102,7 +102,6 @@ import type { AchievementEvent } from '../systems/AchievementSystem';
 import type { CharacterKey } from '../render/artpack';
 import { lowHpPulse, mostUrgentStat, moveSpeedFactor } from '../render/feedback';
 import { GAME_CONFIG } from '../core/config';
-import { ensureGrowth } from '../core/growth';
 import {
   markResolved,
   resolveEncounter,
@@ -120,12 +119,10 @@ import { encounterSpots, nudgeSpotX, placeClearX } from '../systems/encounterSpo
 import { playerCombatant, combatWeaponLabel } from '../systems/combat';
 export { combatWeaponLabel, combatBehaviorLabel } from '../systems/combat';
 import { moveSpeedMult } from '../systems/relics';
-import { buy, materialShelf, sell, sellPrice, shopStock } from '../systems/shop';
-import { VENTURES, invest, settleInvestments } from '../systems/shop';
 // AG-81：本局统计。只加钩子不改逻辑——各事件点 bumpStat 一行，读写都在
 // StatsSystem（纯函数 + 旧存档补零）。buildStatsTable 是结算画面的共享统计
 // 表组件，暂停菜单的统计面板复用同一件。
-import { bumpStat, noteFloorReached, noteGoldEarned } from '../systems/StatsSystem';
+import { bumpStat, noteFloorReached } from '../systems/StatsSystem';
 import { buildStatsTable } from './EndScene';
 import { CombatController } from './controllers/CombatController';
 import { StatsPanelController, type PanelBox, type StatsPanelHost } from './controllers/StatsPanelController';
@@ -134,6 +131,7 @@ import { PerfController, type PerfHost } from './controllers/PerfController';
 import { TutorialController, type TutorialHost } from './controllers/TutorialController';
 import { AchievementController, type AchievementHost } from './controllers/AchievementController';
 import { NavBarController, type NavBarHost, type NavSlotKey } from './controllers/NavBarController';
+import { DialogueController, type DialogueHost } from './controllers/DialogueController';
 import { charge, recordShortcut, shortcutAvailable, shortcutPlan } from '../systems/shortcut';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
@@ -148,41 +146,21 @@ import { playSfx } from '../render/audio';
 // 委托引用 JuiceState 类型。
 import type { JuiceState } from '../render/juice';
 import { SettingsScene } from './MenuScene';
-import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, PANEL_FILL_BANDS, PANEL_FRAME_PIECES, PANEL_SLICE, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
+import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import {
   FONT_FAMILY,
   HUD_FOOT_H,
-  PANEL_HEADER_H,
   STAT_COLORS,
   TYPE,
   UI,
   buildListRow,
   buildPanelHeader,
   buildPanelWell,
-  drawLine,
 } from '../render/uiKit';
-import { characterKeyForNpc, portraitKey } from '../render/artpack';
+import { characterKeyForNpc } from '../render/artpack';
 import { framedButton, hitRect } from '../render/pointer';
 import { createStatRingsBaker, drawHazardStripe, drawHudIcon, drawHudPlate, type HudIconName, type StatRingsBaker } from '../render/hudSkin';
-import {
-  estimateTextWidth,
-  DIALOG_PADDING,
-  DIALOG_PANEL_H,
-  DIALOG_PANEL_W,
-  DIALOG_PORTRAIT_SIZE,
-  DIALOG_PORTRAIT_TOP,
-  DIALOG_ROW_COUNT,
-  DIALOG_ROW_H,
-  DIALOG_ROW_PITCH,
-  DIALOG_ROWS_TOP,
-  DIALOG_TEXT_LEFT,
-  DIALOG_TEXT_W,
-  DIALOG_WELL_H,
-  DIALOG_WELL_LEFT,
-  DIALOG_WELL_TOP,
-  DIALOG_WELL_W,
-  dialogueGeometry,
-} from '../render/dialogueLayout';
+import { estimateTextWidth } from '../render/dialogueLayout';
 import {
   ATTACK_FRAME_START,
   ATTACK_FRAMES,
@@ -255,17 +233,14 @@ import {
   type CraftTreeNode,
 } from '../data/craftTree';
 import { WALL_DECO } from '../data/wallDeco';
-import { NPCS, NPC_FLOOR, getNpc, npcsOnFloor, type BarterOffer, type NpcDef, type NpcId } from '../data/npcs';
+import { NPCS, NPC_FLOOR, npcsOnFloor, type NpcDef, type NpcId } from '../data/npcs';
 import { QUEST_FLAG, QUESTS } from '../data/quests';
-import { bumpFlag, clearFlag, flagCount, hasFlag, setFlag } from '../systems/WorldFlags';
-import { availableOffers, claimGift, executeBarter, giftOffer, receiveGift, reputationOf } from '../ai/npcEconomy';
+import { clearFlag, hasFlag, setFlag } from '../systems/WorldFlags';
 import { stockOf, syncNpcInventory } from '../ai/npcInventory';
 import { NPC_MARGIN, npcAutonomyFor, scheduleFor, slotAt, type NpcAutonomyView } from '../ai/npcSchedule';
-import { aiNpcConfig, archetypeForNpcId, npcFactFor } from '../ai/config';import { OllamaBrain } from '../ai/brains/ollamaBrain';
-import { OptionTreeBrain } from '../ai/brains/optionTreeBrain';
+import { aiNpcConfig } from '../ai/config';import { OllamaBrain } from '../ai/brains/ollamaBrain';
 import { createNpcState } from '../data/npcPersonalities';
 import { loadNpcState, recordMemory, saveNpcState } from '../systems/NpcMemory';
-import { decideNpcAction, isDialogueFresh, type DialogueSession, type NpcRuntimeConfig } from '../systems/NpcRuntime';
 import {
   decideWandererIntent,
   planNightWanderer,
@@ -320,14 +295,6 @@ const SICKNESS_TIER_LABEL: Record<string, string> = {
   sick: '患病',
   critical: '病危',
 };
-// AG-20: 产业累计收益的账本标记。存在 state.flags（WorldFlags 的平地）而不是
-// 场景字段里：存档因此携带整个账本，读档后面板的「累计」读数不断档。结算本身
-// 由系统层的水位标记 economy:settled-day 把关，场景只把观察到的收益累加到这里。
-const VENTURE_INCOME_FLAG = 'economy:venture-income-total';
-// 产业结算 flash 的延后时长：跨日那一帧的 flash 位被夜间事件播报占着
-// （ensureNightEvent 在同一帧 flash 今夜的遭遇），1700ms 接在它 1600ms
-// 的寿命之后，两条因此都看得见。
-const VENTURE_FLASH_DELAY_MS = 1700;
 // HUD type scale (docs/05_ART_GUIDE.md §2: no size too small to read). Title 16 /
 // body 13 / auxiliary 11 — all integer pixels, since any fractional size would be
 // resampled and blur the pixel look.
@@ -758,7 +725,7 @@ function npcStrollPose(npcId: string, floor: number, stationary: boolean, elapse
  * TutorialController（RC-03 拆分第 3 步，TUTORIAL_DONE_FLASH_DELAY_MS）。
  */
 
-export class GameScene extends Phaser.Scene implements StatsPanelHost, MonologueHost, TutorialHost, PerfHost, AchievementHost, NavBarHost {
+export class GameScene extends Phaser.Scene implements StatsPanelHost, MonologueHost, TutorialHost, PerfHost, AchievementHost, NavBarHost, DialogueHost {
   private player!: Phaser.GameObjects.Sprite;
   /** The crowbar in the survivor's hand. Follows the attack pose's fist. */
   private weapon?: Phaser.GameObjects.Image;
@@ -995,26 +962,25 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   //     startEndScene/成就三件/addLootThisTrip/combatPanelObjects/场景事件
   //     三订阅/共享件四薄封装——见下方「CombatHost 面」段）。
   private readonly combat = new CombatController(this);
-  // OVERHAUL Wave C1: the shop panel's cursor. AG-20: one cursor over BOTH
-  // shelves — the trader's stock and the material shelf — so Enter buys and S
-  // sells whatever row is highlighted, whichever shelf it came from.
-  private shopRows: Array<{ kind: 'stock' | 'material'; itemId: ItemId; price: number }> = [];
-  private shopSelected = 0;
-
-  // AG-20: the venture ledger (产业投资面板). Reads VENTURES / invest /
-  // settleInvestments from systems/shop.ts; the day's settlement itself is
-  // fired by the clock (SurvivalSystem's day-rollover paths), and the scene
-  // only OBSERVES the ledger around every time-advancing call so the panel
-  // can show 已投入 / 昨日收益 / 累计 — see diffVentureLedger. The scene
-  // never settles around the watermark; it only reads what the clock paid.
-  private ventureOpen = false;
-  private ventureSelected = 0;
-  private ventureObjects: PanelObject[] = [];
-  private ventureMarker!: Phaser.GameObjects.Image;
-  /** 最近一次产业结算的读数（由 diffVentureLedger 在时钟推进后对比账本得出）。 */
-  private lastVentureDay = 0;
-  private lastVentureIncome = 0;
-  private lastVentureCollapsed: string[] = [];
+  // ── RC-03 拆分第 8 步：NPC 对话 + 行商交易 + 产业投资 + AI NPC ────────────
+  // 对话树/交易层/赠礼层、行商双货架面板（shop rows + CENTUM 跳层 UI 的
+  // 「Enter 买入」面）、产业投资面板、AI 开场白编排（降级选项树）全在
+  // controllers/DialogueController.ts（plain TS 类，Node 可单测），场景只留：
+  //   * onInteract 的入口检查链（shop spot → dialogue.openShop()；nearestNpc
+  //     → dialogue.open(npc)）与 NPC 世界摆位（drawNpcs/npcView/syncNpcs/
+  //     nearestNpc 留本段）；
+  //   * onEsc/onNavUp/onNavDown/onUse/keyS/keyG 的对话域路由委托；
+  //   * 产业账本观察三点（chargeTime / 帧循环 advanceTime / 睡觉 finishNight
+  //     前后的 ventureLedgerSnapshot+diffVentureLedger）；
+  //   * create 的 build 一行 + 重启的 reset 委托；
+  //   * anyPanelOpen/openPanelHint/各 guard 的 isOpen/ventureIsOpen 读面；
+  //   * e2e 契约 getter（spark.spec.ts 直读的 scene.dialogue → 文件末）；
+  //   * clearStrayPanels 的 dialogue.panelObjectsForRecovery()；
+  //   * DialogueHost 面（panelHit/playFx/createMarker/viewSize/setPanelBox/
+  //     setEncounterOpen/rebuildEncounterSpots/refreshStats/refreshInventory/
+  //     flash/chargeTime/emitNpcTalked/onUse/assertPanelContent——见下方
+  //     「DialogueHost 面」段）。
+  private readonly dialogueCtl = new DialogueController(this);
   // First-floor shelter decision panel: the cursor is visual state, while the
   // selected action itself is committed through ShelterSystem.
   private shelterOpen = false;
@@ -1124,55 +1090,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   /** The quests:changed subscription survives a Game restart; the panel scene does not restart. */
   private questsEventBound = false;
 
-  private dialogueOpen = false;
-  // sessionId/revision：AI 异步返回的保鲜键。玩家每次开对话 sessionId+1，
-  // 每次操作 revision+1；过期 AI 结果不得覆盖新对话（P1-2）。
-  private dialogueSessionSeq = 0;
-  private dialogue: { npc: NpcId; level: 'main' | 'trade' | 'gift'; selected: number; message: string; lineToggle: number; sessionId: number; revision: number } | null = null;
-  /**
-   * AG-20: 赠礼层的选项窗口平移。对话只有四行，而背包可能有十几格——赠礼
-   * 列表因此与制作面板同宗：窗口跟着光标滑（dialogueViewOffset 是视图第 0
-   * 行对应的扁平下标）。主菜单/交易层不滑动，恒为 0。
-   */
-  private dialogueViewOffset = 0;
-  // feat/ai-npc-spark-integration：每个 NPC 一个运行时（降级脑的台词是该
-  // NPC 自己的问候语）。未配置模型时整个 Map 为空，行为与改造前一致。
-  private aiRuntimes = new Map<string, NpcRuntimeConfig>();
-  private dialogueObjects: PanelObject[] = [];
-  /** one selection band per dialogue row, toggled in refreshDialogue */
-  private dialogueBands: Array<{ band: Phaser.GameObjects.Rectangle; rule: Phaser.GameObjects.Rectangle }> = [];
-  /**
-   * One mouse hit target per row. Kept as a field because the rows MOVE: an AI
-   * opening line can be five lines, dialogueGeometry pushes rowsTop down, and a
-   * hit rect left at the base y then highlights row i while accepting a click
-   * meant for row i-1 (measured: 3px hover miss, clicks one row low at 5 lines).
-   * refreshDialogue re-places these alongside the bands.
-   */
-  private dialogueRowHits: Phaser.GameObjects.Rectangle[] = [];
   /** the wall-fixture close-up (key L): built per open, like the shelter panel */
   private decoOpen = false;
   private decoIndex = 0;
   private decoObjects: PanelObject[] = [];
-  private dialogueTitle!: Phaser.GameObjects.Text;
-  private dialoguePortrait!: Phaser.GameObjects.Image;
-  private dialoguePortraitFrame!: Phaser.GameObjects.Rectangle;
-  private dialogueMessage!: Phaser.GameObjects.Text;
-  private dialogueOptions: Phaser.GameObjects.Text[] = [];
-  private dialogueOptionIcons: Phaser.GameObjects.Image[] = [];
-  private dialogueMarker!: Phaser.GameObjects.Image;
-  // Re-layout handles for the adaptive panel. The well, the four rows, the
-  // footer and the panel's own skin are all built once at the BASE geometry and
-  // then re-placed per message by refreshDialogue (dialogueGeometry) — never
-  // rebuilt, because destroying and re-adding them per keystroke is what made
-  // the dialogue flicker before the geometry was extracted.
-  /** buildPanel's return: [fill x PANEL_FILL_BANDS, frame x PANEL_FRAME_PIECES]. */
-  private dialoguePanelParts: PanelObject[] = [];
-  /** buildPanelHeader's return: [strip, accent rule, title text, hairline graphics]. */
-  private dialogueHeaderParts: PanelObject[] = [];
-  private dialogueWellFill!: Phaser.GameObjects.Rectangle;
-  private dialogueWellEdge!: Phaser.GameObjects.Graphics;
-  private dialogueFooter!: Phaser.GameObjects.Text;
-
   private pauseOpen = false;
   // Mouse state. `walkTarget` is the click-to-walk order the update loop steps
   // toward; `panelBox` is the rectangle of the most recently built panel, so a
@@ -1261,10 +1182,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.pauseOptionTexts = [];
     this.pauseMarker = createMarker(this);
     this.statsPanel.reset();
-    this.dialogueObjects = [];
-    this.dialogueOptions = [];
-    this.dialogueOptionIcons = [];
-    this.dialogueMarker = createMarker(this);
+    // RC-03 拆分第 8 步：对话面板件/标记 + 产业面板件/标记 + 对话开关与进行中
+    // 对话的重置本体在 DialogueController.reset（原逐字段清单见那边注释）。
+    this.dialogueCtl.reset();
     this.shelterObjects = [];
     this.shelterMarker = createMarker(this);
     this.nightChoiceObjects = [];
@@ -1274,8 +1194,6 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // 入夜提示是「时钟跨过 18:00」的边沿触发：续档/重开从当前时刻起算，
     // 不补弹今夜之前错过的提示。
     this.prevMinuteOfDay = getGame().gameMinuteOfDay;
-    this.ventureObjects = [];
-    this.ventureMarker = createMarker(this);
     // 重新开始 runs while the pause menu is still open, and these flags survive a
     // restart. Left set, update() early-returns forever and every panel handler
     // refuses to run, so the restarted game looks frozen.
@@ -1283,8 +1201,6 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.invSelected = 0;
     this.craftingOpen = false;
     this.craftSelected = 0;
-    this.dialogueOpen = false;
-    this.dialogue = null;
     this.shelterOpen = false;
     this.shelterSelected = 0;
     this.pauseOpen = false;
@@ -1365,7 +1281,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.buildHud();
     this.buildInventoryPanel();
     this.buildCraftPanel();
-    this.buildDialoguePanel();
+    // RC-03 拆分第 8 步：对话面板的一次性装配本体在 DialogueController.build
+    // （与背包/制作/暂停同一批 create 期 build，重启由 reset+build 重建）。
+    this.dialogueCtl.build();
     this.buildPausePanel();
     this.statsPanel.build();
     this.bindInput();
@@ -2137,448 +2055,6 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       case 'note':
         return ['read'];
     }
-  }
-
-  // ── the trader (OVERHAUL Wave C1) ────────────────────────────────────────
-  // One panel, two directions: ↑/↓ moves along the stock, Enter buys one, and
-  // S sells one of the highlighted item. Gold is the run's second currency and
-  // the shortcut's price (Wave C2).
-
-  private openShop(): void {
-    const state = getGame();
-    // AG-20: 商品架 + 材料货架合成一份行列表。材料牌价是当日价
-    // （materialShelf 按 (runSeed, day) 抖），所以每次开面板都重新读——
-    // 昨天看过的价今天不作数，这正是「今天囤料还是明天囤料」的决策面。
-    this.shopRows = [
-      ...shopStock(state.currentFloor).map((e) => ({ kind: 'stock' as const, itemId: e.itemId, price: e.price })),
-      ...materialShelf(state.runSeed, state.day).map((e) => ({ kind: 'material' as const, itemId: e.itemId, price: e.price })),
-    ];
-    this.shopSelected = 0;
-    this.encounterOpen = true;
-    playSfx('click');
-    this.buildShopPanel();
-  }
-
-  private closeShop(): void {
-    this.encounterOpen = false;
-    for (const o of this.encounterObjects) o.destroy();
-    this.encounterObjects = [];
-    this.buildEncounterSpots();
-  }
-
-  private buildShopPanel(): void {
-    for (const o of this.encounterObjects) o.destroy();
-    this.encounterObjects = [];
-    const state = getGame();
-    const { width, height } = this.viewSize();
-    const cx = width / 2;
-    const cy = height / 2;
-    const panelW = 440;
-    // AG-20: 248 → 424。材料货架是八行当日牌价，每行同时写着「买」和「卖」
-    // 两个方向的价格——要价恒高于收购价（shop.ts 的结构性下限），面板上
-    // 一眼看得见，套利无从下嘴。
-    const panelH = 424;
-    const left = cx - panelW / 2;
-    const top = cy - panelH / 2;
-    // Remembered for the mouse: a click outside this rectangle closes the panel.
-    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
-    const depth = PANEL_DEPTH.game.dialogue;
-
-    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
-    this.encounterObjects.push(...buildPanelHeader(this, left, top, panelW, '行商', UI.good, depth + 5));
-
-    // The purse, right-aligned on the header row: the one number that decides
-    // what the rest of this panel means.
-    this.encounterObjects.push(
-      this.add
-        .text(left + panelW - 10, top + 10, `${state.player.gold} 金`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
-        .setOrigin(1, 0.5)
-        .setDepth(depth + 6),
-    );
-
-    // Stock as rows: icon, name, price, how many the player already carries.
-    // The icon is the item's own 16x16 art, so the shop speaks the same visual
-    // language as the bag. AG-20: the two shelves share one cursor
-    // (this.shopSelected indexes shopRows), so this section scans the combined
-    // list and keeps its own rows' y positions contiguous.
-    let stockY = top + 30;
-    for (const [i, row] of this.shopRows.entries()) {
-      if (row.kind !== 'stock') continue;
-      const y = stockY;
-      stockY += 30;
-      const selected = i === this.shopSelected;
-      this.encounterObjects.push(
-        ...buildListRow(this, left + 8, y, panelW - 16, depth + 5, {
-          iconKey: itemIconKey(row.itemId),
-          label: getItem(row.itemId).displayName,
-          value: `${row.price} 金 · 持 ${countItem(state.player.inventory, row.itemId)}`,
-          selected,
-        }),
-      );
-      // Click a row to buy it. Deferred by one tick: this panel is rebuilt from
-      // scratch on every selection change, and destroying the object that is
-      // currently handling the pointer event is how you get a crash inside
-      // Phaser's input list.
-      this.encounterObjects.push(
-        this.panelHit( left + 8, y, panelW - 16, 28, depth + 8, {
-          onClick: () =>
-            this.time.delayedCall(0, () => {
-              this.shopSelected = i;
-              this.buildShopPanel();
-              this.onUse();
-            }),
-        }),
-      );
-      if (!selected) continue;
-      // The selected row also shows what the trade would do, since the only
-      // feedback otherwise arrives after the gold is already spent.
-      const canBuy = state.player.gold >= row.price;
-      this.encounterObjects.push(
-        this.add
-          .text(left + panelW - 20, y + 20, canBuy ? 'Enter 买入' : '金币不足', {
-            fontFamily: FONT_FAMILY,
-            fontSize: `${TYPE.caption}px`,
-            color: canBuy ? hex(PALETTE.clothHigh) : hex(TEXT.warn),
-          })
-          .setOrigin(1, 0.5)
-          .setDepth(depth + 7),
-      );
-    }
-
-    // ── AG-20: 材料货架（当日牌价）────────────────────────────────────────
-    // 与商品架同一块面板、同一个光标：八件硬通货，每行「买 X · 卖 Y · 持 N」。
-    // 买价是 materialShelf 的当日牌价（每次开面板重读），卖价是商人收购价
-    // （sellPrice，全世界固定）——两个方向印在同一行上，结构性无套利因此
-    // 是看得见的，不是注释里的承诺。
-    const shelfY = stockY + 6;
-    this.encounterObjects.push(
-      this.add
-        .text(left + 16, shelfY + 8, `材料货架 · 第 ${state.day} 天牌价`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
-        .setOrigin(0, 0.5)
-        .setDepth(depth + 7),
-    );
-    let rowY = shelfY + 22;
-    for (const [i, row] of this.shopRows.entries()) {
-      if (row.kind !== 'material') continue;
-      const y = rowY;
-      rowY += 26;
-      const selected = i === this.shopSelected;
-      const bid = sellPrice(row.itemId, state.currentFloor);
-      this.encounterObjects.push(
-        ...buildListRow(this, left + 8, y, panelW - 16, depth + 5, {
-          iconKey: itemIconKey(row.itemId),
-          label: getItem(row.itemId).displayName,
-          value: `买 ${row.price} · 卖 ${bid} · 持 ${countItem(state.player.inventory, row.itemId)}`,
-          selected,
-        }),
-      );
-      this.encounterObjects.push(
-        this.panelHit( left + 8, y, panelW - 16, 26, depth + 8, {
-          onClick: () =>
-            this.time.delayedCall(0, () => {
-              this.shopSelected = i;
-              this.buildShopPanel();
-              this.onUse();
-            }),
-        }),
-      );
-      if (!selected) continue;
-      const canBuy = state.player.gold >= row.price;
-      this.encounterObjects.push(
-        this.add
-          .text(left + panelW - 20, y + 20, canBuy ? 'Enter 买入' : '金币不足', {
-            fontFamily: FONT_FAMILY,
-            fontSize: `${TYPE.caption}px`,
-            color: canBuy ? hex(PALETTE.clothHigh) : hex(TEXT.warn),
-          })
-          .setOrigin(1, 0.5)
-          .setDepth(depth + 7),
-      );
-    }
-
-    // The sell hint lives in its own strip at the bottom: the stock list is
-    // what the player is browsing, and the sell mechanics apply to the whole bag
-    // rather than to the highlighted row.
-    const footY = top + panelH - 34;
-    this.encounterObjects.push(...buildPanelWell(this, left + 8, footY, panelW - 16, 22, depth + 5));
-    this.encounterObjects.push(
-      this.add
-        .text(left + 16, footY + 11, 'Enter 买入 · S 卖出选中的一件 · ESC 离开', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
-        .setOrigin(0, 0.5)
-        .setDepth(depth + 7),
-    );
-    // This panel is rebuilt on every open, so it never runs applyPanelDepth -
-    // every object it makes has to be locked here or it slides with the camera.
-    lockToScreen(this.encounterObjects);
-  }
-
-  private shopBuy(): void {
-    const state = getGame();
-    const entry = this.shopRows[this.shopSelected];
-    if (!entry) return;
-    // buy() 自己认材料：商品架没有的物品回落到 materialPrice（当日牌价 +
-    // 熟人折扣，夹在收购价+1 的下限上），所以材料行与商品行走同一入口。
-    const r = buy(state, entry.itemId, state.currentFloor);
-    playSfx(r.ok ? 'chest' : 'pickup');
-    this.flash(r.ok ? r.message : r.reason);
-    // The trade, seen. Gold changing hands was a number in the HUD and a line of
-    // text; the coin spins over the counter while the deal is open.
-    if (r.ok) {
-      const coin = startFxLoop(this, 'coin-spin', state.player.x + 26, PLAYER_FEET_Y - 62, LIGHT_DEPTH);
-      if (coin) this.encounterObjects.push(coin);
-    }
-    this.refreshInventory();
-    this.refreshStats();
-    this.buildShopPanel();
-  }
-
-  private shopSell(): void {
-    const state = getGame();
-    const entry = this.shopRows[this.shopSelected];
-    if (!entry) return;
-    // 卖方向：材料行走收购价（MATERIAL_SELL_PRICES，全世界固定），商品架走
-    // band 半价——选中的是哪行就卖哪行，S 因此同时是两个货架的出口。
-    const goldBefore = state.player.gold; // AG-81：金币收入按卖出前后的差额计
-    const r = sell(state, entry.itemId, state.currentFloor);
-    playSfx(r.ok ? 'chest' : 'pickup');
-    this.flash(r.ok ? r.message : r.reason);
-    if (r.ok) {
-      noteGoldEarned(state, goldBefore); // AG-81：卖出进账
-      const coin = startFxLoop(this, 'coin-spin', state.player.x + 26, PLAYER_FEET_Y - 62, LIGHT_DEPTH);
-      if (coin) this.encounterObjects.push(coin);
-    }
-    this.refreshInventory();
-    this.refreshStats();
-    this.buildShopPanel();
-  }
-
-  // ── AG-20: 产业投资面板（VENTURES / invest / settleInvestments）──────────
-  //
-  // 三门产业是长期行为：金币沉下去（investedGold），按游戏日结算收益与风险
-  // （亏损/倒塌），收益喂 wealth 成长线。面板因此必须回答「我投的怎么了」：
-  // 已投入（沉没资本 + 在册名单）、昨日收益、累计——否则玩家投完只能盯着
-  // 金币总数猜。
-  //
-  // 结算发生在时钟内部（SurvivalSystem 的跨日路径），报告不往上传；场景在
-  // 每次推进时间的前后对比账本快照得出当日读数（diffVentureLedger）——只
-  // 观察，绝不绕过 economy:settled-day 水位标记自己结算。打开面板时再补一
-  // 次 settleInvestments：幂等，时钟已结过就是空转，悬挂的结算日在此入账。
-  private onToggleVentures(): void {
-    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen) return;
-    this.ventureOpen = !this.ventureOpen;
-    for (const o of this.ventureObjects) o.setVisible(this.ventureOpen);
-    if (this.ventureOpen) {
-      this.ventureSelected = 0;
-      this.buildVenturePanel();
-    }
-  }
-
-  private closeVentures(): void {
-    this.ventureOpen = false;
-    for (const o of this.ventureObjects) o.setVisible(false);
-  }
-
-  /** 投资账本快照：推进时间前后各取一次，差就是当日产业结算的读数。 */
-  private ventureLedgerSnapshot(): { gold: number; ventures: string[] } {
-    const state = getGame();
-    return { gold: state.player.gold, ventures: [...(state.growth?.ventures ?? [])] };
-  }
-
-  /**
-   * 观察一次时间推进后的产业结算。时钟已经在推进内部结过了（水位标记把关），
-   * 这里只对比账本：多出来的金币就是当日收益（该窗口内没有第二个动金币的
-   * 系统），从在册名单里消失的产业就是倒塌。读数进面板，收益累进 flags 里
-   * 的累计账本，并以 flash 告诉玩家——「投了不知道发生什么」到此为止。
-   */
-  private diffVentureLedger(before: { gold: number; ventures: string[] }): void {
-    const state = getGame();
-    if (before.ventures.length === 0) return; // 没有在册产业，结算必然是 no-op
-    const after = state.growth?.ventures ?? [];
-    const income = state.player.gold - before.gold;
-    if (income > 0) noteGoldEarned(state, before.gold); // AG-81：产业日结进账
-    const collapsed = before.ventures.filter((id) => !after.includes(id));
-    if (income <= 0 && collapsed.length === 0) return;
-    this.recordVentureSettlement(state.day - 1, income, collapsed);
-  }
-
-  /**
-   * 记一笔结算读数（面板读数 + 累计账本 + 玩家可见的反馈）。
-   *
-   * flash 延后到夜间事件播报之后：跨日那一帧 ensureNightEvent 也在 flash
-   * （今夜的遭遇），两条同时亮只会互相覆盖——玩家先看到今夜有什么，再看到
-   * 产业进账。1600ms 是 flash 自身的寿命，1700ms 正好接在后面。
-   */
-  private recordVentureSettlement(day: number, income: number, collapsed: string[]): void {
-    const state = getGame();
-    this.lastVentureDay = day;
-    this.lastVentureIncome = Math.max(0, income);
-    this.lastVentureCollapsed = collapsed;
-    if (income > 0) bumpFlag(state, VENTURE_INCOME_FLAG, income);
-    const lines: string[] = [];
-    if (income > 0) lines.push(`产业结算：第 ${day} 天进账 +${income} 金`);
-    for (const id of collapsed) {
-      const def = VENTURES.find((v) => v.id === id);
-      lines.push(`${def?.displayName ?? id}倒闭了，投入的本金全损`);
-    }
-    if (lines.length === 0) return;
-    this.time.delayedCall(VENTURE_FLASH_DELAY_MS, () => {
-      for (const line of lines) this.flash(line);
-    });
-  }
-
-  private buildVenturePanel(): void {
-    for (const o of this.ventureObjects) {
-      if (o !== this.ventureMarker) o.destroy();
-    }
-    this.ventureObjects = [];
-    const state = getGame();
-    // 打开即补一次结算：幂等（时钟已结过就是空转），悬挂的结算日在此入账，
-    // 面板读到的因此永远是结完账的数字。
-    const pending = settleInvestments(state);
-    if (pending.totalIncome > 0 || pending.collapsed.length > 0) {
-      this.recordVentureSettlement(pending.day, pending.totalIncome, pending.collapsed);
-    }
-    const { width, height } = this.viewSize();
-    const panelW = 520;
-    const panelH = 268;
-    const cx = width / 2;
-    const cy = height / 2;
-    const left = cx - panelW / 2;
-    const top = cy - panelH / 2;
-    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
-    const depth = PANEL_DEPTH.game.dialogue;
-
-    this.ventureObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
-    this.ventureObjects.push(...buildPanelHeader(this, left, top, panelW, '产业投资', UI.good, depth + 5));
-    this.ventureObjects.push(
-      this.add
-        .text(left + panelW - 10, top + 10, `${state.player.gold} 金`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
-        .setOrigin(1, 0.5)
-        .setDepth(depth + 6),
-    );
-
-    // 账本读数：已投入 / 昨日收益 / 累计。投资是长期行为，这三行就是玩家
-    // 「投了之后发生什么」的唯一答案，因此放在面板最上面。
-    const growth = ensureGrowth(state);
-    const owned = growth.ventures
-      .map((id) => VENTURES.find((v) => v.id === id))
-      .filter((v): v is (typeof VENTURES)[number] => v !== undefined);
-    const totalIncome = flagCount(state, VENTURE_INCOME_FLAG);
-    this.ventureObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 52, depth + 5));
-    this.ventureObjects.push(
-      this.add
-        .text(
-          left + 24,
-          top + 40,
-          `已投入 ${growth.investedGold} 金 · 在册 ${owned.length} 门${owned.length ? `：${owned.map((v) => v.displayName).join('、')}` : ''}`,
-          { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary), wordWrap: { width: panelW - 48 } },
-        )
-        .setOrigin(0, 0.5)
-        .setDepth(depth + 6),
-    );
-    const lastIncome = this.lastVentureIncome;
-    this.ventureObjects.push(
-      this.add
-        .text(
-          left + 24,
-          top + 64,
-          this.lastVentureDay > 0
-            ? `昨日收益（第 ${this.lastVentureDay} 天）+${lastIncome} 金 · 累计 +${totalIncome} 金${this.lastVentureCollapsed.length ? ` · 倒闭 ${this.lastVentureCollapsed.length} 门` : ''}`
-            : `昨日收益 — · 累计 +${totalIncome} 金`,
-          { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(lastIncome > 0 ? PALETTE.lightHigh : TEXT.secondary) },
-        )
-        .setOrigin(0, 0.5)
-        .setDepth(depth + 6),
-    );
-
-    // 三门产业：成本 / 日收益率 / 亏损率 / 倒闭率全印在行上——风险行为不能
-    // 做成稳赚，概率 therefore 是面板的一等内容。
-    const rowsTop = top + 90;
-    VENTURES.forEach((def, i) => {
-      const y = rowsTop + i * 28;
-      const selected = i === this.ventureSelected;
-      const inLedger = owned.some((v) => v.id === def.id);
-      this.ventureObjects.push(
-        ...buildListRow(this, left + 16, y, panelW - 32, depth + 6, {
-          label: `${def.displayName}${inLedger ? ' · 在册' : ''}`,
-          value: `成本 ${def.cost} · 日 ${Math.round(def.baseRate * 100)}% · 亏 ${Math.round(def.lossChance * 100)}% · 倒 ${Math.round(def.collapseChance * 100)}%`,
-          selected,
-          dim: inLedger,
-        }),
-      );
-      this.ventureObjects.push(
-        this.panelHit( left + 16, y, panelW - 32, 26, depth + 8, {
-          onOver: () => {
-            if (this.ventureSelected === i) return;
-            this.ventureSelected = i;
-            this.buildVenturePanel();
-          },
-          onClick: () => {
-            if (this.ventureSelected !== i) {
-              this.ventureSelected = i;
-              this.buildVenturePanel();
-              playSfx('click');
-              return;
-            }
-            this.activateVentureChoice();
-          },
-        }),
-      );
-    });
-
-    // 选中行的说明与动作：.description 是这门生意的来龙去脉，Enter 的动作
-    // 与代价写在同一行——金币不够时说的是差多少，不是沉默。
-    const selected = VENTURES[this.ventureSelected];
-    if (selected) {
-      const inLedger = owned.some((v) => v.id === selected.id);
-      const afford = state.player.gold >= selected.cost;
-      const action = inLedger ? '已在册 · 按游戏日结算' : afford ? `Enter 入股 ${selected.cost} 金` : `金币不够（需要 ${selected.cost}）`;
-      this.ventureObjects.push(
-        this.add
-          .text(left + 18, rowsTop + 3 * 28 + 16, action, {
-            fontFamily: FONT_FAMILY,
-            fontSize: `${TYPE.caption}px`,
-            color: hex(inLedger ? TEXT.dim : afford ? PALETTE.clothHigh : TEXT.warn),
-          })
-          .setOrigin(0, 0.5)
-          .setDepth(depth + 6),
-      );
-      this.ventureObjects.push(
-        this.add
-          .text(left + 18, rowsTop + 3 * 28 + 38, selected.description, {
-            fontFamily: FONT_FAMILY,
-            fontSize: `${TYPE.caption}px`,
-            color: hex(TEXT.secondary),
-            wordWrap: { width: panelW - 36 },
-          })
-          .setOrigin(0, 0.5)
-          .setDepth(depth + 6),
-      );
-    }
-
-    this.ventureObjects.push(
-      this.add.text(cx, top + panelH - 14, '↑/↓ 选择 · Enter 入股 · G 离开', {
-        fontFamily: FONT_FAMILY,
-        fontSize: `${TYPE.caption}px`,
-        color: hex(PALETTE.clothHigh),
-      }).setOrigin(0.5).setDepth(depth + 6),
-    );
-    this.ventureObjects.push(this.ventureMarker);
-    applyPanelDepth(this.ventureObjects, PANEL_DEPTH.game.dialogue);
-    lockToScreen(this.ventureObjects);
-    this.assertPanelContent('venture', this.ventureObjects);
-  }
-
-  private activateVentureChoice(): void {
-    const state = getGame();
-    const def = VENTURES[this.ventureSelected];
-    if (!def) return;
-    // invest() 原子：被拒时金币、账本、经验一律不动，reason 原样给玩家看。
-    const r = invest(state, def.id);
-    playSfx(r.ok ? 'chest' : 'pickup');
-    this.flash(r.ok ? r.message : r.reason);
-    if (r.ok) this.refreshStats();
-    this.buildVenturePanel();
   }
 
   private openEncounter(spotId: string): void {
@@ -4375,7 +3851,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     return i < getGame().player.inventory.slotCount;
   }
 
-  private refreshInventory(): void {
+  // public：DialogueHost 面之一（RC-03 拆分第 8 步）——行商买卖/对话赠礼后
+  // 的背包面板刷新走这一份实现（控制器不复制 HUD 刷新）。
+  refreshInventory(): void {
     const slots = getGame().player.inventory.slots;
     const capacity = getGame().player.inventory.slotCount;
     if (this.invSelected >= BAG_BALANCE.gridSlots) this.invSelected = Math.max(0, BAG_BALANCE.gridSlots - 1);
@@ -5141,7 +4619,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   }
 
   private onToggleCrafting(): void {
-    if (this.inventoryOpen || this.dialogueOpen || this.pauseOpen || this.shelterOpen || this.nightChoiceOpen) return;
+    if (this.inventoryOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.shelterOpen || this.nightChoiceOpen) return;
     if (!this.craftingOpen && getGame().currentFloor !== STARTING_FLOOR) {
       this.flash('只能在宿舍工作台制作');
       return;
@@ -5206,13 +4684,15 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   // consequences the frame loop would — HUD refresh, autosave, and the end-of-run
   // transition. Keeping this in one place means a cost can never be charged
   // without the clock, the save and the death check following it.
-  private chargeTime(gameMinutes: number): void {
+  // public：DialogueHost 面之一（RC-03 拆分第 8 步）——交易/赠礼的 -N 分钟
+  // 经宿主扣（时钟属主在场景，含产业账本观察，见方法体内 diffVentureLedger）。
+  chargeTime(gameMinutes: number): void {
     const state = getGame();
     // AG-20: 动作跨日时产业结算在 spendTime 内部发生——前后对比账本，读数
     // 才跟着动作走（只观察，不重复结算）。
-    const ledger = state.growth?.ventures?.length ? this.ventureLedgerSnapshot() : null;
+    const ledger = state.growth?.ventures?.length ? this.dialogueCtl.ventureLedgerSnapshot() : null;
     const tick = spendTime(state, gameMinutes);
-    if (ledger) this.diffVentureLedger(ledger);
+    if (ledger) this.dialogueCtl.diffVentureLedger(ledger);
     this.refreshClock();
     this.refreshStats();
     this.applyNightLighting();
@@ -5359,531 +4839,6 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     return null;
   }
 
-  private buildDialoguePanel(): void {
-    const { width, height } = this.viewSize();
-    // A scene restart keeps the display list, so the previous run's row hit
-    // rects would otherwise be pushed into again and re-placed by index.
-    this.dialogueRowHits = [];
-    // Geometry lives in render/dialogueLayout: the portrait column, the gap the
-    // text must keep from it, and the wrap width all have to agree, and they did
-    // not (the text started 84px inside the 96px face). dialogueLayout.test.ts
-    // holds the numbers against the real dialogue strings.
-    const panelW = DIALOG_PANEL_W;
-    const panelH = DIALOG_PANEL_H;
-    const cx = width / 2;
-    const cy = height / 2;
-    const left = cx - panelW / 2;
-    const top = cy - panelH / 2;
-    // Remembered for the mouse: a click outside this rectangle closes the panel.
-    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
-
-    const depth = PANEL_DEPTH.game.dialogue;
-    // The skin is captured, not just pushed: refreshDialogue re-places these
-    // parts when a long AI opening line grows the panel (dialogueGeometry).
-    this.dialoguePanelParts = buildPanel(this, cx, cy, panelW, panelH, 'dialogue', depth);
-    this.dialogueObjects.push(...this.dialoguePanelParts);
-    // OVERHAUL UI: the same header strip every other panel uses, with the NPC's
-    // name on it, and the message in an inset well so speech reads as speech
-    // rather than as more body text.
-    // Empty header title on purpose: the NPC's name is the header, and drawing a
-    // static '对话' underneath it printed the two on top of each other.
-    // The strip is captured like the skin: the panel grows around it, so the
-    // strip has to move with the panel's top edge or it detaches from the frame.
-    this.dialogueHeaderParts = buildPanelHeader(this, left, top, panelW, '', UI.good, depth + 5);
-    this.dialogueObjects.push(...this.dialogueHeaderParts);
-    // Create with placeholder content so each text's canvas/frame exists up front
-    // (setText on a never-rendered empty text throws in Phaser 4).
-    this.dialogueTitle = this.add
-      .text(left + 10, top + 10, '对话', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
-      .setOrigin(0, 0.5)
-      .setDepth(depth + 6);
-    // Left: the speaker's face, on a dark inset so it does not float on the
-    // panel's own texture. Drawn at its native 96x96 — scaling a bust down is
-    // what makes pixel art look like a photo.
-    const portraitLeft = left + DIALOG_PADDING;
-    this.dialoguePortraitFrame = this.add
-      .rectangle(portraitLeft, top + DIALOG_PORTRAIT_TOP, DIALOG_PORTRAIT_SIZE, DIALOG_PORTRAIT_SIZE, PALETTE.ink)
-      .setOrigin(0, 0)
-      .setAlpha(0.85)
-      .setDepth(depth + 5);
-    this.dialoguePortrait = this.add
-      .image(portraitLeft + DIALOG_PORTRAIT_SIZE / 2, top + DIALOG_PORTRAIT_TOP + DIALOG_PORTRAIT_SIZE / 2, portraitKey('npc_alin'))
-      .setDepth(depth + 6);
-    this.dialogueObjects.push(this.dialoguePortraitFrame, this.dialoguePortrait);
-    // The speech well starts a full DIALOG_TEXT_GAP right of the face and ends
-    // DIALOG_TEXT_RIGHT_PAD left of the panel edge. Built at the base two-line
-    // height; refreshDialogue resizes it per message from dialogueGeometry().
-    const wellParts = buildPanelWell(this, left + DIALOG_WELL_LEFT, top + DIALOG_WELL_TOP, DIALOG_WELL_W, DIALOG_WELL_H, depth + 5);
-    this.dialogueWellFill = wellParts[0] as Phaser.GameObjects.Rectangle;
-    this.dialogueWellEdge = wellParts[1] as Phaser.GameObjects.Graphics;
-    this.dialogueObjects.push(...wellParts);
-    // dialogueTitle MUST be in the list: closeDialogue() hides everything in it,
-    // and a name left out of the list stays on screen after the panel closes.
-    this.dialogueObjects.push(this.dialogueTitle);
-    // Left-aligned and vertically centred in the well. Centred text looked tidy
-    // on a one-line greeting but threw a wrapped line out to both sides, which
-    // is how it ended up on the portrait and past the frame.
-    this.dialogueMessage = this.add
-      .text(left + DIALOG_TEXT_LEFT, top + DIALOG_WELL_TOP + DIALOG_WELL_H / 2, '……', {
-        fontFamily: FONT_FAMILY,
-        fontSize: `${TYPE.body}px`,
-        color: hex(TEXT.primary),
-        align: 'left',
-        // useAdvancedWrap is load-bearing: the basic wrapper only breaks on
-        // spaces, and Chinese has none, so the width was ignored entirely and
-        // the line ran straight through the portrait.
-        wordWrap: { width: DIALOG_TEXT_W, useAdvancedWrap: true },
-      })
-      .setOrigin(0, 0.5)
-      .setDepth(depth + 7);
-    this.dialogueObjects.push(this.dialogueMessage);
-
-    this.dialogueBands = [];
-    for (let i = 0; i < DIALOG_ROW_COUNT; i++) {
-      const rowY = top + DIALOG_ROWS_TOP + i * DIALOG_ROW_PITCH;
-      // A selection band per row, the same language as every other list: a wash
-      // plus a 2px accent rule. Toggled in refreshDialogue.
-      const band = this.add.rectangle(left + DIALOG_PADDING, rowY, panelW - DIALOG_PADDING * 2, DIALOG_ROW_H, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 5);
-      const rule = this.add.rectangle(left + DIALOG_PADDING, rowY, 2, DIALOG_ROW_H, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 6);
-      this.dialogueBands.push({ band, rule });
-      this.dialogueObjects.push(band, rule);
-      // Mouse: hover moves the cursor, click confirms — guarded on the option
-      // count because the row list is shorter than the four bands in trade mode.
-      // Kept in dialogueRowHits so refreshDialogue can move it with the band.
-      const rowHit = this.panelHit(left + DIALOG_PADDING, rowY, panelW - DIALOG_PADDING * 2, DIALOG_ROW_H, depth + 8, {
-        onOver: () => {
-          if (!this.dialogue) return;
-          // 先取视图（它顺带算出窗口平移），再把视图行号换算回扁平下标。
-          if (i >= this.dialogueOptionsView().length) return;
-          const flat = this.dialogueViewOffset + i;
-          if (this.dialogue.selected === flat) return;
-          this.dialogue.selected = flat;
-          this.refreshDialogue();
-        },
-        onClick: () => {
-          if (!this.dialogue || i >= this.dialogueOptionsView().length) return;
-          this.dialogue.selected = this.dialogueViewOffset + i;
-          this.refreshDialogue();
-          this.onUse();
-        },
-      });
-      this.dialogueRowHits.push(rowHit);
-      this.dialogueObjects.push(rowHit);
-      const icon = this.add.image(left + 30, rowY + DIALOG_ROW_H / 2, 'blank').setOrigin(0.5).setDepth(depth + 7);
-      const t = this.add
-        .text(left + 46, rowY + DIALOG_ROW_H / 2, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
-        .setOrigin(0, 0.5)
-        .setDepth(depth + 7);
-      this.dialogueOptionIcons.push(icon);
-      this.dialogueOptions.push(t);
-      this.dialogueObjects.push(icon, t);
-    }
-    const footer = this.add
-      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
-      .setOrigin(0.5)
-      .setDepth(depth + 7);
-    this.dialogueFooter = footer;
-    this.dialogueObjects.push(footer, this.dialogueMarker);
-
-    applyPanelDepth(this.dialogueObjects, PANEL_DEPTH.game.dialogue);
-    this.assertPanelContent('dialogue', this.dialogueObjects);
-    for (const o of this.dialogueObjects) o.setVisible(false);
-  }
-
-  // Label + icon key per dialogue option. The icon is the item the player
-  // RECEIVES (the trade's output), matching how the crafting list shows outputs;
-  // 问候/询问/退出/返回 are not items and get no icon.
-  //
-  // AG-11: the trade list reads availableOffers, not the static npc.offers —
-  // 信誉修正（trusted 双倍货 / disliked 双倍价）与真实库存过滤（没货下架、
-  // hostile 整体清空）都发生在系统侧，场景展示的就是此刻真正成交得了的报价。
-  // 静态表会让玩家看见一件 NPC 库存里没有的货，按了 Enter 才被拒绝。
-  private dialogueOffers(npc: NpcDef): BarterOffer[] {
-    const state = getGame();
-    const { npcState, inventory } = syncNpcInventory(state, npc);
-    return availableOffers(inventory, npc, reputationOf(npcState));
-  }
-
-  /**
-   * AG-20: 交易层「赠礼」行的下标；摆不下（报价超过两行的 NPC）时为 -1。
-   * 对话只有四行：报价 ×N + 赠礼 + 返回必须放得下，赠礼行因此是可选的。
-   */
-  private dialogueGiftRowIndex(npc: NpcDef): number {
-    return this.dialogueOffers(npc).length <= 2 ? this.dialogueOffers(npc).length : -1;
-  }
-
-  /**
-   * AG-20: 赠礼层的扁平选项表——「领取回赠」（npcEconomy.giftOffer 判得有
-   * 可送时才摆，与交易层「只展示成交得了的报价」同一条纪律）+ 背包里每一格
-   * 一件（整叠送出，一次 receiveGift 一笔记忆，不给「一件一件刷关系」留缝）。
-   */
-  private dialogueGiftEntries(): Array<{ kind: 'claim'; itemId: ItemId } | { kind: 'item'; itemId: ItemId; quantity: number }> {
-    const state = getGame();
-    const d = this.dialogue;
-    if (!d) return [];
-    const npc = getNpc(d.npc);
-    const { npcState, inventory } = syncNpcInventory(state, npc);
-    const gift = giftOffer(npc, inventory, reputationOf(npcState));
-    const items = state.player.inventory.slots.map((s) => ({ kind: 'item' as const, itemId: s.itemId, quantity: s.quantity }));
-    return [...(gift ? [{ kind: 'claim' as const, itemId: gift.itemId }] : []), ...items];
-  }
-
-  private dialogueOptionsView(): Array<{ label: string; icon?: ItemId }> {
-    const d = this.dialogue;
-    if (!d) return [];
-    if (d.level === 'main') {
-      this.dialogueViewOffset = 0;
-      return ['问候', '询问', '交易', '退出'].map((label) => ({ label }));
-    }
-    const npc = getNpc(d.npc);
-    if (d.level === 'gift') {
-      // 窗口化：视图第 0 行对应扁平下标 dialogueViewOffset，随光标滑动。
-      const flat = this.dialogueGiftEntries();
-      this.dialogueViewOffset = Math.max(0, Math.min(d.selected - 1, flat.length - DIALOG_ROW_COUNT));
-      return flat.slice(this.dialogueViewOffset, this.dialogueViewOffset + DIALOG_ROW_COUNT).map((e) =>
-        e.kind === 'claim'
-          ? { label: `领取回赠：${getItem(e.itemId).displayName}`, icon: e.itemId }
-          : { label: `送出 ${getItem(e.itemId).displayName}×${e.quantity}`, icon: e.itemId },
-      );
-    }
-    const rows: Array<{ label: string; icon?: ItemId }> = this.dialogueOffers(npc).map((o) => ({
-      label: `用 ${getItem(o.get.itemId).displayName}×${o.get.quantity} 换 ${getItem(o.give.itemId).displayName}×${o.give.quantity}`,
-      icon: o.give.itemId,
-    }));
-    const giftRow = this.dialogueGiftRowIndex(npc);
-    if (giftRow >= 0) rows.push({ label: '赠礼' });
-    rows.push({ label: '返回' });
-    this.dialogueViewOffset = 0;
-    return rows;
-  }
-
-  /** 选项的扁平总数（导航钳制用）：赠礼层是整张表，不是可见的那四行。 */
-  private dialogueOptionsCount(): number {
-    const d = this.dialogue;
-    if (!d) return 0;
-    if (d.level === 'gift') return this.dialogueGiftEntries().length;
-    return this.dialogueOptionsView().length;
-  }
-
-  // ── AI NPC（feat/ai-npc-spark-integration，默认关闭）─────────────────────
-  // 接线原则：AI 只影响「开场白」这一句话与事后的记忆积累；菜单结构、
-  // 交易执行、数值规则全部走原有路径。未配置模型时以下方法全部空转。
-
-  private getAiRuntime(npc: NpcDef): NpcRuntimeConfig | null {
-    const cfg = aiNpcConfig();
-    if (!cfg.enabled) return null;
-    let runtime = this.aiRuntimes.get(npc.id);
-    if (!runtime) {
-      runtime = {
-        brain: new OllamaBrain({ baseUrl: cfg.baseUrl, model: cfg.model, timeoutMs: cfg.timeoutMs }),
-        // 降级脑给该 NPC 自己的第一句问候——Spark 不可达时玩家看到的就是
-        // 改造前那一句，这是护栏 2 的场景侧落地。
-        fallback: new OptionTreeBrain(npc.greetings[0]),
-        timeoutMs: cfg.timeoutMs,
-        memoryRecallK: cfg.recallK,
-        // 第一阶段只接通 dialogue 的执行路径：模型提议交易/赠送等其他行动
-        // 一律被运行时拒绝并降级，不会出现「说了但没做」或「没说要了」的错位。
-        allowedActions: ['dialogue'],
-      };
-      this.aiRuntimes.set(npc.id, runtime);
-    }
-    return runtime;
-  }
-
-  private npcStateFor(npc: NpcDef): NpcPersistedState {
-    return loadNpcState(getGame(), npc.id) ?? createNpcState(archetypeForNpcId(npc.id));
-  }
-
-  /** 当前对话的保鲜键；没有打开的对话时为 null。 */
-  private currentDialogueSession(): DialogueSession | null {
-    if (!this.dialogueOpen || !this.dialogue) return null;
-    return { sessionId: this.dialogue.sessionId, revision: this.dialogue.revision };
-  }
-
-  /** 异步取一句人格化开场白。取到前画面显示原句，与改造前无差异。 */
-  private async enhanceOpeningLine(npc: NpcDef): Promise<void> {
-    const runtime = this.getAiRuntime(npc);
-    if (!runtime) return;
-    // 请求发出前记住这场对话的保鲜键；45s 后返回时用它判断结果是否过期
-    const captured = this.currentDialogueSession();
-    if (!captured) return;
-    try {
-      // AG-11: npcFactFor 把 npcStates 里已按天结算的真实库存喂给规则执行器
-      // （阶段 C）——模型看到的才是「NPC 现在真的有什么」。静态报价表推导
-      // （npcFactFromDef）会让执行器放行一笔 NPC 库存里根本没有的交易。
-      const decision = await decideNpcAction(getGame(), npcFactFor(getGame(), npc), this.npcStateFor(npc), runtime);
-      if (!decision.validated.ok) return;
-      const { action, utterance } = decision.validated;
-      // 第一阶段只落地对话文本；其他行动类型在第一阶段就被 availableActions 挡掉
-      const line = utterance ?? (action.type === 'dialogue' ? action.text : '');
-      // 保鲜检查：玩家可能已关闭对话、重开、或翻过选项——过期结果一律丢弃，
-      // 不能覆盖玩家眼前的这场新对话（P1-2）。
-      if (line && isDialogueFresh(this.currentDialogueSession(), captured)) {
-        this.dialogue!.message = line;
-        this.dialogue!.revision += 1; // AI 换行本身也是一次修订，防止两次返回互相覆盖
-        this.refreshDialogue();
-      }
-    } catch {
-      // AI 层任何意外都不能把对话搞坏：保持原句即为正确行为
-    }
-  }
-
-  private openDialogue(npc: NpcDef): void {
-    this.dialogueSessionSeq += 1;
-    // AG-77：全 NPC 对话（每位只认第一次开口）。
-    this.achievements.emit({ type: 'npc_talked', npcId: npc.id });
-    this.dialogue = {
-      npc: npc.id,
-      level: 'main',
-      selected: 0,
-      message: npc.greetings[0],
-      lineToggle: 0,
-      sessionId: this.dialogueSessionSeq,
-      revision: 0,
-    };
-    this.dialogueOpen = true;
-    for (const o of this.dialogueObjects) o.setVisible(true);
-    this.refreshDialogue();
-    void this.enhanceOpeningLine(npc);
-  }
-
-  private closeDialogue(): void {
-    this.dialogueOpen = false;
-    this.dialogue = null;
-    for (const o of this.dialogueObjects) o.setVisible(false);
-  }
-
-  private dialogueBack(): void {
-    if (!this.dialogue) return;
-    this.dialogue.revision += 1; // 玩家操作使在途 AI 结果过期
-    if (this.dialogue.level === 'gift') {
-      this.dialogue.level = 'trade';
-      this.dialogue.selected = 0;
-      this.dialogue.message = '想换点什么？';
-      this.refreshDialogue();
-    } else if (this.dialogue.level === 'trade') {
-      this.dialogue.level = 'main';
-      this.dialogue.selected = 0;
-      this.dialogue.message = '';
-      this.refreshDialogue();
-    } else {
-      this.closeDialogue();
-    }
-  }
-
-  private refreshDialogue(): void {
-    const d = this.dialogue;
-    if (!d) return;
-    const npc = getNpc(d.npc);
-    this.dialogueTitle.setText(`${npc.name}（${npc.title}）`);
-    // NpcId is 'alin'|'xiaozhou'; portrait files are keyed by CharacterKey, so
-    // the prefix is the only translation needed.
-    this.dialoguePortrait.setTexture(portraitKey(`npc_${d.npc}` as CharacterKey));
-    this.dialogueMessage.setText(d.message || '……');
-
-    // ── adaptive layout ────────────────────────────────────────────────────
-    // The well's height, the rows under it and the panel around both are
-    // computed from the message's wrapped line count (dialogueGeometry), so an
-    // AI opening line of up to 60 characters — five lines at this width — grows
-    // the panel instead of printing over the option rows. Re-place only: the
-    // objects were built once in buildDialoguePanel at the base geometry, and
-    // destroying them per keystroke is what made the dialogue flicker.
-    const geo = dialogueGeometry(d.message || '……', TYPE.body);
-    const { width, height } = this.viewSize();
-    const cx = width / 2;
-    const left = cx - DIALOG_PANEL_W / 2;
-    const top = height / 2 - geo.panelH / 2;
-    // The header strip rides the panel's top edge: strip, accent rule, (empty)
-    // title and hairline, in buildPanelHeader's return order. The hairline is a
-    // Graphics, so it is cleared and re-drawn rather than moved.
-    const [hStrip, hAccent, hTitle, hLine] = this.dialogueHeaderParts as [
-      Phaser.GameObjects.Rectangle,
-      Phaser.GameObjects.Rectangle,
-      Phaser.GameObjects.Text,
-      Phaser.GameObjects.Graphics,
-    ];
-    hStrip.setPosition(left, top).setSize(DIALOG_PANEL_W, PANEL_HEADER_H);
-    hAccent.setPosition(left, top);
-    hTitle.setPosition(left + 10, top + PANEL_HEADER_H / 2);
-    hLine.clear();
-    drawLine(hLine, left + 2, top + PANEL_HEADER_H - 1, DIALOG_PANEL_W - 2, UI.good, 0.7);
-    // The skin: five stepped fill bands then eight frame pieces (corners first,
-    // then top/bottom/left/right edges), in buildPanel's return order.
-    const bandH = geo.panelH / PANEL_FILL_BANDS;
-    this.dialoguePanelParts.slice(0, PANEL_FILL_BANDS).forEach((part, i) => {
-      const band = part as Phaser.GameObjects.Rectangle;
-      band.setPosition(cx, top + bandH * (i + 0.5));
-      band.setSize(DIALOG_PANEL_W, bandH + 1);
-    });
-    const frame = this.dialoguePanelParts.slice(PANEL_FILL_BANDS, PANEL_FILL_BANDS + PANEL_FRAME_PIECES) as Phaser.GameObjects.Image[];
-    const [fTL, fTR, fBL, fBR, fTop, fBottom, fLeft, fRight] = frame;
-    const right = left + DIALOG_PANEL_W;
-    const bottom = top + geo.panelH;
-    fTL.setPosition(left, top);
-    fTR.setPosition(right - PANEL_SLICE, top);
-    fBL.setPosition(left, bottom - PANEL_SLICE);
-    fBR.setPosition(right - PANEL_SLICE, bottom - PANEL_SLICE);
-    fTop.setPosition(left + PANEL_SLICE, top).setDisplaySize(DIALOG_PANEL_W - PANEL_SLICE * 2, PANEL_SLICE);
-    fBottom.setPosition(left + PANEL_SLICE, bottom - PANEL_SLICE).setDisplaySize(DIALOG_PANEL_W - PANEL_SLICE * 2, PANEL_SLICE);
-    fLeft.setPosition(left, top + PANEL_SLICE).setDisplaySize(PANEL_SLICE, geo.panelH - PANEL_SLICE * 2);
-    fRight.setPosition(right - PANEL_SLICE, top + PANEL_SLICE).setDisplaySize(PANEL_SLICE, geo.panelH - PANEL_SLICE * 2);
-    // The header title and the bust ride the panel's top edge.
-    this.dialogueTitle.setPosition(left + 10, top + 10);
-    this.dialoguePortraitFrame.setPosition(left + DIALOG_PADDING, top + DIALOG_PORTRAIT_TOP);
-    this.dialoguePortrait.setPosition(left + DIALOG_PADDING + DIALOG_PORTRAIT_SIZE / 2, top + DIALOG_PORTRAIT_TOP + DIALOG_PORTRAIT_SIZE / 2);
-    // The well grows; its stroke is redrawn around the new box.
-    const wellLeft = left + DIALOG_WELL_LEFT;
-    const wellTop = top + DIALOG_WELL_TOP;
-    this.dialogueWellFill.setPosition(wellLeft, wellTop).setSize(DIALOG_WELL_W, geo.wellH);
-    this.dialogueWellEdge.clear();
-    this.dialogueWellEdge.lineStyle(1, UI.line, 0.5);
-    this.dialogueWellEdge.strokeRect(Math.round(wellLeft) + 0.5, Math.round(wellTop) + 0.5, DIALOG_WELL_W - 1, geo.wellH - 1);
-    // The message stays centred in the (possibly taller) well.
-    this.dialogueMessage.setPosition(left + DIALOG_TEXT_LEFT, wellTop + geo.wellH / 2);
-    // The four rows and the footer shift with the geometry.
-    for (let i = 0; i < this.dialogueBands.length; i++) {
-      const rowY = top + geo.rowsTop + i * DIALOG_ROW_PITCH;
-      const b = this.dialogueBands[i];
-      b.band.setPosition(left + DIALOG_PADDING, rowY);
-      b.rule.setPosition(left + DIALOG_PADDING, rowY);
-      // The mouse targets move with their row. Left at the base y they accept
-      // the click meant for the row above as soon as a five-line AI message
-      // pushes rowsTop down (measured: hover landed 3px off, click one row low).
-      this.dialogueRowHits[i]?.setPosition(left + DIALOG_PADDING, rowY);
-      this.dialogueOptionIcons[i].setPosition(left + 30, rowY + DIALOG_ROW_H / 2);
-      this.dialogueOptions[i].setPosition(left + 46, rowY + DIALOG_ROW_H / 2);
-    }
-    this.dialogueFooter.setPosition(cx, bottom - 12);
-    // The click-outside box follows the panel's grown height; otherwise the
-    // header and footer of a tall panel count as "outside" and close it.
-    this.panelBox = { x: left, y: top, w: DIALOG_PANEL_W, h: geo.panelH };
-
-    const options = this.dialogueOptionsView();
-    // 钳制对扁平总数，不是对可见行——赠礼层的表比四行长，光标可以停在
-    // 窗口外（由 dialogueViewOffset 滑进来）。
-    const count = this.dialogueOptionsCount();
-    if (d.selected >= count) d.selected = Math.max(0, count - 1);
-    // 光标所在的行 = 扁平下标 − 窗口平移（主菜单/交易层平移为 0，语义不变）。
-    const cursorRow = d.selected - this.dialogueViewOffset;
-    for (let i = 0; i < this.dialogueOptions.length; i++) {
-      const option = options[i];
-      const icon = this.dialogueOptionIcons[i];
-      if (option === undefined) {
-        this.dialogueOptions[i].setText('');
-        icon.setVisible(false);
-        continue;
-      }
-      this.dialogueOptions[i].setText(option.label);
-      if (option.icon) icon.setTexture(itemIconKey(option.icon)).setVisible(true);
-      else icon.setVisible(false);
-      const selected = i === cursorRow;
-      this.dialogueOptions[i].setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
-      const b = this.dialogueBands[i];
-      if (b) {
-        b.band.setAlpha(selected ? 0.14 : 0);
-        b.rule.setAlpha(selected ? 1 : 0);
-      }
-    }
-    const selectedIcon = this.dialogueOptionIcons[cursorRow];
-    this.dialogueMarker.setVisible(options[cursorRow] !== undefined);
-    if (options[cursorRow] && selectedIcon) placeMarkerLeftOf(this.dialogueMarker, selectedIcon);
-  }
-
-  private activateDialogueOption(): void {
-    const d = this.dialogue;
-    if (!d) return;
-    d.revision += 1; // 玩家操作使在途 AI 结果过期
-    const npc = getNpc(d.npc);
-    if (d.level === 'main') {
-      switch (d.selected) {
-        case 0:
-          d.message = npc.greetings[d.lineToggle % npc.greetings.length];
-          d.lineToggle++;
-          break;
-        case 1:
-          d.message = npc.asks[d.lineToggle % npc.asks.length];
-          d.lineToggle++;
-          break;
-        case 2:
-          d.level = 'trade';
-          d.selected = 0;
-          d.message = '想换点什么？';
-          break;
-        default:
-          this.closeDialogue();
-          return;
-      }
-    } else if (d.level === 'gift') {
-      // AG-20: 赠礼层。两条通路都接 npcEconomy 的闭环函数：领取回赠走
-      // claimGift（装不下整体失败，回执「背包空间不足」），送出走
-      // receiveGift（整叠送出，先校验后扣除）。失败 reason 一律显示，
-      // 不静默——玩家按了 Enter 就得知道发生了什么。
-      const entries = this.dialogueGiftEntries();
-      const entry = entries[d.selected];
-      const state = getGame();
-      if (!entry) {
-        d.level = 'trade';
-        d.selected = 0;
-        d.message = '背包是空的，没什么可送。';
-      } else if (entry.kind === 'claim') {
-        const r = claimGift(state, npc);
-        if (r.ok) {
-          saveToStorage(state);
-          this.refreshInventory();
-          playSfx('chest');
-          d.message = `收下 ${getItem(r.itemId).displayName}×${r.quantity}（-${ACTION_COSTS.trade} 分钟）`;
-          this.chargeTime(ACTION_COSTS.trade);
-        } else {
-          playSfx('pickup');
-          d.message = r.reason;
-        }
-      } else {
-        const r = receiveGift(state, npc, entry.itemId, entry.quantity);
-        if (r.ok) {
-          saveToStorage(state);
-          this.refreshInventory();
-          playSfx('trade');
-          d.message = `送出 ${getItem(entry.itemId).displayName}×${entry.quantity}（-${ACTION_COSTS.trade} 分钟）`;
-          this.chargeTime(ACTION_COSTS.trade);
-        } else {
-          playSfx('pickup');
-          d.message = r.reason ?? '赠礼没成';
-        }
-      }
-    } else {
-      const offers = this.dialogueOffers(npc);
-      const giftRow = this.dialogueGiftRowIndex(npc);
-      if (d.selected < offers.length) {
-        // AG-11: 交易执行走 npcEconomy.executeBarter——它一次做完校验（信誉+
-        // 库存过滤后的报价）、原子交易、扣 NPC 库存、记一条 trade 记忆并写回
-        // npcStates。场景原来自己调 trade() + recordNpcTrade：记忆会记两条、
-        // NPC 库存永不消耗（同样的货能无限次换），信誉分级也从未生效。
-        const offer = offers[d.selected];
-        const result = executeBarter(getGame(), npc, offer.id);
-        d.message = result.ok
-          ? `换到了 ${getItem(offer.give.itemId).displayName}×${offer.give.quantity}`
-          : (result.reason ?? '交易没成');
-        if (result.ok) {
-          saveToStorage(getGame());
-          this.refreshInventory();
-          playSfx('trade');
-          d.message = `换到了 ${getItem(offer.give.itemId).displayName}×${offer.give.quantity}（-${ACTION_COSTS.trade} 分钟）`;
-          this.chargeTime(ACTION_COSTS.trade);
-        }
-      } else if (d.selected === giftRow) {
-        // AG-20: 进赠礼层——「伸手不打笑脸人」，礼尚往来也是交道的一部分。
-        d.level = 'gift';
-        d.selected = 0;
-        d.message = '想送点什么？';
-      } else {
-        d.level = 'main';
-        d.selected = 0;
-        d.message = '';
-      }
-    }
-    this.refreshDialogue();
-  }
-
   // ── input ──────────────────────────────────────────────────────────────
   private bindInput(): void {
     const keyboard = this.input.keyboard;
@@ -5914,7 +4869,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.keyM.on('down', () => this.guard('m', this.onToggleMap), this);
     // OVERHAUL Wave C1: S sells inside the shop; nowhere else does anything.
     this.keyS.on('down', () => {
-      if (this.encounterOpen && !getGame().combat && !this.encounter) this.shopSell();
+      if (this.encounterOpen && !getGame().combat && !this.encounter) this.dialogueCtl.shopSell();
     }, this);
     // OVERHAUL Wave C2: F buys the paid shortcut at the up stairwell.
     this.keyF.on('down', () => this.guard('f', this.tryShortcut), this);
@@ -5968,11 +4923,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.invObjects,
       this.craftObjects,
       this.pauseObjects,
-      this.dialogueObjects,
+      this.dialogueCtl.panelObjectsForRecovery(),
       this.encounterObjects,
       this.combat.panelObjectsForRecovery(),
       this.shelterObjects,
-      this.ventureObjects,
       this.nightChoiceObjects,
     ];
     let found = false;
@@ -6008,7 +4962,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
    * player would press Q into silence. Say so instead.
    */
   private onToggleQuests(): void {
-    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.ventureOpen || this.questsOpen) return;
+    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen || this.questsOpen) return;
     if (!this.scene.get('QuestPanel')) {
       this.flash('任务面板未就绪');
       return;
@@ -6051,12 +5005,23 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   }
 
   private onToggleMap(): void {
-    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.ventureOpen) return;
+    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen) return;
     this.openTowerOverview();
   }
 
+  /**
+   * AG-20：G 键/导航条「产业」槽的开关入口。面板互斥 guard 逐字留在场景侧
+   * （RC-03 拆分第 8 步：控制器只做翻转与重建，stairClimb/其他面板的判据是
+   * 场景交互状态）——键盘 guard('g', ...) 与 navSlotRun('venture') 两条路
+   * 都走这一个入口，与 I/C/M 同款。
+   */
+  private onToggleVentures(): void {
+    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen) return;
+    this.dialogueCtl.toggleVentures();
+  }
+
   private onToggleInventory(): void {
-    if (this.stairClimb || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.ventureOpen) return;
+    if (this.stairClimb || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen) return;
     this.toggleInventory();
   }
 
@@ -6083,7 +5048,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   // 「有没有面板开着」的场景判据只有这一份。
   anyPanelOpen(): boolean {
     return (
-      this.encounterOpen || this.shelterOpen || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.decoOpen || this.ventureOpen || this.nightChoiceOpen
+      this.encounterOpen || this.shelterOpen || this.inventoryOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.decoOpen || this.dialogueCtl.ventureIsOpen || this.nightChoiceOpen
     );
   }
 
@@ -6132,7 +5097,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     switch (key) {
       case 'bag': return this.inventoryOpen;
       case 'craft': return this.craftingOpen;
-      case 'venture': return this.ventureOpen;
+      case 'venture': return this.dialogueCtl.ventureIsOpen;
       case 'menu': return this.pauseOpen;
       case 'map': return false;
     }
@@ -6285,11 +5250,11 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       !this.encounterOpen &&
       !this.inventoryOpen &&
       !this.craftingOpen &&
-      !this.dialogueOpen &&
+      !this.dialogueCtl.isOpen &&
       !this.pauseOpen &&
       !this.shelterOpen &&
       !this.nightChoiceOpen &&
-      !this.ventureOpen &&
+      !this.dialogueCtl.ventureIsOpen &&
       !this.decoOpen &&
       this.clearStrayPanels()
     ) {
@@ -6312,7 +5277,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
     // OVERHAUL Wave C1: the shop is open (no combat, no encounter object).
     if (this.encounterOpen && !getGame().combat && !this.encounter) {
-      this.closeShop();
+      this.dialogueCtl.closeShop();
       return;
     }
     if (this.encounterOpen) {
@@ -6335,8 +5300,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
     if (this.inventoryOpen) this.toggleInventory();
     else if (this.craftingOpen) this.toggleCrafting();
-    else if (this.dialogueOpen) this.dialogueBack();
-    else if (this.ventureOpen) this.closeVentures();
+    else if (this.dialogueCtl.isOpen) this.dialogueCtl.back();
+    else if (this.dialogueCtl.ventureIsOpen) this.dialogueCtl.closeVentures();
     else this.togglePause();
   }
 
@@ -6357,8 +5322,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
     // OVERHAUL Wave C1: the shop's cursor.
     if (this.encounterOpen && !getGame().combat && !this.encounter) {
-      this.shopSelected = Math.max(0, this.shopSelected - 1);
-      this.buildShopPanel();
+      this.dialogueCtl.shopMove(-1);
       return;
     }
     // RC-03 拆分第 7 步：战斗光标委托 combat.move（钳位 + 重画在控制器里）。
@@ -6373,12 +5337,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     } else if (this.craftingOpen) {
       this.craftSelected = Math.max(0, this.craftSelected - 1);
       this.refreshCraft();
-    } else if (this.ventureOpen) {
-      this.ventureSelected = Math.max(0, this.ventureSelected - 1);
-      this.buildVenturePanel();
-    } else if (this.dialogueOpen && this.dialogue) {
-      this.dialogue.selected = Math.max(0, this.dialogue.selected - 1);
-      this.refreshDialogue();
+    } else if (this.dialogueCtl.ventureIsOpen) {
+      this.dialogueCtl.ventureMove(-1);
+    } else if (this.dialogueCtl.isOpen) {
+      this.dialogueCtl.move(-1);
     } else if (this.pauseOpen && !this.statsPanel.isOpen) {
       // AG-81：统计面板开着时暂停菜单隐藏着，↑ 不挪它的光标（同 onNavDown）。
       this.pauseSelected = Math.max(0, this.pauseSelected - 1);
@@ -6403,8 +5365,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
     // OVERHAUL Wave C1: the shop's cursor.
     if (this.encounterOpen && !getGame().combat && !this.encounter) {
-      this.shopSelected = Math.min(this.shopRows.length - 1, this.shopSelected + 1);
-      this.buildShopPanel();
+      this.dialogueCtl.shopMove(1);
       return;
     }
     // RC-03 拆分第 7 步：战斗光标委托 combat.move（钳位 + 重画在控制器里）。
@@ -6421,13 +5382,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       const count = this.craftEntries().length;
       this.craftSelected = Math.min(Math.max(0, count - 1), this.craftSelected + 1);
       this.refreshCraft();
-    } else if (this.ventureOpen) {
-      this.ventureSelected = Math.min(VENTURES.length - 1, this.ventureSelected + 1);
-      this.buildVenturePanel();
-    } else if (this.dialogueOpen && this.dialogue) {
-      const count = this.dialogueOptionsCount();
-      this.dialogue.selected = Math.min(Math.max(0, count - 1), this.dialogue.selected + 1);
-      this.refreshDialogue();
+    } else if (this.dialogueCtl.ventureIsOpen) {
+      this.dialogueCtl.ventureMove(1);
+    } else if (this.dialogueCtl.isOpen) {
+      this.dialogueCtl.move(1);
     } else if (this.pauseOpen && !this.statsPanel.isOpen) {
       // AG-81：统计面板开着时暂停菜单是隐藏的，别让 ↓ 偷偷挪它的光标——
       // 否则 ESC 合下面板，标记停在一个玩家没看见过的选项上。
@@ -6436,7 +5394,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
   }
 
-  private onUse(): void {
+  // public：DialogueHost 面之一（RC-03 拆分第 8 步）——行商行/对话行点击的
+  // 「选中后确认」走同一条 Enter 路径（键盘 Enter 的 guard('enter', onUse)
+  // 同款；guard 的 action.call(this) 不依赖可见性）。
+  onUse(): void {
     if (this.stairClimb) return;
     if (this.nightChoiceOpen) {
       this.activateNightChoice();
@@ -6455,7 +5416,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
     // OVERHAUL Wave C1: Enter in the shop buys one of the highlighted item.
     if (this.encounterOpen && !this.encounter) {
-      this.shopBuy();
+      this.dialogueCtl.shopBuy();
       return;
     }
     if (this.encounterOpen) {
@@ -6500,12 +5461,12 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.activateCraftEntry();
       return;
     }
-    if (this.ventureOpen) {
-      this.activateVentureChoice();
+    if (this.dialogueCtl.ventureIsOpen) {
+      this.dialogueCtl.activateVenture();
       return;
     }
-    if (this.dialogueOpen) {
-      this.activateDialogueOption();
+    if (this.dialogueCtl.isOpen) {
+      this.dialogueCtl.activate();
       return;
     }
     // AG-81：统计面板是只读子面板，Enter 不当确认键——它在暂停菜单里就是
@@ -6570,9 +5531,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.onUse();
       return;
     }
-    if (this.inventoryOpen || this.craftingOpen || this.pauseOpen || this.ventureOpen) return;
-    if (this.dialogueOpen) {
-      this.closeDialogue();
+    if (this.inventoryOpen || this.craftingOpen || this.pauseOpen || this.dialogueCtl.ventureIsOpen) return;
+    if (this.dialogueCtl.isOpen) {
+      this.dialogueCtl.close();
       return;
     }
     const state = getGame();
@@ -6581,7 +5542,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // marks pull the player across a room. The trader's spot id is 'shop'.
     const spot = this.nearestEncounterSpot();
     if (spot === 'shop') {
-      this.openShop();
+      this.dialogueCtl.openShop();
       return;
     }
     if (spot) {
@@ -6599,7 +5560,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
     const npc = this.nearestNpc(state);
     if (npc) {
-      this.openDialogue(npc);
+      this.dialogueCtl.open(npc);
       return;
     }
     // AG-51：床铺（自己的床白天翻、夜里睡；室友床搜刮/拆解）与工作台
@@ -6675,7 +5636,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   private tryShortcut(): void {
     const state = getGame();
     if (state.status !== 'playing') return;
-    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.ventureOpen) return;
+    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen) return;
     const top = Math.max(...PLAYABLE_FLOORS_V01);
     if (!shortcutAvailable(state.currentFloor, top)) {
       this.flash('这里没有可抄的近路');
@@ -6754,8 +5715,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     if (this.shelterOpen) return getGame().shelterPlan?.resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回';
     if (this.inventoryOpen) return '↑/↓ 选择 · Enter 使用 · I 关闭';
     if (this.craftingOpen) return '↑/↓ 选择 · Enter 制作 · 拖拽平移 · 滚轮缩放 · C 关闭';
-    if (this.ventureOpen) return '↑/↓ 选择 · Enter 入股 · G 关闭';
-    if (this.dialogueOpen) return '↑/↓ 选择 · Enter 确定 · ESC 返回';
+    if (this.dialogueCtl.ventureIsOpen) return '↑/↓ 选择 · Enter 入股 · G 关闭';
+    if (this.dialogueCtl.isOpen) return '↑/↓ 选择 · Enter 确定 · ESC 返回';
     // AG-81：统计面板只有一条出路——回暂停菜单。Enter 不当确认（只读面板）。
     if (this.statsPanel.isOpen) return 'ESC 返回暂停菜单';
     if (this.pauseOpen) return '↑/↓ 选择 · Enter 确认 · ESC 继续';
@@ -7135,12 +6096,12 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     if (state.shelterPlan?.resolved) {
       // AG-20: 睡醒即跨日，产业结算在 finishNight→sleep 内部发生。前后对比
       // 账本，「昨夜的收益」才能在醒来时就被看见（只观察，不重复结算）。
-      const ledger = state.growth?.ventures?.length ? this.ventureLedgerSnapshot() : null;
+      const ledger = state.growth?.ventures?.length ? this.dialogueCtl.ventureLedgerSnapshot() : null;
       // AG-64：躺进被窝前把悬挂的造访判定结清——人都睡在屋里了，小偷无从
       // 下手；睡醒台词里带上昨夜的一句（settlePendingVisitOnSleep 幂等）。
       const nightPreventedBySleep = settlePendingVisitOnSleep(state);
       const result = finishNight(state);
-      if (ledger) this.diffVentureLedger(ledger);
+      if (ledger) this.dialogueCtl.diffVentureLedger(ledger);
       if (!result.ok) {
         this.flash(result.reason ?? '今晚还不能睡');
         return;
@@ -8147,6 +7108,32 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     return this.combat.juiceState;
   }
 
+  // ── DialogueHost 面（RC-03 拆分第 8 步：NPC 对话/行商/产业/AI NPC） ──────
+  // 其余面（add/tweens/time 三单子 + panelHit/playFx/viewSize/setPanelBox/
+  // setEncounterOpen/rebuildEncounterSpots/refreshStats/refreshInventory/
+  // flash/chargeTime/onUse/assertPanelContent）由场景已有实现满足——与方法
+  // 上方逐条的 public 注释同款纪律：一个方法满足两个接口，不写第二份。
+
+  /** AG-77：全 NPC 对话成就发射（每位只认第一次开口）。 */
+  emitNpcTalked(npcId: NpcId): void {
+    this.achievements.emit({ type: 'npc_talked', npcId });
+  }
+
+  /** 选项箭头标记（render/panels createMarker）——对话光标与产业光标各一支，
+   *  场景重启时由 dialogueCtl.reset() 经这支工厂重建。 */
+  createMarker(): Phaser.GameObjects.Image {
+    return createMarker(this);
+  }
+
+  // ── e2e 契约面：对话运行时快照 ─────────────────────────────────────────
+  // spark.spec.ts 直读 scene.getScene('Game')?.dialogue（{message, sessionId}
+  // 或 null）——迁移前它是场景字段，现在留只读委托 DialogueController 的
+  // dialogueSnapshot()，契约不变、e2e 零改动（AG-41 的保鲜/降级三条断言
+  // 全部走这个读数）。与 juice getter 同款路数。
+  get dialogue(): { message: string; sessionId: number } | null {
+    return this.dialogueCtl.dialogueSnapshot();
+  }
+
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
     // AG-71（RC-03 第 6 步）：导航条先刷，放在每个早退之前——面板的布尔在
@@ -8228,7 +7215,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // is up (openPanelHint returns null then, so the two cannot fight).
     const panelHint = this.openPanelHint();
     if (panelHint !== null) this.hintText.setText(panelHint);
-    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.ventureOpen || this.questsOpen) return;
+    if (this.inventoryOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen || this.questsOpen) return;
     const state = getGame();
 
     // AG-11: the neighbours walk their own schedule. Pure function of game
@@ -8350,9 +7337,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // AG-20: 帧循环跨日时产业结算在 advanceTime 内部发生。前后对比账本，
     // 当日收益/倒塌变成面板读数与一条 flash（只观察，不重复结算——水位
     // 标记 economy:settled-day 仍是结算的唯一把关）。
-    const ledger = state.growth?.ventures?.length ? this.ventureLedgerSnapshot() : null;
+    const ledger = state.growth?.ventures?.length ? this.dialogueCtl.ventureLedgerSnapshot() : null;
     const tick = advanceTime(state, delta);
-    if (ledger) this.diffVentureLedger(ledger);
+    if (ledger) this.dialogueCtl.diffVentureLedger(ledger);
     const rolled = ensureNightEvent(state);
     if (rolled.rolled && rolled.event) {
       if (rolled.event.type === 'wanderer') playSfx('danger');

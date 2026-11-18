@@ -50,6 +50,10 @@ const SCENE_SRC = readFileSync(join(process.cwd(), 'src/scenes/GameScene.ts'), '
 // 攻击备注与行为标签行住在控制器里（与 statsPanelRefresh.test.ts 的
 // sceneSrc/ctrlSrc 双读同款）。
 const COMBAT_CTRL_SRC = readFileSync(join(process.cwd(), 'src/scenes/controllers/CombatController.ts'), 'utf8');
+// RC-03 拆分第 9 步：AG-63 常驻标记（hud-debuff-mark）的创建随 HUD 带迁入
+// HudController——「创建在脚注条上方」的断言改读控制器源，场景侧只留
+// debuffMarkLabel 的求值一行（世界链判饿渴、setDebuffMark 委托绘制）。
+const HUD_CTRL_SRC = readFileSync(join(process.cwd(), 'src/scenes/controllers/HudController.ts'), 'utf8');
 
 /** 一个只装了给定物品的槽位表——武器判定只读 itemId。 */
 function slotsOf(...ids: string[]): Array<{ itemId: string }> {
@@ -190,8 +194,12 @@ describe('GameScene AG-63 wiring', () => {
   });
 
   it('常驻标记创建在脚注条上方，由 debuff 块驱动显隐', () => {
-    expect(SCENE_SRC).toContain(".setName('hud-debuff-mark')");
-    expect(SCENE_SRC).toContain('const label = debuffMarkLabel(hungry, parched);');
+    // 创建在 HudController（第 9 步：HUD 带先毁后建的一部分），显隐驱动在
+    // 场景帧循环的 debuff 块——求值（debuffMarkLabel(hungry, parched)）与
+    // 绘制委托（hud.setDebuffMark）分离，两边各读各的源。
+    expect(HUD_CTRL_SRC).toContain(".setName('hud-debuff-mark')");
+    expect(SCENE_SRC).toContain('debuffMarkLabel(hungry, parched)');
+    expect(SCENE_SRC).toContain('this.hud.setDebuffMark(');
   });
 
   it('面板自己也不再说「造成武器伤害」这种废话', () => {

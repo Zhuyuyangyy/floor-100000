@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { FloatTextPool, playFx, setFxDegraded, startFxLoop } from '../render/fx';
-import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../core/design';
+import { DESIGN_HEIGHT } from '../core/design';
 import { getGame, hasGame, startNewGame } from '../core/session';
 import {
   BED_X,
@@ -13,7 +13,6 @@ import {
   roomCountFor,
   FLOOR_GEOMETRY_BALANCE,
   FLOOR_GEO_SEED_TAG,
-  environmentFor,
   FLOOR_VIEW_ZOOM,
   ENTRY_X,
   FLOOR_BAND,
@@ -52,7 +51,7 @@ import { hasFloorContent } from '../data/floorTemplates';
 import { liftDirection, liftOutcome, liftRequirement, nextSegment, prevSegment, skippedFloors } from '../core/segments';
 import { crossingSummary, floorGeometryFor } from '../core/worldgen';
 import type { FloorGeometry } from '../core/worldgen';
-import { countItem, isBagFull, removeItem, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
+import { countItem, removeItem, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
 import { craft, hasUpgrade, nightOverlayAlpha, purifyWater, recipePreview } from '../systems/CraftingSystem';
 import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, isNight, spendTime } from '../systems/SurvivalSystem';
 import { ensureNightEvent, eventStatus, setEventStatus } from '../systems/EventSystem';
@@ -63,19 +62,10 @@ import { freshWandererAI, stepWandererAI, type WandererAI } from '../systems/wan
 // 重解，命中同一曲目是 no-op）。
 import { RADIO_MINUTES, startFloorMusic, stopBgm, syncMusic, useRadioFromSlot } from '../systems/AudioSystem';
 import { ensureDailyGoal, grantDailyGoalReward, idleWindowSuggestion, isDailyGoalDone } from '../systems/dailyGoals';
-import {
-  BODY_TEMP_MAX,
-  COLD_THRESHOLD,
-  bodyTempOf,
-  warmthAt,
-} from '../systems/EnvironmentSystem';
-import { sicknessOf } from '../systems/SurvivalSystem';
-import { ailmentLabel, inflict } from '../systems/SicknessSystem';
+import { inflict } from '../systems/SicknessSystem';
 import {
   backFromScavenge,
   cheerFromItem,
-  moraleBandOf,
-  moraleLabel,
   witnessTrauma,
 } from '../systems/MoraleSystem';
 import { diaryOf } from '../systems/DiarySystem';
@@ -93,14 +83,14 @@ import {
   stepNightWatch,
   type NightChoice,
 } from '../systems/NightSystem';
-import { recordDepth, runScore } from '../systems/progress';
+import { recordDepth } from '../systems/progress';
 import { CHARACTER_NAMES, applyDepth, loadMeta, saveMeta, unlockFromDepth } from '../systems/metaProgress';
 // AG-77 的求值/计数/持久化（ AchievementSystem ）与 toast 编排
 // （controllers/AchievementController）已随 RC-03 拆分第 5 步迁出；场景只留
 // 事件类型（emitAchievementEvent 委托签名用）。
 import type { AchievementEvent } from '../systems/AchievementSystem';
 import type { CharacterKey } from '../render/artpack';
-import { lowHpPulse, mostUrgentStat, moveSpeedFactor } from '../render/feedback';
+import { lowHpPulse, moveSpeedFactor } from '../render/feedback';
 import { GAME_CONFIG } from '../core/config';
 import {
   markResolved,
@@ -132,6 +122,13 @@ import { TutorialController, type TutorialHost } from './controllers/TutorialCon
 import { AchievementController, type AchievementHost } from './controllers/AchievementController';
 import { NavBarController, type NavBarHost, type NavSlotKey } from './controllers/NavBarController';
 import { DialogueController, type DialogueHost } from './controllers/DialogueController';
+// AG-54/AG-60/AG-67：HUD 顶带（四联圆环/铆钉板/数值行）+ 背包面板在
+// controllers/HudController（RC-03 拆分第 9 步），场景只持控制器本体 +
+// buildHud 编排与公开委托面。BAG_BALANCE 随迁出后经此 re-export——
+// bagPanel.test.ts 的 import 路径（'../scenes/GameScene'）不变（同第 7 步
+// combatWeaponLabel 的先例）。
+import { HudController, STAT_BARS } from './controllers/HudController';
+export { BAG_BALANCE, type BagBalance } from './controllers/HudController';
 import { charge, recordShortcut, shortcutAvailable, shortcutPlan } from '../systems/shortcut';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
@@ -150,7 +147,6 @@ import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_D
 import {
   FONT_FAMILY,
   HUD_FOOT_H,
-  STAT_COLORS,
   TYPE,
   UI,
   buildListRow,
@@ -159,7 +155,7 @@ import {
 } from '../render/uiKit';
 import { characterKeyForNpc } from '../render/artpack';
 import { framedButton, hitRect } from '../render/pointer';
-import { createStatRingsBaker, drawHazardStripe, drawHudIcon, drawHudPlate, type HudIconName, type StatRingsBaker } from '../render/hudSkin';
+import { createStatRingsBaker, type StatRingsBaker } from '../render/hudSkin';
 import { estimateTextWidth } from '../render/dialogueLayout';
 import {
   ATTACK_FRAME_START,
@@ -207,7 +203,7 @@ import {
   buildWallDressing,
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
-import { BAG_LAYOUT, CONTAINER_LABEL_DROP, HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
+import { CONTAINER_LABEL_DROP, HUD_LAYOUT } from '../render/hudLayout';
 // RC-03 拆分第 7 步：BEHAVIOR_LABELS/MONSTER_BAR_COLORS/monsterFormFor 随
 // 战斗台上迁 CombatController；场景只剩两个第一参钉死 Phaser.Scene 的装配
 // 薄封装（CombatHost 面）与两个返回类型。
@@ -290,11 +286,7 @@ const CRAFT_TREE_BUTTON_H = 34;
 // AG-20：终局层（统治核心）。这一层的三个容器是终局演出入口
 // （docs/plans/FINALE_UX.md §2 契约，EndgameScene 归 AG-21）。
 const FINALE_FLOOR = 100000;
-// TWOM 对齐 §1：疾病三档的 HUD 用语。healthy 不进读数——没病不需要占位。
-const SICKNESS_TIER_LABEL: Record<string, string> = {
-  sick: '患病',
-  critical: '病危',
-};
+// SICKNESS_TIER_LABEL 随环境行迁入 HudController（RC-03 拆分第 9 步）。
 // HUD type scale (docs/05_ART_GUIDE.md §2: no size too small to read). Title 16 /
 // body 13 / auxiliary 11 — all integer pixels, since any fractional size would be
 // resampled and blur the pixel look.
@@ -461,20 +453,15 @@ const LIFT_SIGN_FONT = 18;
 const WANDERER_FLEE_SAFE_DISTANCE = 280;
 const WANDERER_FLEE_EXIT_MARGIN = 24;
 
-// Row pitch for the four HUD stat bars. 15px gives an 11px label plus a 7px bar
-// with breathing room; 13px was too cramped to read at a glance.
-
-const STAT_BARS: Array<{ key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: string; color: number; icon: HudIconName }> = [
-  { key: 'hp', label: '生命', color: 0xe56d63, icon: 'cross' },
-  { key: 'hunger', label: '饥饿', color: 0xf4b66a, icon: 'hunger' },
-  { key: 'thirst', label: '口渴', color: 0x6aa8e5, icon: 'thirst' },
-  { key: 'energy', label: '精力', color: 0x77c6a4, icon: 'energy' },
-];
+// STAT_BARS（四联圆环行规格）随 HUD 带迁入 HudController（RC-03 拆分第 9
+// 步）——定义住在圆环的本家，本文件 import 它注入 MonologueController 的
+// 状态卡（同一份数组对象，不复制数据）。
 
 // Body heat gets its own readout rather than a fifth bar: it is the one stat a
 // floor owns, so it reads as "where you are" as much as "how you are". The bar
 // would have said the latter and hidden the former.
-const TEMP_LABEL = '体温值';
+// TEMP_LABEL/SICKNESS_TIER_LABEL/GOAL_LABELS 随 HUD 段迁入 HudController
+// （RC-03 拆分第 9 步）——环境行/疾病档/目标行的用语只有那一处消费者。
 
 // Ailment labels, so the HUD and the item flash name the same thing the same way.
 const AILMENT_LABEL: Record<string, string> = {
@@ -500,13 +487,7 @@ const AILMENT_LABEL: Record<string, string> = {
 // 「本局统计」固定在设置之后（index 5）：统计是只读面板，放最后不碍事。
 const PAUSE_OPTIONS = ['继续游戏', '塔楼地图', '重新开始', '返回标题', '设置', '本局统计'];
 
-// OVERHAUL: the daily objective's one-line label, per goal kind.
-const GOAL_LABELS: Record<'water' | 'containers' | 'upgrade' | 'floor', (target: number) => string> = {
-  water: (n) => `带回 ${n} 瓶净水`,
-  containers: (n) => `搜刮 ${n} 个容器`,
-  upgrade: (n) => `建成 ${n} 项宿舍升级`,
-  floor: (n) => `到达第 ${n} 层`,
-};
+// GOAL_LABELS 随目标行迁入 HudController（RC-03 拆分第 9 步）。
 
 // OVERHAUL: the encounter panel's vocabulary. Titles are the kind's name as the
 // player should read it; labels name the choices in the player's terms.
@@ -600,58 +581,12 @@ function readMovementBalance(): MovementBalance {
 /** 点击操控线的数值入口（AG-50）：GameScene 内不硬编码任何跑动参数。 */
 const MOVEMENT_BALANCE: MovementBalance = readMovementBalance();
 
-// ── AG-60：背包面板的平衡值 ────────────────────────────────────────────
-// 面板/格子几何全部走 config/game-balance.json 的 bag 块（AG-60 放大改版：
-// 440x236/40px 格/12 格 → 880x360/76px 格/14 格）。core/config.ts 的校验
-// 只查必填键，扩展块与 movement/warmthSources 同款按 Record 读；缺字段回退
-// 默认值，旧配置文件照样能跑。布局语言（标题栏/条纹/行锚点/内边距）在
-// render/hudLayout.ts 的 BAG_LAYOUT，两边不重复尺寸。
-export interface BagBalance {
-  panelWidth: number;
-  panelHeight: number;
-  gridCols: number;
-  gridSlots: number;
-  cellSize: number;
-  cellGap: number;
-  iconScale: number;
-  detailGap: number;
-}
-
-const BAG_DEFAULTS: BagBalance = {
-  panelWidth: 880,
-  panelHeight: 360,
-  gridCols: 5,
-  gridSlots: 14,
-  cellSize: 76,
-  cellGap: 8,
-  iconScale: 3,
-  detailGap: 12,
-};
-
-function readBagBalance(): BagBalance {
-  const raw = (GAME_CONFIG as unknown as { bag?: Partial<BagBalance> }).bag ?? {};
-  const num = (v: unknown, fallback: number): number =>
-    typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-  return {
-    panelWidth: num(raw.panelWidth, BAG_DEFAULTS.panelWidth),
-    panelHeight: num(raw.panelHeight, BAG_DEFAULTS.panelHeight),
-    gridCols: num(raw.gridCols, BAG_DEFAULTS.gridCols),
-    gridSlots: num(raw.gridSlots, BAG_DEFAULTS.gridSlots),
-    cellSize: num(raw.cellSize, BAG_DEFAULTS.cellSize),
-    cellGap: num(raw.cellGap, BAG_DEFAULTS.cellGap),
-    iconScale: num(raw.iconScale, BAG_DEFAULTS.iconScale),
-    detailGap: num(raw.detailGap, BAG_DEFAULTS.detailGap),
-  };
-}
-
-/** AG-60：背包面板几何的数值入口——GameScene 内不硬编码任何尺寸。 */
-export const BAG_BALANCE: BagBalance = readBagBalance();
-
 /** 点击落点标记的深度：在地面物件（≤26）之上、HUD（100+）之下。 */
 const CLICK_MARKER_DEPTH = 40;
 
-/** AG-66：程序化生成的铲子图标贴图 key（见 ensureShovelIcon 的注释）。 */
-const SHOVEL_ICON_KEY = 'shovel';
+// AG-60 背包面板平衡值（BagBalance/readBagBalance/BAG_BALANCE）与 AG-66
+// 铲子图标 key 随背包 UI 迁入 HudController（RC-03 拆分第 9 步）——
+// BAG_BALANCE 经上方 re-export 保留外部 import 路径。
 // ── AG-65：NPC 实时散步（用户原话「那些 npc 应该都是可以动的」）────────────
 // 日程（ai/npcSchedule 的 npcAutonomyFor）按游戏时间赶路，玩家站着不动时整层
 // 人是僵的。这里叠一层实时散步：到达日程锚点后在 ±band 内走-停-走，waypoint
@@ -856,28 +791,24 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     until: number;
     timer: Phaser.Time.TimerEvent;
   };
-  /** 程序化生成的铲子图标贴图就绪没有（create 里画一次，背包格用）。 */
-  private shovelIconReady = false;
+  // AG-66 铲子图标就绪标记随背包格迁入 HudController（RC-03 拆分第 9 步）。
 
   // AG-77 成就字段组（achievementSave/achievementQueue/activeToasts/
   // nextToastAt/thirstHitZero/lastAchievementDay/combatDamageTaken）随
   // controllers/AchievementController 迁出（RC-03 拆分第 5 步，见上方
   // achievements 字段处的接线说明）。
 
-  private clockText!: Phaser.GameObjects.Text;
-  /** AG-102（性能轮 3）：四联圆环是一张 RenderTexture——Phaser 4 每帧重三角化
-   *  Graphics 的 ARC 命令，42 条弧实测 0.68ms/帧；数值变化时重烤（render/hudSkin.ts
-   *  的 createStatRingsBaker），每帧只剩一个贴图 quad。 */
-  private statRings?: StatRingsBaker;
-  private statLabels: Phaser.GameObjects.Text[] = [];
-  private statValues: Phaser.GameObjects.Text[] = [];
-  private invCountText?: Phaser.GameObjects.Text;
-  private invCells: Phaser.GameObjects.Rectangle[] = [];
-  /** AG-60：全部格子边框共用这一个 Graphics，refreshInventory 整幅重画 */
-  private invCellBorders!: Phaser.GameObjects.Graphics;
-  private invDetailName?: Phaser.GameObjects.Text;
-  private invDetailMeta?: Phaser.GameObjects.Text;
-  private invDetailBody?: Phaser.GameObjects.Text;
+  // ── AG-54/AG-60/AG-67：HUD 顶带 + 背包面板（RC-03 拆分第 9 步） ─────────
+  // 四联圆环 RT/数值文本/环境 chips/目标行/预警行/暗角/debuff 标记与背包
+  // 全部件（格/图标/徽章/边框/详情/count/光标/面板态）全在 controllers/
+  // HudController.ts，场景只持控制器本体：buildHud 里 reset() 先毁后建 +
+  // build() 一次装配；公开委托面（refreshStats/refreshClock/refresh-
+  // Inventory/toggle/moveSelection/isOpen/selectedIndex）见下方各方法处。
+  // 留场景的只有两件：feedbackText（flash 的同一出口，第 3 步契约「控制器
+  // 不碰 feedbackText 本体」）与 hintText（导航条 contextual 数据源，世界
+  // 链逐帧写、NavBarController 经 worldHintText 读）。
+  private readonly hud = new HudController(this);
+
   private hintText!: Phaser.GameObjects.Text;
   // ── AG-73: 新手教程（RC-03 拆分第 3 步） ─────────────────────────────────
   // 进度状态/世界坐标呼吸框/HUD 圆环高亮框/右上角跳过按钮四样全在
@@ -887,43 +818,23 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   // update、导航条 contextual 分支、Esc 早退与开局 flash 的接线。
   private readonly tutorial = new TutorialController(this, localStorage);
   /**
-   * AG-63: 饥饿/干渴 debuff 期间左下角的常驻小标记（「状态：饥饿」）。绿光
-   * 在身上跑的时候，脚注条上方始终有一行字说它是什么——用户把这片光报成
-   * bug，缺的就是这个名字。平时不可见；坐标在 hudLayout 的 debuffMark 键。
+   * AG-63: 饥饿/干渴 debuff 的常驻小标记（「状态：饥饿」）随 HUD 带迁入
+   * HudController（RC-03 拆分第 9 步）——世界链判饿渴、控制器只画
+   * （hud.setDebuffMark）。绿光在身上跑的时候，脚注条上方始终有一行字说
+   * 它是什么——用户把这片光报成 bug，缺的就是这个名字。平时不可见；坐标
+   * 在 hudLayout 的 debuffMark 键。
    */
-  private debuffMark?: Phaser.GameObjects.Text;
   private feedbackText!: Phaser.GameObjects.Text;
-  // B3-02 §4.2: a full bag used to be a 1.6s flash, so a player who filled the
-  // bag on floor 3 arrived on floor 4 with no reminder and lost the next
-  // container's loot to what looked like a bug. This one stays until a slot
-  // frees up, so the state is readable whenever the player looks.
-  private bagFullText!: Phaser.GameObjects.Text;
-  private bagFullShown = false;
   // OVERHAUL: the day's objective and the run's score, top-right; the low-HP
-  // vignette is a full-screen rect whose alpha the feedback module drives.
-  // Optional because buildHud destroys and clears them on a scene restart
-  // before recreating them — a destroyed Text throws on setText.
-  private floorBadge?: Phaser.GameObjects.Text;
-  private goldText?: Phaser.GameObjects.Text;
-  private goalText?: Phaser.GameObjects.Text;
-  // The environment row is four chips, one per reading, each with its own icon:
-  // 体温值 / 区域 / 潮湿 / 夜间危险. They used to be one string, which meant one
-  // icon's worth of meaning for four unrelated facts.
-  private environmentText?: Phaser.GameObjects.Text;
-  private envRegionText?: Phaser.GameObjects.Text;
-  private envHumidText?: Phaser.GameObjects.Text;
-  private envNightText?: Phaser.GameObjects.Text;
-  private hudIcons?: Phaser.GameObjects.Graphics;
-  private scoreText?: Phaser.GameObjects.Text;
-  /** the low-HP edge warning: bands with their own base weights */
-  private vignetteParts: Array<{ rect: Phaser.GameObjects.Rectangle; weight: number }> = [];
-  private lastGoalKey = '';
+  // vignette; the environment row's four chips; the standing bag-full warning
+  // —— 全部随 HUD 带迁入 HudController（RC-03 拆分第 9 步）。
   // ── AG-67: the bottom-right character card + the monologue ticker ──────
   // RC-03 拆分第 2 步：卡片件/气泡/ticker 状态全在 controllers/Monologue-
   // Controller.ts（plain TS 类，Node 可单测）。字段初始化器不随场景重启重跑
   // ——buildHud 里 monologue.reset() 先毁后建（旧代码 statusCard*/monologue*
-  // 字段组的重置惯例）。STAT_BARS 注入：行规格与 HUD 圆环同源，场景保留一份
-  // 给圆环，控制器一份给状态卡，不复制数据。
+  // 字段组的重置惯例）。STAT_BARS 注入：行规格与 HUD 圆环同源，第 9 步起
+  // 定义住在 HudController（圆环的本家），这里 import 同一份数组注入，
+  // 不复制数据。
   private readonly monologue = new MonologueController(this, STAT_BARS);
   // ── AG-80: 性能层（RC-03 拆分第 4 步） ───────────────────────────────────
   // 飘字池/帧预算守卫/FPS 计数器/降级边沿四样全在 PerfController（plain TS
@@ -995,15 +906,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   /** 上一帧的 gameMinuteOfDay：只有帧循环把时钟推过 18:00 的那一帧算「入夜」 */
   private prevMinuteOfDay: number | null = null;
   private feedbackTimer?: Phaser.Time.TimerEvent;
-  private lastClock = '';
-  private lastStats = '';
-
-  private invObjects: PanelObject[] = [];
-  private invSlotTexts: Phaser.GameObjects.Text[] = [];
-  private invSlotIcons: Phaser.GameObjects.Image[] = [];
-  private invMarker!: Phaser.GameObjects.Image;
-  private invSelected = 0;
-  private inventoryOpen = false;
+  // lastClock/lastStats（HUD 按值缓存键）与 invObjects/invSlotTexts/
+  // invSlotIcons/invMarker/invSelected/inventoryOpen（背包面板件与面板态）
+  // 随 HudController 迁出（RC-03 拆分第 9 步）。
 
   private craftingOpen = false;
   private craftObjects: PanelObject[] = [];
@@ -1160,9 +1065,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // The frame counter is monotonic across the session, so a stale slot would
     // never match anyway — reset to keep the per-create state honest.
     this.lastInputFrame = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, q: -1, l: -1, g: -1, up: -1, down: -1 };
-    // Field initialisers do not re-run, so the HUD's cached visibility has to be
-    // re-derived against the fresh bag of a restarted run.
-    this.bagFullShown = false;
+    // Field initialisers do not re-run, so the HUD's cached bag-full visibility
+    // has to be re-derived against the fresh bag of a restarted run — the flag
+    // itself lives in HudController (RC-03 拆分第 9 步，hud.reset() 清零）。
 
     // Every builder below only pushes into these, and field initialisers do not
     // re-run on scene restart. Without the reset, 重新开始 left them holding the
@@ -1172,10 +1077,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.containerObjs.clear();
     this.npcObjs.clear();
     this.groundObjs.clear();
-    this.invObjects = [];
-    this.invSlotTexts = [];
-    this.invSlotIcons = [];
-    this.invMarker = createMarker(this);
+    // RC-03 拆分第 9 步：背包面板件/光标/面板态与 bagFullShown 的重置本体在
+    // HudController.reset（buildHud 顶部先毁后建——比这里的数组清零更狠：
+    // 旧件直接 destroy，不再留不可见的幽灵件占显示列表）。
     this.craftObjects = [];
     this.craftMarker = createMarker(this);
     this.pauseObjects = [];
@@ -1196,9 +1100,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.prevMinuteOfDay = getGame().gameMinuteOfDay;
     // 重新开始 runs while the pause menu is still open, and these flags survive a
     // restart. Left set, update() early-returns forever and every panel handler
-    // refuses to run, so the restarted game looks frozen.
-    this.inventoryOpen = false;
-    this.invSelected = 0;
+    // refuses to run, so the restarted game looks frozen.（背包的 inventory-
+    // Open/invSelected 同理——本体在 HudController.reset。）
     this.craftingOpen = false;
     this.craftSelected = 0;
     this.shelterOpen = false;
@@ -1217,8 +1120,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // 字段初始化器不重跑，旧 walkTarget 会让新角色自己先走两步。
     this.walkTarget = null;
     this.lastClick = undefined;
-    this.lastClock = '';
-    this.lastStats = '';
+    // lastClock/lastStats 的清零随 HUD 按值缓存键迁入 HudController.reset
+    // （RC-03 拆分第 9 步）。
     // AG-66：阻碍物名册与进行中动作不随字段初始化器重生（场景重启复用实例），
     // 在这里显式清空——否则上一局的 timer 会在新局到点出货。
     this.floorObstacles = [];
@@ -1260,8 +1163,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // the room dark around them.
     this.playerLight = addGlow(this, FLOOR_WIDTH / 2, PLAYER_FEET_Y - 40, 54, 0, LIGHT_DEPTH);
     // AG-66：背包里会出现铲子（craft_shovel），artpack 没有它的贴图，程序化
-    // 画一把 16×16 顶着（render/artpack.ts 不归本工单，见 ensureShovelIcon）。
-    this.ensureShovelIcon();
+    // 画一把 16×16 顶着。本体随背包格迁入 HudController（RC-03 拆分第 9
+    // 步：hud.build() 开头调 ensureShovelIcon——贴图只被背包格消费，在面板
+    // 首次刷新之前就位，与原创建期时序等价）。
 
     // AG-74：楼层 BGM。按当前上下文起（入夜/带电台都由 resolveTrackId 决定），
     // AudioContext 未获手势前只记待播、不发声（自动播放策略）。
@@ -1278,8 +1182,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
 
     this.drawFloor();
 
+    // RC-03 拆分第 9 步：HUD 顶带 + 背包面板的一次性装配都在 HudController
+    // .build()（buildHud 编排内）——原 create 的 buildHud()+buildInventory-
+    // Panel() 两行并成 buildHud() 一行，面板相对次序不变（先 HUD 带后背包）。
     this.buildHud();
-    this.buildInventoryPanel();
     this.buildCraftPanel();
     // RC-03 拆分第 8 步：对话面板的一次性装配本体在 DialogueController.build
     // （与背包/制作/暂停同一批 create 期 build，重启由 reset+build 重建）。
@@ -3345,195 +3251,46 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.bunkObjs.set(`own_bed_${STARTING_FLOOR}`, { x: BED_X, own: true, objects: [g, bedLabel] });
   }
 
-  // ── HUD & inventory UI ─────────────────────────────────────────────────
+  // ── HUD & inventory UI（RC-03 拆分第 9 步：编排留场景，本体在 HudController）─
+  /**
+   * create() 尾部调用一次：HUD 顶带 + 背包面板。第 9 步后这里是纯编排——
+   * 先毁后建的顺序与原 buildHud 一致（HUD 本体 → 底部导航条 → 角色卡），
+   * 场景重启保 display list 且字段初始化器不重跑，上一局的件不清会双份上
+   * 屏、stale Text 一 setText 就抛（Phaser 4 的 shutdown 只空纹理）。
+   *
+   * 留场景的两件（其余全在 HudController）：
+   *   * feedbackText——flash() 是 ~30 处出口的同一反馈行（第 3 步契约：
+   *     控制器不碰 feedbackText 本体），深度 HUD_FEEDBACK_DEPTH；
+   *   * hintText——AG-71 起退居不可见的状态对象，世界链逐帧写它、
+   *     NavBarController 经 worldHintText() 读，e2e 按 name 断言全串文本。
+   */
   private buildHud(): void {
-    // A scene restart keeps the display list — Phaser 4's shutdown only nulls
-    // the textures — and field initialisers do not re-run, so the previous
-    // run's HUD objects would both double up on screen and throw on the first
-    // setText/setColor (a stale Text's glTexture is null). Destroy and reset
-    // everything this method owns before rebuilding.
-    this.statLabels = [];
-    this.statValues = [];
-    this.lastGoalKey = '';
-    this.environmentText?.destroy();
-    this.environmentText = undefined;
-    this.envRegionText?.destroy();
-    this.envRegionText = undefined;
-    this.envHumidText?.destroy();
-    this.envHumidText = undefined;
-    this.envNightText?.destroy();
-    this.envNightText = undefined;
-    this.hudIcons?.destroy();
-    this.hudIcons = undefined;
-    // AG-102：圆环贴图的 Image 同属先毁后建之列——重启时旧图留着的话，新图会
-    // 在同一位置再画一遍，半透明抗锯齿边缘叠一次会变深。
-    this.statRings?.destroy();
-    this.statRings = undefined;
-    this.goalText?.destroy();
-    this.goalText = undefined;
-    this.scoreText?.destroy();
-    this.scoreText = undefined;
-    for (const p of this.vignetteParts) p.rect.destroy();
-    this.vignetteParts = [];
-    this.floorBadge?.destroy();
-    this.floorBadge = undefined;
-    this.goldText?.destroy();
-    this.goldText = undefined;
-    // AG-67（RC-03 第 2 步）：角色卡 + 自言自语 ticker 先毁后建——场景重启保
-    // display list 且字段初始化器不重跑，旧卡件/气泡/定时器不清会双份上屏、
-    // stale Text 一 setText 就抛（MonologueController.reset 的旧字段组等价）。
+    // 先毁后建：HUD 本体（板/圆环 RT/数值行/环境 chips/预警行/暗角/debuff
+    // 标记/背包全部件）+ 两个共用底栏的控制器。reset 内逐件 destroy。
+    this.hud.reset();
+    // AG-67（RC-03 第 2 步）：角色卡 + 自言自语 ticker 先毁后建。
     this.monologue.reset();
-    // AG-71（RC-03 第 6 步）：底部导航条先毁后建——同上，旧板/状态层/六文本/
-    // 五张 hitRect 不清会双份上屏、stale Text 一 setText 就抛。
+    // AG-71（RC-03 第 6 步）：底部导航条先毁后建。
     this.navBar.reset();
 
-    // The 2026-11-14 HUD skin: one riveted plate holding three rows —
-    // instruments, the day's objective, the environment readout. See
-    // render/hudSkin.ts for why this is drawn rather than dropped in as the
-    // concept PNGs.
-    const hud = HUD_LAYOUT;
-    this.add.rectangle(0, 0, DESIGN_WIDTH, hud.contextBottom, UI.surface).setOrigin(0).setAlpha(0.98).setScrollFactor(0).setDepth(100);
-    const plate = this.add.graphics().setScrollFactor(0).setDepth(101);
-    drawHudPlate(plate, DESIGN_WIDTH, hud.contextBottom, 0x0b0f12, UI.line, PALETTE.stoneLight, PALETTE.light);
-    // Group dividers: floor block | stats | money.
-    plate.fillStyle(UI.line, 0.85);
-    plate.fillRect(268, 12, 1, hud.topHeight - 24);
-    plate.fillRect(hud.moneyX - 16, 12, 1, hud.topHeight - 24);
-    // Row separators.
-    plate.fillRect(16, hud.topHeight, DESIGN_WIDTH - 32, 1);
-    plate.fillRect(16, hud.environmentY - 10, DESIGN_WIDTH - 32, 1);
-    // The concept's hazard stripe under the right end of the environment row.
-    drawHazardStripe(plate, hud.hazardX, hud.environmentY - 6, 176, 12, PALETTE.lightDeep);
-
-    // Static glyphs. Only the numbers and the two context rows move, so the
-    // icons are drawn once here and never touched again.
-    this.hudIcons = this.add.graphics().setScrollFactor(0).setDepth(103);
-    const icon = (name: HudIconName, x: number, y: number, color: number): void => {
-      drawHudIcon(this.hudIcons as Phaser.GameObjects.Graphics, name, x, y, 16, color);
-    };
-    icon('tower', 20, hud.row1Y, PALETTE.lightHigh);
-    icon('calendar', 20, hud.row1Y + 28, TEXT.secondary);
-    icon('coins', hud.moneyX, hud.row1Y, PALETTE.light);
-    icon('star', hud.moneyX, hud.row1Y + 28, TEXT.highlight);
-    icon('clipboard', 20, hud.goalY - 4, PALETTE.lightHigh);
-    hud.envChipX.forEach((cx, i) => {
-      const names: HudIconName[] = ['thermo', 'wind', 'drop', 'moon'];
-      icon(names[i], cx, hud.environmentY - 4, i === 0 ? PALETTE.light : TEXT.secondary);
-    });
-    // AG-54: the four stat bars became four stat rings. Each group is the
-    // ring, its pixel icon and its label; the value sits in the ring's well.
-    STAT_BARS.forEach((stat, i) => {
-      const gx = hud.statX + i * hud.statPitch;
-      icon(stat.icon, gx + hud.ringR * 2 + 8, hud.ringCY - 8, STAT_COLORS[stat.key]);
-    });
-
-    this.floorBadge = this.add.text(46, hud.row1Y - 2, '', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.lightHigh) })
-      .setName('hud-floor').setScrollFactor(0).setDepth(103);
-    this.clockText = this.add.text(42, hud.row1Y + 28, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
-      .setName('hud-clock').setScrollFactor(0).setDepth(103);
-    this.refreshClock();
-
-    // AG-102（性能轮 3）：四联圆环从每帧重三角化的 Graphics 换成一张
-    // RenderTexture——同一条 WebGL 三角化路径画进 FBO，只在数值变化时重画，
-    // 每帧只剩一个 quad。（不用 Graphics.generateTexture：它的 Canvas 2D
-    // 光栅化与线上三角化的边缘像素对不上，冻结 diff 0.128% 不过像素级关口；
-    // 见 render/hudSkin.ts 的路线记录。）重建顺序与原 Graphics 一致：环在
-    // 文本之下，重启时先毁后建。
-    this.statRings = createStatRingsBaker(this, hud);
-    STAT_BARS.forEach((stat, i) => {
-      const gx = hud.statX + i * hud.statPitch;
-      this.statLabels.push(this.add.text(gx + hud.ringR * 2 + 30, hud.statLabelY, stat.label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
-        .setName(`hud-stat-${stat.key}`).setScrollFactor(0).setDepth(103));
-      // The value rides in the ring's centre, origin half/half, so the dial
-      // reads as one instrument: gauge around, number inside.
-      this.statValues.push(this.add.text(gx + hud.ringR, hud.ringCY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
-        .setOrigin(0.5, 0.5).setName(`hud-value-${stat.key}`).setScrollFactor(0).setDepth(103));
-    });
-    this.refreshStats();
-
-    this.goldText = this.add.text(hud.moneyX + 24, hud.row1Y, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
-      .setOrigin(0, 0).setName('hud-gold').setScrollFactor(0).setDepth(103);
-    this.scoreText = this.add.text(hud.moneyX + 24, hud.row1Y + 28, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
-      .setOrigin(0, 0).setName('hud-score').setScrollFactor(0).setDepth(103);
-
-    this.goalText = this.add.text(44, hud.goalY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
-      .setName('hud-goal').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
-    // Four environment chips. Each owns one reading, so a player scanning for
-    // "is it night" does not have to parse a sentence.
-    const chip = (x: number, name: string, color: string): Phaser.GameObjects.Text =>
-      this.add.text(x + 24, hud.environmentY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color })
-        .setName(name).setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
-    this.environmentText = chip(hud.envChipX[0], 'hud-environment', hex(TEXT.secondary));
-    this.envRegionText = chip(hud.envChipX[1], 'hud-region', hex(TEXT.secondary));
-    this.envHumidText = chip(hud.envChipX[2], 'hud-humid', hex(TEXT.secondary));
-    this.envNightText = chip(hud.envChipX[3], 'hud-night', hex(TEXT.secondary));
-
-    // Feedback has a dedicated lower lane. It remains above modal panels but
-    // can never collide with the daily objective or the permanent environment.
-    this.feedbackText = this.add.text(20, hud.feedbackY, '', {
-      fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh),
-      backgroundColor: '#0b0f12ee', padding: { x: 8, y: 5 }, wordWrap: { width: 1216 },
-    }).setName('hud-feedback').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
-    this.bagFullText = this.add.text(20, hud.bagY,
-      '背包已满 · 使用、制作或交易腾出格子，否则搜刮会留在原处；能叠进已有堆的物品仍可拾取',
-      { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12ee', padding: { x: 8, y: 3 }, wordWrap: { width: 1216 } },
-    ).setName('hud-bag-full').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
+    // AG-54/AG-60/AG-67：HUD 顶带（四联圆环 + 铆钉板 + 数值/目标/环境行 +
+    // 预警行 + 低血红环暗角 + debuff 标记）与背包面板（格/详情/放大面板）
+    // 都在 HudController.build()——含 AG-66 铲子图标与 AG-102 圆环 RT 的
+    // 首次烘焙。原 create 的 buildInventoryPanel() 一行并在这里面（面板相对
+    // 次序不变：先 HUD 带后背包）。
+    this.hud.build();
 
     // ── AG-71: the bottom navigation bar ──────────────────────────────────────
     // 参考 UI 的常驻底栏：一个 contextual 槽 + 五个固定槽，六个槽一条铆钉板。
     // hud-hint 退居状态对象（不可见）：它的文案是 contextual 槽的唯一数据源
     // （世界链逐帧刷新、面板链在开面板那一帧落定），e2e 仍按 name 断言它的
-    // 全串文本；显示层是导航条自己的 hud-nav-context，见 buildNavBar。
+    // 全串文本；显示层是导航条自己的 hud-nav-context，见 NavBarController。
     this.hintText = this.add
       .text(8, DESIGN_HEIGHT - HUD_FOOT_H / 2, WORLD_DEFAULT_HINT, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
       .setOrigin(0, 0.5).setName('hud-hint').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
     // AG-71（RC-03 第 6 步）：六槽铆钉板的构建在 NavBarController；hud-hint
     // 这个状态对象留场景——世界链逐帧写它，控制器经 worldHintText() 读。
     this.navBar.build();
-    // 裁决记录（merge ag-63）：HEAD 侧为 AG-71 导航条版 hud-hint（退居不可见
-    // 状态对象），ag-63 侧的旧可见 hintText 让位；debuffMark 创建移植到此，
-    // 与 hud-hint 同深度同热区纪律，平时不可见。
-    // AG-63: the debuff's standing marker, one line above the hint. Invisible
-    // until hunger or thirst crosses 25%; the fx block in update() drives it.
-    // hudLayout pins the y between the bag-full lane and the foot bar.
-    this.debuffMark = this.add
-      .text(HUD_LAYOUT.debuffMarkX, HUD_LAYOUT.debuffMarkY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn) })
-      .setOrigin(0, 0.5).setName('hud-debuff-mark').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
-
-    // The low-HP vignette: pure red wash whose alpha is the pulse function's
-    // output. Created invisible; update() drives it every frame.
-    // THE SAME fillAlpha TRAP AS THE NIGHT OVERLAY: this was created with a
-    // positional fillAlpha of 0 and only ever driven through setAlpha(), so the
-    // red low-HP warning never drew a single frame.
-    //
-    // Fixing it exposed a second problem that had never been visible either: as
-    // one full-screen rectangle the pulse peaks near 0.9, which floods the frame
-    // with red and hides the game at exactly the moment the player needs to see
-    // it. A warning should live at the EDGES. Eight bands (three deep on each
-    // side) carry decreasing alphas so the centre stays clear, which is what a
-    // vignette is for.
-    this.vignetteParts = [];
-    const band = (x: number, y: number, w: number, h: number, weight: number): void => {
-      const r = this.add
-        .rectangle(x, y, w, h)
-        .setFillStyle(0xe56d63, 1)
-        .setAlpha(0)
-        .setOrigin(0, 0)
-        .setScrollFactor(0)
-        .setDepth(90);
-      this.vignetteParts.push({ rect: r, weight });
-    };
-    const T = 26;
-    for (let i = 0; i < 3; i++) {
-      const inset = i * T;
-      const weight = 0.9 - i * 0.26; // deepest band is the strongest
-      band(0, inset, DESIGN_WIDTH, T, weight); // top
-      band(0, DESIGN_HEIGHT - inset - T, DESIGN_WIDTH, T, weight); // bottom
-      band(inset, 0, T, DESIGN_HEIGHT, weight); // left
-      band(DESIGN_WIDTH - inset - T, 0, T, DESIGN_HEIGHT, weight); // right
-    }
-    this.lastStats = '';
-    this.refreshGoalHud();
 
     // ── AG-67: the bottom-right character card + the monologue ticker ────
     // Built last, so the card's lane is measured against the FINISHED hud:
@@ -3543,42 +3300,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.monologue.build();
   }
 
-  // OVERHAUL: the day's objective (rolled lazily on first read of the day) and
-  // the run score + depth record. Recomputed on a key so the text objects are
-  // only touched when something actually changed.
-  //
-  // Guarded because refreshStats() — which calls this — runs from buildHud
-  // before the goal/score texts exist; the first real call is the one at the
-  // end of buildHud, after they are created.
-  private refreshGoalHud(): void {
-    if (!this.goalText || !this.scoreText) return;
-    const state = getGame();
-    ensureDailyGoal(state);
-    const goal = state.dailyGoal;
-    const done = goal ? isDailyGoalDone(state) : false;
-    const label = goal ? GOAL_LABELS[goal.kind](goal.target) : '';
-    const stress = Math.round(state.player.stress ?? 20);
-    const key = `${goal?.day ?? 0}|${goal?.kind ?? ''}|${goal?.target ?? 0}|${String(done)}|${stress}`;
-    if (key !== this.lastGoalKey) {
-      this.lastGoalKey = key;
-      this.goalText.setText(`目标 ${label}${done ? ' ✓' : ''} · 压力 ${stress}`);
-      this.goalText.setColor(done ? hex(TEXT.highlight) : hex(PALETTE.lightHigh));
-    }
-    this.scoreText.setText(`分数 ${runScore(state)}`);
-    this.goldText?.setText(`金币 ${state.player.gold}`);
-    this.scoreText.setFontSize(TYPE.caption);
-    if (this.scoreText.width > 240) this.scoreText.setFontSize(18);
-    if (this.goldText) {
-      this.goldText.setFontSize(TYPE.caption);
-      if (this.goldText.width > 240) this.goldText.setFontSize(18);
-    }
-    this.fitHudLine(this.goalText, 1200);
-  }
-
   /** Preserve legible type; shorten only exceptional overlong HUD strings.
    *  AG-71（RC-03 第 6 步）：public——NavBarHost 的截断面，contextual 槽的
-   *  超宽战斗脚注在这里截断（goalText/clockText/环境 chips 同口径），截断
-   *  算法只有这一份。 */
+   *  超宽战斗脚注在这里截断（HudController 的目标行/时钟/环境 chips 同口径），
+   *  截断算法只有这一份。 */
   fitHudLine(text: Phaser.GameObjects.Text, width: number): void {
     if (text.width <= width) return;
     const characters = Array.from(text.text);
@@ -3588,366 +3313,58 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
   }
 
-  private refreshClock(): void {
-    const s = getGame();
-    const label = hudClockLabel(s.day, s.gameMinuteOfDay);
-    if (label !== this.lastClock) {
-      this.lastClock = label;
-      this.clockText.setText(label);
-    }
-    this.floorBadge?.setText(`第${s.currentFloor}层`);
-    this.fitHudLine(this.clockText, 164);
-  }
-
-  // public：CombatHost 面之一（RC-03 拆分第 7 步）——战斗回合推进/掉血后的
-  // HUD 刷新走这一份实现（圆环按值缓存 + 时钟/目标行），与世界链同一口径。
+  // public：CombatHost/DialogueHost/世界链/冻结探针（split-step7/8 的
+  // s.refreshStats()）共用这一份实现——第 9 步后委托 HudController（圆环
+  // 按值缓存 + 时钟/目标行/金币/分数），场景不复制第二份刷新逻辑。
   refreshStats(): void {
-    // Transactions can change money while a modal freezes the ordinary tick.
-    this.refreshGoalHud();
-    const p = getGame().player;
-    const values = [p.hp, p.hunger, p.thirst, p.energy];
-    const key = `${values.map((v) => Math.round(v)).join(',')}|${Math.round(p.stress ?? 20)}`;
-    if (key === this.lastStats) return;
-    this.lastStats = key;
-    // AG-102（性能轮 3）：圆环整组重烤进 RenderTexture。这就是旧 clear+重画
-    // 所在的位置——只在数值变化时跑，绝不每帧——RT 把 42 条弧在这里三角化
-    // 一次，取代 WebGL 渲染器每帧的重三角化（实测 0.68ms/帧，见
-    // docs/2026-11-18-PERF-ROUND2-CHUNK-CULL.md §4）。
-    this.statRings?.redraw(values, STAT_BARS.map((s) => STAT_COLORS[s.key] ?? UI.good), UI.danger);
-    values.forEach((v, i) => {
-      const frac = v / 100;
-      // 12 pips at 30 degrees: the concept sheet's bar, turned into a ring.
-      // A stat running out lights danger red whatever its own colour is, the
-      // same <=20% rule the bar had; its number goes warn with it.
-      this.statValues[i]?.setText(String(Math.round(v)));
-      this.statValues[i]?.setColor(frac <= 0.2 ? hex(TEXT.warn) : hex(TEXT.primary));
-    });
-    // The most urgent bar's label turns red, so the critical slot is findable
-    // without reading four numbers.
-    const urgent = mostUrgentStat(getGame().player);
-    this.statLabels.forEach((t, i) => t.setColor(STAT_BARS[i].key === urgent ? hex(TEXT.warn) : hex(TEXT.secondary)));
+    this.hud.refreshStats();
   }
 
-  /**
-   * The environment line refreshes on its own, not from refreshStats.
-   *
-   * refreshStats early-returns when the four bars have not moved, and the
-   * environment changes without any of them moving - walking from floor 4 onto
-   * floor 5's brazier changes the heat and nothing else. Calling it from the
-   * frame loop instead is what keeps the line honest.
-   */
-  private refreshEnvironmentHud(): void {
-    if (!this.environmentText || !this.envRegionText || !this.envHumidText || !this.envNightText) return;
-    const state = getGame();
-    const temp = bodyTempOf(state);
-    // The readout says what the heat is doing, not just the number: "回暖中" next
-    // to a brazier is the feedback that standing here was the right call.
-    const heat = warmthAt(state.currentFloor, state.player.x);
-    let mood: string;
-    if (heat > 0 && temp < BODY_TEMP_MAX) mood = '回暖中';
-    else if (temp <= COLD_THRESHOLD) mood = '寒冷';
-    else if (temp >= 85) mood = '暖和';
-    else mood = '微凉';
-    // An ailment outranks the weather: being ill is more urgent than being
-    // chilly, and this row is the only place either is stated.
-    const ill = ailmentLabel(state);
-    const env = environmentFor(state.currentFloor);
-    const night = isNight(state.gameMinuteOfDay);
-
-    this.environmentText.setText(`${TEMP_LABEL} ${Math.round(temp)} ${mood}`);
-    this.environmentText.setColor(temp <= COLD_THRESHOLD || ill !== '' ? hex(TEXT.warn) : hex(TEXT.secondary));
-
-    // Region, with the player's own state folded in when there is any — an
-    // ailment, a sickness tier and a sagging morale are properties of the
-    // survivor, not of the floor, so they ride on the region chip rather than
-    // getting a fifth slot. TWOM 对齐 §1/§2：疾病三档与心情点数终于有读数。
-    // 只在该报警时报——士气高涨不必占这一行，低落必须占。
-    const tier = sicknessOf(state);
-    const sagging = moraleBandOf(state) === 'low';
-    const flags: string[] = [];
-    if (ill !== '') flags.push(ill);
-    if (tier !== 'healthy') flags.push(SICKNESS_TIER_LABEL[tier]);
-    if (sagging) flags.push(moraleLabel(state));
-    this.envRegionText.setText(`区域 ${flags.length ? `${flags.join(' · ')} · ` : ''}${env.label}`);
-    this.envRegionText.setColor(ill !== '' || tier !== 'healthy' || sagging ? hex(TEXT.warn) : hex(TEXT.secondary));
-
-    this.envHumidText.setText(env.humidity >= 0.5 ? '潮湿' : '干燥');
-    this.envNightText.setText(env.hostile && night ? '夜间危险' : night ? '夜间' : '安全');
-
-    this.fitHudLine(this.envRegionText, HUD_LAYOUT.envChipX[2] - HUD_LAYOUT.envChipX[1] - 28);
-    this.fitHudLine(this.envHumidText, HUD_LAYOUT.envChipX[3] - HUD_LAYOUT.envChipX[2] - 28);
-    this.fitHudLine(this.envNightText, HUD_LAYOUT.hazardX - HUD_LAYOUT.envChipX[3] - 28);
-  }
-
-  private buildInventoryPanel(): void {
-    // AG-60 放大改版（用户 2026-11-17：「感觉 i 还是比较简陋吧，首先这个背包
-    // 界面可以稍微做大一点」）：440x236 / 40px 格 / 12 格 → 880x360 / 76px 格 /
-    // 14 格。几何数值全在 config/game-balance.json 的 bag 块（BAG_BALANCE），
-    // 布局语言在 render/hudLayout.ts 的 BAG_LAYOUT——本方法内不硬编码尺寸。
-    //
-    // 视觉沿用 hudSkin 的铆钉板+危险条纹语言，不自创风格：buildPanel 的五段
-    // 渐变底板与八件框筋原样保留，标题栏下加一条通栏危险条纹
-    // （drawHazardStripe，HUD 同款），四角补 2x2 铆钉（drawHudPlate 的同款
-    // 摆法）。底板半透明，世界照旧透得出来。
-    //
-    // 14 格 = 5 列 x 3 行（末行 4 格，ragged，与末行两格「未解锁」合成一组
-    // 读数）。容量由 inventory.slotCount 决定（基础 12 + 置物架 2），超出当前
-    // 容量的格子画成未解锁：压暗 + 斜纹 + 不响应鼠标；置物架做成后
-    // refreshInventory 自然点亮，标题栏计数同步切到 x/14。
-    const { width, height } = this.viewSize();
-    const panelW = BAG_BALANCE.panelWidth;
-    const panelH = BAG_BALANCE.panelHeight;
-    const cx = width / 2;
-    const cy = height / 2;
-    const left = cx - panelW / 2;
-    const top = cy - panelH / 2;
-    // Remembered for the mouse: a click outside this rectangle closes the panel.
-    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
-    const depth = PANEL_DEPTH.game.inventory;
-
-    this.invObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'item', depth));
-    this.invObjects.push(...buildPanelHeader(this, left, top, panelW, '背包', UI.good, depth + 5));
-    // The capacity readout on the header's right: used / capacity. It reads
-    // inventory.slotCount (12, or 14 once the storage rack is crafted), NOT the
-    // grid size — the old /12 said 12 even with the rack's two extra slots in
-    // the save, and the two dimmed cells at the end of the grid now show exactly
-    // what that count is talking about.
-    this.invObjects.push(
-      this.add
-        .text(left + panelW - 10, top + BAG_LAYOUT.headerH / 2, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
-        .setOrigin(1, 0.5)
-        .setDepth(depth + 6),
-    );
-    this.invCountText = this.invObjects[this.invObjects.length - 1] as Phaser.GameObjects.Text;
-
-    // ── 危险条纹 + 四角铆钉（hudSkin 语言，HUD 同款）─────────────────────
-    const skin = this.add.graphics().setScrollFactor(0).setDepth(depth + 4);
-    drawHazardStripe(
-      skin,
-      left + BAG_LAYOUT.stripeInset,
-      top + BAG_LAYOUT.headerH,
-      panelW - BAG_LAYOUT.stripeInset * 2,
-      BAG_LAYOUT.stripeH,
-      PALETTE.lightDeep,
-    );
-    skin.fillStyle(PALETTE.stoneLight, 0.85);
-    const ri = BAG_LAYOUT.rivetInset;
-    const rivetY = top + BAG_LAYOUT.headerH + BAG_LAYOUT.stripeH + 4;
-    const rivets: Array<[number, number]> = [
-      [left + ri, rivetY],
-      [left + panelW - ri - 2, rivetY],
-      [left + ri, top + panelH - ri - 2],
-      [left + panelW - ri - 2, top + panelH - ri - 2],
-    ];
-    for (const [rx, ry] of rivets) skin.fillRect(rx, ry, 2, 2);
-    this.invObjects.push(skin);
-
-    // ── the grid ────────────────────────────────────────────────────────────
-    // 5 columns x 3 rows of 76px cells: fourteen slots — the base 12 plus the
-    // storage rack's 2, drawn locked until the rack is crafted — no scrolling,
-    // and each cell is big enough for a 3x icon (pixel art upscales cleanly at
-    // integer factors, unlike the old 16px icons in a 20px row).
-    const GRID_X = left + BAG_LAYOUT.padX;
-    const GRID_Y = top + BAG_LAYOUT.contentTop;
-    const CELL = BAG_BALANCE.cellSize;
-    const GAP = BAG_BALANCE.cellGap;
-    const COLS = BAG_BALANCE.gridCols;
-    const ROWS = Math.ceil(BAG_BALANCE.gridSlots / COLS);
-    this.invCells = [];
-    this.invSlotIcons = [];
-    this.invSlotTexts = [];
-    for (let i = 0; i < BAG_BALANCE.gridSlots; i++) {
-      const col = i % COLS;
-      const row = Math.floor(i / COLS);
-      const x = GRID_X + col * (CELL + GAP);
-      const y = GRID_Y + row * (CELL + GAP);
-      const cell = this.add.rectangle(x, y, CELL, CELL, 0x080c0f).setOrigin(0, 0).setAlpha(0.6).setDepth(depth + 5);
-      const icon = this.add
-        .image(x + CELL / 2, y + CELL / 2, 'blank')
-        .setOrigin(0.5)
-        .setScale(BAG_BALANCE.iconScale)
-        .setDepth(depth + 6);
-      const badge = this.add
-        .text(x + CELL - 4, y + CELL - 4, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
-        .setOrigin(1, 1)
-        .setDepth(depth + 7);
-      this.invCells.push(cell);
-      this.invSlotIcons.push(icon);
-      this.invSlotTexts.push(badge);
-      this.invObjects.push(cell, icon, badge);
-      // Mouse: click selects; clicking the already-selected slot uses the item,
-      // which is what Enter does. A LOCKED cell (beyond the current slotCount)
-      // ignores the mouse entirely — it is capacity not earned yet. Pushed into
-      // invObjects so it hides with the panel — an orphan hit rect would keep
-      // eating clicks over the world.
-      this.invObjects.push(
-        this.panelHit( x, y, CELL, CELL, depth + 8, {
-          onOver: () => {
-            if (!this.invSlotUnlocked(i)) return;
-            if (this.invSelected === i) return;
-            this.invSelected = i;
-            this.refreshInventory();
-          },
-          onClick: () => {
-            if (!this.invSlotUnlocked(i)) return;
-            if (this.invSelected !== i) {
-              this.invSelected = i;
-              this.refreshInventory();
-              playSfx('click');
-              return;
-            }
-            this.onUse();
-          },
-        }),
-      );
-    }
-    // ONE Graphics for every cell border, created AFTER the cells so it draws
-    // above their fills, and redrawn wholesale by refreshInventory: selection
-    // and the rack's unlock both change border colour, and fourteen per-cell
-    // Graphics objects would mean fourteen clear() calls to keep in step.
-    this.invCellBorders = this.add.graphics().setScrollFactor(0).setDepth(depth + 6);
-    this.invObjects.push(this.invCellBorders);
-
-    // ── the detail pane ─────────────────────────────────────────────────────
-    // The pane starts past the grid's FULL-row right edge (the last row is one
-    // cell short: 14 = 5+5+4), so its left edge stays a clean vertical.
-    const DETAIL_X = GRID_X + COLS * (CELL + GAP) - GAP + BAG_BALANCE.detailGap;
-    const DETAIL_W = left + panelW - BAG_LAYOUT.padRight - DETAIL_X;
-    const DETAIL_H = ROWS * (CELL + GAP) - GAP;
-    this.invObjects.push(...buildPanelWell(this, DETAIL_X, GRID_Y, DETAIL_W, DETAIL_H, depth + 5));
-    // Three rows at 12 / 62 / 104 inside the well. They used to sit at 10 / 48 /
-    // 76 in a 130px well; the 244px well gives the type room to breathe, and the
-    // anchors keep the 30px name's 37px line box clear of the 20px meta's.
-    this.invDetailName = this.add
-      .text(DETAIL_X + BAG_LAYOUT.detailPadX, GRID_Y + BAG_LAYOUT.detailNameY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(PALETTE.lightHigh) })
-      .setDepth(depth + 7);
-    this.invDetailMeta = this.add
-      .text(DETAIL_X + BAG_LAYOUT.detailPadX, GRID_Y + BAG_LAYOUT.detailMetaY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
-      .setDepth(depth + 7);
-    this.invDetailBody = this.add
-      // useAdvancedWrap is load-bearing, fourth time in this codebase: the basic
-      // wrapper breaks on spaces only, and Chinese has none, so a width here is
-      // silently ignored. Measured: the empty-slot sentence rendered 688px wide
-      // inside a 520px panel, i.e. it ran 248px past the frame.
-      .text(DETAIL_X + BAG_LAYOUT.detailPadX, GRID_Y + BAG_LAYOUT.detailBodyY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: DETAIL_W - BAG_LAYOUT.detailPadX * 2, useAdvancedWrap: true } })
-      .setDepth(depth + 7);
-    this.invObjects.push(this.invDetailName, this.invDetailMeta, this.invDetailBody);
-
-    const footer = this.add
-      .text(cx, top + panelH - BAG_LAYOUT.footerDrop, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
-      .setOrigin(0.5, 0.5)
-      .setDepth(depth + 6);
-    this.invObjects.push(footer, this.invMarker);
-
-    applyPanelDepth(this.invObjects, depth);
-    this.assertPanelContent('inventory', this.invObjects);
-    for (const o of this.invObjects) o.setVisible(false);
-  }
-
-  /** AG-60：格子 i 是否已解锁。容量 = inventory.slotCount（基础 12 + 置物架 2）。
-   *  未解锁格不响应鼠标、画成压暗斜纹；置物架做成后本判官自然放行，不需要
-   *  重建格子——刷新即点亮。 */
-  private invSlotUnlocked(i: number): boolean {
-    return i < getGame().player.inventory.slotCount;
+  // public：帧循环与跨动作刷新（睡觉/交易/搜刮后的时钟行 + 楼层徽章）。
+  refreshClock(): void {
+    this.hud.refreshClock();
   }
 
   // public：DialogueHost 面之一（RC-03 拆分第 8 步）——行商买卖/对话赠礼后
-  // 的背包面板刷新走这一份实现（控制器不复制 HUD 刷新）。
+  // 的背包面板刷新走这一份实现（第 9 步后委托 HudController；搜刮/制作/
+  // 任务奖励/无线电同路）。面板开着才可见——控制器内部有同一道安全网。
   refreshInventory(): void {
-    const slots = getGame().player.inventory.slots;
-    const capacity = getGame().player.inventory.slotCount;
-    if (this.invSelected >= BAG_BALANCE.gridSlots) this.invSelected = Math.max(0, BAG_BALANCE.gridSlots - 1);
-    for (let i = 0; i < BAG_BALANCE.gridSlots; i++) {
-      const badge = this.invSlotTexts[i];
-      const icon = this.invSlotIcons[i];
-      const stack = slots[i];
-      // Keyed by item id, never by display name — see itemIconKey().
-      //
-      // No setVisible(true): refreshInventory() also runs while the panel is
-      // CLOSED — looting a container, a shop trade and a neighbour trade all
-      // call it. Showing the icon here used to float the bag's first row over
-      // the world with no panel behind it: four icons straddling the top
-      // frame of whatever panel happened to be open. Visibility is
-      // toggleInventory's job — it sets the whole list, and the empty slots
-      // below hide themselves again. A locked cell never has a stack
-      // (slots.length <= slotCount), so it falls in here and stays empty.
-      // AG-66：铲子走 ensureShovelIcon 程序化生成的 'shovel' 贴图（没生成
-      // 成功就退 artpack 里最接近的撬棍），其余照旧按 id。
-      if (stack && this.invSlotUnlocked(i)) {
-        icon.setTexture(this.itemIconFor(stack.itemId));
-        badge.setText(stack.quantity > 1 ? `${stack.quantity}` : '');
-      } else {
-        icon.setVisible(false);
-        badge.setText('');
-      }
-    }
-    // Cells + borders in one pass. The selection wash moves with the cursor;
-    // a locked cell drops to a near-black fill with a diagonal hatch — the
-    // hazard-stripe language, where a diagonal means "not yours yet". The
-    // single borders Graphics is redrawn wholesale (built after the cells so
-    // it draws above their fills).
-    const borders = this.invCellBorders;
-    borders.clear();
-    this.invCells.forEach((c, i) => {
-      const unlocked = this.invSlotUnlocked(i);
-      const selected = i === this.invSelected;
-      c.setFillStyle(!unlocked ? 0x05070a : selected ? UI.accent : 0x080c0f, !unlocked ? 0.85 : selected ? 0.2 : 0.6);
-      const x = c.x;
-      const y = c.y;
-      const size = c.width;
-      if (unlocked) {
-        borders.lineStyle(1, selected ? UI.accent : UI.line, selected ? 0.95 : 0.85);
-        borders.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
-      } else {
-        borders.lineStyle(1, UI.line, 0.3);
-        borders.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
-        borders.lineStyle(1, PALETTE.stoneLight, 0.22);
-        for (let d = 10; d < size; d += 18) {
-          borders.lineBetween(x + d, y + 1, x + 1, y + d);
-        }
-      }
-    });
-    // AG-60: the count now reads the REAL capacity (slotCount: 12, or 14 with
-    // the rack) instead of the grid size — the two dimmed cells at the end of
-    // the grid are what the number is talking about.
-    if (this.invCountText) this.invCountText.setText(`${slots.length}/${capacity}`);
-
-    const selected = slots[this.invSelected];
-    const cell = this.invCells[this.invSelected];
-    // Same rule as the icons: the marker belongs to the open panel.
-    this.invMarker.setVisible(this.inventoryOpen && selected !== undefined && cell !== undefined);
-    if (selected && cell) placeMarkerLeftOf(this.invMarker, cell);
-
-    if (selected) {
-      const item = getItem(selected.itemId);
-      const category = item.category === 'consumable' ? '消耗品' : item.category === 'material' ? '材料' : '工具';
-      this.invDetailName?.setText(item.displayName);
-      this.invDetailMeta?.setText(`${category} · 持有 ${selected.quantity}`);
-      const effect = item.effect ? `${STAT_LABEL[item.effect.stat]} +${item.effect.amount}` : '';
-      this.invDetailBody?.setText(effect || `${category}，暂时没有直接效果。`);
-    } else if (!this.invSlotUnlocked(this.invSelected)) {
-      // Defensive: the mouse and the arrow keys both refuse to land on a
-      // locked cell, but a stale invSelected from an older build should say
-      // so rather than claim the slot is merely empty.
-      this.invDetailName?.setText('');
-      this.invDetailMeta?.setText('');
-      this.invDetailBody?.setText('锁着的格子。做出置物架就能多带 2 格。');
-    } else {
-      this.invDetailName?.setText('');
-      this.invDetailMeta?.setText('');
-      this.invDetailBody?.setText('空格子。搜刮、制作或交易都往这里放东西。');
-    }
-    // Safety net for the next caller that forgets: with the panel closed there
-    // is nothing of the bag on screen, whatever the data did on the way here.
-    if (!this.inventoryOpen) for (const o of this.invObjects) o.setVisible(false);
+    this.hud.refreshInventory();
   }
-  private toggleInventory(): void {
-    this.inventoryOpen = !this.inventoryOpen;
-    for (const o of this.invObjects) o.setVisible(this.inventoryOpen);
-    if (this.inventoryOpen) {
-      this.invSelected = 0;
-      this.refreshInventory();
-    }
+
+  // ── HudHost 的场景查询面（RC-03 拆分第 9 步） ───────────────────────────
+  // 运行期 host 就是本场景（字段初始化器 new HudController(this, STAT_BARS)），
+  // Node 单测由假件实现同一结构面。
+
+  /** AG-102 圆环 RT 烘焙器——共享件 createStatRingsBaker 第一参钉死
+   *  Phaser.Scene，这里做唯一一处薄封装（与 PerfHost.createFloatTextPool
+   *  同款路数）。 */
+  createStatRings(): StatRingsBaker {
+    return createStatRingsBaker(this, HUD_LAYOUT);
+  }
+
+  /**
+   * HudHost 面之一（RC-03 拆分第 9 步）：反馈行的创建点位。flash() 是 ~30
+   * 处出口的同一反馈行（第 3 步契约「控制器不碰 feedbackText 本体」）——文本
+   * 本体与全部写入都留场景，只把「在 HUD 带序列的哪一刻出生」交给控制器编排
+   * （环境 chips 之后、预警行之前，迁移前的逐字次序；冻结探针的显示列表契约）。
+   * The 2026-11-14 HUD skin：Feedback has a dedicated lower lane. It remains
+   * above modal panels but can never collide with the daily objective or the
+   * permanent environment.
+   */
+  createFeedbackText(): Phaser.GameObjects.Text {
+    this.feedbackText = this.add.text(20, HUD_LAYOUT.feedbackY, '', {
+      fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh),
+      backgroundColor: '#0b0f12ee', padding: { x: 8, y: 5 }, wordWrap: { width: 1216 },
+    }).setName('hud-feedback').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    return this.feedbackText;
+  }
+
+  /** 背包面板开着没有——e2e 六处（ag51/ag71/firstChapter/font/hudLayout/
+   *  triggers）按 scene.inventoryOpen 直读，第 9 步后留 getter 委托
+   *  HudController.isOpen，契约不变、e2e 零改动。 */
+  get inventoryOpen(): boolean {
+    return this.hud.isOpen;
   }
 
   // public：TutorialHost 面之一——教程的跳过语/收尾语走场景这一条反馈行
@@ -4619,7 +4036,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   }
 
   private onToggleCrafting(): void {
-    if (this.inventoryOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.shelterOpen || this.nightChoiceOpen) return;
+    if (this.hud.isOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.shelterOpen || this.nightChoiceOpen) return;
     if (!this.craftingOpen && getGame().currentFloor !== STARTING_FLOOR) {
       this.flash('只能在宿舍工作台制作');
       return;
@@ -4920,7 +4337,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
    */
   private clearStrayPanels(): boolean {
     const groups: ReadonlyArray<ReadonlyArray<Phaser.GameObjects.GameObject | PanelObject>> = [
-      this.invObjects,
+      this.hud.panelObjectsForRecovery(),
       this.craftObjects,
       this.pauseObjects,
       this.dialogueCtl.panelObjectsForRecovery(),
@@ -4962,7 +4379,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
    * player would press Q into silence. Say so instead.
    */
   private onToggleQuests(): void {
-    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen || this.questsOpen) return;
+    if (this.stairClimb || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen || this.questsOpen) return;
     if (!this.scene.get('QuestPanel')) {
       this.flash('任务面板未就绪');
       return;
@@ -5005,7 +4422,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   }
 
   private onToggleMap(): void {
-    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen) return;
+    if (this.stairClimb || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen) return;
     this.openTowerOverview();
   }
 
@@ -5016,13 +4433,13 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
    * 都走这一个入口，与 I/C/M 同款。
    */
   private onToggleVentures(): void {
-    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen) return;
+    if (this.stairClimb || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen) return;
     this.dialogueCtl.toggleVentures();
   }
 
   private onToggleInventory(): void {
     if (this.stairClimb || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen) return;
-    this.toggleInventory();
+    this.hud.toggle();
   }
 
   // ── mouse ───────────────────────────────────────────────────────────────
@@ -5048,7 +4465,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   // 「有没有面板开着」的场景判据只有这一份。
   anyPanelOpen(): boolean {
     return (
-      this.encounterOpen || this.shelterOpen || this.inventoryOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.decoOpen || this.dialogueCtl.ventureIsOpen || this.nightChoiceOpen
+      this.encounterOpen || this.shelterOpen || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.decoOpen || this.dialogueCtl.ventureIsOpen || this.nightChoiceOpen
     );
   }
 
@@ -5095,7 +4512,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
    *  TowerOverview，本场景没有它的布尔，恒 false——参考图里它不开高亮）。 */
   navSlotOwned(key: NavSlotKey): boolean {
     switch (key) {
-      case 'bag': return this.inventoryOpen;
+      case 'bag': return this.hud.isOpen;
       case 'craft': return this.craftingOpen;
       case 'venture': return this.dialogueCtl.ventureIsOpen;
       case 'menu': return this.pauseOpen;
@@ -5248,7 +4665,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // reckoning, and there was no key that would clear it.
     if (
       !this.encounterOpen &&
-      !this.inventoryOpen &&
+      !this.hud.isOpen &&
       !this.craftingOpen &&
       !this.dialogueCtl.isOpen &&
       !this.pauseOpen &&
@@ -5298,7 +4715,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.closeDeco();
       return;
     }
-    if (this.inventoryOpen) this.toggleInventory();
+    if (this.hud.isOpen) this.hud.toggle();
     else if (this.craftingOpen) this.toggleCrafting();
     else if (this.dialogueCtl.isOpen) this.dialogueCtl.back();
     else if (this.dialogueCtl.ventureIsOpen) this.dialogueCtl.closeVentures();
@@ -5331,9 +4748,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     } else if (this.encounterOpen && this.encounter && !this.encounter.resolved) {
       this.encounter.selected = Math.max(0, this.encounter.selected - 1);
       this.buildEncounterPanel(this.spotMarkers.get(this.encounter.spotId)?.isBoss ?? false);
-    } else if (this.inventoryOpen) {
-      this.invSelected = Math.max(0, this.invSelected - 1);
-      this.refreshInventory();
+    } else if (this.hud.isOpen) {
+      this.hud.moveSelection(-1);
     } else if (this.craftingOpen) {
       this.craftSelected = Math.max(0, this.craftSelected - 1);
       this.refreshCraft();
@@ -5374,10 +4790,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     } else if (this.encounterOpen && this.encounter && !this.encounter.resolved) {
       this.encounter.selected = Math.min(this.encounter.choices.length - 1, this.encounter.selected + 1);
       this.buildEncounterPanel(this.spotMarkers.get(this.encounter.spotId)?.isBoss ?? false);
-    } else if (this.inventoryOpen) {
-      const count = getGame().player.inventory.slots.length;
-      this.invSelected = Math.min(Math.max(0, count - 1), this.invSelected + 1);
-      this.refreshInventory();
+    } else if (this.hud.isOpen) {
+      this.hud.moveSelection(1);
     } else if (this.craftingOpen) {
       const count = this.craftEntries().length;
       this.craftSelected = Math.min(Math.max(0, count - 1), this.craftSelected + 1);
@@ -5424,12 +4838,13 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       else this.activateEncounterChoice();
       return;
     }
-    if (this.inventoryOpen) {
-      const stack = getGame().player.inventory.slots[this.invSelected];
+    if (this.hud.isOpen) {
+      const slot = this.hud.selectedIndex;
+      const stack = getGame().player.inventory.slots[slot];
       if (!stack) return;
       // AG-74：收音机是"打开"不是"吃掉"——从背包用它即开电台 N 游戏分钟
       // （TWOM 的音乐通道；用了不消失，tool 类不进 useConsumable）。
-      if (useRadioFromSlot(getGame(), this.invSelected)) {
+      if (useRadioFromSlot(getGame(), slot)) {
         this.flash(`打开收音机 · 电台音乐 ${RADIO_MINUTES} 分钟`);
         return;
       }
@@ -5531,7 +4946,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.onUse();
       return;
     }
-    if (this.inventoryOpen || this.craftingOpen || this.pauseOpen || this.dialogueCtl.ventureIsOpen) return;
+    if (this.hud.isOpen || this.craftingOpen || this.pauseOpen || this.dialogueCtl.ventureIsOpen) return;
     if (this.dialogueCtl.isOpen) {
       this.dialogueCtl.close();
       return;
@@ -5636,7 +5051,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   private tryShortcut(): void {
     const state = getGame();
     if (state.status !== 'playing') return;
-    if (this.stairClimb || this.inventoryOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen) return;
+    if (this.stairClimb || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen) return;
     const top = Math.max(...PLAYABLE_FLOORS_V01);
     if (!shortcutAvailable(state.currentFloor, top)) {
       this.flash('这里没有可抄的近路');
@@ -5713,7 +5128,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     if (this.encounterOpen) return '↑/↓ 选择 · Enter 买入 · S 卖出 · ESC 离开';
     if (this.nightChoiceOpen) return '↑/↓ 选择 · Enter 确认 · ESC 今晚再想想';
     if (this.shelterOpen) return getGame().shelterPlan?.resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回';
-    if (this.inventoryOpen) return '↑/↓ 选择 · Enter 使用 · I 关闭';
+    if (this.hud.isOpen) return '↑/↓ 选择 · Enter 使用 · I 关闭';
     if (this.craftingOpen) return '↑/↓ 选择 · Enter 制作 · 拖拽平移 · 滚轮缩放 · C 关闭';
     if (this.dialogueCtl.ventureIsOpen) return '↑/↓ 选择 · Enter 入股 · G 关闭';
     if (this.dialogueCtl.isOpen) return '↑/↓ 选择 · Enter 确定 · ESC 返回';
@@ -6654,33 +6069,6 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.chargeTime(OBSTACLE_DIG_COST_MINUTES);
   }
 
-  /** AG-66：背包格图标——铲子用程序化贴图，没生成成功退 artpack 的撬棍。 */
-  private itemIconFor(itemId: ItemId): string {
-    if ((itemId as string) === SHOVEL_ICON_KEY && this.shovelIconReady) return SHOVEL_ICON_KEY;
-    return itemIconKey(itemId);
-  }
-
-  /**
-   * AG-66：程序化画一把 16×16 铲子图标。artpack 的 ITEM_ICON_FILES 与 ITEMS
-   * 一件不差被 itemIcons.test.ts 钉死（且 render/ 不归本工单），新工具因此不走
-   * 贴图清单，在 create 里现画一个：木柄 + 铲头 + 一粒高光，全 16 色板。
-   */
-  private ensureShovelIcon(): void {
-    this.shovelIconReady = this.textures.exists(SHOVEL_ICON_KEY);
-    if (this.shovelIconReady) return;
-    const g = this.add.graphics();
-    g.fillStyle(PALETTE.skinDeep, 1);
-    g.fillRect(4, 1, 3, 9);
-    g.fillStyle(PALETTE.stone, 1);
-    g.fillRect(3, 9, 5, 3);
-    g.fillStyle(PALETTE.stoneLight, 1);
-    g.fillRect(4, 10, 4, 3);
-    g.fillStyle(PALETTE.dust, 1);
-    g.fillRect(5, 10, 1, 2);
-    g.generateTexture(SHOVEL_ICON_KEY, 16, 16);
-    g.destroy();
-    this.shovelIconReady = this.textures.exists(SHOVEL_ICON_KEY);
-  }
   private nearLift(state: GameState): boolean {
     return liftDirection(state.currentFloor) !== null && Math.abs(state.player.x - LIFT_X) <= LIFT_REACH;
   }
@@ -6896,31 +6284,6 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       // No monster — a sighting. The next roll on this floor is more likely to
       // be teeth, so this is the warning shot the player should read as "move".
       this.flash(outcome.message);
-    }
-  }
-
-  // Keeps the standing bag-full warning in step with the bag. Runs before the
-  // panel early-return below on purpose: a full bag matters most while the
-  // inventory panel is open, which is exactly when the player is looking for
-  // something to spend.
-  //
-  // AG-11: the warning carries the count (used/capacity). A bare "背包已满"
-  // never said how full — 11/12 and 12/12 read the same and plan differently.
-  private refreshBagFullWarning(): void {
-    const inv = getGame().player.inventory;
-    if (isBagFull(inv)) {
-      // AG-11: 预警带计数（已用/容量）。光一句「背包已满」分不出 11/12 和
-      // 12/12——两者的下一步打算完全不同。计数会变（置物架抬 slotCount、
-      // 叠放释放格子），所以比对整句而非仅开关状态。
-      const label = `背包已满（${inv.slots.length}/${inv.slotCount}）· 使用、制作或交易腾出格子，否则搜刮会留在原处；能叠进已有堆的物品仍可拾取`;
-      if (this.bagFullShown && this.bagFullText.text === label) return;
-      this.bagFullShown = true;
-      this.bagFullText.setVisible(true);
-      this.bagFullText.setText(label);
-    } else {
-      if (!this.bagFullShown) return;
-      this.bagFullShown = false;
-      this.bagFullText.setVisible(false);
     }
   }
 
@@ -7144,7 +6507,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // contextual 分支要读教程状态，放这里是唯一两边都看得见的位置（面板/爬梯
     // 的早退都在更后面，教程因此在那些状态下也照常推进）。
     this.tutorial.tick();
-    this.refreshBagFullWarning();
+    this.hud.refreshBagFullWarning();
     // AG-74：音乐上下文同步与导航条同款理由放在所有早退之前——入夜氛围、
     // 电台到期都不该因为背包开着而停更（战斗/撤退的显式切换在各自事件处）。
     syncMusic(getGame());
@@ -7215,7 +6578,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // is up (openPanelHint returns null then, so the two cannot fight).
     const panelHint = this.openPanelHint();
     if (panelHint !== null) this.hintText.setText(panelHint);
-    if (this.inventoryOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen || this.questsOpen) return;
+    if (this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen || this.questsOpen) return;
     const state = getGame();
 
     // AG-11: the neighbours walk their own schedule. Pure function of game
@@ -7393,7 +6756,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // The pulse is a 0..1 heartbeat; each band takes its own share of it so the
     // deep bands saturate while the centre stays clear.
     const pulse = lowHpPulse(state.player.hp, GAME_CONFIG.player.hpMax, this.time.now);
-    for (const p of this.vignetteParts) p.rect.setAlpha(pulse * p.weight);
+    this.hud.setVignettePulse(pulse);
     // STARVING AND PARCHED, ON THE BODY. Hunger and thirst were two numbers in
     // the HUD; the debuff is now on the survivor. The threshold is the same 25%
     // the HUD already uses to call a stat urgent (URGENT_THRESHOLDS in
@@ -7435,20 +6798,14 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.debuffAnnounced = starving;
       this.flash(starving ? debuffEnterMessage(hungry, parched) : DEBUFF_CLEARED_MESSAGE);
     }
-    if (this.debuffMark) {
-      if (starving) {
-        const label = debuffMarkLabel(hungry, parched);
-        if (this.debuffMark.text !== label) this.debuffMark.setText(label);
-        this.debuffMark.setVisible(true);
-      } else if (this.debuffMark.visible) {
-        this.debuffMark.setVisible(false);
-      }
-    }
+    // AG-63：常驻标记的绘制在 HudController（第 9 步）——世界链判饿渴，
+    // hud.setDebuffMark 只画（null = 隐藏），按值缓存没变不碰对象。
+    this.hud.setDebuffMark(starving ? debuffMarkLabel(hungry, parched) : null);
     // Read after ensureNightEvent so an event rolled this very frame counts.
     const event = state.worldEvents.activeEvent;
-    this.refreshClock();
-    this.refreshStats();
-    this.refreshEnvironmentHud();
+    this.hud.refreshClock();
+    this.hud.refreshStats();
+    this.hud.refreshEnvironmentHud();
     // Body heat crosses its thresholds slowly, so the message fires on the
     // transition rather than every frame while cold. It is the floor telling you
     // to move, which is the whole point of the stat.

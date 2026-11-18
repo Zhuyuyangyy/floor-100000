@@ -132,6 +132,11 @@ export interface TutorialSignals {
   minuteOfDay: number;
   /** 睡过没有（shelterPlan 已结算）。 */
   slept: boolean;
+  /**
+   * 站在自己床边没有（起始层 + 交互距离内）。床步的「知道床在哪」——床在
+   * 1 层，玩家爬梯上楼后随时可以回去找到它，这一步因此不必悬到入夜。
+   */
+  nearBed: boolean;
 }
 
 function stepSatisfied(step: number, state: TutorialState, s: TutorialSignals, now: number): boolean {
@@ -148,7 +153,12 @@ function stepSatisfied(step: number, state: TutorialState, s: TutorialSignals, n
     case 4:
       return s.currentFloor > STARTING_FLOOR;
     case 5:
-      return s.slept || isNight(s.minuteOfDay);
+      // RC-02 XP-3：完成条件是「睡过 / 入夜 / 站到过自己床边」三选一。
+      // 修前只有前两条——最后一步从早晾到入夜，教程结尾悬着一个当晚才
+      // 能做的动作（试玩报告 run-seed1.log 07:35:16）。床步的课是「夜里
+      // 回床按 E 睡觉」，教会它的标志是玩家找到了床，不必真等到夜里；
+      // 入夜路径保留作兜底（爬上楼就不回 1 层的玩家照样收尾）。
+      return s.slept || isNight(s.minuteOfDay) || s.nearBed;
     default:
       return false;
   }

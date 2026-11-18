@@ -155,3 +155,26 @@ export function grantDailyGoalReward(state: GameState): boolean {
   addItem(state.player.inventory, 'ration_pack', 1);
   return true;
 }
+
+// ── RC-02 XP-2（最小缓解）：活干完到 20:00 之间的「指路」 ───────────────────
+// M1 老问题残留：「活干完了，距能睡着的 20:00 还有 X 游戏分无事可做」——
+// RC-02 试玩原话「拨钟加速」（run-seed1.log 03:00 空窗段）。治它有两类
+// 办法，本文件只做最小的一类：
+//   * 不动 20:00 门禁（GDD §54 设计意图 + 防连睡门禁 B3-01 + 7 日生存
+//     预算按「每夜 20:00 入睡」建模——fix-r3 五重证据定性过，见 03_TASKS）；
+//   * 不加新内容/新 roll（每日补充目标、午后世界事件都是更大的面，本轮
+//     只提案不实现，见 RC-02 修复报告）。
+// 这里只把现有的可做事说出来：目标已完成、还没到入睡门禁时，世界链的默认
+// 脚注（「A/D 或 ←/→ 移动 · E 交互」这种空话）让位给一句指路——邻居交易、
+// 翻找物资都还在，门禁时间也顺手告诉玩家，别让对着一句空脚注拨钟。
+// 能睡之后（≥门禁）或目标未完成时返回 null：那时脚注照旧。
+export const IDLE_WINDOW_HINT = '目标已完成 · 与邻居交易或翻找物资，20:00 后可入睡';
+
+export function idleWindowSuggestion(state: GameState): string | null {
+  const goal = state.dailyGoal;
+  // 目标缺失或属于昨天（跨瞬间隙）：今天还没有「已完成的目标」可指路。
+  if (!goal || goal.day !== state.day) return null;
+  // 到了入睡门禁就没有空窗了——那时世界该说的是怎么睡，不是指路。
+  if (state.gameMinuteOfDay >= GAME_CONFIG.time.nightRiskStartMinute) return null;
+  return isDailyGoalDone(state) ? IDLE_WINDOW_HINT : null;
+}

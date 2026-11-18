@@ -60,6 +60,7 @@ const sig = (over: Partial<TutorialSignals> = {}): TutorialSignals => ({
   currentFloor: STARTING_FLOOR,
   minuteOfDay: DAY_MORNING,
   slept: false,
+  nearBed: false,
   ...over,
 });
 
@@ -179,6 +180,17 @@ describe('AG-73 tutorial advancement', () => {
     const night = tickTutorial(s, { signals: sig({ minuteOfDay: NIGHT }), now: 5000 });
     expect(night.state.step).toBe(TUTORIAL_STEP_COUNT);
     expect(night.completed).toBe(true);
+  });
+
+  it('step 5 (bed) also completes once the player has found their bed (RC-02 XP-3)', () => {
+    // 修前床步只有「睡过/入夜」两条路：最后一步从早上悬到夜里，教程结尾
+    // 晾着一个当晚才能做的动作。现在白天站到床边即算「知道床在哪」。
+    const s = atStep(5);
+    const far = tickTutorial(s, { signals: sig({ nearBed: false }), now: 5000 });
+    expect(far.state.step).toBe(5);
+    const atBed = tickTutorial(s, { signals: sig({ nearBed: true }), now: 5000 });
+    expect(atBed.state.step).toBe(TUTORIAL_STEP_COUNT);
+    expect(atBed.completed).toBe(true);
   });
 
   it('finishing all six deactivates the tutorial and reports completion once', () => {

@@ -18,7 +18,7 @@ export interface TutorialStepCopy {
  *   2 stats  圆环高亮 3 秒，无强制等待，到点自动进下一步
  *   3 craft  制作面板开过一次（craftingOpen）
  *   4 stairs 到过第 2 层（currentFloor > STARTING_FLOOR）
- *   5 bed    睡过（shelterPlan 已结算）或入夜
+ *   5 bed    睡过（shelterPlan 已结算）、入夜、或站到自己床边（知道床在哪）
  */
 export const TUTORIAL_STEPS: readonly TutorialStepCopy[] = [
   { id: 'move', hint: '按 A/D 或 ←/→ 移动，熟悉这座塔' },

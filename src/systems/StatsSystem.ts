@@ -107,6 +107,18 @@ export function noteFloorReached(state: GameState): void {
   stats.maxFloor = Math.max(stats.maxFloor, state.currentFloor);
 }
 
+/**
+ * 本局最高层的唯一口径：stats.maxFloor 与当前楼层的较大者。出生层由
+ * createNewGame 预置进 stats（AG-81），但旧存档/统计系统到来前的存档/dev
+ * 夹具（?devfloor=）落层时 stats 可能还没记到——玩家此刻站着的楼层无疑
+ * 是到达过的，所以读数侧兜底。本局统计行（runStatRows）与历史纪录行
+ * （mergeRunRecords/recordRows）同读这一个函数，两处结算画面口径一致
+ * （QA-4-01：「最高层 0」与「纪录 100000」并存的矛盾即出于此）。
+ */
+export function runMaxFloor(state: GameState): number {
+  return Math.max(statsOf(state).maxFloor, state.currentFloor);
+}
+
 /** 金币进账：调用方传交易前的余额，差值为正才计（买入/花费不计收入）。 */
 export function noteGoldEarned(state: GameState, goldBefore: number): void {
   const gained = state.player.gold - goldBefore;
@@ -142,7 +154,12 @@ export function formatRunDuration(state: GameState): string {
 // 纯函数——表格长什么样在 Node 里就能钉死（stats.test.ts）。
 export function runStatRows(state: GameState): StatRow[] {
   const stats = statsOf(state);
-  const rows: StatRow[] = STAT_KEYS.map((key) => ({ label: STAT_LABELS[key], value: `${stats[key]}` }));
+  const rows: StatRow[] = STAT_KEYS.map((key) => ({
+    label: STAT_LABELS[key],
+    // 最高层与纪录行同口径（runMaxFloor）：出生层/旧存档/dev 夹具落下时
+    // stats 未记到也不显示 0。
+    value: `${key === 'maxFloor' ? runMaxFloor(state) : stats[key]}`,
+  }));
   rows.push({ label: '存活天数', value: `${state.day} 天` });
   rows.push({ label: '游戏时长', value: formatRunDuration(state) });
   // 得分是 OVERHAUL 的 run 计分（progress.ts）：深度主导的那套公式，放在
@@ -214,15 +231,16 @@ export function saveRunRecords(records: RunRecords, storage: Storage = localStor
 
 // 本局成绩与历史纪录的比较：纯函数，返回新纪录块与「破了哪几项」。
 // 严格大于才算破——打平旧纪录是「追平」，不是新纪录。
-// maxFloor 取 stats.maxFloor 与当前楼层的较大者：旧存档继续玩时计数从零起，
-// 但玩家此刻站着的楼层无疑是到达过的。
+// maxFloor 取 runMaxFloor（stats.maxFloor 与当前楼层的较大者）：出生层
+// 已由 createNewGame 预置进 stats，旧存档继续玩时计数从零起，但玩家此刻
+// 站着的楼层无疑是到达过的。
 export function mergeRunRecords(
   records: RunRecords,
   state: GameState,
 ): { records: RunRecords; beaten: Array<keyof RunRecords> } {
   const stats = statsOf(state);
   const run = {
-    maxFloor: Math.max(stats.maxFloor, state.currentFloor),
+    maxFloor: runMaxFloor(state),
     maxDays: state.day,
     maxKills: stats.monstersKilled,
     maxGold: stats.goldEarned,
@@ -255,7 +273,7 @@ export function recordRows(
 ): StatRow[] {
   const stats = statsOf(state);
   const run: Record<keyof RunRecords, number> = {
-    maxFloor: Math.max(stats.maxFloor, state.currentFloor),
+    maxFloor: runMaxFloor(state),
     maxDays: state.day,
     maxKills: stats.monstersKilled,
     maxGold: stats.goldEarned,

@@ -6,8 +6,8 @@ import { join } from 'node:path';
 //
 // 钉三件事：
 //   1. 战斗脚注怎么回答「用什么攻击」——武器名按 COMBAT_WEAPON_PRIORITY 取
-//      包里最重的一件，伤害数走 playerCombatant 的真口径（撬棍 +3，其余按
-//      空手），两个数都对得上引擎，不另养一套；
+//      包里最重的一件，伤害数走 playerCombatant 的真口径（查 weaponDamageBonus
+//      加成表，取最高一档，空手 0），两个数都对得上引擎，不另养一套；
 //   2. debuff 提示文案——绿光出现/消失各一句、左下角常驻标记的三种形态，
 //      全部纯函数，场景每帧画的就是这些返回值；
 //   3. 场景接线（源码断言）——flash 挂在边沿上而非每帧、标记挂在脚注条上方
@@ -65,7 +65,7 @@ describe('combatWeaponLabel — 包里有什么就报什么', () => {
     expect(combatWeaponLabel(slotsOf('fire_axe'))).toBe('消防斧');
   });
 
-  it('撬棍压过一切：它是唯一接进伤害口径的武器，也是幸存者手里挥的那件', () => {
+  it('撬棍排显示第一：脚注报最重的一件，伤害口径按加成表取最高', () => {
     expect(combatWeaponLabel(slotsOf('dagger', 'crowbar', 'fire_axe'))).toBe('撬棍');
   });
 

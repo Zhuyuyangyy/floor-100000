@@ -45,7 +45,6 @@ export interface CombatRound {
 // 改前 baseDamage=2/accuracy=5：打 evasion3 的弹弓顽童期望 8.75 回合
 // （试玩实测 8）；改后 4/7 期望 4.50 回合（蒙特卡洛 4000 场验证）。
 const PLAYER_BASE_DAMAGE = GAME_CONFIG.combat.baseDamage;
-const CROWBAR_DAMAGE_BONUS = GAME_CONFIG.combat.crowbarDamageBonus;
 const PLAYER_ACCURACY = GAME_CONFIG.combat.accuracy;
 const PLAYER_DEFENSE = GAME_CONFIG.combat.defense;
 const PLAYER_EVASION = GAME_CONFIG.combat.evasion;
@@ -152,23 +151,37 @@ export function resolveRound(
   return { playerDamage, monsterDamage, fled, monsterDead, playerDead, messages };
 }
 
+// 包里所有武器里取最高的伤害加成。武器口径是查表
+// （GAME_CONFIG.combat.weaponDamageBonus），不是写死的撬棍特判——
+// RC-02 试玩员「先做把匕首」的动机要求匕首也接伤害口径；表里没有的
+// itemId（含空手与全部非武器）按 0 处理。多把武器同时携带时取最强，
+// 与 GameScene 战斗脚注「报最重的一件」读法一致。
+function bestWeaponBonus(slots: ReadonlyArray<{ itemId: string }>): number {
+  const table = GAME_CONFIG.combat.weaponDamageBonus;
+  let bonus = 0;
+  for (const slot of slots) {
+    const value = table[slot.itemId];
+    if (typeof value === 'number' && value > bonus) bonus = value;
+  }
+  return bonus;
+}
+
 // 从 GameState 推导玩家战斗数值。所有装备判断都从 state.player.inventory 读，
 // 不写死（工单要求「从 inventory 读，不写死」）：
 //  - hp / maxHp：当前血量与配置上限（config/game-balance.json → player.hpMax）。
 //    医疗包不在本函数里加血——它经 InventorySystem 抬高 state.player.hp，
 //    这里读到的 hp 天然已包含医疗包的效果；
-//  - damage：赤手 GAME_CONFIG.combat.baseDamage（XP-1 修复后为 4，原 2）；
-//    包里任一格 itemId==='crowbar'（撬棍）则 + crowbarDamageBonus（3）。
-//    撬棍是不可堆叠工具（maxStack 1），用 some() 扫一遍槽位即可，
-//    数量堆叠不影响判定——有就生效；
+//  - damage：赤手 GAME_CONFIG.combat.baseDamage（XP-1 修复后为 4，原 2）
+//    + 武器加成表里包里最高的一档（匕首 2 / 撬棍 3 / 短剑 3 / 砍刀 4 /
+//    消防斧 5，空手或未列入 0）。撬棍是不可堆叠工具，其余刃具同理，
+//    用 some()/遍历扫一遍槽位即可，数量堆叠不影响判定——有就生效；
 //  - accuracy / defense / evasion：生存者基础体能，数值走 balance 文件
 //    combat 段（7/2/3），Wave B 角色系统上线后再按角色覆写。
 export function playerCombatant(state: GameState): Combatant {
-  const hasCrowbar = state.player.inventory.slots.some((slot) => slot.itemId === 'crowbar');
   return {
     hp: state.player.hp,
     maxHp: GAME_CONFIG.player.hpMax,
-    damage: PLAYER_BASE_DAMAGE + (hasCrowbar ? CROWBAR_DAMAGE_BONUS : 0),
+    damage: PLAYER_BASE_DAMAGE + bestWeaponBonus(state.player.inventory.slots),
     accuracy: PLAYER_ACCURACY,
     defense: PLAYER_DEFENSE,
     evasion: PLAYER_EVASION,

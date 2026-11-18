@@ -63,14 +63,18 @@ export interface GameBalanceConfig {
   combat: {
     /** 赤手基础伤害 */
     baseDamage: number;
-    /** 包里有撬棍时的伤害加成（撬棍总伤 = baseDamage + 本值） */
-    crowbarDamageBonus: number;
     /** 命中加值（d20：roll 0..20 + accuracy > 10 + defense + evasion） */
     accuracy: number;
     /** 防御（伤害公式按 floor(defense/2) 减伤） */
     defense: number;
     /** 闪避（同时抬怪物命中阈值与逃跑成功率） */
     evasion: number;
+    /**
+     * 武器类型→伤害加成表（叠在 baseDamage 上；空手/未列入 = 0）。
+     * playerCombatant 查这张表取包里加成最高的一把——撬棍特判的表化，
+     * 让「做了匕首就有伤害」的动机落地（RC-02 XP-1 遗留）。
+     */
+    weaponDamageBonus: Record<string, number>;
   };
   player: {
     startingFloor: number;
@@ -113,7 +117,6 @@ const REQUIRED_NUMBERS: Array<[string, (c: GameBalanceConfig) => number]> = [
   ['time.maxMajorEventsPerDay', (c) => c.time.maxMajorEventsPerDay],
   ['player.startingFloor', (c) => c.player.startingFloor],
   ['combat.baseDamage', (c) => c.combat.baseDamage],
-  ['combat.crowbarDamageBonus', (c) => c.combat.crowbarDamageBonus],
   ['combat.accuracy', (c) => c.combat.accuracy],
   ['combat.defense', (c) => c.combat.defense],
   ['combat.evasion', (c) => c.combat.evasion],
@@ -164,6 +167,20 @@ export function assertGameBalanceConfig(raw: unknown): GameBalanceConfig {
   }
   if (!Array.isArray((cfg.inventory as Record<string, unknown> | undefined)?.startingItems)) {
     problems.push('inventory.startingItems 必须是数组');
+  }
+
+  // combat.weaponDamageBonus：加成表必须是「键→非负有限数字」的对象
+  // （带 _comment 说明键，其余每个值都校验）。
+  const bonus = (cfg.combat as Record<string, unknown> | undefined)?.weaponDamageBonus;
+  if (typeof bonus !== 'object' || bonus === null || Array.isArray(bonus)) {
+    problems.push('combat.weaponDamageBonus 必须是对象');
+  } else {
+    for (const [weapon, value] of Object.entries(bonus as Record<string, unknown>)) {
+      if (weapon === '_comment') continue; // JSON 内注释键（与其余段同一约定）
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        problems.push(`combat.weaponDamageBonus.${weapon} 不是非负有限数字`);
+      }
+    }
   }
 
   if (problems.length > 0) {

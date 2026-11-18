@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { DEFAULT_SETTINGS } from '../systems/SettingsSystem';
 import {
   BGM_MASTER_GAIN,
   RADIO_ITEM_ID,
@@ -216,8 +217,11 @@ describe('audio state machine (reducer)', () => {
 });
 
 describe('volume', () => {
-  it('defaults to 70 when there is no settings blob (Node has no localStorage)', () => {
-    expect(readBgmVolume()).toBe(70);
+  it('defaults to the SettingsSystem default when there is no settings blob (Node has no localStorage)', () => {
+    // AG-117：兜底默认不再是本模块私写的 70——单一事实源是
+    // DEFAULT_SETTINGS.bgmVolume（50），两个默认值漂移过的教训钉在这里。
+    expect(readBgmVolume()).toBe(DEFAULT_SETTINGS.bgmVolume);
+    expect(readBgmVolume()).toBe(50);
   });
 
   it('maps 0-100 onto the master gain with headroom', () => {

@@ -24,6 +24,9 @@
 
 // 夜晚边界与战斗判定都复用 SurvivalSystem 的纯函数（同源不复刻）。
 import { isNight } from './SurvivalSystem';
+// AG-117：bgmVolume 的单一事实源是 SettingsSystem（AG-72）——存储 key、清洗
+// 规则、默认值全部收在那里，本模块只委托读取，不再复刻第二份默认常量。
+import { getSettings } from './SettingsSystem';
 
 // ── 曲目与纯函数层 ─────────────────────────────────────────────────────────
 
@@ -413,29 +416,21 @@ export function resolveTrackId(ctx: MusicContext): TrackId {
 
 // ── 音量 ───────────────────────────────────────────────────────────────────
 
-// AG-72 的 SettingsSystem 落地后，这里换成读 getSettings().bgmVolume 即可
-// （同名字段、同 0-100 标尺）；在它提交之前直接读同一块 localStorage，
-// 两条路径最终汇到同一个 key：floor100000.settings。
-export const SETTINGS_STORAGE_KEY = 'floor100000.settings';
-const DEFAULT_BGM_VOLUME = 70;
 /** BGM 总线增益：音效层已有 0.4 的总线，音乐再留一半余量给叠音。 */
 export const BGM_MASTER_GAIN = 0.5;
 
-/** 读 0-100 的 bgmVolume 设置（非法值落默认 70）。 */
+/**
+ * 读 0-100 的 bgmVolume 设置，直接委托 SettingsSystem.getSettings()。
+ *
+ * AG-117 修复的漂移：本函数原先自带一份兜底默认 70（无设置 blob / 坏 JSON /
+ * 无 localStorage 时返回），而 SettingsSystem 的 DEFAULT_SETTINGS.bgmVolume 是
+ * 50——首启无存储时 BGM 实际比设置面板显示的响。根因是两个默认值各写一处、
+ * 没有单一事实源。现在默认值、存储 key、清洗规则统一以 SettingsSystem 为准
+ * （坏 JSON / 缺字段 / Storage 不可用的回退语义由 getSettings 逐字段兜底，
+ * 与本函数旧语义一致，只多覆盖隐私模式抛错一条路径）。
+ */
 export function readBgmVolume(): number {
-  if (typeof localStorage === 'undefined') return DEFAULT_BGM_VOLUME;
-  try {
-    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (!raw) return DEFAULT_BGM_VOLUME;
-    const parsed: unknown = JSON.parse(raw);
-    const v = (parsed as { bgmVolume?: unknown } | null)?.bgmVolume;
-    if (typeof v === 'number' && Number.isFinite(v)) {
-      return Math.min(100, Math.max(0, v));
-    }
-  } catch {
-    // 坏 JSON 与没有设置一样：默认音量。
-  }
-  return DEFAULT_BGM_VOLUME;
+  return getSettings().bgmVolume;
 }
 
 /** 0-100 → 总线增益（0-1）。 */

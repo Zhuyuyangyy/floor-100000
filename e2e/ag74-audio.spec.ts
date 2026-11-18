@@ -154,7 +154,8 @@ test('主菜单 BGM：菜单要它的音乐，首次按键后起播，console �
   expect(menu.running).toBe(true);
   expect(menu.playing).toBe(true);
   expect(menu.pending).toBeNull();
-  expect(menu.volume).toBe(70); // 无设置时的默认音量
+  // 无设置时的默认音量 = SettingsSystem.DEFAULT_SETTINGS.bgmVolume（AG-117 统一为 50）
+  expect(menu.volume).toBe(50);
   expect(menu.busGain).not.toBeNull();
 
   expect(errors.page, `page errors: ${errors.page.join(' | ')}`).toEqual([]);

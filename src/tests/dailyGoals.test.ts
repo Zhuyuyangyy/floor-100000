@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ensureDailyGoal, grantDailyGoalReward, isDailyGoalDone } from '../systems/dailyGoals';
+import { ensureDailyGoal, grantDailyGoalReward, IDLE_WINDOW_HINT, idleWindowSuggestion, isDailyGoalDone } from '../systems/dailyGoals';
 import type { DailyGoalKind } from '../systems/dailyGoals';
 import { addItem, countItem, removeItem } from '../systems/InventorySystem';
 import { createNewGame } from '../core/gameState';
@@ -211,5 +211,46 @@ describe('grantDailyGoalReward', () => {
     expect(grantDailyGoalReward(s)).toBe(true);
     expect(s.records!.bestScore).toBe(320); // 240 + 80
     expect(s.records!.deepestFloor).toBe(3); // 不被奖励逻辑改写
+  });
+});
+
+// RC-02 XP-2（最小缓解）：目标干完到 20:00 门禁之间的空窗指路。钉死四件事——
+// 什么时候说、到点闭嘴、没干完不说、昨天的目标不说。
+describe('idleWindowSuggestion', () => {
+  /** 一个「今日目标已达标」的盘：floor 目标 1 层，开局就在 1 层。 */
+  function doneGoal(minute: number) {
+    const s = createNewGame(42);
+    ensureDailyGoal(s);
+    s.dailyGoal = { day: s.day, kind: 'floor', target: 1, done: false };
+    s.gameMinuteOfDay = minute;
+    return s;
+  }
+
+  it('目标已完成且未到 20:00 门禁：给一句指路（含门禁时间）', () => {
+    expect(idleWindowSuggestion(doneGoal(18 * 60 + 29))).toBe(IDLE_WINDOW_HINT);
+    expect(IDLE_WINDOW_HINT).toContain('20:00');
+    expect(idleWindowSuggestion(doneGoal(8 * 60))).toBe(IDLE_WINDOW_HINT);
+  });
+
+  it('到 20:00 能睡之后不再指路（没有空窗可填）', () => {
+    expect(idleWindowSuggestion(doneGoal(20 * 60))).toBeNull();
+    expect(idleWindowSuggestion(doneGoal(23 * 60 + 59))).toBeNull();
+  });
+
+  it('目标未完成时不给指路（那正是该去干目标的时候）', () => {
+    const s = createNewGame(42);
+    ensureDailyGoal(s);
+    s.dailyGoal = { day: s.day, kind: 'floor', target: 99, done: false };
+    s.gameMinuteOfDay = 15 * 60;
+    expect(idleWindowSuggestion(s)).toBeNull();
+  });
+
+  it('目标是昨天的或缺失：不给指路', () => {
+    const stale = doneGoal(15 * 60);
+    stale.day += 1; // 跨天了，dailyGoal 还挂着昨天的
+    expect(idleWindowSuggestion(stale)).toBeNull();
+    const none = createNewGame(42);
+    delete none.dailyGoal;
+    expect(idleWindowSuggestion(none)).toBeNull();
   });
 });

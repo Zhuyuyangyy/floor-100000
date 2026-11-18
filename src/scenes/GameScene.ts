@@ -62,7 +62,7 @@ import { freshWandererAI, stepWandererAI, type WandererAI } from '../systems/wan
 // 场景销毁各一切换、update 里每帧同步（夜晚/电台到期由 syncMusic 按上下文
 // 重解，命中同一曲目是 no-op）。
 import { RADIO_MINUTES, startFloorMusic, stopBgm, syncMusic, useRadioFromSlot } from '../systems/AudioSystem';
-import { ensureDailyGoal, grantDailyGoalReward, isDailyGoalDone } from '../systems/dailyGoals';
+import { ensureDailyGoal, grantDailyGoalReward, idleWindowSuggestion, isDailyGoalDone } from '../systems/dailyGoals';
 import {
   BODY_TEMP_MAX,
   COLD_THRESHOLD,
@@ -854,6 +854,13 @@ function npcStrollPose(npcId: string, floor: number, stationary: boolean, elapse
   }
   return { x: 0, walking: false, face: 0 };
 }
+
+/**
+ * AG-73 教程收尾 flash 的入夜推迟量：flash() 的驻留 1600ms + 100ms 气口。
+ * 入夜推进的收尾与夜事件 flash 同帧相撞（后者盖掉前者），夜里收尾时让收尾语
+ * 排到事件消息之后——缘由见 runTutorialTick 的 completed 分支。
+ */
+const TUTORIAL_DONE_FLASH_DELAY_MS = 1700;
 
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
@@ -5184,11 +5191,29 @@ export class GameScene extends Phaser.Scene {
           currentFloor: state.currentFloor,
           minuteOfDay: state.gameMinuteOfDay,
           slept: state.shelterPlan?.resolved === true,
+          // RC-02 XP-3：床步的第三条完成路径——站到自己床边即「知道床在
+          // 哪」，教程不必从早上悬到入夜（nearBed 判起始层 + 交互距离）。
+          nearBed: this.nearBed(state),
         },
       });
       this.tutorial = result.state;
       if (result.advanced) saveTutorial(this.tutorial, localStorage);
-      if (result.completed) this.flash(TUTORIAL_DONE_LINE);
+      if (result.completed) {
+        // RC-02：入夜推进的收尾与夜事件 roll 同在 update() 同帧——夜事件的
+        // flash 在世界模拟段（本帧稍后，ensureNightEvent 处）会整条盖掉收尾
+        // 语，于是「入夜收尾」的玩家从来没见过「你已掌握基本生存」（探针
+        // fix-xp23/probe-xp23c 实证：flash 只剩事件消息）。夜里收尾（且不是
+        // 睡过的——那条路有自己的醒来 flash）时让收尾语排到事件消息后面：
+        // 消息亮满 flash 驻留（1600ms）后收尾语接手，两句都看得见。
+        const nightRollover = isNight(state.gameMinuteOfDay) && state.shelterPlan?.resolved !== true;
+        if (nightRollover) {
+          this.time.delayedCall(TUTORIAL_DONE_FLASH_DELAY_MS, () => {
+            if (this.scene.isActive()) this.flash(TUTORIAL_DONE_LINE);
+          });
+        } else {
+          this.flash(TUTORIAL_DONE_LINE);
+        }
+      }
     }
     this.refreshTutorialChrome();
   }
@@ -10268,7 +10293,9 @@ export class GameScene extends Phaser.Scene {
     // 导航条里，脚注再整串复读只是重复（与 MenuScene 帮助面板同一句）。
     // AG-73：这一串同时是教程的「世界无话可说」判据（WORLD_DEFAULT_HINT），
     // 两边引同一份常量，改台词不会只改一头。
-    else this.hintText.setText(WORLD_DEFAULT_HINT);
+    // RC-02 XP-2：目标干完、离 20:00 入睡门禁还有时间时，空脚注让位给一句
+    // 指路（判定与文案在 dailyGoals.idleWindowSuggestion——不动门禁本身）。
+    else this.hintText.setText(idleWindowSuggestion(state) ?? WORLD_DEFAULT_HINT);
   }
 
   // The wanderer only haunts its own floor; it is slower than the player and

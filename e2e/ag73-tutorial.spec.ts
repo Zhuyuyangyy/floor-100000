@@ -6,14 +6,15 @@ import { expect, test, type Page } from '@playwright/test';
 //   ③ 开柜推进圆环步（HUD 圆环高亮 3 秒），到点自动进制作步；
 //   ④ 按 C 开制作面板推进爬梯步；
 //   ⑤ 爬到 2 层推进床步，入夜收尾（「你已掌握基本生存」）；
-//   ⑥ 跳过：按钮 / Esc 两条路，跳过态记 localStorage 且刷新不重现。
+//   ⑥ 跳过：按钮 / Esc 两条路，跳过态记 localStorage 且刷新不重现；
+//   ⑦ RC-02 XP-3：床步白天收尾——爬下 1 层走到自己床边即完成（入夜路径
+//      保留作兜底，见用例 ⑤）。
 // 截图落 output/ag73/（gitignore 的本地证据目录），全程 pageerror 零。
 
 const HINT_MOVE = '按 A/D 或 ←/→ 移动，熟悉这座塔';
 const HINT_LOOT = '走近柜子，按 E 搜刮';
 const HINT_STAIRS = '走到楼层左端的梯口，按 E 上楼';
 const HINT_BED = '入夜后回自己的床，按 E 睡觉';
-const DEFAULT_FOOT = 'A/D 或 ←/→ 移动 · E 交互';
 
 interface TutorialView {
   step: number;
@@ -79,11 +80,16 @@ const gfxVisible = (page: Page, field: 'tutorialWorldGfx' | 'tutorialHudGfx'): P
 async function walkTo(page: Page, key: 'ArrowLeft' | 'ArrowRight', target: number): Promise<void> {
   await page.keyboard.down(key);
   await page.waitForFunction(
-    (t) => {
+    // RC-02 修复：key 必须随参数进浏览器端——pageFunction 里引用闭包变量会
+    // 直接 ReferenceError（已实证），而 .catch(() => undefined) 会把它吞成
+    // 「秒退」，向右的行走自此全部失效（谓词恒走 x<=t 那条臂）。修前 ag73
+    // 六个用例在这条路上自 AG-73 落盘起就没绿过（干净 tip df2925b 复跑
+    // 6 失败/2 通过，与本分支无关）。
+    ([t, k]) => {
       const x = window.__PHASER_SESSION__?.getState()?.player.x ?? -1;
-      return key === 'ArrowRight' ? x >= t : x <= t;
+      return k === 'ArrowRight' ? x >= t : x <= t;
     },
-    target,
+    [target, key] as [number, string],
     { timeout: 20_000 },
   ).catch(() => undefined);
   await page.keyboard.up(key);
@@ -124,17 +130,22 @@ test('moving advances to the loot step, and the cabinet gets a breathing box', a
   // 真实移动 200px 以上：推进第二步。
   await walkTo(page, 'ArrowRight', 900);
   expect((await tutorial(page)).step).toBe(1);
-  // 空地上 contextual 让回默认脚注（世界无话可说时才轮到教程说话——
-  // 但出现条件要求走近没开过的容器，所以此时是默认脚注）。
-  expect(await hudText(page, 'hud-nav-context')).toBe(DEFAULT_FOOT);
+  // loot 步的出现条件（200px 内有没有没开过的容器）不满足时教程闭嘴，
+  // contextual 归世界链。修前钉 DEFAULT_FOOT——那是 AG-51 宿舍床铺进世界
+  // 链之前的过期值：1 层两排室友床铺满走廊，900 处世界说的是「搜刮床铺」。
+  expect(await hudText(page, 'hud-nav-context')).toBe('搜刮床铺');
   // 呼吸框已经盯上储物柜（世界坐标，160）。
   expect(await gfxVisible(page, 'tutorialWorldGfx')).toBe(true);
-  // 走近柜子：教程的搜刮提示出现。
-  await walkTo(page, 'ArrowLeft', 300);
+  // 走到床铺区的缺口（上梯口 44px 与柜子 44px 之间）出搜刮提示：1 层两排
+  // 室友床（DORM_FRONT/BACK_BEDS，AG-51）占满走廊中段，床铺 44px 内世界
+  // 的「按 E 搜刮床铺」会按 tutorialYieldsToWorld 接棒——修前走 300 正是
+  // 床铺区，断言因此永远看不到 HINT_LOOT。
+  await walkTo(page, 'ArrowLeft', 100);
   await expect.poll(async () => hudText(page, 'hud-nav-context'), { timeout: 5000 }).toBe(HINT_LOOT);
   await page.screenshot({ path: 'output/ag73/02-step2-loot-approach.png' });
-  // 贴到交互距离内：世界链自己的键帽提示接棒（教程不覆写交互提示）。
-  await walkTo(page, 'ArrowLeft', 170);
+  // 贴到交互距离内：世界链自己的键帽提示接棒（教程不覆写交互提示）。从 100
+  // 往右回到柜子（170）——柜子在 160，44px 内世界说「按 E 打开 储物柜」。
+  await walkTo(page, 'ArrowRight', 170);
   await expect.poll(async () => hudText(page, 'hud-nav-context'), { timeout: 5000 }).toBe('打开 储物柜');
   await page.screenshot({ path: 'output/ag73/02b-step2-world-hint.png' });
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
@@ -232,8 +243,16 @@ test('nightfall finishes all six steps and the tutorial never comes back', async
     undefined,
     { timeout: 10_000 },
   );
+  // 圆环步持有 3 秒：等它自动进制作步再按 C。修前这里立刻按 C，面板在圆环
+  // 保持期内开合，craftingOpen 的采样窗口整个错过——存量 race（本用例与
+  // 「finding the bed」同款），walkTo 修好后才会走到这一步。
+  await expect.poll(async () => tutorial(page), { timeout: 8000 }).toEqual({ step: 3, skipped: false });
   await page.keyboard.press('C');
-  await page.waitForTimeout(300);
+  await page.waitForFunction(
+    () => (window.__PHASER_GAME__?.scene.getScene('Game') as unknown as { craftingOpen: boolean } | null)?.craftingOpen === true,
+    undefined,
+    { timeout: 5000 },
+  );
   await page.keyboard.press('C');
   await page.evaluate(() => {
     const s = window.__PHASER_SESSION__?.getState();
@@ -264,7 +283,10 @@ test('nightfall finishes all six steps and the tutorial never comes back', async
   await waitForScene(page, 'Game');
   await page.waitForTimeout(400);
   expect(await hudVisible(page, 'hud-tutorial-skip')).toBe(false);
-  await expect.poll(async () => hudText(page, 'hud-nav-context'), { timeout: 5000 }).toBe(DEFAULT_FOOT);
+  // contextual 归世界链：续上局站在 2 层上梯口，世界说的是上楼（tier1 还挂着
+  // 抄近路报价）。修前钉 DEFAULT_FOOT 同样是宿舍床铺进链前的过期值；「按 E」
+  // 前缀被导航条渲染成 E 键帽，槽里只剩动作名，所以断言不含前缀。
+  expect(await hudText(page, 'hud-nav-context')).toContain('上楼');
   expect(await page.evaluate(() => localStorage.getItem('floor100000.tutorial.progress'))).toBe('6');
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
@@ -282,7 +304,9 @@ test('the skip button skips for good: flag persists, refresh does not bring it b
   const box = (await canvas.boundingBox())!;
   await page.mouse.click(box.x + 1210 * (box.width / 1280), box.y + 127 * (box.height / 720));
   await expect.poll(async () => hudText(page, 'hud-feedback'), { timeout: 5000 }).toContain('教程已跳过');
-  await expect.poll(async () => hudText(page, 'hud-nav-context'), { timeout: 5000 }).toBe(DEFAULT_FOOT);
+  // 教程闭嘴后 contextual 归世界链：出生点（640）压着一张室友床，世界说的是
+  // 「搜刮床铺」。修前钉 DEFAULT_FOOT——同为宿舍床铺进链前的过期值。
+  await expect.poll(async () => hudText(page, 'hud-nav-context'), { timeout: 5000 }).toBe('搜刮床铺');
   expect(await hudVisible(page, 'hud-tutorial-skip')).toBe(false);
   expect(await page.evaluate(() => localStorage.getItem('floor100000.tutorial.skipped'))).toBe('1');
   expect(await page.evaluate(() => localStorage.getItem('floor100000.tutorial.progress'))).toBeNull();
@@ -291,7 +315,7 @@ test('the skip button skips for good: flag persists, refresh does not bring it b
   // 刷新重开：不重现。
   await startGame(page, 42);
   await page.waitForTimeout(400);
-  await expect.poll(async () => hudText(page, 'hud-nav-context'), { timeout: 5000 }).toBe(DEFAULT_FOOT);
+  await expect.poll(async () => hudText(page, 'hud-nav-context'), { timeout: 5000 }).toBe('搜刮床铺');
   expect(await hudVisible(page, 'hud-tutorial-skip')).toBe(false);
   expect((await tutorial(page)).skipped).toBe(true);
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
@@ -309,5 +333,76 @@ test('Esc skips the tutorial instead of opening the pause menu', async ({ page }
   // Esc 的第一含义是跳教程，不弹暂停（无面板占着 Esc 时）。
   expect(await page.evaluate(() => (window.__PHASER_GAME__?.scene.getScene('Game') as unknown as { pauseOpen: boolean }).pauseOpen)).toBe(false);
   expect((await tutorial(page)).skipped).toBe(true);
+  expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+});
+
+// RC-02 XP-3：床步不再从早上悬到入夜。修前完成条件只有「睡过/入夜」，
+// 教程结尾晾着一个当晚才能做的动作（RC-02 报告 run-seed1.log 07:35:16）；
+// 现在白天走到自己床边即「知道床在哪」当场收尾，入夜路径保留兜底
+// （用例 'nightfall finishes all six steps' 钉着它）。
+test('finding the bed on floor 1 finishes the tutorial before nightfall', async ({ page }) => {
+  test.setTimeout(180_000);
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  await startGame(page, 42);
+  await walkTo(page, 'ArrowRight', 900);
+  await walkTo(page, 'ArrowLeft', 165);
+  await page.keyboard.press('E');
+  await page.waitForFunction(
+    () => (window.__PHASER_SESSION__?.getState()?.visitedFloors?.[1]?.openedContainers?.length ?? 0) > 0,
+    undefined,
+    { timeout: 10_000 },
+  );
+  // 圆环步持有 3 秒：等它自动进制作步再按 C（同 test 4 的稳健序列）。
+  await expect.poll(async () => tutorial(page), { timeout: 8000 }).toEqual({ step: 3, skipped: false });
+  await page.keyboard.press('C');
+  await page.waitForFunction(
+    () => (window.__PHASER_GAME__?.scene.getScene('Game') as unknown as { craftingOpen: boolean } | null)?.craftingOpen === true,
+    undefined,
+    { timeout: 5000 },
+  );
+  await expect.poll(async () => tutorial(page), { timeout: 5000 }).toEqual({ step: 4, skipped: false });
+  await page.keyboard.press('C'); // 关面板
+  await page.evaluate(() => {
+    const s = window.__PHASER_SESSION__?.getState();
+    if (s) s.player.x = 40;
+  });
+  await page.waitForTimeout(150);
+  await page.keyboard.press('E');
+  await page.waitForFunction(
+    () => window.__PHASER_SESSION__?.getState()?.currentFloor === 2,
+    undefined,
+    { timeout: 10_000 },
+  );
+  await expect.poll(async () => tutorial(page), { timeout: 5000 }).toEqual({ step: 5, skipped: false });
+
+  // 把时钟摁在上午：证明收尾不靠入夜（入夜 = 18:00，这里离它还有半天）。
+  await setMinute(page, 10 * 60);
+  // 爬回 1 层：把玩家摆到 2 层下行梯口（1240，tier1 钉右端）按 E——与上面
+  // 爬梯同款 evaluate 摆位，顺带避开 2 层可能刷新的阻碍物（seed 42 的 2 层
+  // 就有瓦砾，真实行走会被挡住，10s 内下不来）。
+  await page.evaluate(() => {
+    const s = window.__PHASER_SESSION__?.getState();
+    if (s) s.player.x = 1240;
+  });
+  await page.waitForTimeout(150);
+  await page.keyboard.press('E');
+  await page.waitForFunction(
+    () => window.__PHASER_SESSION__?.getState()?.currentFloor === 1,
+    undefined,
+    { timeout: 10_000 },
+  );
+  // 下梯落点在 1 层右端（downExitXFor(2)=1240），床在 1120——往左走。
+  const landX = await page.evaluate(() => window.__PHASER_SESSION__?.getState()?.player?.x ?? 0);
+  await walkTo(page, landX > 1120 ? 'ArrowLeft' : 'ArrowRight', 1120);
+  // 走到床边：教程当场收尾，flash 是六步全过的那一句。
+  await expect.poll(async () => tutorial(page), { timeout: 8000 }).toEqual({ step: 6, skipped: false });
+  await expect.poll(async () => hudText(page, 'hud-feedback'), { timeout: 5000 }).toContain('你已掌握基本生存');
+  expect(await hudVisible(page, 'hud-tutorial-skip')).toBe(false);
+  // 此刻仍是白天：这一步不是「等到晚上自动完成」的。
+  expect(await page.evaluate(() => window.__PHASER_SESSION__?.getState()?.gameMinuteOfDay ?? -1)).toBeLessThan(18 * 60);
+  expect(await page.evaluate(() => localStorage.getItem('floor100000.tutorial.progress'))).toBe('6');
+  await page.screenshot({ path: 'output/ag73/08-bed-found-daytime.png' });
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });

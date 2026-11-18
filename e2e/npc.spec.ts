@@ -66,19 +66,44 @@ async function setX(page: Page, x: number): Promise<void> {
   }, x);
 }
 
-// Where a resident IS, not where the data file says they spawn.
-//
-// AG-11's autonomy walks them along a schedule (alin was measured at x=224 while
-// npcs.ts still says 480, xiaozhou at 560 vs 800). Nearest-npc is judged on the
-// live sprite, so parking the player on the static coordinate now opens nothing
-// at all. Read the sprite before every E press — they patrol ±28px every 15
-// game minutes, so a single setX goes stale within a second.
-async function npcSpriteX(page: Page, npcId: string): Promise<number | null> {
+// AG-66：过道阻碍物的 E 交互优先于 NPC（onInteract 的顺序：阻碍物 → NPC，
+// GameScene.ts:8192-8201，有意设计——被钳在瓦砾上时该先挖路）。seed42 的
+// 2 层瓦砾@222 正嵌在 alin 的巡逻带 [196.5,224.5] 里：贴她身上按 E，开的
+// 是「需要铲子才能挖开这堆瓦砾」而不是对话（同 spec 小周测试通过为铁证——
+// 她的巡逻带 528-599 不压阻碍位）。挑一个既够得到 NPC、又不在任何阻碍物
+// 交互距离内的站位；她恰好压在瓦砾正上方（无解）时等几步——她按日程会走开。
+const INTERACT_DIST = 44;
+
+/** NPC 精灵实时 x + 本层还没挖掉的阻碍物 x（同一帧快照里读，免得坐标漂移）。 */
+async function npcAndObstacleXs(page: Page, npcId: string): Promise<{ npcX: number | null; obstacleXs: number[] }> {
   return page.evaluate((id) => {
-    const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { npcObjs?: Map<string, { sprite: { x: number } }> } | null } } }).__PHASER_GAME__;
-    const rec = g?.scene.getScene('Game')?.npcObjs?.get(id);
-    return rec ? Math.round(rec.sprite.x) : null;
+    const g = (window as unknown as {
+      __PHASER_GAME__?: {
+        scene: {
+          getScene: (k: string) => {
+            npcObjs?: Map<string, { sprite: { x: number } }>;
+            activeObstacleList?: Array<{ x: number }>;
+          } | null;
+        };
+      };
+    }).__PHASER_GAME__;
+    const sc = g?.scene.getScene('Game');
+    const rec = sc?.npcObjs?.get(id);
+    return {
+      npcX: rec ? rec.sprite.x : null,
+      obstacleXs: (sc?.activeObstacleList ?? []).map((o) => o.x),
+    };
   }, npcId);
+}
+
+/** 由近及远挑站位：|站位-NPC| ≤ 44 且每个阻碍物都 > 44；无解返回 null。 */
+function standSpotNear(npcX: number, obstacleXs: readonly number[]): number | null {
+  for (const d of [0, -12, 12, -24, 24, -34, 34, -42, 42]) {
+    const s = npcX + d;
+    if (s < 8) continue;
+    if (obstacleXs.every((ox) => Math.abs(ox - s) > INTERACT_DIST)) return s;
+  }
+  return null;
 }
 
 /** Stand on a walking resident's current x and press E until `check` passes. */
@@ -88,9 +113,16 @@ async function pressEAtNpc(page: Page, npcId: string, check: () => Promise<boole
   await page.waitForTimeout(700);
   for (let i = 0; i < tries; i++) {
     if (await check()) return;
-    const x = await npcSpriteX(page, npcId);
-    if (x === null) throw new Error(`resident "${npcId}" is not on this floor`);
-    await setX(page, x);
+    // AG-66：先挑不被阻碍物抢占的站位（她压着瓦砾时等几步，巡逻会走开）。
+    let spot: number | null = null;
+    for (let w = 0; w < 8 && spot === null; w++) {
+      const { npcX, obstacleXs } = await npcAndObstacleXs(page, npcId);
+      if (npcX === null) throw new Error(`resident "${npcId}" is not on this floor`);
+      spot = standSpotNear(npcX, obstacleXs);
+      if (spot === null) await page.waitForTimeout(250);
+    }
+    if (spot === null) continue;
+    await setX(page, spot);
     await page.waitForTimeout(60);
     await page.keyboard.press('E');
     const deadline = Date.now() + 1200;

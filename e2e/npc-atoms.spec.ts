@@ -97,6 +97,31 @@ async function alinSprite(page: Page): Promise<{ x: number; anim: string } | nul
   });
 }
 
+// AG-66：阻碍物的 E 交互优先于 NPC（onInteract 阻碍物 → NPC）。seed42 的 2 层
+// 瓦砾@222 嵌在 alin 的巡逻带 [196.5,224.5] 里，贴她身上按 E 开的是瓦砾提示
+// 而不是对话。站位改挑「够得到她、又不在阻碍物交互距离内」的点；她恰好压在
+// 瓦砾正上方（无解）时等几步——巡逻会走开。同 e2e/npc.spec.ts 的修法。
+async function obstacleAwareStandX(page: Page): Promise<number | null> {
+  const both = await page.evaluate(() => {
+    const sc = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as {
+      npcObjs?: Map<string, { sprite: { x: number } }>;
+      activeObstacleList?: Array<{ x: number }>;
+    } | null;
+    const rec = sc?.npcObjs?.get('alin');
+    return {
+      npcX: rec ? rec.sprite.x : null,
+      obstacleXs: (sc?.activeObstacleList ?? []).map((o) => o.x),
+    };
+  });
+  if (both.npcX === null) return null;
+  for (const d of [0, -12, 12, -24, 24, -34, 34, -42, 42, -44, 44]) {
+    const s = both.npcX + d;
+    if (s < 8) continue;
+    if (both.obstacleXs.every((ox) => Math.abs(ox - s) > 44)) return s;
+  }
+  return null;
+}
+
 /** 在页面里对真实 state 求原子序列（产品函数，非 mock）。 */
 async function atomsFor(page: Page, npcId: string, opts: { forcedTarget?: number | null } = {}): Promise<AtomLike[]> {
   return page.evaluate(
@@ -315,23 +340,41 @@ test('the speak atom is sensor-gated: close enough and the real E key opens the 
   await page.waitForTimeout(400);
   expect(await hasVisibleText(page, '阿林（维修工）')).toBe(false);
 
-  // 正例：贴身站到阿林的实时位置上——sense 报 withinInteract，原子带 speak，
+  // 正例：站到阿林实时位置旁——sense 报 withinInteract，原子带 speak，
   // 且真场景里 E 真的打开对话（Sensor 的结论与场景交互判定同源）。
+  // 站位要同时避开阻碍物的交互距离（AG-66：阻碍物抢先于 NPC）。
+  // alin 沿巡逻带走动：瞬移落点按她那刻的位置算，她再走开一步 44 的交互
+  // 阈值就超（实测 46.69/55.51——对话开着她的 sprite 仍在动，「时钟/自主
+  // 冻结」不冻巡逻 tween）。所以 sense 读数必须在按 E 前的收敛窗口取快照，
+  // 循环外对快照断言；atoms 读状态对象，不受 sprite 移动影响，留到最后。
+  let settled: { sameFloor: boolean; distance: number; withinInteract: boolean } | null = null;
   for (let i = 0; i < 6; i++) {
     if (await hasVisibleText(page, '阿林（维修工）')) break;
-    const sprite = await alinSprite(page);
-    if (sprite) await setX(page, sprite.x);
-    await page.waitForTimeout(60);
+    let spot: number | null = null;
+    for (let w = 0; w < 8 && spot === null; w++) {
+      spot = await obstacleAwareStandX(page);
+      if (spot === null) await page.waitForTimeout(250);
+    }
+    if (spot === null) continue;
+    await setX(page, spot);
+    // 收敛到交互阈值 44 本身（不是更紧的 40）：巡逻带宽 28px，避开瓦砾的
+    // 候选点最远落在 npcX±44，等 40 以内可能永远等不到（d=±42 时距离 42）。
+    // 窗口给到 ~4s：alin 的巡逻 AI 有停顿，负载高时一停一顿，短窗口会整个
+    // 错过她走进可达范围的时刻（单跑绿/批量挂的根因）。
+    for (let c = 0; c < 32; c++) {
+      const s = await senseOf(page, 'alin');
+      if (s.player.distance <= 44) { settled = s.player; break; }
+      await page.waitForTimeout(120);
+    }
     await page.keyboard.press('E');
     await page.waitForTimeout(250);
   }
   expect(await hasVisibleText(page, '阿林（维修工）'), 'E beside alin must open her dialogue').toBe(true);
 
-  // 对话开着的时候时钟/自主冻结，此刻读原子：贴身 → 有 speak。
-  const seen = await senseOf(page, 'alin');
-  expect(seen.player.sameFloor).toBe(true);
-  expect(seen.player.distance).toBeLessThanOrEqual(44);
-  expect(seen.player.withinInteract).toBe(true);
+  expect(settled, 'standing beside alin must settle inside interact range before E').not.toBeNull();
+  expect(settled!.sameFloor).toBe(true);
+  expect(settled!.distance).toBeLessThanOrEqual(44);
+  expect(settled!.withinInteract).toBe(true);
   atoms = await atomsFor(page, 'alin');
   const speak = atoms.find((a) => a.kind === 'speak');
   expect(speak, 'within interact distance the speak atom must fire').toBeDefined();

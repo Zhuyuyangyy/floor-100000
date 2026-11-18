@@ -114,6 +114,26 @@ test.describe('B3-02.1 bag-full feedback', () => {
     return check();
   }
 
+  // AG-66：吃背包里的一叠面包（开真实背包面板，光标按 state 里的槽位号下移）。
+  // 新路线从 F5 下行必经 F5 地上面包@160（绕行口的唯一通路），捡了它就在
+  // 路上吃掉——格数才能与旧路线一致（survivalJourney 的同款手法）。
+  async function eatOneBread(page: Page): Promise<void> {
+    const index = await page.evaluate(() =>
+      (window.__PHASER_SESSION__?.getState()?.player.inventory.slots ?? []).findIndex((s) => s.itemId === 'bread'),
+    );
+    if (index < 0) return;
+    await page.keyboard.press('I');
+    await page.waitForTimeout(250);
+    for (let i = 0; i < index; i++) {
+      await page.keyboard.press('ArrowDown');
+      await page.waitForTimeout(90);
+    }
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(240);
+    await page.keyboard.press('I'); // close
+    await page.waitForTimeout(200);
+  }
+
   async function openContainer(page: Page, floor: number, id: string, x: number): Promise<void> {
     const opened = async (): Promise<boolean> =>
       ((await readState(page)).visitedFloors[floor]?.openedContainers ?? []).includes(id);
@@ -123,10 +143,14 @@ test.describe('B3-02.1 bag-full feedback', () => {
     // enough locally and not on the CI runner, where the spec died with
     // "could not open 3/crate_metal" - all eight presses had landed before the
     // key was being handled. Wait for the state to change instead.
+    // AG-66 再补一刀：开容器是 2s 搜刮动作，openedContainers 到动作落地才记；
+    // 期间任何移动输入都会收手取消（onInteract 的 pendingAction 分支），所以
+    // 轮询窗口必须 > SEARCH_MS(2s)，且失败重试的那次 walkTo 此时是原地踏步
+    // （玩家没动过）——不会把搜索掐死。与 actionCosts/survivalLoop 同款修法。
     for (let i = 0; i < 10; i++) {
       if (await opened()) return;
       await page.keyboard.press('E');
-      if (await pollUntil(page, opened, 1500)) return;
+      if (await pollUntil(page, opened, 3000)) return;
       await walkTo(page, x); // slid past the radius: step back and try again
     }
     throw new Error(`could not open ${floor}/${id}`);
@@ -175,15 +199,36 @@ test.describe('B3-02.1 bag-full feedback', () => {
     await page.waitForTimeout(400);
     expect(await hasVisibleText(page, BAG_FULL)).toBe(false);
 
+    // ── AG-66 重编路线 ──
+    // 旧路线按 AG-66 之前的世界直走，现在两处被封（seed42 实证）：
+    //   3 层 rubble@251 把落点 40 与 crate_metal@800 / crate_wood@480 隔在右侧；
+    //   4 层 rubble@992 把左侧落点与下行口@1240 隔开。
+    // 新路线走「先上后下」的绕行（AG-109 修 survivalJourney 的同款手法：
+    // 下行竖井起止同 x——从 F5 下来落在 F4 的 1240，再从 F4 下来落在 F3 的
+    // 1240，落地即在瓦砾右侧，箱子够得着）。 loot 集合与旧路线一致，
+    // 断言原地不动。
     await takeStairs(page, 'up', 2);
     await takeStairs(page, 'up', 3);
+    // 3 层落地侧（左）补捡地上电池@160：旧路线从木箱走回梯子时顺手捡，
+    // 新路线不经过那块地——先捡上。
+    await walkTo(page, 160);
+    await takeStairs(page, 'up', 4);
+    await openContainer(page, 4, 'fuse_box', 640);
+    await takeStairs(page, 'up', 5);
+    // 下行绕行的通路：F5 从 40 走到 1240 必经地上面包@160。捡了它，
+    // 在 F5 上用真实背包面板吃掉（格数才能与旧路线一致——补给架的面包
+    // 稍后要当一个新栈把空出来的格子填满）。
+    await walkTo(page, DOWN_EXIT_X);
+    await eatOneBread(page);
+    await takeStairs(page, 'down', 4);
+    await takeStairs(page, 'down', 3);
+    // 3 层右侧：两只箱子（从 1240 往左走过去会顺手捡起地上布料@1120）。
     await openContainer(page, 3, 'crate_metal', 800);
     await openContainer(page, 3, 'crate_wood', 480);
-    await takeStairs(page, 'up', 4); // the loose battery at x=160 is picked up en route
-    await openContainer(page, 4, 'fuse_box', 640);
 
-    // The continuous stair route can also walk over a loose ground stack while
-    // leaving floor 3, so the bag may already be full before the water tank.
+    // The bag is one short of full with everything but the water: same eleven
+    // stacks the straight route carried (bread eaten, crate battery absent on
+    // seed 42), plus the cloth picked up on the way back to the stairs.
     const beforeTank = await readState(page);
     expect(beforeTank.player.inventory.slots.length).toBeGreaterThanOrEqual(11);
     expect(beforeTank.player.inventory.slots.length).toBeLessThanOrEqual(beforeTank.player.inventory.slotCount);
@@ -191,6 +236,13 @@ test.describe('B3-02.1 bag-full feedback', () => {
       expect(await hasVisibleText(page, BAG_FULL)).toBe(false);
     }
 
+    // 回 4 层左侧开水箱：F4 的下行口被 rubble@992 封在左侧落点的右侧，
+    // 只能先下到 1 层再爬回来（上行口恒 40，落点永不被封）。
+    await takeStairs(page, 'down', 2);
+    await takeStairs(page, 'down', 1);
+    await takeStairs(page, 'up', 2);
+    await takeStairs(page, 'up', 3);
+    await takeStairs(page, 'up', 4);
     await openContainer(page, 4, 'water_tank', 240);
     const full = await readState(page);
     expect(full.player.inventory.slots.length).toBe(full.player.inventory.slotCount);
@@ -228,6 +280,10 @@ test.describe('B3-02.1 bag-full feedback', () => {
     // The route the game actually offers is the workbench: crafting spends whole
     // stacks, which is what frees slots. The lamp's battery, wire and scrap are
     // all in the bag, so walk home and build it.
+    // AG-66：F4 左侧落点没有下行路（rubble@992 封住右侧的下行口）——按绕行
+    // 手法上 F5，从上层下口掉回右侧再一路下到 1 层。
+    await takeStairs(page, 'up', 5);
+    await takeStairs(page, 'down', 4);
     await takeStairs(page, 'down', 3);
     await takeStairs(page, 'down', 2);
     await takeStairs(page, 'down', 1);
@@ -244,9 +300,10 @@ test.describe('B3-02.1 bag-full feedback', () => {
     expect(spent.player.inventory.slots.length).toBeLessThan(full.player.inventory.slots.length);
     await waitForFlag(page, BAG_FULL, false);
 
-    // And it is not a one-shot latch: the physical stair route may already have
-    // picked up floor 3's cloth while returning to the down stair. Use the
-    // guaranteed bread stack on floor 5 to refill the freed slot deterministically.
+    // And it is not a one-shot latch: the绕行 route already picked up floor 3's
+    // cloth on the way to the metal crate (from 1240 leftwards passes 1120).
+    // Use the guaranteed bread stack on floor 5 to refill the freed slot
+    // deterministically.
     await takeStairs(page, 'up', 2);
     await takeStairs(page, 'up', 3);
     await takeStairs(page, 'up', 4);

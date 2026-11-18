@@ -15,6 +15,9 @@ import { readFileSync } from 'node:fs';
 const sceneSrc = readFileSync('src/scenes/GameScene.ts', 'utf-8');
 const menuSrc = readFileSync('src/scenes/MenuScene.ts', 'utf-8');
 const audioSrc = readFileSync('src/systems/AudioSystem.ts', 'utf-8');
+// RC-03 拆分第 3 步：教程四件随 TutorialController 迁走，先毁再建的首段现在
+// 住在控制器里（init() 首段）——契约测试跟着搬家，不断言来源。
+const tutorialControllerSrc = readFileSync('src/scenes/controllers/TutorialController.ts', 'utf-8');
 
 describe('restart-safe contracts (Setback 标准，源码级)', () => {
   it('GameScene 的 SHUTDOWN 摘掉音乐与楼层级订阅', () => {
@@ -37,9 +40,10 @@ describe('restart-safe contracts (Setback 标准，源码级)', () => {
 
   it('教程对象（呼吸框/高亮框/跳过按钮）先毁再建', () => {
     // AG-73：场景重启不清显示列表（Phaser 4 shutdown 只空纹理），
-    // initTutorial 首段先销毁上一轮的。
-    expect(sceneSrc).toContain('this.tutorialWorldGfx?.destroy();');
-    expect(sceneSrc).toContain('this.tutorialHudGfx?.destroy();');
+    // TutorialController.init() 首段先销毁上一轮的（原 GameScene.initTutorial）。
+    expect(tutorialControllerSrc).toContain('this.worldGfx?.destroy();');
+    expect(tutorialControllerSrc).toContain('this.hudGfx?.destroy();');
+    expect(tutorialControllerSrc).toContain('for (const o of this.skipParts) o.destroy();');
   });
 
   it('战斗舞台随 closeCombat 完整拆除', () => {

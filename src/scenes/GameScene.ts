@@ -133,35 +133,15 @@ import { bumpStat, noteFloorReached, noteGoldEarned } from '../systems/StatsSyst
 import { buildStatsTable } from './EndScene';
 import { StatsPanelController, type PanelBox, type StatsPanelHost } from './controllers/StatsPanelController';
 import { MonologueController, type MonologueHost } from './controllers/MonologueController';
+import { TutorialController, type TutorialHost } from './controllers/TutorialController';
 import { charge, recordShortcut, shortcutAvailable, shortcutPlan } from '../systems/shortcut';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
-// AG-73：新手教程。纯逻辑（步骤/推进/高亮几何）在 TutorialSystem，文案在
-// data/tutorial；本场景只接三处：initTutorial（create）、tickTutorial
-// （update）、refreshNavBar 的 contextual 分支，外加 onEsc 的跳过早退。
-import {
-  freshTutorial,
-  hasOpenedAnyContainer,
-  loadTutorial,
-  saveTutorial,
-  skipTutorial,
-  tickTutorial,
-  tutorialActive,
-  tutorialHighlight,
-  tutorialHintVisible,
-  tutorialYieldsToWorld,
-  type TutorialState,
-  type TutorialWorld,
-} from '../systems/TutorialSystem';
-import {
-  TUTORIAL_DONE_LINE,
-  TUTORIAL_OPENING_LINE,
-  TUTORIAL_SKIP_LABEL,
-  TUTORIAL_SKIP_LINE,
-  TUTORIAL_STEPS,
-  WORLD_DEFAULT_HINT,
-} from '../data/tutorial';
+// AG-73：新手教程的本体在 controllers/TutorialController（RC-03 拆分第 3
+// 步），场景只留两处：开局 flash 的那一句（激活与否决定放哪句）与导航条
+// contextual 分支的接线；onEsc 的跳过早退与 update 的 tick 同走控制器。
+import { TUTORIAL_OPENING_LINE, WORLD_DEFAULT_HINT } from '../data/tutorial';
 import { playSfx } from '../render/audio';
 // AG-91：juice 层（战斗打击感）。纯逻辑在 render/juice.ts（零 Phaser），
 // 本场景只做三件事：updateJuice 每帧按真实时间推进并写相机 offset、按分级
@@ -838,13 +818,11 @@ function npcStrollPose(npcId: string, floor: number, stationary: boolean, elapse
 }
 
 /**
- * AG-73 教程收尾 flash 的入夜推迟量：flash() 的驻留 1600ms + 100ms 气口。
- * 入夜推进的收尾与夜事件 flash 同帧相撞（后者盖掉前者），夜里收尾时让收尾语
- * 排到事件消息之后——缘由见 runTutorialTick 的 completed 分支。
+ * AG-73 教程收尾 flash 的入夜推迟量随教程段迁入 controllers/
+ * TutorialController（RC-03 拆分第 3 步，TUTORIAL_DONE_FLASH_DELAY_MS）。
  */
-const TUTORIAL_DONE_FLASH_DELAY_MS = 1700;
 
-export class GameScene extends Phaser.Scene implements StatsPanelHost, MonologueHost {
+export class GameScene extends Phaser.Scene implements StatsPanelHost, MonologueHost, TutorialHost {
   private player!: Phaser.GameObjects.Sprite;
   /** The crowbar in the survivor's hand. Follows the attack pose's fist. */
   private weapon?: Phaser.GameObjects.Image;
@@ -1009,20 +987,13 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   private invDetailMeta?: Phaser.GameObjects.Text;
   private invDetailBody?: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
-  // ── AG-73: 新手教程 ───────────────────────────────────────────────────────
-  // 状态在 TutorialSystem（纯逻辑），这里只持场景侧的三样：进度状态、世界坐标
-  // 呼吸框、HUD 圆环高亮框，外加右上一个跳过按钮。全部由 initTutorial 建、
-  // tickTutorial/refreshTutorialChrome 驱动；create() 之外不新建（重启时
-  // 先销毁再建，见 initTutorial 首段——Phaser 4 重启不清显示列表）。
-  private tutorial: TutorialState = freshTutorial(0);
-  /** 上一帧的玩家 x：累计位移只认「位置变了」，传送也算（检测钩子不问怎么变的）。 */
-  private tutorialLastX = 0;
-  private tutorialWorldGfx?: Phaser.GameObjects.Graphics;
-  private tutorialHudGfx?: Phaser.GameObjects.Graphics;
-  /** 跳过按钮四件（底/边/签/热区），framedButton 的返回序。 */
-  private tutorialSkipParts: Phaser.GameObjects.GameObject[] = [];
-  /** 按钮当前可见性，免得每帧 setVisible。 */
-  private tutorialSkipShown = false;
+  // ── AG-73: 新手教程（RC-03 拆分第 3 步） ─────────────────────────────────
+  // 进度状态/世界坐标呼吸框/HUD 圆环高亮框/右上角跳过按钮四样全在
+  // TutorialController，场景只持控制器本体：init() 先毁再建（场景重启不清
+  // 显示列表，Phaser 4 shutdown 只空纹理——字段初始化器不重跑，旧的
+  // 呼吸框/按钮不清会双份挂在坏纹理上），tick/navHint/skip/isActive 是
+  // update、导航条 contextual 分支、Esc 早退与开局 flash 的接线。
+  private readonly tutorial = new TutorialController(this, localStorage);
   /**
    * AG-63: 饥饿/干渴 debuff 期间左下角的常驻小标记（「状态：饥饿」）。绿光
    * 在身上跑的时候，脚注条上方始终有一行字说它是什么——用户把这片光报成
@@ -1531,10 +1502,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
 
     // AG-73：新手教程初始化（读 localStorage 进度、建呼吸框/高亮框/跳过按钮）。
     // 必须在下面那段开局 flash 之前——flash 要读教程是否激活来决定放哪句话。
-    this.initTutorial();
+    this.tutorial.init();
 
     if (getGame().day === 1) {
-      this.flash(tutorialActive(this.tutorial) ? TUTORIAL_OPENING_LINE : '目标：从第 1 层一路爬到第 100000 层。A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图');
+      this.flash(this.tutorial.isActive ? TUTORIAL_OPENING_LINE : '目标：从第 1 层一路爬到第 100000 层。A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图');
     }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -4972,7 +4943,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     if (!this.navStateGfx || !this.navContextText || !this.navKeyText) return;
     const nav = NAV_BAR;
     const cy = DESIGN_HEIGHT - nav.height / 2;
-    const hint = this.openPanelHint() ?? this.tutorialNavHint() ?? this.hintText.text;
+    const hint = this.openPanelHint() ?? this.tutorial.navHint() ?? this.hintText.text;
     const { key, label } = this.navContextParts(hint);
     if (label !== this.navContextShown) {
       this.navContextShown = label;
@@ -5046,189 +5017,6 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     } else {
       cell(2, 1, 4, 2); // 锤头
       cell(3, 3, 2, 5); // 锤柄
-    }
-  }
-
-  // ── AG-73: 新手教程 ───────────────────────────────────────────────────────
-  // TWOM 式六步（移动/搜刮/圆环/制作/爬梯/床）。前 5 层是基础发育区、几何
-  // 固定，目标物件因此按坐标钉死（1 层：储物柜 160 / 工作台 480 / 梯口 40 /
-  // 床 1120）。本段只做四件事：建对象、每帧推进与重画、给 contextual 槽供
-  // 文本、接跳过——判定/文案/几何全在 TutorialSystem 与 data/tutorial 里。
-
-  /** 场景侧的楼层上下文快照（出现判定与高亮几何共用一份）。 */
-  private tutorialWorld(): TutorialWorld {
-    const state = getGame();
-    return {
-      playerX: state.player.x,
-      currentFloor: state.currentFloor,
-      containers: this.floorView.containers.map((c) => ({ id: c.id, x: c.x })),
-      openedIds: state.visitedFloors[state.currentFloor]?.openedContainers ?? [],
-    };
-  }
-
-  /**
-   * create() 尾部调用一次（开局 flash 之前——flash 要读教程激活与否）。
-   * 先销毁再建：场景重启不清显示列表（Phaser 4 的 shutdown 只空纹理），
-   * 上一轮的呼吸框/按钮会双份挂在坏纹理上。
-   */
-  private initTutorial(): void {
-    this.tutorialWorldGfx?.destroy();
-    this.tutorialHudGfx?.destroy();
-    for (const o of this.tutorialSkipParts) o.destroy();
-    this.tutorialSkipParts = [];
-    this.tutorial = loadTutorial(localStorage, this.time.now);
-    this.tutorialLastX = getGame().player.x;
-    // 世界坐标呼吸框：depth 30——压得住前景剪影（26）与全部楼层道具，又在
-    // HUD 上下文带（100）之下，永远不会爬进屏幕带。
-    this.tutorialWorldGfx = this.add.graphics().setDepth(30);
-    // HUD 圆环高亮（第 3 步）：屏幕坐标，压在 HUD 反馈层（300）之上。
-    this.tutorialHudGfx = this.add.graphics().setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH + 2);
-    // 跳过按钮：右上、环境行（80..105）下方，不压目标行/chips/状态卡/导航条。
-    // framedButton 的 hitRect 自带 stopPropagation，点它不会顺便被读成走位。
-    // scrollFactor 0：相机跟随角色时 scrollY 会到 -200（楼层带居中在屏中），
-    // 默认 (1,1) 会把整块按钮渲染到画布顶上——点击落进世界，变成走位订单。
-    const w = 108;
-    const h = 30;
-    this.tutorialSkipParts = framedButton(
-      this,
-      DESIGN_WIDTH - 16 - w,
-      112,
-      w,
-      h,
-      TUTORIAL_SKIP_LABEL,
-      HUD_FEEDBACK_DEPTH,
-      () => this.skipTutorial(),
-      { fill: UI.surfaceRaised, line: PALETTE.stoneLight, text: hex(TEXT.secondary), hover: PALETTE.lightHigh },
-    );
-    for (const o of this.tutorialSkipParts) {
-      (o as Phaser.GameObjects.GameObject & { setScrollFactor(x: number, y?: number): void }).setScrollFactor(0);
-    }
-    // 具名 hud-*：存量 e2e 的面板文本采集按名字跳过它（它是 HUD，不是面板）。
-    this.tutorialSkipParts[2]?.setName('hud-tutorial-skip');
-    // QA 第 1 轮 R2 修复：flag 的契约是「零件此刻处于可见态」，而上面
-    // framedButton 新建的四个零件（底/边/字/hitRect）默认可见——所以这里必须
-    // 记 true。记 false 时，refreshTutorialChrome 的相等守卫
-    // （showButton !== flag）在终态教程（上局跳过/完成 → showButton=false）
-    // 下判定「无需转换」，新建零件就带着默认可见态挂完整局：右上角「跳过
-    // 教程」按钮对开局即终态的玩家残留。记 true 后：终态 → false!==true 走
-    // 转换收起；新教程 → showButton=true 与 flag 相等，零件本就可见，无需
-    // 转换。局内跳过/完成（状态翻转 true→false）本就走转换分支，不受影响。
-    this.tutorialSkipShown = true;
-    this.refreshTutorialChrome();
-  }
-
-  /** update() 里紧跟 refreshNavBar 的那一行。 */
-  private runTutorialTick(): void {
-    const state = getGame();
-    const dx = Math.abs(state.player.x - this.tutorialLastX);
-    this.tutorialLastX = state.player.x;
-    if (tutorialActive(this.tutorial)) {
-      const result = tickTutorial(this.tutorial, {
-        now: this.time.now,
-        signals: {
-          dx,
-          hasOpenedContainer: hasOpenedAnyContainer(state.visitedFloors),
-          craftingOpen: this.craftingOpen === true,
-          currentFloor: state.currentFloor,
-          minuteOfDay: state.gameMinuteOfDay,
-          slept: state.shelterPlan?.resolved === true,
-          // RC-02 XP-3：床步的第三条完成路径——站到自己床边即「知道床在
-          // 哪」，教程不必从早上悬到入夜（nearBed 判起始层 + 交互距离）。
-          nearBed: this.nearBed(state),
-        },
-      });
-      this.tutorial = result.state;
-      if (result.advanced) saveTutorial(this.tutorial, localStorage);
-      if (result.completed) {
-        // RC-02：入夜推进的收尾与夜事件 roll 同在 update() 同帧——夜事件的
-        // flash 在世界模拟段（本帧稍后，ensureNightEvent 处）会整条盖掉收尾
-        // 语，于是「入夜收尾」的玩家从来没见过「你已掌握基本生存」（探针
-        // fix-xp23/probe-xp23c 实证：flash 只剩事件消息）。夜里收尾（且不是
-        // 睡过的——那条路有自己的醒来 flash）时让收尾语排到事件消息后面：
-        // 消息亮满 flash 驻留（1600ms）后收尾语接手，两句都看得见。
-        const nightRollover = isNight(state.gameMinuteOfDay) && state.shelterPlan?.resolved !== true;
-        if (nightRollover) {
-          this.time.delayedCall(TUTORIAL_DONE_FLASH_DELAY_MS, () => {
-            if (this.scene.isActive()) this.flash(TUTORIAL_DONE_LINE);
-          });
-        } else {
-          this.flash(TUTORIAL_DONE_LINE);
-        }
-      }
-    }
-    this.refreshTutorialChrome();
-  }
-
-  /**
-   * contextual 槽的教程分支（refreshNavBar 显示链的第三环）。教程激活、
-   * 本步的出现条件过了，才接管；一种情况让世界说——世界正在教本步目标物
-   * 的同一个 E 动作（贴近柜子时的「[E] 打开 储物柜」），它的键帽版比教程
-   * 文案更短更准。理由见 refreshNavBar 的注释。
-   */
-  private tutorialNavHint(): string | null {
-    if (!tutorialActive(this.tutorial)) return null;
-    const world = this.tutorialWorld();
-    if (!tutorialHintVisible(this.tutorial, world)) return null;
-    if (this.hintText.text.startsWith('按 E ') && tutorialYieldsToWorld(this.tutorial, world)) return null;
-    return TUTORIAL_STEPS[this.tutorial.step]?.hint ?? null;
-  }
-
-  /** 跳过：localStorage 记终态（本机永不再弹），按钮/高亮当场收起。 */
-  private skipTutorial(): void {
-    this.tutorial = skipTutorial(this.tutorial, localStorage);
-    this.refreshTutorialChrome();
-    this.flash(TUTORIAL_SKIP_LINE);
-  }
-
-  /**
-   * 呼吸框与跳过按钮。每帧跑：世界目标按当前楼层重算（柜子在哪框哪，爬梯
-   * 态不收），HUD 圆环框只服务第 3 步。alpha 走正弦——呼吸，不是闪烁。
-   */
-  private refreshTutorialChrome(): void {
-    const worldGfx = this.tutorialWorldGfx;
-    const hudGfx = this.tutorialHudGfx;
-    if (!worldGfx || !hudGfx) return;
-    // 跳过按钮：教程在进行、且没有面板/爬梯占屏时才在。面板里藏起来是为
-    // 了免误触——制作树支持拖拽平移，从按钮位置起手会把「挪视图」变成
-    // 「跳教程」；Esc 跳过的早退同样只在无面板时生效，两边一致。
-    const showButton = tutorialActive(this.tutorial) && !this.anyPanelOpen() && !this.stairClimb;
-    if (showButton !== this.tutorialSkipShown) {
-      this.tutorialSkipShown = showButton;
-      for (const o of this.tutorialSkipParts) {
-        (o as Phaser.GameObjects.GameObject & { setVisible(v: boolean): void }).setVisible(showButton);
-      }
-    }
-    if (!tutorialActive(this.tutorial) || this.stairClimb) {
-      // 收框只做一次：之后每帧只是两个 visible 检查。
-      if (worldGfx.visible) {
-        worldGfx.clear();
-        worldGfx.setVisible(false);
-      }
-      if (hudGfx.visible) {
-        hudGfx.clear();
-        hudGfx.setVisible(false);
-      }
-      return;
-    }
-    const box = tutorialHighlight(this.tutorial, this.tutorialWorld());
-    const pulse = 0.3 + 0.25 * Math.sin(this.time.now / 260);
-    worldGfx.clear();
-    hudGfx.clear();
-    if (box?.space === 'world') {
-      worldGfx.setVisible(true);
-      worldGfx.fillStyle(PALETTE.light, 0.08);
-      worldGfx.fillRect(box.x, box.y, box.w, box.h);
-      worldGfx.lineStyle(2, PALETTE.lightHigh, pulse);
-      worldGfx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
-    } else {
-      worldGfx.setVisible(false);
-    }
-    if (box?.space === 'hud') {
-      hudGfx.setVisible(true);
-      hudGfx.lineStyle(2, PALETTE.lightHigh, pulse);
-      hudGfx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
-    } else {
-      hudGfx.setVisible(false);
     }
   }
 
@@ -5632,7 +5420,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
   }
 
-  private flash(msg: string): void {
+  // public：TutorialHost 面之一——教程的跳过语/收尾语走场景这一条反馈行
+  // （与其余 ~30 处 this.flash 同一出口；控制器不碰 feedbackText 本体）。
+  flash(msg: string): void {
     this.feedbackText.setText(msg);
     this.feedbackTimer?.remove(false);
     this.feedbackTimer = this.time.delayedCall(1600, () => this.feedbackText.setText(''));
@@ -7363,6 +7153,53 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     );
   }
 
+  // ── TutorialHost 面（RC-03 拆分第 3 步） ─────────────────────────────────
+  // AG-73 教程的本体在 controllers/TutorialController（plain TS 类，不
+  // import Phaser 场景类型），运行期拿场景当 host。下面这些是教程要用而场景
+  // 已有的实现——与 MonologueHost/StatsPanelHost 同款纪律：控制器不 import
+  // 场景类型，可测性靠这层结构面（单测用假件实现）。
+  /** 场景此刻活着没有——夜收尾的延迟 flash 落地前的那一问。 */
+  sceneActive(): boolean {
+    return this.scene.isActive();
+  }
+  /** 爬梯动画进行中——教程按钮隐藏、呼吸框收起。 */
+  stairClimbing(): boolean {
+    return this.stairClimb !== undefined;
+  }
+  /** 制作面板开着没有——教程第 4 步（制作）的完成条件（字段同名，方法换个名）。 */
+  craftingPanelOpen(): boolean {
+    return this.craftingOpen;
+  }
+  /** 本层视图容器的坐标——教程世界快照（出现判定/高亮几何共用）。 */
+  containers(): Array<{ id: string; x: number }> {
+    return this.floorView.containers.map((c) => ({ id: c.id, x: c.x }));
+  }
+  /**
+   * 站到自己床边没有（起始层 + 交互距离）——教程床步的第三条完成路径
+   * （RC-02 XP-3）。判定纯读 state + 常量且另有非教程调用方（床铺交互），
+   * 实现因此留场景、控制器经这层查询面摄入。
+   */
+  isNearBed(): boolean {
+    return this.nearBed(getGame());
+  }
+  /** contextual 槽的世界链当前文本——教程让位判据（世界在教同一个 E 动作）。 */
+  worldHintText(): string {
+    return this.hintText.text;
+  }
+  /** 共享 framedButton 的场景侧薄封装：第一参钉死 Phaser.Scene（运行期就是本场景）。 */
+  framedButton(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    label: string,
+    depth: number,
+    onClick: () => void,
+    colors: Parameters<typeof framedButton>[8],
+  ): Phaser.GameObjects.GameObject[] {
+    return framedButton(this, x, y, w, h, label, depth, onClick, colors);
+  }
+
   /** True when something E could act on sits within reach of `x`. */
   private hasInteractableNear(x: number): boolean {
     const state = getGame();
@@ -7498,8 +7335,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // AG-73：教程进行中、且没有面板占着 Esc 时，第一下 Esc = 跳过教程
     // （不弹暂停——玩家连按 Esc 的意图是先摆脱眼前这条指引）。面板开着时
     // Esc 照旧归面板：关面板比跳教程急。与右上角「跳过教程」按钮同效。
-    if (tutorialActive(this.tutorial) && !this.anyPanelOpen()) {
-      this.skipTutorial();
+    if (this.tutorial.isActive && !this.anyPanelOpen()) {
+      this.tutorial.skip();
       return;
     }
     // OVERHAUL Wave A: ESC mid-fight is the retreat — it runs the flee round
@@ -9410,7 +9247,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // AG-73：教程 tick 紧跟导航条——它推进步骤、按步骤重画高亮，而导航条的
     // contextual 分支要读教程状态，放这里是唯一两边都看得见的位置（面板/爬梯
     // 的早退都在更后面，教程因此在那些状态下也照常推进）。
-    this.runTutorialTick();
+    this.tutorial.tick();
     this.refreshBagFullWarning();
     // AG-74：音乐上下文同步与导航条同款理由放在所有早退之前——入夜氛围、
     // 电台到期都不该因为背包开着而停更（战斗/撤退的显式切换在各自事件处）。

@@ -11,6 +11,11 @@
 //
 // Nothing here throws: audio is decoration and must never break gameplay.
 
+// AG-72：sfxVolume 设置的读取点。单一事实源是 SettingsSystem 的 localStorage
+// （key floor100000.settings），与 BGM 侧 readBgmVolume() 读同一块存储、
+// 同 0-100 标尺；本模块只拥有音效图，不拥有设置存储。
+import { getSettings } from '../systems/SettingsSystem';
+
 export type SfxName =
   | 'click'
   | 'pickup'
@@ -24,8 +29,8 @@ export type SfxName =
   | 'alert'
   | 'goal'
   // AG-74：补齐缺失的音效钩子——面板开关 / 金币 / 升级 / 入夜警告。
-  // 全部程序化短音（零素材）；调用侧按需接，音量由 playSfx 的 volumeScale
-  // 统一折算（AG-72 的 sfxVolume 设置接在那个参数上）。
+  // 全部程序化短音（零素材）；调用侧按需接，最终音量 = 食谱增益 ×
+  // 调用侧相对音量 × sfxVolume 设置（AG-72，由 playSfx 内部读取）。
   | 'panel'
   | 'coin'
   | 'upgrade'
@@ -364,10 +369,24 @@ const SFX: Record<SfxName, () => void> = {
   night: sfxNight,
 };
 
-// AG-74：playSfx 的可选音量系数。调用侧（AG-72 的 sfxVolume 设置等）按
-// 0..1 传；默认 1 = 旧行为逐字节兼容。实现是模块级作用域变量而非给每条
-// 配方加参数——SFX 表里的闭包同步执行完即复位，重入/竞态无窗口。
+// AG-74：playSfx 的音量系数作用域变量。调用侧传入的 volume 是这个音效的
+// 相对音量（同一个音效也可以有轻重）；全局的 sfxVolume 设置（AG-72）在
+// playSfx 里一并读入、与 volume 相乘——两个音量旋钮互不干扰。实现是模块
+// 级作用域变量而非给每条配方加参数——SFX 表里的闭包同步执行完即复位，
+// 重入/竞态无窗口。
 let volumeScale = 1;
+
+/**
+ * playSfx 的最终音量系数：sfxVolume（0-100 全局设置）× volume（0..1 本音效
+ * 相对音量）。纯函数，Node 单测直接钉乘法语义；任一端为 0 即整体静音
+ * （playSfx 见状直接不排节点，见 e2e ag72 的 zeroNodeCount 断言）。
+ * 与 BGM 侧 volumeGain(readBgmVolume()) 同构：设置永远是全局乘数。
+ */
+export function sfxGainScale(sfxVolume: number, volume: number): number {
+  const globalScale = Math.min(100, Math.max(0, sfxVolume)) / 100;
+  const localScale = Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1;
+  return globalScale * localScale;
+}
 
 // Fire-and-forget: safe before unlockAudio (no context yet), while muted, and
 // if the browser refuses to hand us an AudioContext at all.
@@ -377,7 +396,12 @@ export function playSfx(name: SfxName, volume = 1): void {
   if (!context || context.state === 'closed') return;
   const synth = SFX[name];
   if (!synth) return;
-  volumeScale = Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1;
+  // AG-72：sfxVolume 设置在这里读进音效播放路径——修复前全 src 没有任何
+  // 读取点，设置面板的音效滑条改了不生效（RC-01 的真缺陷）。每次播放现读，
+  // 改设置下一声即生效，与 BGM 总线随设置刷新的行为对称。
+  const scale = sfxGainScale(getSettings().sfxVolume, volume);
+  if (scale <= 0) return; // 静音不排节点：包络都不建（MenuScene 滑条滑到 0 的试听同理）
+  volumeScale = scale;
   try {
     synth();
   } catch {

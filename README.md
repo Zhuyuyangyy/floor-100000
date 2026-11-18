@@ -75,9 +75,9 @@
 | 关卡 | 实况 |
 | --- | --- |
 | 类型检查 | `tsc --noEmit` **0 错** |
-| 单元测试 | **116 个文件 / 2096 个用例全部通过**（`VITE_NPC_MODEL= npx vitest run`） |
+| 单元测试 | **116 个文件 / 2128 个用例全部通过**（`VITE_NPC_MODEL= npx vitest run`） |
 | 生产构建 | **通过**（`tsc && vite build` → `dist/`） |
-| 浏览器 E2E | **观测项，非合并门禁**：磁盘上 56 个 Playwright spec；RC-01 重新验收进行中，通过数字由 E2E 工作线回填，本文不写死 |
+| 浏览器 E2E | **观测项，非合并门禁**：磁盘上 56 个 Playwright spec；RC-01 复判实跑全量 213 test（38.3m 单 worker）：**177 通过 / 33 失败 / 3 跳过**；33 失败已全部分诊（探针缺陷 30 / 帧时序 1 / 真产品缺陷 1 / 复合 1，详情 docs/03_TASKS.md RC-01 节）；12 个核心冒烟 spec 3 轮稳定性 **37/38 个 test 3/3 全绿**（阻断门禁提案，见 RC-01 节） |
 
 > E2E 套件驱动真实 Phaser 帧循环，剩余抖动是帧时序而非逻辑错误，已降为观测项；确定性门禁是 typecheck + 全部单测 + build。
 
@@ -163,7 +163,7 @@
 | 关卡 | 规模 | 命令 |
 | --- | --- | --- |
 | 类型检查 | TypeScript strict，零 `any` 滥用；集成线 tip `cc3059c` 实跑 0 错 | `npm run typecheck` |
-| 单元测试 | **116 个文件 / 2096 个用例，全部通过**（2026-11-18 实跑 `VITE_NPC_MODEL= npx vitest run`，非手抄） | `npm run test` |
+| 单元测试 | **116 个文件 / 2128 个用例，全部通过**（2026-11-18 中午实跑 `VITE_NPC_MODEL= npx vitest run`，非手抄） | `npm run test` |
 | 浏览器测试 | 磁盘上 56 个 Playwright spec（夹具回归 + 真实输入旅程）；**状态为观测项**：RC-01 重新验收进行中，通过数字由 E2E 工作线回填，此处不写死 | `npm run test:e2e` |
 | CI | push / PR 运行 typecheck、单测、build、浏览器安装及 E2E | `.github/workflows/ci.yml` |
 

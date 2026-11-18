@@ -156,10 +156,17 @@
   "combat": {
     "_comment": "XP-1 修复（2026-11-18，RC-02 试玩「前段刮痧」）：玩家裸装战斗数值从 combat.ts 常量搬来此处，公式不动只挪数值，后续调前段手感改这里即可。改前 baseDamage=2/accuracy=5：d20 命中公式（roll0..20 + accuracy > 10 + defense + evasion）下打 evasion3 的弹弓顽童只有 57.1% 命中、每击 2 伤，期望 8.75 回合（试玩实测 8）；瞌睡宿管 defense 5+slow2=7 更把赤手每击砍到保底 1、期望 21 回合。改后 baseDamage=4/accuracy=7：同两口怪期望均降至 4.50 回合（蒙特卡洛 4000 场验证），且每场玩家期望掉血 14.2→7.3、12.0→2.6（连带缓解 XP-1b HP 滑坡）。survivalBalance/survivalSim 不读战斗数值，7 日生存压力曲线不受影响。",
     "baseDamage": 4,
-    "crowbarDamageBonus": 3,
     "accuracy": 7,
     "defense": 2,
-    "evasion": 3
+    "evasion": 3,
+    "weaponDamageBonus": {
+      "_comment": "武器类型→伤害加成表（叠在 baseDamage 上；空手/未列入=0；包里有多把取加成最高的一把）。动机落地（RC-02 试玩员「先做把匕首」）：改前只有撬棍接伤害口径，做了匕首和空手没区别。设计标尺：前段怪 HP 8-10，单次命中≤9（fire_axe 总伤 9<10）保证任何武器都不一刀秒、保持两击以上的击杀节奏；每把相对空手（4 伤）+50%~+125% 每击伤害，HP10 的弹弓顽童从空手 4.5 回合降到 3.0（匕首/短剑/撬棍）~3.0（砍刀/消防斧）。撬棍 3 为 XP-1 基线值不动；短剑与撬棍同档（一刃一钝）；消防斧封顶 5 受「不秒 HP10」约束。中段怪（hp14 def2）上梯度才分化：匕首 4.5 回合 vs 消防斧 3.0。",
+      "dagger": 2,
+      "crowbar": 3,
+      "short_sword": 3,
+      "cleaver": 4,
+      "fire_axe": 5
+    }
   },
   "player": {
     "startingFloor": 1,

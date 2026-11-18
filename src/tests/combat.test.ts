@@ -310,17 +310,48 @@ describe('playerCombatant：从 GameState 推导', () => {
     expect(c.maxHp).toBe(GAME_CONFIG.player.hpMax);
   });
 
-  it('包里有撬棍：damage +3（与裸装差 3 点）', () => {
+  it('包里有撬棍：damage +3（与裸装差 3 点，加成走查表）', () => {
     const bare = playerCombatant(createNewGame(1));
     const s = createNewGame(1);
     addItem(s.player.inventory, 'crowbar', 1);
     const armed = playerCombatant(s);
-    expect(armed.damage).toBe(bare.damage + GAME_CONFIG.combat.crowbarDamageBonus);
+    // 撬棍档位以 balance 文件 weaponDamageBonus.crowbar 为准（XP-1 基线 +3）。
+    expect(armed.damage).toBe(bare.damage + GAME_CONFIG.combat.weaponDamageBonus.crowbar);
     expect(armed.damage - bare.damage).toBe(3);
     // 其余数值不受装备影响。
     expect(armed.accuracy).toBe(bare.accuracy);
     expect(armed.defense).toBe(bare.defense);
     expect(armed.evasion).toBe(bare.evasion);
+  });
+
+  it('加成表覆盖全部刃具：匕首/短剑/砍刀/消防斧按表加伤（空手 0）', () => {
+    // RC-02 遗留 2：「先做把匕首」的动机落地——做了武器就有伤害，不再只有
+    // 撬棍接口径。每把按 weaponDamageBonus 表加，未列入的物品（含全部
+    // 非武器）不加。
+    const bare = playerCombatant(createNewGame(1));
+    const bonus = GAME_CONFIG.combat.weaponDamageBonus;
+    expect(bonus.dagger).toBeGreaterThan(0); // 表里必须有匕首，否则动机落空
+    for (const id of ['dagger', 'short_sword', 'cleaver', 'fire_axe'] as const) {
+      const s = createNewGame(1);
+      addItem(s.player.inventory, id, 1);
+      const armed = playerCombatant(s);
+      expect(armed.damage, id).toBe(bare.damage + bonus[id]);
+      expect(bonus[id], id).toBeGreaterThanOrEqual(bonus.dagger); // 刃具不低于第一把武器
+      expect(bare.damage + bonus[id], id).toBeLessThan(10); // 不一刀秒前段 HP10 怪
+    }
+    // 非武器物品不触发任何加成。
+    const s = createNewGame(1);
+    addItem(s.player.inventory, 'bread', 2);
+    expect(playerCombatant(s).damage).toBe(bare.damage);
+  });
+
+  it('带多把武器取加成最高的一把', () => {
+    const bare = playerCombatant(createNewGame(1));
+    const s = createNewGame(1);
+    addItem(s.player.inventory, 'dagger', 1);
+    addItem(s.player.inventory, 'fire_axe', 1);
+    const armed = playerCombatant(s);
+    expect(armed.damage).toBe(bare.damage + GAME_CONFIG.combat.weaponDamageBonus.fire_axe);
   });
 
   it('初始包自带手电/净水/口粮，不触发撬棍加成', () => {

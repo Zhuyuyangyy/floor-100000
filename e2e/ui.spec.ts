@@ -15,6 +15,9 @@ async function waitForScene(page: Page, key: string): Promise<void> {
 }
 
 async function startGame(page: Page, seed: number): Promise<void> {
+  // AG-73：教程进行中第一下 ESC = 跳过教程（有意设计，ag73-tutorial.spec.ts
+  // 钉死）——本 spec 的暂停流程与教程无关，开局即按约定跳过，ESC 留给暂停。
+  await page.addInitScript(() => localStorage.setItem('floor100000.tutorial.skipped', '1'));
   await page.goto(`/?seed=${seed}`);
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter'); // 开始新游戏
@@ -90,7 +93,12 @@ test('the title menu is keyboard-navigable and has a help panel', async ({ page 
   expect(await hasVisibleText(page, '继续游戏')).toBe(false); // no save yet
   await page.screenshot({ path: 'e2e/screenshots/12-title.png' });
 
+  // AG-77：无存档菜单是 开始新游戏 / 成就 / 操作说明 / 关于 / 设置——
+  // 「成就」插在「操作说明」之前，下移两次才到它。
+  await page.keyboard.press('ArrowDown'); // -> 成就
+  await page.waitForTimeout(120);
   await page.keyboard.press('ArrowDown'); // -> 操作说明
+  await page.waitForTimeout(120);
   await page.keyboard.press('Enter');
   await page.waitForTimeout(150);
   expect(await hasVisibleText(page, 'A/D 或 ←/→ 移动')).toBe(true);
@@ -150,7 +158,14 @@ test('returning to the title from the pause menu leaves a working title screen',
   expect(await hasVisibleText(page, '开始新游戏')).toBe(true);
 
   // Still keyboard-navigable, which only holds if create() ran to completion.
-  await page.keyboard.press('ArrowDown'); // -> 操作说明
+  // 返回标题时这一局已有存档（暂停/ autosave 写过），标题菜单带「继续游戏」
+  // ——AG-77 后六项：开始新游戏 / 继续游戏 / 成就 / 操作说明 / 关于 / 设置。
+  // 不写死下移次数：轮询到选中「操作说明」再确认。
+  for (let i = 0; i < 6; i++) {
+    if (await selectedOption(page) === '操作说明') break;
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(120);
+  }
   await page.keyboard.press('Enter');
   await page.waitForTimeout(150);
   expect(await hasVisibleText(page, 'A/D 或 ←/→ 移动')).toBe(true);
@@ -283,6 +298,8 @@ test('a keypress is not doubled by another key in the same frame', async ({ page
 });
 
 // Guard against over-debouncing: a keypress in a later frame must still register.
+// AG-77：有存档菜单是 开始新游戏 / 继续游戏 / 成就 / 操作说明 / 关于 / 设置，
+// 每一步下移精确前进一个条目。
 test('a lone ArrowDown advances the menu by exactly one entry', async ({ page }) => {
   await page.addInitScript((save) => localStorage.setItem('floor100000.save.v1', save), LEGACY_SAVE);
   await page.goto('/?seed=42');
@@ -292,6 +309,10 @@ test('a lone ArrowDown advances the menu by exactly one entry', async ({ page })
   await page.keyboard.press('ArrowDown');
   await page.waitForTimeout(250);
   expect(await selectedOption(page)).toBe('继续游戏');
+
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(250);
+  expect(await selectedOption(page)).toBe('成就');
 
   await page.keyboard.press('ArrowDown');
   await page.waitForTimeout(250);

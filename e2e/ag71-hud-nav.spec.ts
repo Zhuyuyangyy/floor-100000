@@ -30,6 +30,10 @@ async function waitForScene(page: Page, key: string): Promise<void> {
 }
 
 async function startGame(page: Page, seed = 42): Promise<void> {
+  // AG-73：教程进行中第一下 ESC = 跳过教程（有意设计，ag73-tutorial.spec.ts
+  // 钉死）——本 spec 的 HUD 断言与教程无关，开局即按约定跳过（教程期的
+  // contextual 文案会盖住世界链，跳过后方可断言电梯口/战斗等真实脚注）。
+  await page.addInitScript(() => localStorage.setItem('floor100000.tutorial.skipped', '1'));
   await page.goto(`/?seed=${seed}`);
   await waitForScene(page, 'Menu');
   await page.keyboard.press('Enter');
@@ -324,8 +328,12 @@ test('combat keeps the nav bar up and hands the contextual slot the fight hint',
   }
   expect(opened, 'no ambush spot on floor 2 for seed 42').toBe(true);
 
-  // 导航条不消失：六个槽照常，contextual 槽交棒给战斗提示。
-  await expect.poll(async () => hudText(page, 'hud-nav-context'), { timeout: 5000 }).toBe('↑/↓ 选择 · Enter 出招 · ESC 撤退');
+  // 导航条不消失：六个槽照常，contextual 槽交棒给战斗提示。当前战斗脚注
+  // 带武器前缀（combatFootHint：当前武器：××（伤害 n）· Enter 出招 · …），
+  // contextual 槽被 fitHudLine 按槽宽截断——断截断后的前缀；全串断不可见
+  // 的 hud-hint 状态对象（与 ag63-combat-hud 同款新文案）。
+  await expect.poll(async () => hudText(page, 'hud-nav-context'), { timeout: 5000 }).toMatch(/^当前武器：.+· Enter 出招/);
+  await expect.poll(async () => hudText(page, 'hud-hint'), { timeout: 5000 }).toMatch(/^当前武器：.+· Enter 出招 · ↑\/↓ 选择 · ESC 撤退$/);
   for (const key of SLOT_KEYS) {
     const o = await hudObject(page, `hud-nav-${key}`);
     expect(o!.visible, `slot ${key} stays up in combat`).toBe(true);

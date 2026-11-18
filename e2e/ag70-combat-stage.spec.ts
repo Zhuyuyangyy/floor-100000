@@ -347,7 +347,13 @@ test('③ 敌人反击：前冲 + 受伤 + 震屏 + 掉血飘字', async ({ page
   // 反击落空：日志「扑空了」，无伤——两种都是合法演出，探针分别取证。
   // RC-01：分支改押游戏权威状态（日志），采样只作前冲的佐证——判定不再
   // 依赖「动画采样恰好采到」这种运气。
-  const lunged = min < spotX - 8;
+  // RC-01 §5：贴脸站位（spot 1024）前冲窗口内位移实测 5.4-6.3px，原 8px
+  // 阈值把真实短前冲判成「没前冲」——但权威状态（日志「击中你」+玩家掉血+
+  // 掉血飘字）确认反击确实发生，是位移幅度的边界情形而非漏采（Node 侧 25ms
+  // 步进已覆盖整个 130ms 窗口）。阈值放宽到 4px（与 ② 的 knocked/dodged
+  // ±4px 容差同笔）：仍能证否「完全没动」，又不误杀贴脸短前冲——ag70③ 由此
+  // 进 5/5 稳定，随 spec 升 CI 阻断门禁。
+  const lunged = min < spotX - 4;
   const log = await combatLogTail(page);
   if (log.includes('击中你')) {
     expect(lunged, `命中的反击要前冲（spot ${spotX}, min ${min}）`).toBe(true);

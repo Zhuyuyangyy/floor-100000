@@ -45,6 +45,11 @@ import { HUD_FOOT_H, TYPE, fontLineBox } from '../render/uiKit';
 import type { ItemId } from '../core/gameTypes';
 
 const SCENE_SRC = readFileSync(join(process.cwd(), 'src/scenes/GameScene.ts'), 'utf8');
+// RC-03 拆分第 7 步：战斗面板（动作条/回合签）本体随 CombatController 迁出，
+// 「面板自己也不再说废话」的源码断言改双读——场景留入口/回写委托，面板的
+// 攻击备注与行为标签行住在控制器里（与 statsPanelRefresh.test.ts 的
+// sceneSrc/ctrlSrc 双读同款）。
+const COMBAT_CTRL_SRC = readFileSync(join(process.cwd(), 'src/scenes/controllers/CombatController.ts'), 'utf8');
 
 /** 一个只装了给定物品的槽位表——武器判定只读 itemId。 */
 function slotsOf(...ids: string[]): Array<{ itemId: string }> {
@@ -190,8 +195,11 @@ describe('GameScene AG-63 wiring', () => {
   });
 
   it('面板自己也不再说「造成武器伤害」这种废话', () => {
-    expect(SCENE_SRC).toContain('${combatWeaponLabel(state.player.inventory.slots)} · 伤害 ${playerCombatant(state).damage}');
+    // 攻击备注与行为标签行随 CombatController 迁走——双读：备注模板在控制器
+    // 源里，场景源与控制器源都不许出现「造成武器伤害」这种旧废话。
+    expect(COMBAT_CTRL_SRC).toContain('${combatWeaponLabel(state.player.inventory.slots)} · 伤害 ${playerCombatant(state).damage}');
     expect(SCENE_SRC).not.toContain("'造成武器伤害'");
-    expect(SCENE_SRC).toContain('combatBehaviorLabel(combat.monster.behavior)');
+    expect(COMBAT_CTRL_SRC).not.toContain("'造成武器伤害'");
+    expect(COMBAT_CTRL_SRC).toContain('combatBehaviorLabel(combat.monster.behavior)');
   });
 });

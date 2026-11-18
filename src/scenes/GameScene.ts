@@ -109,15 +109,17 @@ import {
   rollEncounter as rollFloorEncounter,
   shouldSkip,
   isCombatKind,
-  combatIntroMessage,
   type Encounter,
   type EncounterChoice,
 } from '../systems/encounters';
 import { encounterSpots, nudgeSpotX, placeClearX } from '../systems/encounterSpots';
-import { resolveRound, playerCombatant, GUARD_ENERGY_RESTORE, type CombatAction, type CombatRound, type Combatant } from '../systems/combat';
-import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster, type MonsterBehavior } from '../systems/monsters';
-import { guardianDamageMult, lootBonus, moveSpeedMult } from '../systems/relics';
-import { modeGuardianDamageMult } from '../systems/modes';
+// AG-63：combatWeaponLabel/combatBehaviorLabel 两份纯函数随 RC-03 拆分第 7 步
+// （CombatController）迁到 systems/combat.ts——与 playerCombatant 同一口径的
+// 家；本文件 re-export 保持 combatHud.test.ts 的 import 路径
+// （'../scenes/GameScene'）不变，openPanelHint 的战斗脚注也走它们。
+import { playerCombatant, combatWeaponLabel } from '../systems/combat';
+export { combatWeaponLabel, combatBehaviorLabel } from '../systems/combat';
+import { moveSpeedMult } from '../systems/relics';
 import { buy, materialShelf, sell, sellPrice, shopStock } from '../systems/shop';
 import { VENTURES, invest, settleInvestments } from '../systems/shop';
 // AG-81：本局统计。只加钩子不改逻辑——各事件点 bumpStat 一行，读写都在
@@ -125,6 +127,7 @@ import { VENTURES, invest, settleInvestments } from '../systems/shop';
 // 表组件，暂停菜单的统计面板复用同一件。
 import { bumpStat, noteFloorReached, noteGoldEarned } from '../systems/StatsSystem';
 import { buildStatsTable } from './EndScene';
+import { CombatController } from './controllers/CombatController';
 import { StatsPanelController, type PanelBox, type StatsPanelHost } from './controllers/StatsPanelController';
 import { MonologueController, type MonologueHost } from './controllers/MonologueController';
 import { PerfController, type PerfHost } from './controllers/PerfController';
@@ -140,11 +143,10 @@ import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSyste
 // contextual 分支的接线；onEsc 的跳过早退与 update 的 tick 同走控制器。
 import { TUTORIAL_OPENING_LINE, WORLD_DEFAULT_HINT } from '../data/tutorial';
 import { playSfx } from '../render/audio';
-// AG-91：juice 层（战斗打击感）。纯逻辑在 render/juice.ts（零 Phaser），
-// 本场景只做三件事：updateJuice 每帧按真实时间推进并写相机 offset、按分级
-// 表在战斗钩子触发 impact、消费 ImpactFeedback 演闪白/缩放。
-import { JuiceState, JUICE_BALANCE } from '../render/juice';
-import { getSettings } from '../systems/SettingsSystem';
+// AG-91：juice 层（战斗打击感）随 RC-03 拆分第 7 步整体迁入 CombatController
+// （纯逻辑仍留 render/juice.ts，Node 单测直跑）；场景只剩 get juice() 取证
+// 委托引用 JuiceState 类型。
+import type { JuiceState } from '../render/juice';
 import { SettingsScene } from './MenuScene';
 import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, PANEL_FILL_BANDS, PANEL_FRAME_PIECES, PANEL_SLICE, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import {
@@ -227,15 +229,17 @@ import {
   buildWallDressing,
 } from '../render/roomDepth';
 import { getItem } from '../data/items';
-import { BAG_LAYOUT, COMBAT_BAR, CONTAINER_LABEL_DROP, HUD_LAYOUT, combatBarX, hudClockLabel } from '../render/hudLayout';
+import { BAG_LAYOUT, CONTAINER_LABEL_DROP, HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
+// RC-03 拆分第 7 步：BEHAVIOR_LABELS/MONSTER_BAR_COLORS/monsterFormFor 随
+// 战斗台上迁 CombatController；场景只剩两个第一参钉死 Phaser.Scene 的装配
+// 薄封装（CombatHost 面）与两个返回类型。
 import {
-  BEHAVIOR_LABELS,
-  MONSTER_BAR_COLORS,
   createHeadTag,
   createMonsterView,
-  monsterFormFor,
   type HeadTag,
+  type HeadTagOptions,
   type MonsterView,
+  type MonsterViewOptions,
 } from '../render/monsterArt';
 import { getRecipe, isPassUpgrade, materialSourceHint, type RecipeId, type UpgradeId } from '../data/recipes';
 import {
@@ -437,23 +441,11 @@ const NPC_LABEL_Y = PLAYER_FEET_Y - FRAME_H - CONTAINER_LABEL_DROP;
 // 什么打、按什么键」，debuff 文案给那片绿光一个名字。纯函数 + Phaser-free，
 // combatHud.test.ts 直 import（场景模块 import Phaser，Node 下跑不了，
 // 测试用 vi.mock('phaser') 桩——与 labelsAndView.test.ts 同款）。
-
-/**
- * 战斗脚注的武器优先序。撬棍排第一不是审美：playerCombatant 的伤害口径
- * 只有它（+3），幸存者手里挥的也是它；四件刃具（消防斧/砍刀/短剑/匕首）
- * 在 lootPool 与配方里，但装备系统是 v0.2 的预留（gameTypes.player.equipped
- * 至今无人读写），伤害仍按空手算。名字照实说最重的那件，伤害照实报引擎的
- * 数——两个数对不上时，玩家至少没被谎话敷衍。
- */
-const COMBAT_WEAPON_PRIORITY: readonly ItemId[] = ['crowbar', 'fire_axe', 'cleaver', 'short_sword', 'dagger'];
-
-/** 包里有什么武器决定脚注怎么回答「用什么攻击」。一件都没有 → 空手。 */
-export function combatWeaponLabel(slots: ReadonlyArray<{ itemId: string }>): string {
-  for (const id of COMBAT_WEAPON_PRIORITY) {
-    if (slots.some((slot) => slot.itemId === id)) return getItem(id).displayName;
-  }
-  return '空手';
-}
+//
+// RC-03 拆分第 7 步：武器标签（combatWeaponLabel）与行为标签
+// （combatBehaviorLabel）随 CombatController 迁到 systems/combat.ts（与
+// playerCombatant 同一口径的家），本文件留 re-export——import 路径不变。
+// 脚注串（combatFootHint）与 debuff 文案留本文件（提示层归场景）。
 
 /**
  * 左下角战斗提示。先答「用什么攻击」（用户点名要的），再给三个动作的键。
@@ -462,30 +454,6 @@ export function combatWeaponLabel(slots: ReadonlyArray<{ itemId: string }>): str
  */
 export function combatFootHint(weaponLabel: string, damage: number): string {
   return `当前武器：${weaponLabel}（伤害 ${damage}）· Enter 出招 · ↑/↓ 选择 · ESC 撤退`;
-}
-
-/**
- * 敌人的行为标签：面板血条行末尾那两个字。七种行为（monsters.ts）翻译成
- * 玩家能拿去决策的词——「怯战」意味着残血它会自己跑，「伏击」意味着见面
- * 先挨一下。default 收 normal 与任何未知值。
- */
-export function combatBehaviorLabel(behavior: string): string {
-  switch (behavior) {
-    case 'fast':
-      return '迅捷';
-    case 'slow':
-      return '笨重';
-    case 'ranged':
-      return '远程';
-    case 'ambusher':
-      return '伏击';
-    case 'coward':
-      return '怯战';
-    case 'brute':
-      return '蛮力';
-    default:
-      return '普通';
-  }
 }
 
 /** debuff 阈值内那句 flash：给绿光起名字，并说该去干什么。 */
@@ -525,17 +493,6 @@ const LIFT_SIGN_FONT = 18;
 
 const WANDERER_FLEE_SAFE_DISTANCE = 280;
 const WANDERER_FLEE_EXIT_MARGIN = 24;
-
-/**
- * AG-70：战斗站位。用户 2026-11-17 原话：「我不是说那个就是打击别人的时候
- * 展示战斗然后我们打击吗，不要做那种文本框，我们点击攻击看不见人的操作了」。
- * 双方因此以「人」的形式上场：玩家滑步到层左 25% 面右，敌人在层右 75% 面左。
- * 按当前层宽取值（floorWidthFor，tier1 一档 1280）——不硬编码 1280：tier2+
- * 的层宽不同，25%/75% 的间距随之伸缩，zoom 1 视口在遭遇层（2..5，全 tier1）
- * 恰好把双方同时框住。
- */
-const COMBAT_SPOT_PLAYER_FRAC = 0.25;
-const COMBAT_SPOT_MONSTER_FRAC = 0.75;
 
 // Row pitch for the four HUD stat bars. 15px gives an 11px label plus a 7px bar
 // with breathing room; 13px was too cramped to read at a glance.
@@ -1021,21 +978,23 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   private encounterOpen = false;
   private encounter?: { spotId: string; encounter: Encounter; choices: EncounterChoice[]; selected: number; resolved: boolean };
   private encounterObjects: Phaser.GameObjects.GameObject[] = [];
-  // OVERHAUL Wave A: the live turn-based combat (state lives in
-  // state.combat; this is only the panel's cursor).
-  private combatSelected = 0;
-  // True while the outcome screen is up (the fight is decided, one Enter left).
-  private combatDone = false;
-  // AG-70：战斗舞台——敌人剪影视图 + 双方头顶名签。世界坐标（scrollFactor 1），
-  // 击退/前冲/待机呼吸都由 MonsterView 自己的确定性 tween 驱动；本场景只在
-  // syncCombatStage 里把名签钉在角色身上。不走 encounterObjects：那个列表由
-  // 面板重建/销毁管，舞台要活过整个战斗（含 outcome 面板那一段）。
-  private combatStage?: { monster: MonsterView; playerTag: HeadTag };
-  // AG-70：敌人剪影上的点击热区（世界坐标）——「点击攻击」直接点怪也出手。
-  private combatMonsterHit?: Phaser.GameObjects.Rectangle;
-  // AG-70：演出锁——撤退成功时角色跑向边缘淡出（560ms），这期间任何战斗
-  // 输入（Enter/ESC/点击）都不再驱动回合，否则半空中再结算一回合。
-  private combatBusy = false;
+  // ── RC-03 拆分第 7 步：回合制战斗（CombatController） ────────────────────
+  // 战斗状态机 + AG-70 舞台 + 回合编排 + juice 层 + 战斗 UI 五件全在
+  // controllers/CombatController.ts（plain TS 类，Node 可单测），场景只留：
+  //   * openEncounter 的开战入口（detect 到 combat kind → combat.start）；
+  //   * onUse/onNavUp/onNavDown/onEsc 的战斗分支委托（enter/move/close/flee
+  //     四入口 + isDone 读数）；
+  //   * update 的两行（combat.tick 顿帧闸门 + combat.syncStage 名签钉点）；
+  //   * create 的一行（combat.initJuice）；
+  //   * AG-63 脚注纯函数（combatFootHint 留本文件；combatWeaponLabel/
+  //     combatBehaviorLabel 随拆分迁 systems/combat.ts，下面 re-export——
+  //     combatHud.test.ts 的 import 路径不变）；
+  //   * CombatHost 查询面/动作面（playActionAnim/playSwingFx/spawnFloatText/
+  //     playerSprite/floorWidth/syncPlayerWorldObjects/shopSpotX/
+  //     setEncounterOpen/setPanelBox/rebuildEncounterSpots/refreshStats/
+  //     startEndScene/成就三件/addLootThisTrip/combatPanelObjects/场景事件
+  //     三订阅/共享件四薄封装——见下方「CombatHost 面」段）。
+  private readonly combat = new CombatController(this);
   // OVERHAUL Wave C1: the shop panel's cursor. AG-20: one cursor over BOTH
   // shelves — the trader's stock and the material shelf — so Enter buys and S
   // sells whatever row is highlighted, whichever shelf it came from.
@@ -1398,7 +1357,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
 
     // AG-91：juice 层（震屏/顿帧/闪白/缩放的状态机）同样建在 drawFloor 之前——
     // 伏击开场偷袭（playAmbusherStrike）在战斗第一帧就可能打人。
-    this.initJuice();
+    // RC-03 拆分第 7 步：initJuice 本体在 CombatController。
+    this.combat.initJuice();
 
     this.drawFloor();
 
@@ -1840,7 +1800,11 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   // 的 walk/idle 挑选段），一次性动作从站立态出手时若不复位，GIF 会以 1/5
   // 速播放（攻击 9 秒），程序姿态更是从来只播得出第一帧。播完 update 的
   // 挑选会重新按速度压时间，这里只负责出手这一下。
-  private playActionAnim(key: string, ms: number): void {
+  //
+  // public：CombatHost 面之一（RC-03 拆分第 7 步）——战斗出手/受击/倒地与
+  // 世界链（搜割/拾取/死亡/巡游体攻击）共用同一份实现；e2e 的 clip 记录
+  // （ag51/ag66 猴补丁）也走这个场景方法。
+  playActionAnim(key: string, ms: number): void {
     this.actionAnimKey = key;
     this.actionAnimUntil = this.time.now + charAnimHoldMs(key, ms);
     this.player.anims.timeScale = 1;
@@ -1900,8 +1864,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.clearEncounterSpots();
   }
 
-  /** Keep the player, carried light and contact shadow on one world position. */
-  private syncPlayerWorldObjects(x: number, y: number): void {
+  /** Keep the player, carried light and contact shadow on one world position.
+   *  public：CombatHost 面之一（RC-03 拆分第 7 步）——战斗滑步/撤退演出的
+   *  tween onUpdate 驱动点，与世界链（攀爬落地）同一份实现。 */
+  syncPlayerWorldObjects(x: number, y: number): void {
     this.player.setPosition(x, y);
     for (const shadow of this.playerShadow) {
       (shadow as Phaser.GameObjects.Rectangle).setPosition(x, y + 2);
@@ -2622,8 +2588,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     const enc = rollFloorEncounter(state, state.currentFloor, spotId);
     // OVERHAUL Wave A: anything with teeth opens a real turn-based fight
     // instead of the old single-roll panel.
+    // RC-03 拆分第 7 步：开战入口留场景（遭遇点检测的世界链归场景），
+    // startCombat 本体在 CombatController——detect 到 combat kind 即委托。
     if (isCombatKind(enc.kind)) {
-      this.startCombat(spotId, enc.kind as 'ambush' | 'boss');
+      this.combat.start(spotId, enc.kind as 'ambush' | 'boss');
       return;
     }
     this.encounter = { spotId, encounter: enc, choices: this.encounterChoices(enc.kind), selected: 0, resolved: false };
@@ -2633,712 +2601,6 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     playSfx('alert');
   }
 
-  // ── turn-based combat (OVERHAUL Wave A) ─────────────────────────────────
-  // The monster is rolled once per spot and frozen into state.combat, so a
-  // save/reload mid-fight resumes the same fight. Behaviours from monsters.ts
-  // shape the effective stats; the first-strike and guard-pierce rules are
-  // applied here because resolveRound stays a generic engine.
-
-  private monsterFor(kind: 'ambush' | 'boss', state: import('../core/gameTypes').GameState, spotId: string): Combatant & { id: number; behavior: string } {
-    const floor = state.currentFloor;
-    let def;
-    if (kind === 'boss') {
-      def = MONSTERS.find((m) => m.id === 900);
-      if (!def) throw new Error('monster roster lost the 900 guardian');
-    } else {
-      // Seeded per spot, so the same question mark always hides the same thing
-      // within a run — and deriveSeed, never a small integer, because
-      // xorshift32's first output for small seeds collapses toward 0.
-      const rng = makeRng(deriveSeed(state.runSeed, state.day, floor, spotId, 'combat-monster'));
-      def = rollMonster(floor, rng);
-    }
-    const base: Combatant = {
-      hp: def.hp,
-      maxHp: def.hp,
-      damage: def.damage,
-      accuracy: def.accuracy,
-      defense: def.defense,
-      evasion: def.evasion,
-      name: def.name,
-    };
-    const mods = behaviorModifiers(def.behavior);
-    const effective = applyBehavior(mods, base);
-    // applyBehavior rebuilds the object from the six combat fields, so the
-    // display name does not survive it — re-attach it here.
-    return { ...effective, name: def.name, id: def.id, behavior: def.behavior };
-  }
-
-  private startCombat(spotId: string, kind: 'ambush' | 'boss'): void {
-    const state = getGame();
-    // AG-77：本场受伤计数从零起算——「零伤害击败守门人」只认这一场的账。
-    this.achievements.resetCombatDamage();
-    const monster = this.monsterFor(kind, state, spotId);
-    const log: string[] = [combatIntroMessage(kind, monster.name ?? '敌人')];
-    // An ambusher's first strike lands before the player acts: the wind-up is
-    // the tell, the hit is the bill.
-    let ambushStrike = 0;
-    if (monster.behavior === 'ambusher') {
-      const mods = behaviorModifiers('ambusher');
-      const strike = Math.max(1, Math.round(monster.damage * mods.firstStrikeMult));
-      state.player.hp = Math.max(0, state.player.hp - strike);
-      // 裁决记录（merge ag-81）：偷袭这一口同时进两本账——AG-77 成就判据
-      // （控制器里的本场受伤计数）与 AG-81 统计（bumpStat）两套记账服务不同
-      // 消费者，并存。
-      bumpStat(state, 'damageTaken', strike); // AG-81：偷袭这一口也要进「受到伤害」
-      this.achievements.noteCombatDamage(strike); // 抢先扑出也算本场受的伤
-      log.push(`${monster.name} 抢先扑出，造成 ${strike} 点伤害！`);
-      // 受伤动画/震屏挪到 playAmbusherStrike——否则紧接着的滑步 walk clip
-      // 会把 hurt clip 当场盖掉，偷袭只剩日志没有画面。
-      ambushStrike = strike;
-    }
-    state.combat = {
-      kind,
-      floor: state.currentFloor,
-      spotId,
-      monster: { ...monster, name: monster.name ?? '敌人' },
-      guarding: false,
-      turn: 1,
-      log,
-    };
-    this.encounterOpen = true; // the same panel slot and the same input routing
-    this.combatSelected = 0;
-    playSfx('alert');
-    syncMusic(getGame()); // AG-74：战斗 BGM（优先级高于夜晚/电台/楼层）
-    this.refreshStats();
-    if (state.player.hp <= 0) {
-      state.status = 'lost';
-      bumpStat(state, 'deaths'); // AG-81：偷袭反杀也记一次死亡
-      saveToStorage(state);
-      this.scene.start('End');
-      return;
-    }
-    saveToStorage(state);
-    // AG-70：双方上场（滑步 + 敌人生成 + 头顶名签），再补 ambusher 的偷袭
-    // 演出——前冲、受伤、掉血飘字与头顶血条收缩，全部看得见。
-    this.buildCombatStage(monster, kind === 'boss');
-    if (ambushStrike > 0) this.playAmbusherStrike(ambushStrike);
-    this.buildCombatPanel();
-  }
-
-  private closeCombat(): void {
-    const state = getGame();
-    state.combat = undefined;
-    this.combatDone = false;
-    this.combatBusy = false;
-    this.encounterOpen = false;
-    for (const o of this.encounterObjects) o.destroy();
-    this.encounterObjects = [];
-    // AG-70：拆舞台——敌人剪影、双方名签、敌人点击热区都随战斗结束消失。
-    this.destroyCombatStage();
-    // The floor's spots are rebuilt so a resolved one disappears.
-    this.buildEncounterSpots();
-    syncMusic(getGame()); // AG-74：战斗音乐让位，按夜晚/电台/楼层重解
-  }
-
-  // ── AG-70: the combat stage ─────────────────────────────────────────────
-  // 战斗从「读面板」变成「看人打」：双方以剪影/立绘上场站位，头顶名签血条
-  // 随人移动，命中/未命中/反击/格挡/撤退各有动作链演出。逻辑与数值仍全部
-  // 在 combat.ts/monsters.ts（只读），这里只播片——resolveRound 同步返回，
-  // 演出是它下游的 tween/delayedCall，永不阻塞回合结算。
-
-  /** 双方上场：敌人在层右 75% 面左落地，玩家滑步到层左 25% 面右。 */
-  private buildCombatStage(monster: Combatant & { id: number; behavior: string }, isBoss: boolean): void {
-    this.destroyCombatStage();
-    const behavior = monster.behavior as MonsterBehavior;
-    let monsterX = this.floorW * COMBAT_SPOT_MONSTER_FRAC;
-    // 与行商保持一个身位：75% 若落在商店点 100px 内，顺移到商店外侧 100px，
-    // 再夹回 75%±(60..64) 的带内——既不和另一个站着的活人穿模，也不跑出
-    // 「层右大半边」的站位语义。行商的名签与敌人头顶名签同高且带深色底板，
-    // 贴太近两块字牌会叠，敌人的血条会被行商标签板盖住（seed 42 的 2 层
-    // 实测：shop 1000 vs 960）。
-    const shopX = this.spotMarkers.get('shop')?.x;
-    if (shopX !== undefined && Math.abs(monsterX - shopX) < 100) {
-      const away = shopX + (monsterX <= shopX ? -100 : 100);
-      const spot = this.floorW * COMBAT_SPOT_MONSTER_FRAC;
-      monsterX = Phaser.Math.Clamp(away, spot - 60, spot + 64);
-    }
-    const view = createMonsterView(this, {
-      x: monsterX,
-      y: PLAYER_FEET_Y,
-      form: monsterFormFor(behavior, { isBoss }),
-      name: monster.name ?? '敌人',
-      hpFrac: Math.max(0, monster.hp) / monster.maxHp,
-      barColor: isBoss ? MONSTER_BAR_COLORS.boss : MONSTER_BAR_COLORS.normal,
-    });
-    // 玩家名签：青色（安全色）与敌人的血红/boss 金分开，一眼分清谁是谁。
-    const playerTag = createHeadTag(this, { name: '你', barColor: PALETTE.clothHigh });
-    playerTag.setHp(this.combatPlayerHpFrac());
-    this.combatStage = { monster: view, playerTag };
-    // 具名：e2e 按名字探针（世界坐标/可见性），不用数 children。
-    view.root.setName('combat-monster-view');
-    playerTag.root.setName('combat-player-tag');
-    this.syncCombatStage();
-    // 滑步上场：距离近就原地转身面右，不硬播一段走路。
-    this.combatSlidePlayerTo(this.floorW * COMBAT_SPOT_PLAYER_FRAC);
-    // 行为标签开场飘一次：「这只怎么打」在看见剪影之后立刻有文字确认。
-    // 伏击/蛮力/冷枪是「特别疼」的三类，用 warn 色；其余中性。
-    const warn = behavior === 'ambusher' || behavior === 'brute' || behavior === 'ranged';
-    this.combatFloatText(monsterX, view.chestY - 34, BEHAVIOR_LABELS[behavior], warn ? hex(TEXT.warn) : hex(TEXT.secondary));
-    // 点敌人本身也能出手——「点击攻击」的字面兑现：世界坐标热区盖在剪影上，
-    // 与底部动作条按钮同一终点（activateCombatChoice，自带 combatBusy 锁）。
-    const hit = hitRect(this, monsterX - 40, PLAYER_FEET_Y - view.formH - 8, 80, view.formH + 8, DUST_DEPTH + 5, {
-      onClick: () => {
-        if (this.combatBusy || this.combatDone) return;
-        if (getGame().combat) this.activateCombatChoice();
-      },
-    });
-    hit.setName('combat-monster-hit');
-    this.combatMonsterHit = hit;
-  }
-
-  /** 拆舞台：先摘 tween 再销毁（ Graphics 被 tween 追着画会炸）。 */
-  private destroyCombatStage(): void {
-    this.combatMonsterHit?.destroy();
-    this.combatMonsterHit = undefined;
-    const stage = this.combatStage;
-    if (!stage) return;
-    this.combatStage = undefined;
-    stage.monster.destroy();
-    stage.playerTag.stop();
-    stage.playerTag.root.destroy();
-  }
-
-  /** 每帧（update 的面板早退之前）：玩家名签钉在世界坐标，滑步途中跟着走。 */
-  private syncCombatStage(): void {
-    const stage = this.combatStage;
-    if (!stage) return;
-    stage.playerTag.root.setPosition(this.player.x, PLAYER_FEET_Y - FRAME_H - 8);
-  }
-
-  /** 滑步：tween 代理同时驱动 sprite 与 state.player.x（存档位置一致）。 */
-  private combatSlidePlayerTo(x: number): void {
-    const from = this.player.x;
-    const dist = x - from;
-    if (Math.abs(dist) < 4) {
-      this.player.setFlipX(false); // 面右：敌人从右打来
-      return;
-    }
-    const who = this.metaSelectedCharacter();
-    this.player.setFlipX(dist < 0);
-    this.player.play(walkAnimKey(who), true);
-    const proxy = { v: from };
-    this.tweens.add({
-      targets: proxy,
-      v: x,
-      duration: Math.min(700, 260 + Math.abs(dist) * 0.6),
-      ease: 'Quad.easeInOut',
-      onUpdate: () => this.syncPlayerWorldObjects(proxy.v, PLAYER_FEET_Y),
-      onComplete: () => {
-        if (!this.player.active) return;
-        this.player.setFlipX(false);
-        this.player.play(idleAnimKey(who), true);
-      },
-    });
-  }
-
-  /** 玩家血量比：头顶血条与飘字共用同一个数。 */
-  private combatPlayerHpFrac(): number {
-    const state = getGame();
-    return Math.max(0, state.player.hp) / GAME_CONFIG.player.hpMax;
-  }
-
-  /**
-   * 飘字：世界坐标，上飘 46px 淡出。depth 压过前景剪影（26）。
-   *
-   * AG-80：走 FloatTextPool——每次命中 this.add.text 一个新 Text、900ms 后
-   * destroy，一场战斗就是几十次「新建 Text + 重烤纹理 + 上传 GPU」。池预建
-   * 12 个复用，超发时回收最旧的一个（见 fx.ts 的 FloatTextPool）。调用点
-   * 一个都没改：掉血/未命中/反击/行为标签仍然调这一个方法。
-   */
-  private combatFloatText(x: number, y: number, text: string, color: string): void {
-    this.perf.spawnFloatText(x, y, text, color);
-  }
-
-  /** ambusher 开场偷袭：敌人前冲 + 玩家受伤动画/震屏 + 掉血飘字 + 头顶血条收缩。 */
-  private playAmbusherStrike(damage: number): void {
-    const stage = this.combatStage;
-    if (!stage) return;
-    playSfx('danger');
-    this.playActionAnim(hurtAnimKey(this.metaSelectedCharacter()), 400);
-    // AG-91：玩家受击 = medium 档（震屏 0.4 trauma + 50ms 顿帧 + 受击闪白）。
-    // 原 AG-72 的 shakeIfEnabled(160, 0.008) 被这套分级表取代——同一事件
-    // 全游戏一个入口、一个比例（config/game-balance.json 的 juice 块）。
-    // （集成裁决：受击动画取 anim 的 metaSelectedCharacter 按角色播，
-    // 反馈取 juice 的分级入口。）
-    this.juiceImpact('medium', this.player.x, PLAYER_FEET_Y - 48);
-    stage.monster.lunge();
-    this.time.delayedCall(130, () => {
-      if (!this.combatStage) return;
-      playSfx('hurt');
-      this.combatFloatText(this.player.x, PLAYER_FEET_Y - FRAME_H - 4, `-${damage}`, hex(TEXT.warn));
-      this.combatStage.playerTag.tweenHpTo(this.combatPlayerHpFrac(), 200);
-    });
-  }
-
-  /** 命中：闪白 + 击退（MonsterView.hit）+ 火花 + 掉血飘字 + 敌人血条收缩。 */
-  private stageMonsterHit(damage: number): void {
-    const state = getGame();
-    const stage = this.combatStage;
-    if (!stage || !state.combat) return;
-    // AG-91：普通命中 = small 档（trauma 0.15 的轻震、无顿帧无闪白）——
-    // 与受击/击杀共用一套比例，打击感的「底噪」。位置取敌人胸口。
-    this.juiceImpact('small', stage.monster.root.x, stage.monster.chestY);
-    playSfx('hurt');
-    stage.monster.hit(26);
-    stage.monster.tweenHpTo(Math.max(0, state.combat.monster.hp) / state.combat.monster.maxHp, 240);
-    // 90ms 后出字与火花——与挥击 clip（320ms）同帧，读作「这一下打中了」。
-    this.time.delayedCall(90, () => {
-      const live = this.combatStage;
-      if (!live) return;
-      const mx = live.monster.root.x;
-      const cy = live.monster.chestY;
-      this.combatFloatText(mx, cy, `-${damage}`, hex(TEXT.warn));
-      playFx(this, 'hit-flash', mx, cy, LIGHT_DEPTH + 2);
-    });
-  }
-
-  /** 未命中：敌人朝玩家侧移闪避（与击退反向）+ 灰色「未命中」。 */
-  private stageMonsterDodge(): void {
-    const stage = this.combatStage;
-    if (!stage) return;
-    stage.monster.dodge();
-    this.time.delayedCall(110, () => {
-      const live = this.combatStage;
-      if (!live) return;
-      this.combatFloatText(live.monster.root.x, live.monster.chestY, '未命中', hex(TEXT.dim));
-    });
-  }
-
-  /** 格挡：沉腰架盾（压缩回弹）+ 招架火花。 */
-  private stagePlayerGuard(): void {
-    playFx(this, 'parry', this.player.x, PLAYER_FEET_Y - 46, LIGHT_DEPTH + 1, { scale: 1.3 });
-    this.tweens.add({ targets: this.player, scaleY: 0.94, duration: 90, yoyo: true, ease: 'Quad.easeOut' });
-  }
-
-  /** 敌人反击：前冲 38px + 玩家掉血飘字 + 玩家头顶血条收缩。 */
-  private stageMonsterCounter(damage: number): void {
-    const stage = this.combatStage;
-    if (!stage) return;
-    stage.monster.lunge();
-    // 140ms 后落地：与前冲 tween（130ms）同步，飘字贴在挨上的那一刻。
-    this.time.delayedCall(140, () => {
-      const live = this.combatStage;
-      if (!live) return;
-      this.combatFloatText(this.player.x, PLAYER_FEET_Y - FRAME_H - 4, `-${damage}`, hex(TEXT.warn));
-      live.playerTag.tweenHpTo(this.combatPlayerHpFrac(), 200);
-    });
-  }
-
-  /** 撤退成功：角色跑向层左缘淡出（敌人留在原地），收尾后交还控制。 */
-  private playFleeShow(): void {
-    this.combatBusy = true;
-    const who = this.metaSelectedCharacter();
-    this.player.setFlipX(true);
-    const runKey = runAnimKey(who);
-    this.player.play(this.anims.exists(runKey) ? runKey : walkAnimKey(who), true);
-    const targetX = Math.max(48, this.floorW * COMBAT_SPOT_PLAYER_FRAC * 0.4);
-    const proxy = { v: this.player.x };
-    this.tweens.add({
-      targets: proxy,
-      v: targetX,
-      duration: 520,
-      ease: 'Quad.easeIn',
-      onUpdate: () => this.syncPlayerWorldObjects(proxy.v, PLAYER_FEET_Y),
-    });
-    this.tweens.add({ targets: this.player, alpha: 0, duration: 400, delay: 160 });
-    const stage = this.combatStage;
-    if (stage) this.tweens.add({ targets: stage.playerTag.root, alpha: 0, duration: 400, delay: 160 });
-    this.time.delayedCall(560, () => {
-      if (!this.scene.isActive()) return;
-      this.player.setAlpha(1);
-      this.closeCombat();
-      this.flash('你撤出了战斗。');
-    });
-  }
-
-  /**
-   * AG-70：战斗界面去文本框化。440×232 的中央文字面板整块拆除——
-   *   1. 底部动作条（y 604..656，导航条 672 之下）：攻击/格挡/撤退三个大
-   *      按钮，图标 + 效果说明，可点击（panelHit），Enter/↑↓/Esc 语义原样
-   *      （onUse/onNavUp/onNavDown/onEsc 的战斗分支一个都没动）；
-   *   2. 双方头顶血条在世界坐标随人移动（buildCombatStage，不走本列表）；
-   *   3. 回合日志降级成左下角三行半透明小字，主要信息走头顶飘字。
-   * 战斗中圆环 HUD 与底部导航条常驻可读——动作条 x 与日志错开，y 全在
-   * 660 硬线之内。
-   */
-  private buildCombatPanel(): void {
-    for (const o of this.encounterObjects) o.destroy();
-    this.encounterObjects = [];
-    const state = getGame();
-    const combat = state.combat;
-    if (!combat) return;
-    const bar = COMBAT_BAR;
-    const bx = combatBarX();
-    const depth = PANEL_DEPTH.game.dialogue;
-    // 面板点击外区域 = 鼠标 ESC 的逃生门（onPointerDown 读 panelBox）。整个
-    // 画布都算「板内」：战斗中移动锁定，点世界不再触发撤退回合；想撤退点
-    // 按钮或按 ESC。点敌人剪影出手走 buildCombatStage 的世界热区。
-    this.panelBox = { x: 0, y: 0, w: DESIGN_WIDTH, h: DESIGN_HEIGHT };
-
-    // 裁决记录（merge ag-63）：HEAD 侧为 AG-70 底部动作条（更新的演化），
-    // ag-63 侧的中央文字面板为其旧基线，整段让位；ag-63 的语义增量移植到
-    // 动作条上——攻击备注不再说「武器伤害」这种废话，实报手里那件与它的
-    // 伤害数（口径同战斗脚注：combatWeaponLabel + playerCombatant）。
-    const actions: ReadonlyArray<{ label: string; note: string; icon: 'attack' | 'guard' | 'flee' }> = [
-      { label: '攻击', note: `${combatWeaponLabel(state.player.inventory.slots)} · 伤害 ${playerCombatant(state).damage}`, icon: 'attack' },
-      { label: '格挡', note: '受伤减半', icon: 'guard' },
-      { label: '撤退', note: '可能失败', icon: 'flee' },
-    ];
-    actions.forEach((act, i) => {
-      const x = bx + i * (bar.btnW + bar.gap);
-      const y = bar.y;
-      const selected = i === this.combatSelected;
-      this.encounterObjects.push(this.add.rectangle(x, y, bar.btnW, bar.btnH, UI.surface).setOrigin(0, 0).setAlpha(0.92).setDepth(depth));
-      if (selected) {
-        this.encounterObjects.push(
-          this.add.rectangle(x, y, bar.btnW, bar.btnH, UI.accent).setOrigin(0, 0).setAlpha(0.16).setDepth(depth + 1),
-          this.add.rectangle(x, y, 2, bar.btnH, UI.accent).setOrigin(0, 0).setDepth(depth + 2),
-        );
-      }
-      const iconG = this.add.graphics().setDepth(depth + 3);
-      this.drawCombatActionIcon(iconG, act.icon, x + 14, y + 18, selected ? PALETTE.lightHigh : TEXT.secondary);
-      this.encounterObjects.push(iconG);
-      this.encounterObjects.push(
-        this.add
-          .text(x + 40, y + 16, act.label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary) })
-          .setOrigin(0, 0.5)
-          .setDepth(depth + 3),
-        this.add
-          .text(x + 40, y + 38, act.note, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
-          .setOrigin(0, 0.5)
-          .setDepth(depth + 3),
-        this.panelHit(x, y, bar.btnW, bar.btnH, depth + 6, {
-          onClick: () =>
-            this.time.delayedCall(0, () => {
-              this.combatSelected = i;
-              this.buildCombatPanel();
-              this.onUse();
-            }),
-        }),
-      );
-    });
-
-    // 回合日志：左下角三行小字半透明。最新一行亮、旧的压暗——「刚刚发生了
-    // 什么」仍然可读，但不再占据屏幕中央。
-    const tail = combat.log.slice(-3);
-    tail.forEach((line, i) => {
-      this.encounterObjects.push(
-        this.add
-          .text(bar.logX, bar.logY + i * bar.logPitch, line, {
-            fontFamily: FONT_FAMILY,
-            fontSize: `${TYPE.caption}px`,
-            color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim),
-            wordWrap: { width: bar.logW },
-          })
-          .setOrigin(0, 0)
-          .setAlpha(i === tail.length - 1 ? 0.85 : 0.55)
-          .setDepth(depth),
-      );
-    });
-
-    // 「第 N 回合」：动作条上方居中，半透明——节奏感不抢戏。
-    // 裁决记录（merge ag-63）：ag-63 把行为标签放在中央面板的血条读数行，
-    // AG-70 已无该面板；标签移植到此行——「伏击」「怯战」是 monsters.ts 名册
-    // 的设计意图，玩家看见一只怪就知道这回合该怎么打。
-    this.encounterObjects.push(
-      this.add
-        .text(DESIGN_WIDTH / 2, bar.turnY, `第 ${combat.turn} 回合 · ${combatBehaviorLabel(combat.monster.behavior)}`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
-        .setOrigin(0.5, 0.5)
-        .setAlpha(0.8)
-        .setDepth(depth),
-    );
-
-    lockToScreen(this.encounterObjects);
-  }
-
-  /**
-   * 动作条图元：16px 盒内三枚程序化小图——攻击（斜斩刃）、格挡（盾）、
-   * 撤退（左向奔跑箭）。与敌人剪影同一纪律：不新画贴图，Graphics 现画。
-   */
-  private drawCombatActionIcon(g: Phaser.GameObjects.Graphics, kind: 'attack' | 'guard' | 'flee', x: number, y: number, color: number): void {
-    g.fillStyle(color, 1);
-    if (kind === 'attack') {
-      // 斜斩：一道宽刃楔形 + 护手。
-      g.fillTriangle(x + 2, y + 14, x + 14, y + 2, x + 14, y + 5);
-      g.fillRect(x + 1, y + 12, 4, 3);
-    } else if (kind === 'guard') {
-      // 盾：方首 + 尖底 + 甲心高光。
-      g.fillRect(x + 3, y + 2, 10, 8);
-      g.fillTriangle(x + 3, y + 10, x + 13, y + 10, x + 8, y + 14);
-      g.fillStyle(PALETTE.stone, 0.9);
-      g.fillRect(x + 7, y + 4, 2, 6);
-    } else {
-      // 撤退：左箭头 + 杆 + 两道速度线。
-      g.fillTriangle(x + 2, y + 8, x + 7, y + 3, x + 7, y + 13);
-      g.fillRect(x + 7, y + 7, 8, 2);
-      g.fillRect(x + 11, y + 3, 3, 1);
-      g.fillRect(x + 13, y + 12, 2, 1);
-    }
-  }
-
-  /**
-   * The visible swing: the arc, its mirroring, and the crit flash on a kill.
-   *
-   * Shared by the turn-based fight and the single-roll encounter, because they
-   * are the same gesture - the survivor swings the crowbar - and two copies of
-   * the scale and the facing rule would drift apart.
-   */
-  private playSwingFx(killed = false): void {
-    const state = getGame();
-    const facing = this.player?.flipX ? -1 : 1;
-    const slash = playFx(this, 'sword-slash', state.player.x + 30 * facing, PLAYER_FEET_Y - 18, LIGHT_DEPTH, {
-      // The atlas's usable arc is about 90x60 inside a 136x104 frame, and its
-      // pivot sits near the bottom of that frame - so the arc rises about 57px
-      // above whatever point it is anchored to. Anchoring at chest height put
-      // the whole arc above the survivor's head; anchoring near the feet puts it
-      // across the body, which is where a swing happens. 1.35 is roughly the
-      // crowbar's reach; 0.7 stretches the 800ms cut to 1.14s, long enough to
-      // survive a glance away at the log.
-      scale: 1.35,
-      timeScale: 0.7,
-    });
-    // The arc is drawn facing right; a survivor facing left needs it mirrored or
-    // the slash trails behind them.
-    if (slash) slash.setFlipX(facing < 0);
-    if (killed) {
-      playFx(this, 'crit-hit', state.player.x + 30 * facing, PLAYER_FEET_Y - 30, LIGHT_DEPTH + 1, { scale: 1.4 });
-    }
-  }
-
-  // Feedback is deliberately downstream of the pure combat result. It can add
-  // sprites, a short shake, and an action pose, but it never rolls, mutates HP,
-  // or decides whether the turn continues.
-  private playCombatFeedback(round: CombatRound, action: CombatAction): void {
-    const state = getGame();
-    // The swing happens whether or not it lands.
-    //
-    // It used to be gated on playerDamage > 0, which meant a miss produced
-    // nothing on screen at all - and with the fight's accuracy the miss was the
-    // common case. The one visual sign that the survivor carries a weapon was an
-    // effect that appeared in roughly half the rounds, for two thirds of a
-    // second, above a figure holding nothing. A swing that whiffs still swings.
-    if (action === 'attack') this.playSwingFx(round.monsterDead);
-    if (action === 'guard' && round.monsterDamage > 0 && !round.fled) {
-      playFx(this, 'parry', state.player.x + 10, PLAYER_FEET_Y - 50, LIGHT_DEPTH + 1, { scale: 1.3 });
-    }
-    if (round.monsterDamage > 0 && !round.fled) {
-      playFx(this, 'hit-flash', state.player.x, PLAYER_FEET_Y - 48, LIGHT_DEPTH + 2);
-    }
-  }
-
-  // One turn: the engine resolves the round, this method lands the numbers on
-  // state and decides whether the fight continues.
-  private activateCombatChoice(): void {
-    const state = getGame();
-    const combat = state.combat;
-    if (!combat) return;
-    // AG-70：撤退演出期间（角色跑向边缘淡出）任何输入都不再结算回合。
-    if (this.combatBusy) return;
-    const action = (['attack', 'guard', 'flee'] as const)[this.combatSelected];
-    const player = playerCombatant(state);
-    const monsterC: Combatant = {
-      hp: combat.monster.hp,
-      maxHp: combat.monster.maxHp,
-      damage: combat.monster.damage,
-      accuracy: combat.monster.accuracy,
-      defense: combat.monster.defense,
-      evasion: combat.monster.evasion,
-      name: combat.monster.name,
-    };
-    const rng = makeRng(deriveSeed(state.runSeed, state.day, combat.floor, combat.spotId, `combat-turn-${combat.turn}`));
-    const round = resolveRound(player, monsterC, action, rng);
-    combat.log.push(...round.messages);
-    combat.guarding = action === 'guard';
-    this.playCombatFeedback(round, action);
-
-    // The swing is the action's, not the damage's. Gating the clip on
-    // playerDamage > 0 meant a miss had no swing either, so the crowbar stayed
-    // slung across the survivor's back while the arc played out of thin air. The
-    // arm and the weapon have to agree, and the arc is the arm's.
-    // （AG-90：key 按 meta 选的当前角色取——原来硬编码 'player'，玩 Alin 时
-    // 出手会闪一下玩家的贴图；GIF 换血后每个角色有自己的 attack 动画。）
-    if (action === 'attack') this.playActionAnim(attackAnimKey(this.metaSelectedCharacter()), 320);
-    if (round.playerDamage > 0) {
-      combat.monster.hp = Math.max(0, combat.monster.hp - round.playerDamage);
-      bumpStat(state, 'damageDealt', round.playerDamage); // AG-81：命中的每一口都计数
-      // AG-70：命中要看见——敌人闪白、击退、掉血飘字、头顶血条收缩。
-      this.stageMonsterHit(round.playerDamage);
-    } else if (action === 'attack') {
-      // 未命中：敌人侧移闪避，与击退反向，读法不同。
-      this.stageMonsterDodge();
-    }
-    if (action === 'guard') {
-      state.player.energy = Math.min(GAME_CONFIG.player.energyMax, state.player.energy + GUARD_ENERGY_RESTORE);
-      // AG-70：格挡招架——沉腰架盾 + 火花。
-      this.stagePlayerGuard();
-    }
-    if (round.monsterDamage > 0 && !round.monsterDead && !round.fled) {
-      // A coward that dropped below its threshold breaks off the fight and
-      // runs — the player keeps what they already did to it.
-      const cowardFrac = behaviorModifiers('coward').fleeAtHpFrac;
-      if (combat.monster.behavior === 'coward' && cowardFrac > 0 && combat.monster.hp / combat.monster.maxHp < cowardFrac) {
-        combat.log.push(`${combat.monster.name} 伤痕累累地逃走了。`);
-        // AG-70：战退演出——敌人滑出战场淡出，再接 outcome 面板。
-        this.combatStage?.monster.fleeAway();
-        this.finishCombat('coward');
-        return;
-      }
-      // OVERHAUL Wave B2/B3: the guardian totem and easy mode both soften the
-      // hit the player takes; the relic applies to any monster, the mode only
-      // to the guardian.
-      const soften = (combat.kind === 'boss' ? guardianDamageMult(state.relics ?? []) * modeGuardianDamageMult(state.mode ?? 'adventure') : guardianDamageMult(state.relics ?? []));
-      const dmg = Math.max(1, Math.round(round.monsterDamage * soften));
-      state.player.hp = Math.max(0, state.player.hp - dmg);
-      // 裁决记录（merge ag-81）：同上——AG-77 成就判据（控制器里的本场受伤
-      // 计数）与 AG-81 统计（bumpStat）两套记账并存。
-      bumpStat(state, 'damageTaken', dmg); // AG-81：敌人反击命中计数（软化后的实扣）
-      this.achievements.noteCombatDamage(dmg); // AG-77：零伤守门人的判据在这里记账
-      if (action === 'guard') this.playActionAnim(hurtAnimKey(this.metaSelectedCharacter()), 400);
-      // AG-91：敌人反击命中 = medium 档（震屏 0.4 trauma + 50ms 顿帧 + 受击
-      // 闪白）。原 AG-72 的 shakeIfEnabled(160, 0.008) 被分级表取代。
-      // （集成裁决：受击动画取 anim 的 metaSelectedCharacter 按角色播，
-      // 反馈取 juice 的分级入口。）
-      this.juiceImpact('medium', this.player.x, PLAYER_FEET_Y - 48);
-      // AG-70：敌人反击要看见——前冲 38px + 玩家掉血飘字 + 头顶血条收缩。
-      this.stageMonsterCounter(dmg);
-    }
-    combat.turn += 1;
-    this.refreshStats();
-
-    if (round.playerDead || state.player.hp <= 0) {
-      state.player.hp = 0;
-      state.status = 'lost';
-      bumpStat(state, 'deaths'); // AG-81：战死计数
-      // AG-91：玩家阵亡 = large 档（满 trauma + 120ms 顿帧 + 闪白 + 缩放）——
-      // 倒下的最后一击要有全场最重的那一下，再进 End 场景。
-      this.juiceImpact('large', this.player.x, PLAYER_FEET_Y - 48);
-      saveToStorage(state);
-      // AG-90：战死也倒地——原来这里直接 scene.start('End')，玩家的最后一
-      // 帧是战斗面板。与世界循环的死亡同一演法：die clip 播完（GIF 3x900ms）
-      // 再切结局卡。combatBusy 锁死输入，延迟切场不会塞进新回合（也不会
-      // 重复结算一次战死计数）。
-      this.combatBusy = true;
-      const dieKey = dieAnimKey(this.metaSelectedCharacter());
-      this.playActionAnim(dieKey, 520);
-      this.time.delayedCall(charAnimHoldMs(dieKey, 520) + 100, () => {
-        if (this.scene.isActive()) this.scene.start('End');
-      });
-      return;
-    }
-    if (round.monsterDead) {
-      // AG-91：击杀 = large 档。位置取敌人胸口（die 之前抓——倒地后 root 会
-      // 被 tween 挪走）。与上面 stageMonsterHit 的 small 档同帧叠加：trauma
-      // 0.15+1.0 钳到 1.0，顿帧取 max(0,120)=120ms，读作「这下打实了」。
-      const stage = this.combatStage;
-      if (stage) this.juiceImpact('large', stage.monster.root.x, stage.monster.chestY);
-      // AG-70：阵亡演出——闪白、倒地、淡出（outcome 面板同时升起，不抢戏）。
-      this.combatStage?.monster.die();
-      this.finishCombat('win');
-      return;
-    }
-    if (round.fled) {
-      // A successful retreat costs nothing and leaves the spot un-resolved —
-      // the player can come back with a better plan (or a crowbar).
-      combat.log.push('你成功撤出。');
-      saveToStorage(state);
-      // AG-70：撤退成功看得见——角色跑向层左缘淡出，敌人留在原地；560ms
-      // 后 closeCombat 收尾（期间 combatBusy 锁死输入，不会半空再结算）。
-      this.playFleeShow();
-      return;
-    }
-    saveToStorage(state);
-    this.buildCombatPanel();
-  }
-
-  // Combat over: pay out, consume the spot, close.
-  private finishCombat(outcome: 'win' | 'coward'): void {
-    const state = getGame();
-    const combat = state.combat;
-    if (!combat) return;
-    const isBoss = combat.kind === 'boss';
-    if (outcome === 'win') {
-      bumpStat(state, 'monstersKilled'); // AG-81：只有真杀掉才计数（逃走的 coward 不算）
-      // Ambush win: the loser's pockets. Boss win: the chapter's payoff.
-      // OVERHAUL Wave B3: the lucky charm adds one more roll to the pile.
-      const rng = makeRng(deriveSeed(state.runSeed, state.day, combat.floor, combat.spotId, 'combat-loot'));
-      const lootCount = (isBoss ? 3 : rng.nextInt(1, 2)) + lootBonus(state.relics ?? []);
-      const taken: Array<{ itemId: ItemId; quantity: number }> = [];
-      const pool: ItemId[] = isBoss
-        ? ['medkit', 'clean_water', 'ration_pack', 'battery', 'filter']
-        : ['bread', 'clean_water', 'dirty_water', 'scrap_metal', 'cloth', 'battery'];
-      for (let i = 0; i < lootCount; i++) {
-        const itemId = pool[rng.nextInt(0, pool.length - 1)];
-        const qty = itemId === 'clean_water' || itemId === 'bread' ? rng.nextInt(1, 2) : 1;
-        const r = addItem(state.player.inventory, itemId, qty);
-        if (r.overflow === 0) { taken.push({ itemId, quantity: qty }); this.lootThisTrip += qty; }
-      }
-      const names = taken.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、');
-      combat.log.push(isBoss ? `守门人倒下了。你搜出：${names || '（背包已满）'}` : `你击败了 ${combat.monster.name}。战利品：${names || '（背包已满）'}`);
-      if (isBoss) {
-        state.records = { deepestFloor: Math.max(state.records?.deepestFloor ?? 0, state.currentFloor), bestScore: (state.records?.bestScore ?? 0) + 200 };
-        combat.log.push('上楼的路通了。分数 +200');
-        // AG-77：零伤害击败守门人（本场累计受伤为 0 才算）。
-        this.achievements.emit({ type: 'boss_won', damageTaken: this.achievements.combatDamage });
-      }
-      markResolved(state, combat.spotId, `combat:win`);
-      playSfx('goal');
-    } else {
-      // Coward break-off: half the glory, and the spot stays spent.
-      const rng = makeRng(deriveSeed(state.runSeed, state.day, combat.floor, combat.spotId, 'combat-coward'));
-      const itemId: ItemId = rng.chance(0.5) ? 'bread' : 'cloth';
-      const r = addItem(state.player.inventory, itemId, 1);
-      if (r.overflow === 0) combat.log.push(`它逃走时掉下了 ${getItem(itemId).displayName}。`);
-      markResolved(state, combat.spotId, `combat:coward`);
-    }
-    saveToStorage(state);
-    this.refreshStats();
-    // Show the outcome for one more Enter, same as the non-combat panel.
-    for (const o of this.encounterObjects) o.destroy();
-    this.encounterObjects = [];
-    const { width, height } = this.viewSize();
-    const cx = width / 2;
-    const cy = height / 2;
-    // OVERHAUL UI: the outcome uses the same header strip and log well as the
-    // fight itself, so the panel does not change shape when the fight ends.
-    const outDepth = PANEL_DEPTH.game.dialogue;
-    const outW = 440;
-    const outH = 170;
-    const outLeft = cx - outW / 2;
-    const outTop = cy - outH / 2;
-    const headline = outcome === 'win' ? (isBoss ? '守门人倒下了' : '战斗胜利') : '敌人逃走了';
-    this.encounterObjects.push(...buildPanel(this, cx, cy, outW, outH, 'yellow', outDepth));
-    this.encounterObjects.push(...buildPanelHeader(this, outLeft, outTop, outW, headline, UI.good, outDepth + 5));
-    this.encounterObjects.push(...buildPanelWell(this, outLeft + 12, outTop + 26, outW - 24, 62, outDepth + 5));
-    const tail = combat.log.slice(-3);
-    tail.forEach((line, i) => {
-      this.encounterObjects.push(
-        this.add
-          .text(outLeft + 20, outTop + 38 + i * 17, line, {
-            fontFamily: FONT_FAMILY,
-            fontSize: `${TYPE.caption}px`,
-            color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim),
-            wordWrap: { width: outW - 40 },
-          })
-          .setDepth(outDepth + 7),
-      );
-    });
-    this.encounterObjects.push(
-      this.add
-        .text(cx, outTop + outH - 12, 'Enter / ESC 继续', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
-        .setOrigin(0.5)
-        .setDepth(outDepth + 7),
-    );
-    lockToScreen(this.encounterObjects);
-    // The fight is over: the outcome screen waits for one Enter, then
-    // closeCombat clears state.combat and the floor's spots.
-    this.combatDone = true;
-    state.combat = { ...combat, log: combat.log };
-  }
 
   private closeEncounter(): void {
     this.encounterOpen = false;
@@ -3450,7 +2712,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
     if (result.hpChange < 0) {
       // AG-91：非战斗舞台的受伤（遭遇战掉血）= medium 档，与战斗反击同一比例。
-      this.juiceImpact('medium', this.player.x, PLAYER_FEET_Y - 48);
+      // RC-03 拆分第 7 步：impact 入口在 CombatController（juice 层随迁）。
+      this.combat.impact('medium', this.player.x, PLAYER_FEET_Y - 48);
       this.refreshStats();
     }
     // Outcome panel: the message, and the item flow the player actually got.
@@ -4860,7 +4123,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.fitHudLine(this.clockText, 164);
   }
 
-  private refreshStats(): void {
+  // public：CombatHost 面之一（RC-03 拆分第 7 步）——战斗回合推进/掉血后的
+  // HUD 刷新走这一份实现（圆环按值缓存 + 时钟/目标行），与世界链同一口径。
+  refreshStats(): void {
     // Transactions can change money while a modal freezes the ordinary tick.
     this.refreshGoalHud();
     const p = getGame().player;
@@ -6705,6 +5970,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.pauseObjects,
       this.dialogueObjects,
       this.encounterObjects,
+      this.combat.panelObjectsForRecovery(),
       this.shelterObjects,
       this.ventureObjects,
       this.nightChoiceObjects,
@@ -6800,7 +6066,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
    *  which sets scrollFactor 0. A hit rect left at scrollFactor 1 sits one camera
    *  scroll above the row it is supposed to cover — measured: 52px off on floor 2,
    *  which made every click land on the row above. */
-  private panelHit(
+  // public：CombatHost 面之一（RC-03 拆分第 7 步）——战斗动作条三钮的屏幕
+  // 空间热区；其余面板（行商/遭遇/背包行）同一份实现。
+  panelHit(
     x: number,
     y: number,
     w: number,
@@ -7037,9 +6305,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
     // OVERHAUL Wave A: ESC mid-fight is the retreat — it runs the flee round
     // rather than walking away for free, so the choice has a cost.
-    if (this.encounterOpen && getGame().combat && !this.combatDone) {
-      this.combatSelected = 2; // flee
-      this.activateCombatChoice();
+    // RC-03 拆分第 7 步：委托 combat.flee（选撤退位 + 打一轮）。
+    if (this.encounterOpen && getGame().combat && !this.combat.isDone()) {
+      this.combat.flee();
       return;
     }
     // OVERHAUL Wave C1: the shop is open (no combat, no encounter object).
@@ -7093,9 +6361,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.buildShopPanel();
       return;
     }
-    if (this.encounterOpen && getGame().combat && !this.combatDone) {
-      this.combatSelected = Math.max(0, this.combatSelected - 1);
-      this.buildCombatPanel();
+    // RC-03 拆分第 7 步：战斗光标委托 combat.move（钳位 + 重画在控制器里）。
+    if (this.encounterOpen && getGame().combat && !this.combat.isDone()) {
+      this.combat.move(-1);
     } else if (this.encounterOpen && this.encounter && !this.encounter.resolved) {
       this.encounter.selected = Math.max(0, this.encounter.selected - 1);
       this.buildEncounterPanel(this.spotMarkers.get(this.encounter.spotId)?.isBoss ?? false);
@@ -7139,9 +6407,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.buildShopPanel();
       return;
     }
-    if (this.encounterOpen && getGame().combat && !this.combatDone) {
-      this.combatSelected = Math.min(2, this.combatSelected + 1);
-      this.buildCombatPanel();
+    // RC-03 拆分第 7 步：战斗光标委托 combat.move（钳位 + 重画在控制器里）。
+    if (this.encounterOpen && getGame().combat && !this.combat.isDone()) {
+      this.combat.move(1);
     } else if (this.encounterOpen && this.encounter && !this.encounter.resolved) {
       this.encounter.selected = Math.min(this.encounter.choices.length - 1, this.encounter.selected + 1);
       this.buildEncounterPanel(this.spotMarkers.get(this.encounter.spotId)?.isBoss ?? false);
@@ -7180,9 +6448,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
     // OVERHAUL Wave A: the fight's turn key. Once the outcome screen is up,
     // Enter closes it; until then it plays the selected action.
+    // RC-03 拆分第 7 步：委托 combat.enter（outcome → close，否则打一轮）。
     if (this.encounterOpen && getGame().combat) {
-      if (this.combatDone) this.closeCombat();
-      else this.activateCombatChoice();
+      this.combat.enter();
       return;
     }
     // OVERHAUL Wave C1: Enter in the shop buys one of the highlighted item.
@@ -8695,124 +7963,6 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
   }
 
-  // ── AG-91: juice 层（战斗打击感：震屏 / 顿帧 / 闪白 / 缩放） ─────────────
-  // 纯逻辑状态机在 render/juice.ts（零 Phaser，Node 单测直跑）；本段只做
-  // 「消费」三件事：
-  //   1. updateJuice —— update() 里按**真实时间**推进状态，把 trauma² 震屏
-  //      写进相机 offset（只写相机，绝不动物体）；
-  //   2. juiceImpact —— 战斗钩子的分级入口（small=命中 / medium=受击 /
-  //      large=击杀），全游戏共用一套比例（config/game-balance.json 的 juice 块）；
-  //   3. 顿帧闸门 —— hitstop 期间只冻模拟（世界链 + 舞台 tween），导航条/
-  //      教程/toast 等 UI 与相机衰减照常走真实时间。
-  //
-  // 相机 offset 的写入点（为什么是 shakeEffect 的私有字段）：
-  //   Phaser 4.2.1 每帧的顺序是 CameraManager.update（先）→ scene.update()
-  //   → Camera.preRender()：follow 跟随 → useBounds 钳制 → 建矩阵 →
-  //   shakeEffect.preRender() 把 _offsetX/_offsetY translate 进矩阵。也就是说
-  //   矩阵平移点是**唯一在 bounds 钳制之后**作用的位置——写 scrollX/scrollY
-  //   会被钳制吃掉（站立 bounds 只有 200px 高 × 层宽，而视口 1280×720，
-  //   clampX/clampY 会把偏移整体钉死，一层楼内震屏直接消失），内置 shake()
-  //   又用 Math.random（项目硬规则禁随机，回放要可复现）。因此本场景直接写
-  //   shakeEffect 的偏移字段：复用 Phaser 官方的「只抖相机不动物体」机制，
-  //   只把随机源换成 juice.ts 的 seeded value noise。字段自 Phaser 3.5.0
-  //   起未变，且 package.json 将 phaser 精确钉在 4.2.1。
-  // 参考：node_modules/phaser/src/cameras/2d/Camera.js preRender 第 637 行、
-  //       effects/Shake.js preRender/update、CameraManager.js 第 201 行（UPDATE 绑定）。
-
-  /** AG-91：juice 状态机。场景重启时 initJuice 建新的（字段初始化器不重跑）。 */
-  private juice!: JuiceState;
-  /**
-   * AG-91：震屏强度（0..1）。= AG-72 的 screenShake 总闸开着时的平衡旋钮值
-   * （JUICE_BALANCE.shakeStrength），总闸关闭时 0。只在 create 与 resume 时
-   * 读设置（设置在 MenuScene 改，那时本场景已暂停），不进每帧热路径。
-   */
-  private juiceStrength = JUICE_BALANCE.shakeStrength;
-
-  /** AG-91：建/重建 juice 状态机。create() 里 perf.init() 之后调。 */
-  private initJuice(): void {
-    // 种子只认 runSeed + 固定标签：同一局的重放震屏噪声一致；不同局不同表。
-    const seed = deriveSeed(getGame().runSeed, JUICE_BALANCE.seedTag);
-    this.juiceStrength = getSettings().screenShake ? JUICE_BALANCE.shakeStrength : 0;
-    this.juice = new JuiceState({ seed, strength: this.juiceStrength });
-    // 相机 shakeEffect 可能留着上一局的 offset（重启不重建相机）——先清零，
-    // 否则新场景第一帧会闪一下旧局的震屏。
-    this.writeCameraShakeOffset(0, 0);
-    // 从设置场景返回时重读总闸（GameScene 在 MenuScene 期间处于暂停态）。
-    this.events.on(Phaser.Scenes.Events.RESUME, this.refreshJuiceStrength, this);
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.events.off(Phaser.Scenes.Events.RESUME, this.refreshJuiceStrength, this);
-    });
-  }
-
-  private refreshJuiceStrength(): void {
-    this.juiceStrength = getSettings().screenShake ? JUICE_BALANCE.shakeStrength : 0;
-    this.juice.shakeStrength = this.juiceStrength;
-  }
-
-  /**
-   * AG-91：把 juice 算出的相机 offset 写进 Phaser 的 shakeEffect——矩阵平移
-   * 点（见本节注释）。全 0 时显式 isRunning=false，不留残留位移。
-   */
-  private writeCameraShakeOffset(x: number, y: number): void {
-    const fx = this.cameras.main.shakeEffect as unknown as {
-      isRunning: boolean;
-      duration: number;
-      _offsetX: number;
-      _offsetY: number;
-    };
-    if (x === 0 && y === 0) {
-      fx.isRunning = false;
-      fx._offsetX = 0;
-      fx._offsetY = 0;
-      return;
-    }
-    // duration 设成无穷大：不让 Phaser 自己的 update 走到「effectComplete」
-    // 分支把 offset 清掉（我们每帧都会重写，但它跑在我们前面）。
-    fx.duration = Number.MAX_SAFE_INTEGER;
-    fx.isRunning = true;
-    fx._offsetX = x;
-    fx._offsetY = y;
-  }
-
-  /**
-   * AG-91：分级打击入口。战斗钩子（命中/受击/击杀/伏击/巡游体）统一走这里，
-   * 返回的视觉清单当场演：闪白（受击白闪 50-80ms）与缩放（squash & stretch
-   * 保体积回弹，large 专属）。顿帧由 updateJuice 的闸门兑现。
-   */
-  private juiceImpact(tier: 'small' | 'medium' | 'large', x: number, y: number): void {
-    const fb = this.juice.impact(tier, x, y);
-    if (fb.flash) {
-      // 受击闪白：Phaser Flash 效果（一次性、自褪色，零新增对象）。总闸只管
-      // 震屏位移，闪白与顿帧不设开关——无位移刺激，且 70ms 一闪即灭。
-      this.cameras.main.flash(JUICE_BALANCE.flashMs, 255, 255, 255);
-    }
-  }
-
-  /**
-   * AG-91：每帧推进（真实时间）。位置在所有早退分支之前——爬梯/面板/战斗
-   * 全程覆盖，顿帧期间震屏与闪白/缩放计时也不冻（spec：只冻模拟）。
-   * 返回是否处于顿帧（调用方据此闸掉世界模拟）。
-   */
-  private updateJuice(deltaMs: number): boolean {
-    this.juice.update(deltaMs);
-    const frozen = this.juice.isFrozen();
-    // 顿帧只冻「模拟」：世界链由调用方闸掉，战斗舞台的 tween（击退/前冲/
-    // 呼吸/飘字）在这里统一冻结——经典 hitstop 冻结受击反应用的就是它。
-    // 每帧都写（不只在边沿）：万一有代码在别处改了 timeScale，下一帧纠回。
-    this.tweens.timeScale = frozen ? 0 : 1;
-    // squash & stretch：按真实时间采样（演出层，不随顿帧冻），保体积
-    // （sx=1/sy）。只挂在战斗舞台的敌人剪影上——large（击杀）的受害者。
-    const stage = this.combatStage;
-    if (stage && this.juice.scaleRemainingMs > 0) {
-      const p = this.juice.scalePulse();
-      stage.monster.root.setScale(p.sx, p.sy);
-    }
-    // 相机 offset：trauma² × 强度 × seeded noise（juice.ts 纯逻辑产出）。
-    const off = this.juice.cameraOffset();
-    this.writeCameraShakeOffset(off.x, off.y);
-    return frozen;
-  }
-
   // ── AG-80: 性能层的 PerfHost 场景查询面（RC-03 拆分第 4 步） ────────────
   // 上架承诺「低端机不炸」的落点——飘字池/帧预算守卫/FPS 计数器/降级边沿
   // 四件已迁入 controllers/PerfController.ts（本类只持控制器本体）。这里
@@ -8829,9 +7979,172 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     setFxDegraded(this, on);
   }
 
-  /** 降级边沿的敌人待机呼吸停帧（战斗舞台归场景管，无战斗时 no-op）。 */
+  /** 降级边沿的敌人待机呼吸停帧（RC-03 第 7 步：战斗舞台归 CombatController，
+   *  本薄封装转委托；无战斗时 no-op）。 */
   setMonsterBreathing(on: boolean): void {
-    this.combatStage?.monster.setBreathing(on);
+    this.combat.setBreathing(on);
+  }
+
+  // ── CombatHost 面（RC-03 拆分第 7 步：回合制战斗） ─────────────────────
+  // 战斗状态机/舞台/回合编排/juice/战斗 UI 五件全在 CombatController（plain
+  // TS 类，Node 可单测），运行期拿场景当 host。下面这些是控制器要用而场景
+  // 已有的实现——与 MonologueHost/StatsPanelHost/PerfHost 同款纪律：控制器
+  // 不 import 场景类型，可测性靠这层结构面（单测用假件实现）。原战斗段
+  // （GameScene.ts 2642-3347 + juice 段）整体迁入 controllers/
+  // CombatController.ts，行为零变更。
+
+  // ── Phaser 单子（结构面，控制器不 import 场景类型）──
+
+  /** 挥击弧（战斗反馈与单 roll 遭遇共用；原战斗段随 CombatController 迁出，
+   *  与世界链共用的这份留在场景）。public：CombatHost 面之一。 */
+  playSwingFx(killed = false): void {
+    const state = getGame();
+    const facing = this.player?.flipX ? -1 : 1;
+    const slash = playFx(this, 'sword-slash', state.player.x + 30 * facing, PLAYER_FEET_Y - 18, LIGHT_DEPTH, {
+      // The atlas's usable arc is about 90x60 inside a 136x104 frame, and its
+      // pivot sits near the bottom of that frame - so the arc rises about 57px
+      // above whatever point it is anchored to. Anchoring at chest height put
+      // the whole arc above the survivor's head; anchoring near the feet puts it
+      // across the body, which is where a swing happens. 1.35 is roughly the
+      // crowbar's reach; 0.7 stretches the 800ms cut to 1.14s, long enough to
+      // survive a glance away at the log.
+      scale: 1.35,
+      timeScale: 0.7,
+    });
+    // The arc is drawn facing right; a survivor facing left needs it mirrored or
+    // the slash trails behind them.
+    if (slash) slash.setFlipX(facing < 0);
+    if (killed) {
+      playFx(this, 'crit-hit', state.player.x + 30 * facing, PLAYER_FEET_Y - 30, LIGHT_DEPTH + 1, { scale: 1.4 });
+    }
+  }
+
+  /** AG-80：战斗飘字入口（combatFloatText 的下游）：掉血/未命中/反击/行为
+   *  标签都走这。public：CombatHost 面之一——PerfController 的池由场景这层
+   *  薄封装注入（第 4 步留的面）。 */
+  spawnFloatText(x: number, y: number, text: string, color: string): void {
+    this.perf.spawnFloatText(x, y, text, color);
+  }
+
+  /** 敌人剪影装配：render/monsterArt createMonsterView 的场景薄封装。 */
+  createMonsterView(opts: MonsterViewOptions): MonsterView {
+    return createMonsterView(this, opts);
+  }
+
+  /** 头顶名签装配：render/monsterArt createHeadTag 的场景薄封装。 */
+  createHeadTag(opts: HeadTagOptions): HeadTag {
+    return createHeadTag(this, opts);
+  }
+
+  /** 粒子特效：render/fx.ts playFx 的场景薄封装（降级时返回 null）。 */
+  playFx(id: string, x: number, y: number, depth: number, opts?: { scale?: number; timeScale?: number }): Phaser.GameObjects.Sprite | null {
+    return playFx(this, id, x, y, depth, opts);
+  }
+
+  /** 世界空间点击热区（hitRect 原样，不锁屏）——敌人剪影上的「点击攻击」。 */
+  worldHitRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    depth: number,
+    handlers: Parameters<typeof hitRect>[6],
+  ): Phaser.GameObjects.Rectangle {
+    return hitRect(this, x, y, w, h, depth, handlers);
+  }
+
+  // ── 战斗编排要用的场景能力（playerSprite/floorWidth/shopSpotX 是本段新面；
+  //    syncPlayerWorldObjects/panelHit/refreshStats/playActionAnim 四件是世界
+  //    链共用的既有实现，在原位置转 public——实现不搬家，只加 host 注释）──
+
+  /** 玩家 sprite——滑步/面朝/格挡压缩/头顶名签钉点/震屏锚点都读它。 */
+  playerSprite(): Phaser.GameObjects.Sprite {
+    return this.player;
+  }
+
+  /** 当前层宽（floorWidthFor 的结果，每层重建时更新）。 */
+  floorWidth(): number {
+    return this.floorW;
+  }
+
+  /** 行商问号点的 x（敌人站位避让用；没有则 undefined）。 */
+  shopSpotX(): number | undefined {
+    return this.spotMarkers.get('shop')?.x;
+  }
+
+  // ── 场景状态与回写 ──
+
+  /** 面板槽布尔（战斗/商店/遭遇共用同一个 encounterOpen）。 */
+  setEncounterOpen(open: boolean): void {
+    this.encounterOpen = open;
+  }
+
+  /** 世界回写：问号点按战斗结果重建（胜/怯战消失，撤退保留）。 */
+  rebuildEncounterSpots(): void {
+    this.buildEncounterSpots();
+  }
+
+  /** 切结局卡（玩家阵亡，die clip 播完）。 */
+  startEndScene(): void {
+    this.scene.start('End');
+  }
+
+  // ── AG-77 成就三件 + 战利品账（本场受伤计数在 AchievementController，
+  //    场景留 CombatHost 薄封装）──
+
+  /** 本场受伤计数归零（开战）。 */
+  resetCombatDamage(): void {
+    this.achievements.resetCombatDamage();
+  }
+
+  /** 本场受伤计数累加（偷袭/反击命中）。 */
+  noteCombatDamage(damage: number): void {
+    this.achievements.noteCombatDamage(damage);
+  }
+
+  /** 本场累计受伤（boss_won 成就判据）。 */
+  combatDamageTaken(): number {
+    return this.achievements.combatDamage;
+  }
+
+  /** 零伤害击败守门人的成就发射。 */
+  emitBossWon(damageTaken: number): void {
+    this.achievements.emit({ type: 'boss_won', damageTaken });
+  }
+
+  /** 战利品计数进「本次出行」账（EndScene 结算读）。 */
+  addLootThisTrip(quantity: number): void {
+    this.lootThisTrip += quantity;
+  }
+
+  /** 面板对象列表（clearStrayPanels 恢复路径要看得见战斗面板件）。 */
+  combatPanelObjects(): ReadonlyArray<Phaser.GameObjects.GameObject> {
+    return this.combat.panelObjectsForRecovery();
+  }
+
+  // ── juice 强度总闸的场景事件订阅（Phaser 场景事件常量留在场景侧，
+  //    控制器不 import Phaser 值）──
+
+  /** 订阅场景 RESUME（从设置场景返回时重读震屏总闸）。 */
+  onSceneResume(handler: () => void): void {
+    this.events.on(Phaser.Scenes.Events.RESUME, handler);
+  }
+
+  /** 退订场景 RESUME（SHUTDOWN 清理时）。 */
+  offSceneResume(handler: () => void): void {
+    this.events.off(Phaser.Scenes.Events.RESUME, handler);
+  }
+
+  /** 订阅场景 SHUTDOWN（一次性的 juice 订阅清理）。 */
+  onceSceneShutdown(handler: () => void): void {
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, handler);
+  }
+
+  // ── AG-91 取证面：juice 状态机本体（e2e/ag91-juice.spec.ts 的逐帧记录器
+  //    读 scene.juice——迁移前它是场景字段，现在留只读委托，契约不变、
+  //    探针无感）。 ──
+  get juice(): JuiceState {
+    return this.combat.juiceState;
   }
 
   // ── frame ──────────────────────────────────────────────────────────────
@@ -8888,7 +8201,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // AG-91：juice 层 tick（真实时间衰减 + 写相机 offset）同样在所有早退之前；
     // 顿帧闸门只冻模拟——上面的导航条/教程/toast/呼吸/武器同步都是 UI 与
     // 演出，照常走真实时间（spec：冻结期只冻模拟）。
-    if (this.updateJuice(delta)) return;
+    // RC-03 拆分第 7 步：updateJuice 本体在 CombatController（tick 同名）。
+    if (this.combat.tick(delta)) return;
     if (this.stairClimb) {
       this.updateStairClimb(delta);
       return;
@@ -8896,7 +8210,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // AG-70：战斗舞台的世界坐标元素（双方头顶名签）每帧钉在角色身上——
     // 面板早退之后世界模拟整段不跑，滑步途中的名签跟随在这里补。敌人剪影
     // 的呼吸/击退/前冲都是 MonsterView 自己的 tween，无需每帧驱动。
-    if (this.encounterOpen) this.syncCombatStage();
+    // RC-03 拆分第 7 步：syncCombatStage 本体在 CombatController（syncStage）。
+    if (this.encounterOpen) this.combat.syncStage();
     // 裁决记录（merge ag-63）：采纳 ag-63 的根因修复——面板提示刷新挪到
     // 面板早退之前。HEAD 侧没有这段（面板提示块在 update 后半的世界链开
     // 头，永远执行不到），AG-70 的 syncCombatStage 行保留；早退行取 HEAD 版
@@ -9500,7 +8815,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       // AG-72 的 shakeIfEnabled 与绿色全屏闪（flash(140,230,109,99)）被
       // 分级表取代——全游戏受击反馈同一个入口同一个比例；绿色那抹毒味由
       // ground-slam 特效与 wound debuff 保留，不再靠全屏闪表达。
-      this.juiceImpact('medium', this.player.x, PLAYER_FEET_Y - 48);
+      // RC-03 拆分第 7 步：impact 入口在 CombatController（juice 层随迁）。
+      this.combat.impact('medium', this.player.x, PLAYER_FEET_Y - 48);
       playFx(this, 'ground-slam', state.player.x, PLAYER_FEET_Y - 6, LIGHT_DEPTH);
       this.flash(`被巡游体击中！HP -${damage}，快回宿舍或换层！`);
       if (state.player.hp <= 0) {

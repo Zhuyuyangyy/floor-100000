@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { sfxGainScale } from '../render/audio';
+import { readBgmVolume } from '../systems/AudioSystem';
+import { DEFAULT_SETTINGS } from '../systems/SettingsSystem';
 
 // AG-72 sfxVolume 接线的纯函数层单测：playSfx 的最终音量系数 =
 // sfxVolume（0-100 全局设置）× volume（0..1 调用侧相对音量）。
@@ -38,5 +40,16 @@ describe('sfxGainScale（sfxVolume × 调用侧相对音量）', () => {
     expect(sfxGainScale(50, 5)).toBeCloseTo(0.5, 12); // volume>1 夹紧到 1
     expect(sfxGainScale(50, -1)).toBe(0); // volume<0 夹紧到 0
     expect(sfxGainScale(50, Number.NaN)).toBeCloseTo(0.5, 12); // 非有限回退 1（旧行为）
+  });
+});
+
+// AG-117：BGM 默认值的单一事实源守卫。readBgmVolume 无设置 blob 时的兜底
+// 曾私写 70，与 SettingsSystem 的 DEFAULT_SETTINGS.bgmVolume（50）漂移
+// （首启 BGM 比面板显示响）；修复后 readBgmVolume 直接委托 getSettings()。
+// 这条用例钉住"无存储时返回值 == 面板默认值"，再漂移一次就会红。
+describe('readBgmVolume 默认值（AG-117 单一事实源）', () => {
+  it('无设置 blob 时返回 SettingsSystem 的默认 50，不再是私写的 70', () => {
+    expect(readBgmVolume()).toBe(DEFAULT_SETTINGS.bgmVolume);
+    expect(readBgmVolume()).toBe(50);
   });
 });

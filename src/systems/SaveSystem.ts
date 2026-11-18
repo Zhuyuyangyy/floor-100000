@@ -3,7 +3,8 @@ import { getItem, isItemId } from '../data/items';
 import { STAT_MAX } from './InventorySystem';
 import { BODY_TEMP_MAX } from './EnvironmentSystem';
 import { AILMENTS } from './SicknessSystem';
-import type { ActiveEvent, DiaryEvent, FloorVisit, GameState, ShelterPlan } from '../core/gameTypes';
+import { isLegacyDiaryKind, migrateLegacyDiary } from './DiarySystem';
+import type { ActiveEvent, FloorVisit, GameState, ShelterPlan } from '../core/gameTypes';
 
 // Save protocol (docs/02_TECH_SPEC.md §6). Deserialization never throws: a bad
 // save returns a graceful error so the UI can show "存档损坏" and keep the
@@ -85,19 +86,13 @@ function validateDwell(value: unknown): string | null {
   return null;
 }
 
-const DIARY_KINDS: DiaryEvent['kind'][] = [
-  'returned_from_scavenge',
-  'late_return',
-  'combat_wounded',
-  'shelter_rested',
-  'shelter_treated',
-  'shelter_repaired',
-  'neighbor_cared',
-  'shelter_attacked',
-];
 const SHELTER_ACTIONS: ShelterPlan['action'][] = ['rest', 'treat', 'repair', 'care'];
 
-function validateDiary(value: unknown): string | null {
+// RC-01 日记统一前的旧日记（DiaryEvent[]，state.diary）。生产代码不再写它，
+// 但旧档里可能有：校验原样保留（坏档仍然整体拒绝，不白屏也不静默丢数据），
+// 加载时由 DiarySystem.migrateLegacyDiary 迁进结构化日记。kind 白名单与
+// 迁移映射同在 DiarySystem（isLegacyDiaryKind），两张表不会各自漂移。
+function validateLegacyDiary(value: unknown): string | null {
   if (value === undefined) return null;
   if (!Array.isArray(value)) return 'diary 无效';
   if (value.length > 64) return 'diary 超过 64 条上限';
@@ -109,7 +104,7 @@ function validateDiary(value: unknown): string | null {
       return `diary.${index}.minute 无效`;
     }
     if (typeof raw.floor !== 'number' || !Number.isInteger(raw.floor)) return `diary.${index}.floor 无效`;
-    if (!DIARY_KINDS.includes(raw.kind as DiaryEvent['kind'])) return `diary.${index}.kind 无效`;
+    if (!isLegacyDiaryKind(raw.kind)) return `diary.${index}.kind 无效`;
     if (!isStringArray(raw.actorIds)) return `diary.${index}.actorIds 无效`;
     if (!Array.isArray(raw.itemChanges)) return `diary.${index}.itemChanges 无效`;
     for (const change of raw.itemChanges) {
@@ -182,7 +177,7 @@ function validateOverhaulBlocks(s: Record<string, unknown>): string[] {
       if (typeof v !== 'number' || !Number.isFinite(v)) errors.push(`flags.${k} 无效`);
     }
   }
-  const diaryError = validateDiary(s.diary);
+  const diaryError = validateLegacyDiary(s.diary);
   if (diaryError) errors.push(diaryError);
   const shelterError = validateShelterPlan(s.shelterPlan);
   if (shelterError) errors.push(shelterError);
@@ -312,7 +307,10 @@ export function deserialize(json: string): SaveResult {
     state.player.gold = 0;
   }
   if (state.player.stress === undefined) state.player.stress = 20;
-  if (state.diary === undefined) state.diary = [];
+  // RC-01 日记统一：旧档的 DiaryEvent[] 在这里迁进结构化日记（diaryOf 随之
+  // 读得到），旧字段删除。新档没有 diary 字段，migrate 是 no-op。压力不随
+  // 迁移重放——stressDelta 在旧档运行时就已经 applied 过。
+  migrateLegacyDiary(state);
   return { ok: true, state };
 }
 

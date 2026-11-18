@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { createNpcState } from '../data/npcPersonalities';
+import type { DiaryEntry } from './DiarySystem';
 import {
   eventVisibility,
   isValidNpcState,
@@ -135,28 +136,33 @@ describe('存档桥接：npcStates', () => {
 });
 
 describe('事件可见性：NPC 独立知识体系（P1-3）', () => {
-  const ev = (kind: string, actorIds: string[]) => ({ id: 'e', day: 1, minute: 600, floor: 2, kind: kind as 'returned_from_scavenge', actorIds, itemChanges: [], stressDelta: 0, message: 'x' });
+  // RC-01：读结构化日记（DiaryEntry）。个体条目带 actorId（亲历判定
+  // 「actorId === npcId」），群体条目为 null，公共事件是 shelterAttacked。
+  const ev = (kind: DiaryEntry['kind'], actorId: string | null, day = 1): DiaryEntry =>
+    ({ kind, day, minute: 600, text: 'x', actorId });
 
   it('NPC 在场 = 亲历', () => {
-    expect(eventVisibility('alin', ev('trade', ['player', 'alin']))).toBe('witnessed');
+    expect(eventVisibility('alin', ev('visitor', 'alin'))).toBe('witnessed');
   });
 
   it('公共事件（宿舍被袭）不到场也知道', () => {
-    expect(eventVisibility('xiaozhou', ev('shelter_attacked', ['player']))).toBe('public');
+    expect(eventVisibility('xiaozhou', ev('shelterAttacked', null))).toBe('public');
   });
 
   it('不在场的普通事件 = 未知（不能进 prompt）', () => {
-    expect(eventVisibility('xiaozhou', ev('combat_wounded', ['player', 'wanderer']))).toBe('unknown');
+    expect(eventVisibility('xiaozhou', ev('dwellerWounded', 'player'))).toBe('unknown');
+    // 群体条目没有当事人，谁都不能亲历
+    expect(eventVisibility('xiaozhou', ev('groupHungry', null))).toBe('unknown');
   });
 
   it('visibleEvents 只放行亲历与公共，保持时间顺序', () => {
-    const events = [
-      { id: 'a', day: 1, minute: 600, floor: 2, kind: 'combat_wounded' as const, actorIds: ['player', 'wanderer'], itemChanges: [], stressDelta: 0, message: '夜袭' },
-      { id: 'b', day: 2, minute: 600, floor: 2, kind: 'shelter_attacked' as const, actorIds: ['player'], itemChanges: [], stressDelta: 0, message: '宿舍被袭' },
-      { id: 'c', day: 3, minute: 600, floor: 2, kind: 'neighbor_cared' as const, actorIds: ['player', 'alin'], itemChanges: [], stressDelta: 0, message: '交易' },
+    const events: DiaryEntry[] = [
+      ev('dwellerWounded', 'player', 1),
+      ev('shelterAttacked', null, 2),
+      ev('visitor', 'alin', 3),
     ];
     const seen = visibleEvents('alin', events);
-    expect(seen.map((e) => e.id)).toEqual(['b', 'c']); // a 阿林不在场，不知道
+    expect(seen.map((e) => e.day)).toEqual([2, 3]); // 第 1 天阿林不在场，不知道
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { addItem } from '../systems/InventorySystem';
+import { recordDiary } from '../systems/DiarySystem';
 import { createNpcState } from '../data/npcPersonalities';
 import { buildObservation, decideNpcAction, isDialogueFresh } from './NpcRuntime';
 import type { NpcFact } from '../ai/rulesExecutor';
@@ -146,13 +147,14 @@ describe('allowedActions：本阶段可用集（P1-1）', () => {
 describe('事件可见性进入观察（P1-3）', () => {
   it('NPC 不在场的日记事件不进 recentEvents', () => {
     const s = state();
-    s.diary = [
-      { id: 'a', day: 1, minute: 600, floor: 2, kind: 'combat_wounded', actorIds: ['player', 'wanderer'], itemChanges: [], stressDelta: 0, message: '夜袭受伤' },
-      { id: 'b', day: 2, minute: 600, floor: 2, kind: 'neighbor_cared', actorIds: ['player', 'alin'], itemChanges: [], stressDelta: 0, message: '和阿林交易' },
-      { id: 'c', day: 3, minute: 600, floor: 2, kind: 'shelter_attacked', actorIds: ['player'], itemChanges: [], stressDelta: 0, message: '宿舍被袭' },
-    ];
+    // RC-01：读结构化日记（DiaryEntry）。三天各一条，覆盖三类可见性：
+    // 玩家自己受伤（阿林不在场 → unknown）、阿林亲历的来访、公共夜袭。
+    recordDiary(s, { kind: 'dwellerWounded', day: 1, minute: 600, text: '夜袭受伤', actorId: 'player' });
+    recordDiary(s, { kind: 'visitor', day: 2, minute: 600, text: '和阿林交易', actorId: 'alin' });
+    recordDiary(s, { kind: 'shelterAttacked', day: 3, minute: 600, text: '宿舍被袭', actorId: null });
     const obs = buildObservation(alinFact, createNpcState('ally'), s);
-    expect(obs.recentEvents).toEqual(["和阿林交易", "宿舍被袭"]); // 夜袭阿林不在场，不知道；其余按时间正序
+    // 夜袭受伤阿林不在场，不知道；其余按时间正序（diaryOf 倒序取前三新的再翻回）。
+    expect(obs.recentEvents).toEqual(['和阿林交易', '宿舍被袭']);
   });
 });
 

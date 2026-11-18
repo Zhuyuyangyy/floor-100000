@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { environmentFor } from '../core/constants';
 import { createNewGame } from '../core/gameState';
 import type { GameState } from '../core/gameTypes';
@@ -310,8 +312,7 @@ describe('NPC 熟客（npc:<id>:regular）', () => {
   });
 });
 
-describe('存量字段 deprecated 后行为不变', () => {
-  it('ensureNightEvent 仍按既有规则 roll 与复用', () => {
+describe('存量字段 deprecated 后行为不变', () => {  it('ensureNightEvent 仍按既有规则 roll 与复用', () => {
     const s = createNewGame(1);
     s.gameMinuteOfDay = 1320;
     const first = ensureNightEvent(s);
@@ -361,5 +362,34 @@ describe('存量字段 deprecated 后行为不变', () => {
         currentFloor: s.currentFloor,
       }),
     ).toBe(snapshot);
+  });
+});
+
+// RC-01 决策（外部审查 P1「统一触发器系统没接进主循环」）：选 (a) 接入——
+// GameScene.update 每帧求值，旗自此是活的查询与存档事实。行为等价由两条
+// 保证：① evaluateTriggers 只置不清、只写 flags（上面的字节级钉子），接入
+// 因此不改变任何既有行为；② 自言自语（GameScene.tickMonologue 的 hp_low
+// 等）是边沿事件（可重复、带冷却、出气泡），latch 旗装不下「又掉一次」，
+// 且阈值/语义与 stat:hunger-critical（归零）等注册项互不重叠——两类问题
+// 各自留任，不是同一判断的两套实现。源码断言钉住接线存在且位置正确。
+describe('RC-01 接线：GameScene.update 每帧求值', () => {
+  it('update 在面板早退之前调用 evaluateTriggers（源码断言）', () => {
+    const src = readFileSync(join(process.cwd(), 'src/scenes/GameScene.ts'), 'utf8');
+    const updateIdx = src.indexOf('override update(');
+    expect(updateIdx, 'GameScene.update 存在').toBeGreaterThan(-1);
+    const callIdx = src.indexOf('evaluateTriggers(getGame())', updateIdx);
+    expect(callIdx, 'update 里调用了 evaluateTriggers（AG-26 留给总控的接线）').toBeGreaterThan(-1);
+    // 必须早于面板早退行：战斗开打、背包塞满、目标达标都可能发生在面板里，
+    // 事实要照常 latch（与 updateAchievementToasts 同款理由）。
+    const earlyReturnIdx = src.indexOf('if (this.inventoryOpen || this.craftingOpen', updateIdx);
+    expect(earlyReturnIdx, '面板早退行存在').toBeGreaterThan(-1);
+    expect(callIdx).toBeLessThan(earlyReturnIdx);
+  });
+
+  it('接线不改变既有行为：新档默认态一个旗都不置', () => {
+    // 与上面「新档默认态」同一期望——接入只是让求值每帧跑，首帧之前无旗。
+    const s = createNewGame(1);
+    expect(evaluateTriggers(s)).toEqual([]);
+    expect(s.flags).toBeUndefined();
   });
 });

@@ -5,14 +5,12 @@ import { STARTING_FLOOR } from '../core/constants';
 import type { DiaryEntry, DiaryKind } from '../systems/DiarySystem';
 import {
   DIARY_ENTRY_LIMIT,
-  appendDiaryEvent,
   checkLateReturnDiary,
   checkSurvivalDiary,
   diaryFlagKey,
   diaryKindCount,
   diaryOf,
   hasDiaryKind,
-  makeDiaryEvent,
   recordDiary,
   recordMoraleDiary,
   recordRequestFulfilledDiary,
@@ -20,7 +18,6 @@ import {
   recordSicknessDiary,
   recordVisitorDiary,
   recordWoundedDiary,
-  recentDiary,
 } from '../systems/DiarySystem';
 import { deserialize, serialize, validateGameState } from '../systems/SaveSystem';
 import { STAT_MAX } from '../systems/InventorySystem';
@@ -106,46 +103,60 @@ describe('DiarySystem · 契约 §5 读写面', () => {
     expect(loaded.ok).toBe(true);
     if (!loaded.ok) return;
     expect(diaryOf(loaded.state)).toEqual([]);
-
-    // 带旧 DiaryEvent、但没有新日记的存档同样加载，且两套互不干扰
-    appendDiaryEvent(legacy, makeDiaryEvent(legacy, {
-      floor: 1,
-      kind: 'shelter_rested',
-      actorIds: ['player'],
-      itemChanges: [],
-      stressDelta: -6,
-      message: '旧格式的一条。',
-    }));
-    const loaded2 = deserialize(serialize(legacy));
-    expect(loaded2.ok).toBe(true);
-    if (!loaded2.ok) return;
-    expect(diaryOf(loaded2.state)).toEqual([]);
-    expect(recentDiary(loaded2.state)).toHaveLength(1);
   });
 
-  it('flash 与 diary 并存不互相影响：新旧两套日记是独立存储', () => {
+  it('旧档的 DiaryEvent[] 经真反序列化路径迁进结构化日记（RC-01）', () => {
+    // 手搓一份统一前的旧档：diary 是 8 种旧 kind 的宽记录。走真产品路径
+    // （serialize → deserialize），迁移发生在 deserialize 里。
+    const legacy = createNewGame(7);
+    (legacy as unknown as { diary?: unknown }).diary = [
+      {
+        id: 'day-2-minute-725-shelter_rested-0',
+        day: 2,
+        minute: 725,
+        floor: 1,
+        kind: 'shelter_rested',
+        actorIds: ['player'],
+        itemChanges: [],
+        stressDelta: -6,
+        message: '你把门关好，先让身体恢复一点。',
+      },
+      {
+        id: 'day-2-minute-726-shelter_attacked-1',
+        day: 2,
+        minute: 726,
+        floor: 1,
+        kind: 'shelter_attacked',
+        actorIds: ['player'],
+        itemChanges: [],
+        stressDelta: 10,
+        message: '夜里有人撞门；你庆幸自己还来得及醒来。',
+      },
+    ];
+    const json = serialize(legacy);
+    // 旧 diary 字段在存档里仍然合法（坏档才拒绝），迁移不改变这一点
+    expect(validateGameState(JSON.parse(json))).toEqual([]);
+
+    const loaded = deserialize(json);
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    const entries = diaryOf(loaded.state);
+    expect(entries.map((e) => e.kind)).toEqual(['shelterAttacked', 'dwellerMorale']);
+    expect(entries[0].text).toContain('撞门');
+    expect(entries[1].text).toContain('把门关好');
+    // 旗随之置起：「这局被袭击过吗」对老存档答得出来
+    expect(hasDiaryKind(loaded.state, 'shelterAttacked')).toBe(true);
+    // 旧字段被删除：再存一次不会有 diary 残留
+    const resaved = JSON.parse(serialize(loaded.state)) as { diary?: unknown };
+    expect(resaved.diary).toBeUndefined();
+  });
+
+  it('结构化日记是唯一的一套：新档的存档里不出现旧 diary 字段', () => {
     const state = createNewGame(42);
-    recordDiary(state, entry('dwellerHungry'));
-    appendDiaryEvent(state, makeDiaryEvent(state, {
-      floor: 1,
-      kind: 'shelter_attacked',
-      actorIds: ['player'],
-      itemChanges: [],
-      stressDelta: 10,
-      message: '旧格式的袭击。',
-    }));
-
-    // 新日记看不见旧的
-    expect(diaryOf(state)).toHaveLength(1);
-    expect(diaryOf(state)[0].kind).toBe('dwellerHungry');
-    // 旧日记的读者也看不见新的
-    expect(state.diary).toHaveLength(1);
-    expect(recentDiary(state, 5)).toHaveLength(1);
-
-    // 再写一条新的，旧的仍然只有一条
-    recordDiary(state, entry('visitor'));
-    expect(state.diary).toHaveLength(1);
-    expect(diaryOf(state)).toHaveLength(2);
+    recordDiary(state, { kind: 'dwellerHungry', day: 1, minute: 700, text: '你开始饿了，但还撑得住——这次没事。', actorId: 'player' });
+    const parsed = JSON.parse(serialize(state)) as { diary?: unknown; diaryEntries?: unknown[] };
+    expect(parsed.diary).toBeUndefined();
+    expect(parsed.diaryEntries).toHaveLength(1);
   });
 
   it('同 seed 同 state 同结果：全流程无 Math.random', () => {

@@ -12,20 +12,21 @@ import { expect, test, type Page } from '@playwright/test';
 //   4. checkSurvivalDiary 的个体→群体连续天数链（真实 GameState 上跑）；
 //   5. 存档往返——真产品路径：写条目 → 自动存档进 localStorage → 刷新页面
 //      → 菜单「继续游戏」→ diaryOf 原样读回；
-//   6. 新旧两套日记并存——旧 DiaryEvent 仍被宿舍面板真实渲染（「上次：…」），
-//      新日记看不见旧的，旧的也看不见新的；
+//   6. RC-01 统一后宿舍面板读结构化日记——真产品路径：选「休息」→
+//      ShelterSystem 写 dwellerMorale → 面板「上次：…」渲染同一条；
 //   7. 日记可按 flag 查询，且旗不被 64 条裁剪影响。
 //
-// 方法说明（重要）：派工单提到的 dev 句柄 `__PHASER_DIARY__` 在本分支**并不
-// 存在**（src/main.ts 只挂了 __PHASER_GAME__ / __PHASER_SESSION__，AG-27 的
-// 实现说明也没有它）。本 spec  therefore 在页面里 import 产品自己的
+// 方法说明（重要）：dev 句柄 `__PHASER_DIARY__`（main.ts，AG-44 挂上）提供
+// getEntries/getKindCount；本 spec 同时在页面里 import 产品自己的
 // DiarySystem 模块（Vite dev server 的模块图与应用同源——GameScene 已经
-// import 它，拿到的是同一个实例），对真实运行中的 GameState 调用。缺句柄
-// 这件事作为已知缺口写进报告，不影响本 spec 测的是产品代码本身。
+// import 它，拿到的是同一个实例），对真实运行中的 GameState 调用，两条路
+// 径都测的是产品代码本身。
 //
-// 另一处已知缺口：DiarySystem 的写入入口（checkSurvivalDiary 等）目前没有
-// 场景调用方（AG-27 实现说明留了建议调用点给接线方），所以"什么触发日记"
-// 由 spec 在页面上调产品函数完成——测的是函数对真实状态的行为。
+// 已知缺口：DiarySystem 的多数写入入口（checkSurvivalDiary 等）的场景调用
+// 方由各系统属主接线（AG-25/AG-26/AG-29，DiarySystem 注释里写了建议调用
+// 点）；ShelterSystem 的四个行动与夜袭已由 RC-01 接进真玩法。"什么触发
+// 日记」中尚未接线的部分由 spec 在页面上调产品函数完成——测的是函数对
+// 真实状态的行为。
 
 // ── 页面内 import 产品模块 ──────────────────────────────────────────────────
 
@@ -427,66 +428,16 @@ test('diary entries survive the real save path: autosave → reload → 继续�
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });
 
-// ── 6. 新旧两套并存 ─────────────────────────────────────────────────────────
+// ── 6. RC-01 统一：宿舍面板读结构化日记（真产品路径）────────────────────────
 
-test('the new diary does not replace the old one: the shelter panel still renders the legacy entry', async ({ page }) => {
+test('the shelter panel renders the unified diary: a real rest writes a structured entry the panel shows', async ({ page }) => {
   test.setTimeout(120_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
 
   await startGame(page, 42);
 
-  // 旧格式一条（flash 时代的那种），新产品路径渲染它。
-  await page.evaluate(() => {
-    const s = window.__PHASER_SESSION__?.getState();
-    if (!s) throw new Error('no session');
-    const mod = '/src/systems/DiarySystem.ts';
-    void import(mod).then((diaryModule) => {
-      const m = diaryModule as {
-        appendDiaryEvent: (s: unknown, e: unknown) => void;
-        makeDiaryEvent: (s: unknown, input: unknown) => unknown;
-      };
-      m.appendDiaryEvent(s, m.makeDiaryEvent(s, {
-        floor: 1,
-        kind: 'shelter_rested',
-        actorIds: ['player'],
-        itemChanges: [],
-        stressDelta: -6,
-        message: '旧格式的一条。',
-      }));
-    });
-  });
-  await page.waitForFunction(
-    () => {
-      const s = window.__PHASER_SESSION__?.getState();
-      return Array.isArray(s?.diary) && s.diary.length === 1;
-    },
-    undefined,
-    { timeout: 10_000 },
-  );
-
-  // 新日记一条——两套互不干扰。
-  await recordEntry(page, { kind: 'dwellerHungry', day: 1, minute: 700, text: '你开始饿了，但还撑得住——这次没事。', actorId: 'player' });
-
-  const stores = await page.evaluate(async () => {
-    const mod = '/src/systems/DiarySystem.ts';
-    const m = (await import(mod)) as {
-      diaryOf: (s: unknown) => DiaryEntryLike[];
-      recentDiary: (s: unknown, n?: number) => Array<{ message: string }>;
-    };
-    const s = window.__PHASER_SESSION__?.getState();
-    if (!s) throw new Error('no session');
-    return {
-      newDiary: m.diaryOf(s).map((e) => e.text),
-      oldDiary: m.recentDiary(s, 5).map((e) => e.message),
-      oldCount: (s.diary as unknown[]).length,
-    };
-  });
-  expect(stores.newDiary).toEqual(['你开始饿了，但还撑得住——这次没事。']);
-  expect(stores.oldDiary).toEqual(['旧格式的一条。']);
-  expect(stores.oldCount).toBe(1);
-
-  // 真实 UI：夜间安排面板仍从旧日记读「上次：…」（ GameScene 的直读路径）。
+  // 走到床边开面板——新档还没有任何日记，面板如实说「今天还没有记录」。
   await page.evaluate(() => {
     const s = window.__PHASER_SESSION__?.getState();
     if (s) s.gameMinuteOfDay = 1200; // 20:00，允许睡觉
@@ -494,9 +445,37 @@ test('the new diary does not replace the old one: the shelter panel still render
   await setX(page, 1120); // BED_X，宿舍的床
   await page.keyboard.press('E');
   await expect.poll(async () => hasVisibleText(page, '夜间安排 · 宿舍'), { timeout: 10_000 }).toBe(true);
-  expect(await hasVisibleText(page, '上次：旧格式的一条。')).toBe(true);
-  // 面板上看不到新日记的条目（两套存储，UI 各读各的）
-  expect(await hasVisibleText(page, '你开始饿了')).toBe(false);
+  expect(await hasVisibleText(page, '今天还没有记录')).toBe(true);
+
+  // 真产品路径：选「休息」——ShelterSystem.resolveShelterAction 写结构化
+  // dwellerMorale（RC-01 取代旧 DiaryEvent），面板重建后「上次：…」读的
+  // 就是这一条（diaryOf 直读，同一套存储）。
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => hasVisibleText(page, '上次：你把门关好，先让身体恢复一点。'), { timeout: 10_000 }).toBe(true);
+
+  // 机读核对：条目形状、actorId 双轨、计数旗；旧 diary 字段不复存在。
+  const stored = await page.evaluate(async () => {
+    const mod = '/src/systems/DiarySystem.ts';
+    const m = (await import(mod)) as {
+      diaryOf: (s: unknown) => DiaryEntryLike[];
+      diaryKindCount: (s: unknown, k: string) => number;
+    };
+    const s = window.__PHASER_SESSION__?.getState();
+    if (!s) throw new Error('no session');
+    return {
+      count: m.diaryOf(s).length,
+      kinds: m.diaryOf(s).map((e) => e.kind),
+      actorIds: m.diaryOf(s).map((e) => e.actorId),
+      moraleCount: m.diaryKindCount(s, 'dwellerMorale'),
+      hasLegacyDiary: Array.isArray((s as { diary?: unknown }).diary),
+    };
+  });
+  expect(stored.count).toBe(1);
+  expect(stored.kinds).toEqual(['dwellerMorale']);
+  expect(stored.actorIds).toEqual(['player']);
+  expect(stored.moraleCount).toBe(1);
+  expect(stored.hasLegacyDiary, '旧 DiaryEvent 字段（state.diary）不再存在').toBe(false);
+
   await page.keyboard.press('Escape');
 
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);

@@ -41,28 +41,6 @@ export type ItemCategory = 'consumable' | 'material' | 'tool';
 
 export type StatKey = 'hp' | 'hunger' | 'thirst' | 'energy';
 
-export type DiaryEventKind =
-  | 'returned_from_scavenge'
-  | 'late_return'
-  | 'combat_wounded'
-  | 'shelter_rested'
-  | 'shelter_treated'
-  | 'shelter_repaired'
-  | 'neighbor_cared'
-  | 'shelter_attacked';
-
-export interface DiaryEvent {
-  id: string;
-  day: number;
-  minute: number;
-  floor: number;
-  kind: DiaryEventKind;
-  actorIds: string[];
-  itemChanges: Array<{ itemId: ItemId; quantity: number }>;
-  stressDelta: number;
-  message: string;
-}
-
 export type ShelterAction = 'rest' | 'treat' | 'repair' | 'care';
 
 export interface ShelterPlan {
@@ -353,15 +331,14 @@ export interface GameState {
   npcStates: Record<string, string>;
   visitedFloors: Record<number, FloorVisit>;
   worldEvents: { history: string[]; activeEvent: ActiveEvent | null; dwell?: DwellState };
-  /** Recent facts the player has lived through. Optional for legacy saves. */
-  diary?: DiaryEvent[];
   /**
    * 结构化日记（TWOM 对齐契约 §5）。AG-27 属主 src/systems/DiarySystem.ts
    * （DiaryEntry / DiaryKind / recordDiary / diaryOf 都在那里）；本字段只是
    * GameState 上的声明位，读写在 diaryOf/recordDiary，缺省按 [] 懒创建——
-   * 老存档没有它就是空数组，不需要为此升 schemaVersion。
-   * 与上面的 diary 分工：diary 是旧 DiaryEvent[]（SaveSystem 用 8 种旧 kind
-   * 白名单严格校验），diaryEntries 是新的 11 种 DiaryKind，两套并存。
+   * 老存档没有它就是空日记，不需要为此升 schemaVersion。
+   * RC-01 起这是全局唯一的日记：旧 DiaryEvent[]（state.diary）已随双轨制
+   * 统一移除，旧档里的旧日记由 DiarySystem.migrateLegacyDiary 在加载时
+   * 迁进这里（SaveSystem.deserialize 调用）。
    */
   diaryEntries?: DiaryEntry[];
   /** The one shelter decision currently being resolved, if any. */

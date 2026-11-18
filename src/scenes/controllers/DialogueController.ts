@@ -895,11 +895,16 @@ export class DialogueController {
   }
 
   /**
-   * 场景重启的「先毁后建」重置（原 GameScene init/restart 段）：字段初始化器
+   * 场景重启的「先毁后建」重置（原 GameScene create 重置段）：字段初始化器
    * 不重跑，上一局的对话件/产业件/标记不清就会双份上屏、stale Text 一
    * setText 就抛。对话开关与进行中的对话随重启清空（原 dialogueOpen=false +
    * dialogue=null 两行）；行商面板在重启时不可能开着（重启只从暂停菜单进，
    * 暂停与行商互斥），shopRows/shopObjects 因此不动——与原逐字段语义一致。
+   *
+   * ventureOpen 补一刀清 false：原场景没清它（AG-20 加入时的遗漏——重启只
+   * 从暂停菜单进、而 ESC 会先关产业面板，所以旧代码里它恒为 false，清不清
+   * 不可观察）。重置段自己的注释说的是「Left set, update() early-returns
+   * forever」——真被留着才是事故，因此这里按同款纪律清掉，可达行为不变。
    */
   reset(): void {
     this.dialogueObjects = [];
@@ -910,6 +915,7 @@ export class DialogueController {
     this.ventureMarker = this.host.createMarker();
     this.dialogOpen = false;
     this.dialog = null;
+    this.ventureOpen = false;
   }
 
   // Label + icon key per dialogue option. The icon is the item the player

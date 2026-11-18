@@ -358,11 +358,16 @@ describe('阻碍物 depth 接线（QA-3 收官视觉洞防回归）', () => {
   // 阻碍物画到演员层（ACTOR_DEPTH）。这里用源码断言钉住接线与层序关系：
   // 压过床铺，但不越过灯光/前景剪影/HUD，角色与高亮的相对关系不变。
   it('阻碍物 graphics 上演员层：压过床铺，不越过灯光与前景', () => {
-    const src = readFileSync(join(process.cwd(), 'src/scenes/GameScene.ts'), 'utf8');
-    const build = src.slice(src.indexOf('private buildObstacles()'), src.indexOf('private drawObstacle('));
-    expect(build, 'buildObstacles 必须给阻碍物 graphics 显式 setDepth').toContain('this.add.graphics().setDepth(ACTOR_DEPTH)');
-    // 前排室友床铺的 depth 从源码自读（drawDormBeds 前排分支），改床高测试自动跟随。
-    const bedDepth = Number(/env-bunk-sleeper'\)\.setOrigin\(0\.5, 1\)\.setDepth\((\d+)\)/.exec(src)?.[1]);
+    // RC-03 拆分第 10 步：阻碍物的名册与绘制本体随交互段迁入
+    // InteractionController（buildObstacles/drawObstacle），depth 接线的源码
+    // 断言跟着搬家——契约不断言来源（同 restartSafe 第 3/7 步先例）。
+    const src = readFileSync(join(process.cwd(), 'src/scenes/controllers/InteractionController.ts'), 'utf8');
+    const build = src.slice(src.indexOf('buildObstacles(): void {'), src.indexOf('private drawObstacle('));
+    expect(build, 'buildObstacles 必须给阻碍物 graphics 显式 setDepth').toContain('this.host.add.graphics().setDepth(ACTOR_DEPTH)');
+    // 前排室友床铺的 depth 仍从 GameScene 源码自读（drawDormBeds 前排分支留
+    // 场景——世界渲染不随交互迁出），改床高测试自动跟随。
+    const sceneSrc = readFileSync(join(process.cwd(), 'src/scenes/GameScene.ts'), 'utf8');
+    const bedDepth = Number(/env-bunk-sleeper'\)\.setOrigin\(0\.5, 1\)\.setDepth\((\d+)\)/.exec(sceneSrc)?.[1]);
     expect(Number.isFinite(bedDepth), 'drawDormBeds 前排床铺的 setDepth 可解析').toBe(true);
     expect(ACTOR_DEPTH, '阻碍物必须压过床铺（家具层）').toBeGreaterThan(bedDepth);
     expect(ACTOR_DEPTH, '但不能越过灯光层').toBeLessThan(LIGHT_DEPTH);

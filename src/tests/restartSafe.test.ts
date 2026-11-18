@@ -21,6 +21,9 @@ const tutorialControllerSrc = readFileSync('src/scenes/controllers/TutorialContr
 // RC-03 拆分第 7 步：战斗段（含 closeCombat/destroyCombatStage）随
 // CombatController 迁走——战斗舞台的拆除契约同样跟着搬家。
 const combatControllerSrc = readFileSync('src/scenes/controllers/CombatController.ts', 'utf-8');
+// RC-03 拆分第 10 步：2s 搜刮/挖掘动作（beginPendingAction 的 delayedCall
+// 身份比对）随交互段迁入 InteractionController——契约测试跟着搬家。
+const interactionControllerSrc = readFileSync('src/scenes/controllers/InteractionController.ts', 'utf-8');
 
 describe('restart-safe contracts (Setback 标准，源码级)', () => {
   it('GameScene 的 SHUTDOWN 摘掉音乐与楼层级订阅', () => {
@@ -68,6 +71,8 @@ describe('restart-safe contracts (Setback 标准，源码级)', () => {
 
   it('对象池模式：pendingAction 的 delayedCall 带身份比对', () => {
     // AG-66：换层/场景切换时旧的 delayedCall 不能落地（身份比对防旧 timer）。
-    expect(sceneSrc).toMatch(/delayedCall[\s\S]*?身份|身份[\s\S]*?delayedCall/);
+    // RC-03 拆分第 10 步：beginPendingAction 迁入 InteractionController，
+    // 断言跟着搬家（契约不断言来源——同第 3/7 步先例）。
+    expect(interactionControllerSrc).toMatch(/delayedCall[\s\S]*?身份|身份[\s\S]*?delayedCall/);
   });
 });

@@ -74,7 +74,13 @@ export const MONSTERS: readonly MonsterDef[] = [
   // 楼道野猫 / Corridor Stray：末世里野猫比人难缠，快且闪。
   { id: 102, name: '楼道野猫', hp: 5, damage: 2, accuracy: 11, defense: 0, evasion: 7, behavior: 'fast', minFloor: 2, weight: 9 },
   // 瞌睡宿管 / Dozing Warden： former 宿舍管理员，迟钝但皮实。
-  { id: 103, name: '瞌睡宿管', hp: 8, damage: 2, accuracy: 9, defense: 5, evasion: 0, behavior: 'slow', minFloor: 2, weight: 9 },
+  // XP-1（2026-11-18）：defense 5→1。原值 5 加上 slow 行为 +2 等于 7，
+  // 伤害公式 floor(7/2)=3 把玩家赤手每击砍到保底 1 点，空手期望 21 回合
+  // （试玩员原话「太刮痧」的极端个案）。1+slow2=3 后：空手每击 3、
+  // 期望 4.50 回合，同时保留「比普通怪硬」的读数（对撬棍仍减 1 伤、
+  // 命中阈值仍高于 normal 怪一层）。HP/damage/accuracy 均未动，
+  // 「迟钝但皮实」的角色感由 hp8 + 打不中（acc 9-2）继续承担。
+  { id: 103, name: '瞌睡宿管', hp: 8, damage: 2, accuracy: 9, defense: 1, evasion: 0, behavior: 'slow', minFloor: 2, weight: 9 },
   // 偷食贼 / Food Thief：抢一口吃的就跑，残血直接跑路。
   { id: 104, name: '偷食贼', hp: 5, damage: 3, accuracy: 10, defense: 0, evasion: 5, behavior: 'coward', minFloor: 2, weight: 9 },
 

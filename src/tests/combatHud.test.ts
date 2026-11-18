@@ -78,27 +78,30 @@ describe('combatWeaponLabel — 包里有什么就报什么', () => {
 
 describe('combatFootHint — 左下角那句战斗提示', () => {
   it('先答「用什么攻击」，再给三个动作的键', () => {
-    const hint = combatFootHint('撬棍', 5);
-    expect(hint.startsWith('当前武器：撬棍（伤害 5）')).toBe(true);
+    const hint = combatFootHint('撬棍', 7);
+    expect(hint.startsWith('当前武器：撬棍（伤害 7）')).toBe(true);
     expect(hint).toContain('Enter 出招');
     expect(hint).toContain('↑/↓ 选择');
     expect(hint).toContain('ESC 撤退');
   });
 
   it('空手也照实说', () => {
-    expect(combatFootHint('空手', 2)).toContain('当前武器：空手（伤害 2）');
+    expect(combatFootHint('空手', 4)).toContain('当前武器：空手（伤害 4）');
   });
 
-  it('伤害数与 playerCombatant 同源：裸装 2，撬棍 5', () => {
+  it('伤害数与 playerCombatant 同源：裸装 4，撬棍 7', () => {
+    // XP-1（2026-11-18）：裸装 2→4、撬棍 5→7（RC-02 前段刮痧修复）。
+    // 数值现走 config/game-balance.json 的 combat 段；这里钉「同源」这一
+    // 契约，具体数以 balance 文件为准。
     const bare = createNewGame(42);
-    expect(playerCombatant(bare).damage).toBe(2);
+    expect(playerCombatant(bare).damage).toBe(4);
     expect(combatFootHint(combatWeaponLabel(bare.player.inventory.slots), playerCombatant(bare).damage)).toBe(
-      '当前武器：空手（伤害 2）· Enter 出招 · ↑/↓ 选择 · ESC 撤退',
+      '当前武器：空手（伤害 4）· Enter 出招 · ↑/↓ 选择 · ESC 撤退',
     );
     addItem(bare.player.inventory, 'crowbar' as ItemId, 1);
-    expect(playerCombatant(bare).damage).toBe(5);
+    expect(playerCombatant(bare).damage).toBe(7);
     expect(combatFootHint(combatWeaponLabel(bare.player.inventory.slots), playerCombatant(bare).damage)).toBe(
-      '当前武器：撬棍（伤害 5）· Enter 出招 · ↑/↓ 选择 · ESC 撤退',
+      '当前武器：撬棍（伤害 7）· Enter 出招 · ↑/↓ 选择 · ESC 撤退',
     );
   });
 });

@@ -313,9 +313,9 @@
 | 工作线 | 内容 | 状态 |
 | --- | --- | --- |
 | E2E 验收（AG-109） | Playwright 观测项重新验收，回填真实通过数字 | 🔵 进行中——**数字未回填前，所有文档写「观测项 / 验收中」，不写死** |
-| 日记触发器统一 | 日记双轨、触发器双轨合并为单一真相路径 | 🔵 进行中 |
-| 确定性存档 | Math.random 违例定位与清除，存档确定性回归 | 🔵 进行中 |
-| 文档对齐（本线，AG-112） | README/ROADMAP/03_TASKS 与真实状态对齐，三态分离，AI NPC 配置文档落库 | 🔵 进行中——README 数字改为实跑值（116 文件 / 2096 用例，`VITE_NPC_MODEL= npx vitest run`），ROADMAP B4/B5/B6 三态拆解，本文本节 |
+| 日记触发器统一 | 日记双轨、触发器双轨合并为单一真相路径 | ✅ 已合入 `ee66406`（AG-110，外部审查 2 个 P1 清零）——详见下方回填 |
+| 确定性存档 | Math.random 违例定位与清除，存档确定性回归 | ✅ 已合入 `4d0fc99`（AG-111，外部审查 P2 清零+验尸挖出 combat 存档真 bug）——详见下方回填 |
+| 文档对齐（本线，AG-112） | README/ROADMAP/03_TASKS 与真实状态对齐，三态分离，AI NPC 配置文档落库 | ✅ 已合入 `eeff67f`——README 数字改为实跑值（116 文件 / 2096 用例，`VITE_NPC_MODEL= npx vitest run`），ROADMAP B4/B5/B6 三态拆解，AI_NPC_CONFIG.md（87 行），本文本节 |
 
 ### 集成线基线（文档线写入时点的真实门禁）
 
@@ -335,8 +335,27 @@
 3. `docs/03_TASKS.md`：本追加节（历史记录未动）。
 4. `docs/AI_NPC_CONFIG.md`（新增）：AI NPC 默认关闭的安全设计理由、`VITE_NPC_MODEL` / `VITE_OLLAMA_URL` / `VITE_NPC_TIMEOUT_MS` / `?ainpc=1` 配置方式、不配时的选项树降级行为。
 
+### 回填：日记触发器统一（AG-110，commit 218277c → merge ee66406）
+
+外部审查 2 个 P1 的清零记录：
+1. **日记双轨统一**：ShelterSystem 四种宿舍行动（rest/treat/repair/care）从旧 DiaryEvent 接口迁到结构化 DiarySystem（recordDiary/recordShelterAttackedDiary），kind 映射注释论证（契约 11 种无休息/加固专属→归最相近，message 原样进 text；care 记 visitor+actorId='xiaozhou' 让他亲历这条进对话上下文）；压力变化从旧路径寄生虫显式化（数值与旧路径逐字节一致，ShelterSystem.test.ts 钉住）；NpcMemory/NpcRuntime 牵连迁移——NPC 对话上下文改读 diaryOf(state)（day 倒序取前三新的再翻回时间正序=旧 chronological.slice(-3) 同结果），visibleEvents 可见性过滤保留（亲历/公共才给 NPC，防情报泄漏）；旧档数据由 DiarySystem.migrateLegacyDiary 迁移，SaveSystem.validateLegacyDiary 校验保留（坏档整体拒绝不白屏）。
+2. **触发器统一（决策：接入统一系统）**：GameScene.update 每帧 evaluateTriggers(getGame())（import 副作用完成启动注册），放在所有面板早退之前；**零行为变更的硬保证**——evaluateTriggers 只置不清、只写 flags 不碰任何存量字段（e2e/triggers.spec.ts 字节级钉死）。与自言自语的分界写进两处文件头：自言自语是边沿事件（可重复/冷却/出气泡），latch 旗装不下「又掉一次」——两类问题各自留任，不是双轨残留。
+3. 门禁：tsc 0 错 / vitest 2111 全过（分支态实跑）。
+
+### 回填：确定性存档（AG-111，commit 313acc1 → merge 4d0fc99）
+
+外部审查 P2 清零 + 存档验尸附加战果：
+1. **Math.random 派生式**（审查建议原样落实）：新增 monologueRng(runSeed, day, floor, trigger, spoken)（src/data/monologue.ts），经 deriveSeed/xorshift32 派生，同 seed 同场景重放选同一句、换 seed 换句子；GameScene.speakMonologue 改走派生 rng；monologue.test.ts +135 行（同 seed 一致/异 seed 有变化/坏值不崩）。
+2. **存档验尸挖出真 bug 并修**：validateCombat 新增（SaveSystem.ts）——战斗中存档的 combat 块此前缺 monster/maxHp 也能过校验，GameScene 首帧 watchCombatWin 无守卫直接读，加载即抛白屏（GHI-03 C1 同类漏网）；现在缺块/坏块给中文原因拒收，没有存档/坏档都保留新游戏入口。save.test.ts +158 行（坏 combat 块矩阵+旧档缺 stats/achievements 字段不崩+迁移后统计正常）。
+3. 门禁：tsc 0 错 / vitest 2113 全过（分支态实跑）。
+4. 合并冲突裁决（与 AG-110 同改 SaveSystem/save.test.ts，取并集）：validateCombat 与 validateLegacyDiary 两个校验函数+调用点全保留，import 三组齐备；合并后集成线 2115 全过。
+
+### 集成线当前状态（2026-11-18 中午，回填时点实跑）
+
+集成线 tip `4d0fc99`：tsc 0 错 / vitest **115 文件 / 2115 用例全过** / build 通过（2.61s）。比 RC-01 启动时（cc3059c：2096）+19 用例。E2E 仍为观测项（AG-109 第 2 棒在跑，数字回填前不写死）。
+
 ### 已知遗留 / 待回填
 
-- **E2E 通过数字**：待 AG-109 回填后更新 README「质量与测试」表与本文基线表；在此之前文档只写「观测项 / 验收中」。
-- **GameScene 10,446 行**：RC-01 审查项，属代码线，不在文档线处置。
-- 三条工作线（日记触发器统一 / 确定性存档 / E2E）各自结论回来后，回填到本文对应行。
+- **E2E 通过数字**：待 AG-109 第 2 棒（rc-e2e-qa2）回填后更新 README「质量与测试」表与本文基线表；在此之前文档只写「观测项 / 验收中」。
+- **体验试玩**（AG-113 第 2 棒 playtest-xp2）：3 seed×6 体验问题+M1 老问题核对，报告落 tmp/qa-evidence/playtest/，结论回来后回填。
+- **GameScene 10,446 行**：RC-01 审查项；拆分设计已出（docs/plans/2026-11-18-gamescene-split-design.md，d17c3fa），实施属 RC-03，不并进 RC-01。

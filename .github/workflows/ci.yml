@@ -38,7 +38,8 @@ jobs:
   # the same commit: 69-72 of 72 across consecutive runs after the stair timing
   # fix. Gating merges on that would block work for a timing coin flip, so the
   # job reports without blocking, and the flip is tracked as B6-AI-09 in
-  # docs/03_TASKS.md. `verify` above is the deterministic gate.
+  # docs/03_TASKS.md. `verify` above is the deterministic gate; the stable
+  # subset of the suite is gated separately by `smoke-e2e` below.
   e2e:
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -59,6 +60,45 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-failure-artifacts-${{ github.run_id }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The blocking smoke gate — RC-01 E2E re-review item 3 ("promote the stable
+  # core smoke specs to a merge gate"). The 12 specs are carved out by
+  # playwright.smoke.config.ts (extends playwright.config.ts: same trace
+  # policy, same server-identity globalSetup guard, dedicated port 5236), so
+  # the carve-out lives in one file next to the e2e config instead of a long
+  # arg list here. Evidence for promotion: 3 stability rounds (repeat3-4, 12 specs
+  # / 38 tests / 114 runs) with 37 of 38 tests 3/3 green; the last N/3 (ag70 ③
+  # counter-attack frame timing) was stabilized by relaxing the lunge
+  # threshold 8px→4px in e2e/ag70-combat-stage.spec.ts — the authoritative
+  # state (combat log "击中你" + HP loss + damage floater) confirms the
+  # counter lands; 5.4-6.3px is a real short lunge, not a missed sample.
+  #
+  # Same runner shape as `e2e` (pinned Playwright image, one worker, one
+  # retry) minus continue-on-error: a red here blocks the merge. The full
+  # 213-test suite stays observational above because the remaining frame
+  # timing jitter would block work for a coin flip.
+  smoke-e2e:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Smoke suite (blocking)
+        run: npm run test:e2e -- --config=playwright.smoke.config.ts --workers=1 --retries=1
+      - name: Upload Playwright failure artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-smoke-failure-artifacts-${{ github.run_id }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7

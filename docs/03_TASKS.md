@@ -403,6 +403,29 @@
 
 QA-5 收官判定（报告 tmp/qa-evidence/round5/REPORT.md，主会话综合）：XP-1/XP-2/XP-3 全部确认解决，边界检查 6/6 过，无 P2 以上新问题；盲区诚实标注：fresh 眼睛清单缺失（agent 未写报告）+冒烟集未复跑+多日循环受无头 rAF 节流限制。
 
+### GameScene 拆分 10 步收官（2026-11-18~19，外部审查 P1 正式销项）
+
+按 docs/plans/2026-11-18-gamescene-split-design.md 的 10 步迁移顺序全部实施完成（集成线 23eb47d；每步独立分支+门禁三件套：tsc+vitest+冻结区域像素 diff+无头冒烟）：
+
+**GameScene.ts 10,446 → 6,264 行（-4,182/-40.0%）**，10 个 plain TS 控制器（不 import Phaser 场景类型，host 结构面+构造注入，可单测）合计 6,613 行：
+
+| 控制器 | 行数 | 迁自区域 |
+|---|---|---|
+| StatsPanelController | 220 | 统计面板（第 1 步，QA-01 知根知底） |
+| MonologueController | 459 | 状态卡+自言自语 ticker |
+| TutorialController | 325 | AG-73 教程（XP-3 三选一随迁） |
+| PerfController | 209 | AG-80 性能层（帧时间 0.00ms 差） |
+| AchievementController | 289 | AG-77 成就 toast+队列 |
+| NavBarController | 334 | AG-71 六槽+contextual 五态冻结 |
+| CombatController | 1,071 | 回合制+AG-70 舞台+juice（juice 机读四跑一致） |
+| DialogueController | 1,324 | NPC 对话+行商+产业+AI NPC 编排 |
+| HudController | 1,018 | 四联圆环+HUD 板+背包（圆环区 8 节点像素 0） |
+| InteractionController | 1,364 | 床铺/特写/捷径/搜刮挖掘/阻碍/入夜编排 |
+
+每步三件套真实数字与契约同步记录在各步 REPORT（tmp/qa-evidence/split-step1~10/）；step7/8/9/10 的冻结守卫 spec（e2e/split-stepN-freeze.spec.ts）已进仓库作长期回归守卫。最终门禁：tsc 0 错 / vitest **126 文件 2,296 测试全过** / build 1.80s。
+
+**<2,000 行目标未达的如实结论（design §七）**：三条原因——①design 区段行号交叠使粗估重复计入可迁区；②残留漏算三块架构必要税（文件头常量 ~760/Host 结构面 ~1,060/主循环+wanderer ~680）；③控制器表两块遗漏户（制作/暂停/设置 ~620+付费捷径+楼层交通 ~340）。**修订建议：行数门禁改构成性表述（只含生命周期/世界核心/编排/输入分发四类），如需行数目标定 ≤3,000，拆 RC-04 三工单（CraftPanel/Shortcut/FloorWorld 三个控制器）**。<2,000 留作文档史实。本地领先 origin 12 commits 待推送（环境 TLS 故障，恢复后 git push 即可）。
+
 **RC-03 剩余**：
 **RC-03 待办（按优先级）**：① XP-1 战斗节奏数值调优（试玩数据驱动）② GameScene 拆分实施（设计已出）③ 12 核心冒烟 spec 升 CI 阻断（提案就绪，改 playwright.config.ts 一行+CI 工作流）④ E2E 探针缺陷存量 32 个按 8 簇修（报告 §3 有修法）⑤ 覆盖缺口 3 项（tier2+ 阻碍物可达性 e2e/设置系统全链路/终局演出链路）⑥ i18n 接线（416 键词典就绪，t() 零实现）⑦ BGM 默认值不一致（readBgmVolume 默认 70 vs SettingsSystem 默认 50，首启 BGM 比面板显示响——AG-114 发现未修）
 

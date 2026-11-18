@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { SCHEMA_VERSION } from '../core/constants';
 import { GAME_CONFIG } from '../core/config';
-import { deserialize, saveFailureCount, saveToStorage, serialize, validateGameState } from '../systems/SaveSystem';
+import { deserialize, hasSave, loadFromStorage, saveFailureCount, saveToStorage, serialize, validateGameState } from '../systems/SaveSystem';
+import { freshAchievements, loadAchievements } from '../systems/AchievementSystem';
 import { getFloorView } from '../systems/LootSystem';
 import { tryContinue } from '../core/session';
 import type { GameState } from '../core/gameTypes';
@@ -374,3 +375,158 @@ describe('tryContinue reports why a save is unusable (GHI-03 M4)', () => {
   });
 });
 
+
+
+// RC-01 存档链路审查（ag-111-determinism）：① combat 块的校验补丁——
+// GameScene 首帧就无护栏读 state.combat（watchCombatWin），畸形块曾能通过
+// 校验再白屏（GHI-03 C1 同类）；② 坏档矩阵复验（QA-4 抽验）+ 审查新类型
+// （localStorage 清空 / 双 tab 同写 / 跨版本 / 成就独立键）；③ 战斗中存档
+// 往返（冻结战斗块的契约）。
+describe('RC-01 combat block validation (GHI-03 C1 class, one block over)', () => {
+  function combatBlock(): Record<string, unknown> {
+    return {
+      kind: 'ambush',
+      floor: 2,
+      spotId: 'spot_0',
+      monster: { id: 12, name: '拾荒者', hp: 30, maxHp: 40, damage: 8, accuracy: 0.75, defense: 2, evasion: 0.1, behavior: 'brute' },
+      guarding: false,
+      turn: 3,
+      log: ['战斗开始。', '你击中拾荒者。'],
+    };
+  }
+
+  it('accepts a well-formed combat block and round-trips it intact', () => {
+    const s = { ...completeSave(), combat: combatBlock() };
+    expect(validateGameState(s)).toEqual([]);
+    const back = deserialize(serialize(s as unknown as GameState));
+    expect(back.ok).toBe(true);
+    if (back.ok) expect(back.state.combat).toEqual(combatBlock());
+  });
+
+  it('a save written mid-fight keeps the frozen fight across save/reload', () => {
+    // 战斗中（每回合结束都存）刷新：冻结的怪物/回合/日志原样回来——同 seed
+    // 同 spot 重roll 也还是这只（deriveSeed 口径，encounters/combat 已钉）。
+    const state = createNewGame(42);
+    state.combat = {
+      kind: 'boss',
+      floor: state.currentFloor,
+      spotId: 'spot_1',
+      monster: { id: 900, name: '守门人', hp: 55, maxHp: 120, damage: 14, accuracy: 0.8, defense: 4, evasion: 0, behavior: 'normal' },
+      guarding: true,
+      turn: 4,
+      log: ['守门人拦住了去路。', '你举盾防御。'],
+    };
+    const back = deserialize(serialize(state));
+    expect(back.ok).toBe(true);
+    if (back.ok) expect(back.state.combat).toEqual(state.combat);
+  });
+
+  it('absent combat stays fine (pre-combat saves)', () => {
+    expect(validateGameState(completeSave())).toEqual([]);
+    const s = completeSave();
+    s.combat = undefined;
+    expect(validateGameState(s)).toEqual([]);
+  });
+
+  it('rejects a malformed combat block with a readable reason, never throws', () => {
+    const bad: Array<[string, Record<string, unknown>]> = [
+      ['monster missing', { ...combatBlock(), monster: undefined }],
+      ['monster.hp missing', { ...combatBlock(), monster: { ...combatBlock().monster as Record<string, unknown>, hp: undefined } }],
+      ['monster.hp wrong type', { ...combatBlock(), monster: { ...(combatBlock().monster as Record<string, unknown>), hp: '很多' } }],
+      ['monster.maxHp zero', { ...combatBlock(), monster: { ...(combatBlock().monster as Record<string, unknown>), maxHp: 0 } }],
+      ['turn zero', { ...combatBlock(), turn: 0 }],
+      ['log not strings', { ...combatBlock(), log: ['ok', 7] }],
+      ['kind unknown', { ...combatBlock(), kind: 'siege' }],
+      ['guarding wrong type', { ...combatBlock(), guarding: 'no' }],
+      ['floor fractional', { ...combatBlock(), floor: 2.5 }],
+    ];
+    for (const [label, combat] of bad) {
+      const errors = validateGameState({ ...completeSave(), combat });
+      expect(errors.some((e) => e.startsWith('combat')), label).toBe(true);
+      const r = deserialize(serialize({ ...completeSave(), combat } as unknown as GameState));
+      expect(r.ok, label).toBe(false);
+      if (!r.ok) expect(r.error, label).toContain('存档损坏');
+    }
+  });
+});
+
+// RC-01 坏档矩阵：QA-4 的 11 种大多已被上面的既有套件钉住（JSON 烂/版本错/
+// hp 越界/未知物品/缺 player/缺 visitedFloors/null/malformed activeEvent/缺
+// player.x/非有限 x/缺 npcStates/缺 homeUpgrades/未知 equipped）。这里复验
+// 三种代表 + 补三种审查新类型。
+describe('RC-01 bad-save matrix re-verified + new types', () => {
+  function fakeStorage(raw: string | null): Storage {
+    return {
+      length: raw === null ? 0 : 1,
+      clear: () => {},
+      getItem: () => raw,
+      key: () => null,
+      removeItem: () => {},
+      setItem: () => {},
+    };
+  }
+
+  it('复验：invalid JSON / 跨版本（schemaVersion 1）/ hp 越界都graceful 拒档', () => {
+    expect(deserialize('{ not json').ok).toBe(false);
+    const old = { ...completeSave(), schemaVersion: 1 };
+    const r = deserialize(serialize(old as unknown as GameState));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('不支持的存档版本');
+    const hurt = createNewGame(1);
+    hurt.player.hp = 150;
+    expect(deserialize(serialize(hurt)).ok).toBe(false);
+  });
+
+  it('新类型：存档键被清（localStorage 清空）= 没有存档，不是坏档', () => {
+    const empty = fakeStorage(null);
+    expect(hasSave(empty)).toBe(false);
+    const r = loadFromStorage(empty);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe('没有存档');
+  });
+
+  it('新类型：双 tab 同写——后写覆盖、JSON 不烂，各自都能完整读回', () => {
+    // localStorage 跨 tab 共享：两个 tab 各自 autosave 时 last-write-wins，
+    // setItem 原子所以不会写出半个 JSON。无跨 tab 锁/leader 选举是设计取舍
+    // （输的 tab 下一次刷新读到的赢家档）——这里钉它的边界：不烂、不抛。
+    const shared = new Map<string, string>();
+    const tabStorage = (): Storage => ({
+      length: shared.size,
+      clear: () => shared.clear(),
+      getItem: (k: string) => shared.get(k) ?? null,
+      key: (i: number) => [...shared.keys()][i] ?? null,
+      removeItem: (k: string) => void shared.delete(k),
+      setItem: (k: string, v: string) => void shared.set(k, v),
+    });
+    const tabA = tabStorage();
+    const tabB = tabStorage();
+    const runA = createNewGame(1);
+    runA.day = 3;
+    const runB = createNewGame(2);
+    runB.day = 5;
+    expect(saveToStorage(runA, tabA)).toBe(true);
+    expect(saveToStorage(runB, tabB)).toBe(true); // B 后写，赢
+    const back = loadFromStorage(tabA); // A 刷新：读到的是赢家的档
+    expect(back.ok).toBe(true);
+    if (back.ok) {
+      expect(back.state.runSeed).toBe(2);
+      expect(back.state.day).toBe(5);
+    }
+    // 赢家自己的 tab 读回也一致（没有互相写花）。
+    const backB = loadFromStorage(tabB);
+    expect(backB.ok).toBe(true);
+    if (backB.ok) expect(backB.state).toEqual(runB);
+  });
+
+  it('新类型：成就独立键坏掉只修奖杯柜，不碰存档继续', () => {
+    const broken = fakeStorage('{ not json');
+    expect(loadAchievements(broken)).toEqual(freshAchievements());
+    const dirty = fakeStorage(JSON.stringify({ unlocked: ['depth_10', 'ghost_achievement'], stats: { crafts: 'many', deepestFloor: 42 } }));
+    const repaired = loadAchievements(dirty);
+    expect(repaired.unlocked).toEqual(['depth_10']); // 认不出的 id 丢弃
+    expect(repaired.stats.crafts).toBe(0); // 脏字段按缺省
+    expect(repaired.stats.deepestFloor).toBe(42);
+    // 存档链路不受独立键影响：照样能开。
+    expect(deserialize(serialize(createNewGame(7))).ok).toBe(true);
+  });
+});

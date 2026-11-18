@@ -15,6 +15,7 @@
 // 永远闭嘴。
 
 import { GAME_CONFIG } from '../core/config';
+import { deriveSeed, makeRng } from '../core/rng';
 
 // ── 类型 ────────────────────────────────────────────────────────────────────
 
@@ -289,6 +290,25 @@ export function monologueVoiceFor(who: string): MonologueVoice {
 
 export function freshMonologueMemory(): MonologueMemory {
   return { lastSpokenAt: Number.NEGATIVE_INFINITY, lineReadyAt: {}, lastLineId: null };
+}
+
+/**
+ * 选句随机源——项目硬规则（CLAUDE.md：世界生成与事件判定禁 Math.random，
+ * docs/02_TECH_SPEC.md §3：统一 seeded PRNG）在自言自语上的落实：由
+ * (runSeed, day, floor, trigger, 本局已飘字数) 经 deriveSeed/xorshift32 派生，
+ * 不碰 Math.random。同 seed 同场景重放，同一触发点选同一句；换 seed 才换
+ * 句子（词表每格三句，分布随 seed 变）。已飘字数做盐：同一处境当天多次
+ * 开口时轮换句子，而重放里计数一致、结果仍逐帧可复现。异常值（NaN/负数/
+ * 缺 seed 兜底 0）被 deriveSeed 的 >>> 0 与 makeRng 的零种子折叠消化，不崩。
+ */
+export function monologueRng(
+  seed: number,
+  day: number,
+  floor: number,
+  trigger: MonologueTrigger,
+  spoken: number,
+): () => number {
+  return makeRng(deriveSeed(seed, day, floor, trigger, 'monologue', spoken)).nextFloat;
 }
 
 /**

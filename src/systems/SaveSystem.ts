@@ -85,6 +85,36 @@ function validateDwell(value: unknown): string | null {
   return null;
 }
 
+// OVERHAUL Wave A: the live combat block. Optional so pre-combat saves stay
+// valid; when present it must be well-formed because GameScene ticks
+// watchCombatWin(state.combat) from the very first frame without a guard —
+// a block missing monster/hp passed validation and then threw on load, the
+// same white-screen class GHI-03 C1 fixed for the rest of GameState. Reject
+// with a readable reason instead; 没有存档/坏档 both keep the new-game entry.
+function validateCombat(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (!isRecord(value)) return 'combat 无效';
+  if (value.kind !== 'ambush' && value.kind !== 'boss') return 'combat.kind 无效';
+  if (typeof value.floor !== 'number' || !Number.isInteger(value.floor)) return 'combat.floor 无效';
+  if (typeof value.spotId !== 'string') return 'combat.spotId 无效';
+  if (typeof value.guarding !== 'boolean') return 'combat.guarding 无效';
+  if (typeof value.turn !== 'number' || !Number.isInteger(value.turn) || value.turn < 1) return 'combat.turn 无效';
+  if (!Array.isArray(value.log) || !value.log.every((l: unknown) => typeof l === 'string')) return 'combat.log 无效';
+  const m = value.monster;
+  if (!isRecord(m)) return 'combat.monster 无效';
+  if (typeof m.name !== 'string') return 'combat.monster.name 无效';
+  if (typeof m.behavior !== 'string') return 'combat.monster.behavior 无效';
+  if (typeof m.id !== 'number' || !Number.isFinite(m.id)) return 'combat.monster.id 无效';
+  const maxHp = m.maxHp;
+  for (const key of ['hp', 'damage', 'accuracy', 'defense', 'evasion'] as const) {
+    const v = m[key];
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return `combat.monster.${key} 无效`;
+  }
+  // 血条分数与 tween 都除以 maxHp：零/负/非有限分母是 NaN 源，必须拒。
+  if (typeof maxHp !== 'number' || !Number.isFinite(maxHp) || maxHp <= 0) return 'combat.monster.maxHp 无效';
+  return null;
+}
+
 const DIARY_KINDS: DiaryEvent['kind'][] = [
   'returned_from_scavenge',
   'late_return',
@@ -186,6 +216,8 @@ function validateOverhaulBlocks(s: Record<string, unknown>): string[] {
   if (diaryError) errors.push(diaryError);
   const shelterError = validateShelterPlan(s.shelterPlan);
   if (shelterError) errors.push(shelterError);
+  const combatError = validateCombat(s.combat);
+  if (combatError) errors.push(combatError);
   return errors;
 }
 

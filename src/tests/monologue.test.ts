@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   MONOLOGUE_LINE_COUNT,
@@ -8,6 +10,7 @@ import {
   crossedBelow,
   freshMonologueMemory,
   isGoodLoot,
+  monologueRng,
   monologueVoiceFor,
   statusSummaryLine,
   type MonologueTrigger,
@@ -251,5 +254,137 @@ describe('AG-67 status card lane contract (hudLayout keys)', () => {
   it('leaves the top plate\'s own lanes untouched (AG-54 regression guard)', () => {
     expect(hud.statX + 3 * hud.statPitch + hud.statWidth).toBeLessThan(hud.moneyX);
     expect(hud.contextBottom).toBeLessThan(hud.feedbackY);
+  });
+});
+
+// AG-67 确定性（外部审查 P2 修复的回归钉子）：选句随机曾直接传 Math.random，
+// 违反 CLAUDE.md「世界生成与事件判定禁 Math.random」。现在走
+// monologueRng——(runSeed, day, floor, trigger, 已飘字数) 的派生 rng。这里钉
+// 三件事：同 seed 重放一致（连开两局同一触发点选同一句）、不同 seed 有变化
+// （确定性但不恒定）、异常 seed 不崩；外加行为探针与源码断言。
+describe('AG-67 monologue determinism (seeded pick, no Math.random)', () => {
+  const cfg: StatusPanelBalance = CFG;
+
+  /** 一局里的自言自语序列：memory 递进、已飘字数递增，与 GameScene 同构。 */
+  function replaySession(seed: number): string[] {
+    let memory = freshMonologueMemory();
+    let spokenCount = 0;
+    let now = 1000;
+    const said: string[] = [];
+    const script: MonologueTrigger[] = [
+      'hp_low',
+      'hunger_low',
+      'night_fall',
+      'good_loot',
+      'hp_low',
+      'combat_win',
+      'new_floor',
+      'thirst_low',
+      'energy_low',
+      'good_loot',
+    ];
+    for (const trigger of script) {
+      const rng = monologueRng(seed, 1, 1, trigger, spokenCount);
+      const picked = chooseMonologue(memory, now, trigger, 'player', cfg, rng);
+      if (picked) {
+        said.push(picked.line.id);
+        memory = picked.memory;
+        spokenCount += 1;
+        now += cfg.monologue.minGapMs + 1000;
+      }
+    }
+    return said;
+  }
+
+  it('same seed, two runs: the same trigger point picks the same line', () => {
+    // 连开两局：同一 seed、同一脚本，逐句一致——回放可复现。
+    const runA = replaySession(20261118);
+    const runB = replaySession(20261118);
+    expect(runA.length).toBeGreaterThan(3); // 脚本真的说出了不少句，别 vacuously 过
+    expect(runB).toEqual(runA);
+  });
+
+  it('same seed: the first pick at a trigger point is stable across calls', () => {
+    for (const trigger of TRIGGERS) {
+      const pick = (): string =>
+        chooseMonologue(freshMonologueMemory(), 1000, trigger, 'player', cfg, monologueRng(777, 3, 5, trigger, 0))!.line.id;
+      expect(pick(), trigger).toBe(pick());
+    }
+  });
+
+  it('different seeds can produce different lines — deterministic, not constant', () => {
+    // 每个处境扫 48 个 seed：同一点位必须能选出至少两种句子（钉「不恒定」）。
+    for (const trigger of TRIGGERS) {
+      const picks = new Set<string>();
+      for (let seed = 1; seed <= 48; seed++) {
+        const rng = monologueRng(seed, 1, 1, trigger, 0);
+        picks.add(chooseMonologue(freshMonologueMemory(), 1000, trigger, 'player', cfg, rng)!.line.id);
+      }
+      expect(picks.size, `${trigger} 的选句应随 seed 变化`).toBeGreaterThan(1);
+    }
+  });
+
+  it('different seeds: whole sessions are not all identical', () => {
+    const sessions = new Set<string>();
+    for (let seed = 1; seed <= 24; seed++) sessions.add(JSON.stringify(replaySession(seed)));
+    expect(sessions.size).toBeGreaterThan(1);
+  });
+
+  it('day/floor/spoken move the pick (the derivation is real, not a constant)', () => {
+    const lineAt = (day: number, floor: number, spoken: number): string =>
+      chooseMonologue(freshMonologueMemory(), 1000, 'hp_low', 'player', cfg, monologueRng(42, day, floor, 'hp_low', spoken))!.line.id;
+    const seen = new Set<string>();
+    for (const day of [1, 2, 3]) for (const floor of [1, 2, 3]) for (const spoken of [0, 1, 2]) {
+      seen.add(lineAt(day, floor, spoken));
+    }
+    expect(seen.size).toBeGreaterThan(1);
+  });
+
+  it('rogue seeds never crash the pick (NaN / negative / zero / huge / fractional)', () => {
+    const rogue: Array<[string, number]> = [
+      ['NaN', Number.NaN],
+      ['negative', -1],
+      ['zero', 0],
+      ['huge', 2 ** 32],
+      ['fractional', 1.5],
+      ['Infinity', Number.POSITIVE_INFINITY],
+    ];
+    for (const [label, seed] of rogue) {
+      const rng = monologueRng(seed, 1, 1, 'hp_low', 0);
+      const picked = chooseMonologue(freshMonologueMemory(), 1000, 'hp_low', 'player', cfg, rng);
+      expect(picked, label).not.toBeNull();
+      expect(picked!.line.text.length, label).toBeGreaterThan(0);
+    }
+  });
+
+  it('rogue day/floor/spoken values never crash either', () => {
+    const rng = monologueRng(7, Number.NaN, -3, 'night_fall', Number.NEGATIVE_INFINITY);
+    expect(() => chooseMonologue(freshMonologueMemory(), 1000, 'night_fall', 'player', cfg, rng)).not.toThrow();
+    expect(chooseMonologue(freshMonologueMemory(), 1000, 'night_fall', 'player', cfg, rng)).not.toBeNull();
+  });
+
+  it('the pick never touches Math.random (probe: one call throws)', () => {
+    // 行为探针：重放期间任何一次 Math.random 都直接炸——选句链路的确定性不
+    // 靠「今天没走到」，靠「走到就抛」。
+    const original = Math.random;
+    Math.random = (): number => {
+      throw new Error('自言自语选句禁 Math.random：必须走 monologueRng 派生');
+    };
+    try {
+      expect(() => replaySession(4242)).not.toThrow();
+      expect(replaySession(4242).length).toBeGreaterThan(3);
+    } finally {
+      Math.random = original;
+    }
+  });
+
+  it('GameScene 的选句站点已接派生 rng、不再出现 Math.random（源码断言）', () => {
+    const src = readFileSync(join(process.cwd(), 'src/scenes/GameScene.ts'), 'utf8');
+    const site = src.slice(src.indexOf('private speakMonologue'), src.indexOf('private spawnSpeechBubble'));
+    expect(site).toContain('monologueRng(state.runSeed');
+    // 旧的违规调用（chooseMonologue 第六参直接收 Math.random）必须绝迹；
+    // 注释里出现「Math.random」字样是文档，不算违规——所以按调用模式断言。
+    expect(site, '5585 站点禁把 Math.random 传给 chooseMonologue').not.toContain('STATUS_PANEL_BALANCE, Math.random');
+    expect(site).toContain('STATUS_PANEL_BALANCE, rng)');
   });
 });

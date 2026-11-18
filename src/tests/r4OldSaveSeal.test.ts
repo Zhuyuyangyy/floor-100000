@@ -217,7 +217,10 @@ describe('rescueSealedPlayerX — 边界与不变量', () => {
 describe('R4 护栏接线', () => {
   it('GameScene.drawFloor 在 buildObstacles 之后调用护栏（源码断言）', () => {
     const src = readFileSync(join(process.cwd(), 'src/scenes/GameScene.ts'), 'utf8');
-    const buildIdx = src.indexOf('this.buildObstacles();');
+    // RC-03 拆分第 10 步：阻碍物名册刷新迁入 InteractionController，drawFloor
+    // 的调用点从 this.buildObstacles() 变成 this.interaction.buildObstacles()
+    // ——「先刷名册再裁决」的契约不变，断言跟着换锚（同第 3/7 步先例）。
+    const buildIdx = src.indexOf('this.interaction.buildObstacles();');
     const guardIdx = src.indexOf('rescueSealedPlayerX(');
     expect(buildIdx, 'drawFloor 仍在 buildObstacles 刷名册').toBeGreaterThan(-1);
     expect(guardIdx, '护栏调用存在').toBeGreaterThan(-1);

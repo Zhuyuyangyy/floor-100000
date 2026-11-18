@@ -41,17 +41,14 @@ import {
   stairMouthZone,
   stairTraversalFor,
   stepHorizontalSpeed,
-  tryChangeFloor,
 } from '../systems/FloorSystem';
-import { BUNK_DISMANTLE_COST, BUNK_SEARCH_COST, OBSTACLE_DIG_COST_MINUTES, OBSTACLE_DIG_MS, SEARCH_MS,
-  bunkDismantleTool, clampXAgainstObstacles, clearObstacle, dismantleBunk, floorExitXs, getFloorView, homewardExitXs,
-  isBunkDismantled, isBunkSearched, isObstacleCleared, lootContainer, lootGround, nearestObstacle, obstacleTool,
-  obstaclesForFloor, recordFloorVisit, rescueSealedPlayerX, searchBunk, type FloorObstacle } from '../systems/LootSystem';
+import { clampXAgainstObstacles, floorExitXs, getFloorView, homewardExitXs,
+  isBunkDismantled, recordFloorVisit, rescueSealedPlayerX, type FloorObstacle } from '../systems/LootSystem';
 import { hasFloorContent } from '../data/floorTemplates';
 import { liftDirection, liftOutcome, liftRequirement, nextSegment, prevSegment, skippedFloors } from '../core/segments';
 import { crossingSummary, floorGeometryFor } from '../core/worldgen';
 import type { FloorGeometry } from '../core/worldgen';
-import { countItem, removeItem, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
+import { removeItem, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
 import { craft, hasUpgrade, nightOverlayAlpha, purifyWater, recipePreview } from '../systems/CraftingSystem';
 import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, isNight, spendTime } from '../systems/SurvivalSystem';
 import { ensureNightEvent, eventStatus, setEventStatus } from '../systems/EventSystem';
@@ -68,20 +65,14 @@ import {
   cheerFromItem,
   witnessTrauma,
 } from '../systems/MoraleSystem';
-import { diaryOf } from '../systems/DiarySystem';
 // AG-26 / RC-01：统一触发器。import 本模块即完成启动注册（副作用），求值在
 // update() 里每帧跑——见那边的接线注释。
 import { evaluateTriggers } from '../systems/triggers';
-import { availableShelterActions, finishNight, resolveShelterAction } from '../systems/ShelterSystem';
+import { finishNight } from '../systems/ShelterSystem';
 import {
   nightChoicePending,
-  nightWatchEvidenceNote,
   nightWatchWakeNote,
-  recordNightChoice,
-  recordNightDismissal,
   settlePendingVisitOnSleep,
-  stepNightWatch,
-  type NightChoice,
 } from '../systems/NightSystem';
 import { recordDepth } from '../systems/progress';
 import { CHARACTER_NAMES, applyDepth, loadMeta, saveMeta, unlockFromDepth } from '../systems/metaProgress';
@@ -129,7 +120,13 @@ import { DialogueController, type DialogueHost } from './controllers/DialogueCon
 // combatWeaponLabel 的先例）。
 import { HudController, STAT_BARS } from './controllers/HudController';
 export { BAG_BALANCE, type BagBalance } from './controllers/HudController';
-import { charge, recordShortcut, shortcutAvailable, shortcutPlan } from '../systems/shortcut';
+// RC-03 拆分第 10 步（设计文档最后一步）：交互逻辑本体（床铺/搜刮挖掘/阻碍物/
+// 墙饰特写/入夜面板/夜间安排/付费捷径/容器邻近判定）在
+// controllers/InteractionController（plain TS 类，不 import Phaser 场景类型），
+// 场景只留输入分发骨架（onUse/onKeyDown/onPointerDown 各分支委托）与三个
+// e2e 契约 getter（pendingAction/floorObstacles/activeObstacleList）。
+import { InteractionController, type PendingAction } from './controllers/InteractionController';
+import { shortcutAvailable, shortcutPlan } from '../systems/shortcut';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
 import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
@@ -149,7 +146,6 @@ import {
   HUD_FOOT_H,
   TYPE,
   UI,
-  buildListRow,
   buildPanelHeader,
   buildPanelWell,
 } from '../render/uiKit';
@@ -169,15 +165,12 @@ import {
   hurtAnimKey,
   idleAnimKey,
   joint,
-  pickupAnimKey,
   runAnimKey,
-  searchAnimKey,
   walkAnimKey,
   walkSheetKey,
 } from '../render/walkcycle';
 import { WEAPON_GRIP_X, WEAPON_GRIP_Y, WEAPON_H, WEAPON_KEY, WEAPON_W } from '../render/weapon.ts';
 import { attackFrameIndex, charAnimHoldMs, isCharAnimBacked } from '../render/charAnims';
-import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom, drawCrowd, drawStairwell, floorKeyFor, placeDoor, placeWindow, stairClimbPose, wallKeyFor } from '../render/corridors';
 import {
@@ -228,7 +221,6 @@ import {
   findCraftNode,
   type CraftTreeNode,
 } from '../data/craftTree';
-import { WALL_DECO } from '../data/wallDeco';
 import { NPCS, NPC_FLOOR, npcsOnFloor, type NpcDef, type NpcId } from '../data/npcs';
 import { QUEST_FLAG, QUESTS } from '../data/quests';
 import { clearFlag, hasFlag, setFlag } from '../systems/WorldFlags';
@@ -247,7 +239,7 @@ import {
   type WandererSituation,
 } from '../systems/NpcAutonomy';
 import type { NpcPersistedState } from '../ai/types';
-import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId, ShelterAction } from '../core/gameTypes';
+import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, GroundItem, ItemId } from '../core/gameTypes';
 
 // AG-77 成就解锁 toast 的几何与节奏（TOAST_* 八常量 + ToastPart 零件类型）
 // 随 controllers/AchievementController 迁出（RC-03 拆分第 5 步）。
@@ -283,9 +275,6 @@ const CRAFT_TREE_DETAIL_GAP = 6;
 /** 制作按钮（Enter 的鼠标版）几何，贴在详情第一行右侧。 */
 const CRAFT_TREE_BUTTON_W = 116;
 const CRAFT_TREE_BUTTON_H = 34;
-// AG-20：终局层（统治核心）。这一层的三个容器是终局演出入口
-// （docs/plans/FINALE_UX.md §2 契约，EndgameScene 归 AG-21）。
-const FINALE_FLOOR = 100000;
 // SICKNESS_TIER_LABEL 随环境行迁入 HudController（RC-03 拆分第 9 步）。
 // HUD type scale (docs/05_ART_GUIDE.md §2: no size too small to read). Title 16 /
 // body 13 / auxiliary 11 — all integer pixels, since any fractional size would be
@@ -507,18 +496,8 @@ const CHOICE_LABELS: Record<EncounterChoice, string> = {
   leave: '离开',
   read: '读纸条',
 };
-const SHELTER_ROWS: Array<{ action: ShelterAction; label: string; value: string }> = [
-  { action: 'rest', label: '休息', value: '恢复精力 · 压力 -6' },
-  { action: 'treat', label: '治疗', value: '医疗包 · 处理伤势' },
-  { action: 'repair', label: '修理', value: '木材×2 + 胶带×1' },
-  { action: 'care', label: '照顾邻居', value: '口粮×1 · 压力 -12' },
-];
-// AG-64：入夜二选一的两张选项卡（各有图标/标题/一句后果说明，选中高亮、
-// Enter 确认）。图标走 itemIconKey：手电 = 推门走进夜色；医疗包 = 守夜睡觉回血。
-const NIGHT_CHOICE_ROWS: Array<{ choice: NightChoice; label: string; consequence: string; iconKey: string }> = [
-  { choice: 'scavenge', label: '出去找物资', consequence: '夜里搜刮各层 · 宿舍可能遭 NPC 光顾', iconKey: itemIconKey('flashlight') },
-  { choice: 'watch', label: '在家守夜', consequence: '回宿舍睡觉回血 · 今夜没人偷得走你的东西', iconKey: itemIconKey('medkit') },
-];
+// AG-51 的 SHELTER_ROWS 与 AG-64 的 NIGHT_CHOICE_ROWS 两条面板行表随交互段
+// 迁入 controllers/InteractionController（RC-03 拆分第 10 步）。
 type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 's' | 'f' | 'q' | 'l' | 'g' | 'up' | 'down';
 type DirKeys = {
   up: Phaser.Input.Keyboard.Key;
@@ -767,30 +746,12 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   // switch back on the very next frame and the clip would never be seen.
   private actionAnimKey = '';
   private actionAnimUntil = 0;
-  // AG-66：过道阻碍物。floorObstacles 是本层全集（seeded，含挖过的残骸），
-  // obstacleObjs 按 x 存场景图形，activeObstacleList 是还没挖的那些——每帧
-  // 钳位与 E 交互读它，挖掉一个就地重算（drawFloor/清障时刷新）。
-  private floorObstacles: FloorObstacle[] = [];
-  private activeObstacleList: FloorObstacle[] = [];
-  private obstacleObjs = new Map<string, Phaser.GameObjects.Graphics>();
-  // AG-66：进行中的搜刮/挖掘动作（2s）。点容器/床铺/阻碍物后先播 search 动画，
-  // 到点才出货/清障；这期间任何移动输入都会取消它——不出货、不扣时间、不标记
-  // 已搜/已挖（防站着刷，见 update 的 pendingAction 段与 cancelPendingAction）。
-  private pendingAction?: {
-    kind: 'container' | 'bunk' | 'dig';
-    floor: number;
-    containerId?: string;
-    bunkId?: string;
-    obstacleX?: number;
-    /** 特效落点（床铺/阻碍物的世界 x）。 */
-    atX: number;
-    /** 动作期间底栏显示的话。 */
-    busyHint: string;
-    /** 取消时的话。 */
-    cancelHint: string;
-    until: number;
-    timer: Phaser.Time.TimerEvent;
-  };
+  // AG-66：过道阻碍物名册（floorObstacles/activeObstacleList/obstacleObjs）与
+  // 进行中的搜刮/挖掘动作（pendingAction）随 RC-03 拆分第 10 步迁入
+  // InteractionController——每帧钳位与 E 交互改经 interaction 读数面，
+  // 场景留三个 e2e 契约 getter（pendingAction/floorObstacles/
+  // activeObstacleList，ag50-control-probe/ag66/npc/spark/survivalLoop/
+  // survivalJourney/split-step8-freeze 直读零改动）。
   // AG-66 铲子图标就绪标记随背包格迁入 HudController（RC-03 拆分第 9 步）。
 
   // AG-77 成就字段组（achievementSave/achievementQueue/activeToasts/
@@ -892,17 +853,15 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   //     flash/chargeTime/emitNpcTalked/onUse/assertPanelContent——见下方
   //     「DialogueHost 面」段）。
   private readonly dialogueCtl = new DialogueController(this);
-  // First-floor shelter decision panel: the cursor is visual state, while the
-  // selected action itself is committed through ShelterSystem.
-  private shelterOpen = false;
-  private shelterSelected = 0;
-  private shelterObjects: PanelObject[] = [];
-  private shelterMarker!: Phaser.GameObjects.Image;
-  // AG-64：入夜二选一面板（出去找物资 / 在家守夜）。
-  private nightChoiceOpen = false;
-  private nightChoiceSelected = 0;
-  private nightChoiceObjects: PanelObject[] = [];
-  private nightChoiceMarker!: Phaser.GameObjects.Image;
+  // RC-03 拆分第 10 步：交互逻辑本体（床铺搜刮/拆解、2s 搜刮/挖掘动作编排、
+  // 阻碍物名册与交互判定、墙饰特写、入夜二选一、夜间安排面板、付费捷径、
+  // 容器邻近判定）在 controllers/InteractionController——下面这些原字段
+  // （shelterOpen/shelterSelected/shelterObjects/shelterMarker/
+  // nightChoice*/deco*/floorObstacles/activeObstacleList/obstacleObjs/
+  // pendingAction）全部随迁，场景只留输入分发骨架与三个 e2e 契约 getter
+  // （pendingAction/floorObstacles/activeObstacleList——ag50/ag66/npc 等
+  // 探针零改动直读）。
+  private readonly interaction = new InteractionController(this);
   /** 上一帧的 gameMinuteOfDay：只有帧循环把时钟推过 18:00 的那一帧算「入夜」 */
   private prevMinuteOfDay: number | null = null;
   private feedbackTimer?: Phaser.Time.TimerEvent;
@@ -995,10 +954,6 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   /** The quests:changed subscription survives a Game restart; the panel scene does not restart. */
   private questsEventBound = false;
 
-  /** the wall-fixture close-up (key L): built per open, like the shelter panel */
-  private decoOpen = false;
-  private decoIndex = 0;
-  private decoObjects: PanelObject[] = [];
   private pauseOpen = false;
   // Mouse state. `walkTarget` is the click-to-walk order the update loop steps
   // toward; `panelBox` is the rectangle of the most recently built panel, so a
@@ -1089,12 +1044,11 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // RC-03 拆分第 8 步：对话面板件/标记 + 产业面板件/标记 + 对话开关与进行中
     // 对话的重置本体在 DialogueController.reset（原逐字段清单见那边注释）。
     this.dialogueCtl.reset();
-    this.shelterObjects = [];
-    this.shelterMarker = createMarker(this);
-    this.nightChoiceObjects = [];
-    this.nightChoiceMarker = createMarker(this);
-    this.nightChoiceOpen = false;
-    this.nightChoiceSelected = 0;
+    // RC-03 拆分第 10 步：夜间安排面板件/标记 + 入夜面板件/标记 + 两面板开关与
+    // 选中 + 阻碍物名册 + 进行中动作的重置本体在 InteractionController.reset
+    // （原 create 的 shelter/night/obstacle 四段逐字搬入；deco 三字段不在重置
+    // 清单里——与原实现逐字一致）。
+    this.interaction.reset();
     // 入夜提示是「时钟跨过 18:00」的边沿触发：续档/重开从当前时刻起算，
     // 不补弹今夜之前错过的提示。
     this.prevMinuteOfDay = getGame().gameMinuteOfDay;
@@ -1104,8 +1058,6 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // Open/invSelected 同理——本体在 HudController.reset。）
     this.craftingOpen = false;
     this.craftSelected = 0;
-    this.shelterOpen = false;
-    this.shelterSelected = 0;
     this.pauseOpen = false;
     this.pauseSelected = 0;
     this.wanderer = undefined;
@@ -1122,12 +1074,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.lastClick = undefined;
     // lastClock/lastStats 的清零随 HUD 按值缓存键迁入 HudController.reset
     // （RC-03 拆分第 9 步）。
-    // AG-66：阻碍物名册与进行中动作不随字段初始化器重生（场景重启复用实例），
-    // 在这里显式清空——否则上一局的 timer 会在新局到点出货。
-    this.floorObstacles = [];
-    this.activeObstacleList = [];
-    this.obstacleObjs.clear();
-    this.pendingAction = undefined;
+    // AG-66：阻碍物名册与进行中动作的清空在本段上方统一走
+    // InteractionController.reset（RC-03 拆分第 10 步）——不随字段初始化器
+    // 重生（场景重启复用实例），否则上一局的 timer 会在新局到点出货。
     // AG-77：成就档从独立键读入（重置游戏不清空），toast 队列与跨天记账随
     // 新跑局清空——字段初始化器不重跑，上一局的排队 toast 会插进新局。
     this.achievements.init(getGame().day);
@@ -1323,7 +1272,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     if (floor === STARTING_FLOOR) {
       this.time.delayedCall(0, () => {
         if (!this.scene.isActive()) return;
-        this.reportNightWatchEvidence();
+        this.interaction.reportNightWatchEvidence();
       });
     }
 
@@ -1355,8 +1304,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.drawDormBunks(floor);
     this.buildContainers();
     this.buildGround();
-    // AG-66：过道阻碍物（本层 seeded 全集 + 挖过的残骸）。
-    this.buildObstacles();
+    // AG-66：过道阻碍物（本层 seeded 全集 + 挖过的残骸）。名册与绘制本体在
+    // InteractionController（RC-03 拆分第 10 步），对象统一进 floorObjects。
+    this.interaction.buildObstacles();
     // R4 护栏（旧档兼容软锁，QA 第 2 轮 probeA-R3）：AG-96 起正常楼层按 roll
     // 率生成阻碍物，生成侧的防软锁保证的是「每个落点至少一个出口可达」——新
     // 档落点因此永远安全。但修复前创建的旧档重进这些层时，玩家位置是旧布局
@@ -1366,7 +1316,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // 一次性迁移：只把玩家挪到最近的走得通的 x，不跨层、不动其它状态；位置
     // 本就安全时纯 no-op（新档零行为变化）。
     const rescuedX = rescueSealedPlayerX(
-      this.activeObstacleList,
+      this.interaction.activeObstacleList,
       state.player.x,
       floorExitXs(floor),
       homewardExitXs(floor),
@@ -1666,15 +1616,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.playerShadow = [];
     this.speedX = 0;
     this.containerObjs.clear();
-    // AG-66：阻碍物的 Graphics 都在 floorObjects 里（上面已批量销毁），这里只
-    // 清名册与动作态——delayedCall 的 timer 必须摘掉，否则换层后旧动作到点出货。
-    this.obstacleObjs.clear();
-    this.floorObstacles = [];
-    this.activeObstacleList = [];
-    if (this.pendingAction) {
-      this.pendingAction.timer.remove(false);
-      this.pendingAction = undefined;
-    }
+    // AG-66：阻碍物的 Graphics 都在 floorObjects 里（上面已批量销毁），名册与
+    // 动作态的清空本体在 InteractionController.clearFloorState（RC-03 拆分第
+    // 10 步）——delayedCall 的 timer 必须摘掉，否则换层后旧动作到点出货。
+    this.interaction.clearFloorState();
     this.bunkObjs.clear();
     this.furnitureLabels = [];
     this.npcObjs.clear();
@@ -2918,7 +2863,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.events.on(Phaser.Scenes.Events.UPDATE, fadeLabels);
   }
 
-  private setContainerEmptyVisual(id: string, empty: boolean): void {
+  // public：InteractionHost 面之一（RC-03 拆分第 10 步）——容器舔空后的
+  // 视觉切换本体留场景（containerObjs 的世界对象簿记属主在这）。
+  setContainerEmptyVisual(id: string, empty: boolean): void {
     const obj = this.containerObjs.get(id);
     if (!obj) return;
     const c = this.floorView.containers.find((x) => x.id === id);
@@ -4036,12 +3983,84 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   }
 
   private onToggleCrafting(): void {
-    if (this.hud.isOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.shelterOpen || this.nightChoiceOpen) return;
+    if (this.hud.isOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.interaction.shelterOpen || this.interaction.nightChoiceOpen) return;
     if (!this.craftingOpen && getGame().currentFloor !== STARTING_FLOOR) {
       this.flash('只能在宿舍工作台制作');
       return;
     }
     this.toggleCrafting();
+  }
+
+  // ── InteractionHost 面（RC-03 拆分第 10 步） ────────────────────────────
+  // 交互逻辑本体在 controllers/InteractionController（plain TS 类，不 import
+  // Phaser 场景类型），运行期拿场景当 host。下面是交互编排要用而场景已有的
+  // 实现/簿记——与 CombatHost/DialogueHost 同款纪律：控制器不 import 场景
+  // 类型，可测性靠这层结构面（单测用假件实现）。
+  /** e2e 契约 getter：ag50-control-probe/survivalJourney 直读 scene.pendingAction
+   *  （「2s 动作起了没有」的判据）——本体在 InteractionController。 */
+  get pendingAction(): PendingAction | undefined {
+    return this.interaction.pendingAction;
+  }
+  /** e2e 契约 getter：ag66 直读 scene.floorObstacles（本层全集含残骸）。 */
+  get floorObstacles(): FloorObstacle[] {
+    return this.interaction.floorObstacles;
+  }
+  /** e2e 契约 getter：ag66/npc/npc-atoms/spark/survivalLoop/split-step8-freeze
+   *  直读 scene.activeObstacleList（未挖列表——钳位与避让的判据）。 */
+  get activeObstacleList(): FloorObstacle[] {
+    return this.interaction.activeObstacleList;
+  }
+  /** 可交互床铺快照（bunkObjs 的世界对象簿记留场景，判定在控制器）。 */
+  bunks(): Array<{ id: string; x: number; own: boolean }> {
+    return [...this.bunkObjs.entries()].map(([id, bunk]) => ({ id, x: bunk.x, own: bunk.own }));
+  }
+  /** 拆床清场：销毁对象、把 Z 从呼吸队列里摘掉、注销交互热区（原 removeBunk）。 */
+  removeBunk(id: string): void {
+    const bunk = this.bunkObjs.get(id);
+    if (!bunk) return;
+    for (const o of bunk.objects) o.destroy();
+    this.dormSleepers = this.dormSleepers.filter((s) => !bunk.objects.includes(s.z));
+    this.bunkObjs.delete(id);
+  }
+  /** 阻碍物 Graphics 交进 floorObjects（clearFloor 批量销毁）。 */
+  pushFloorObject(o: Phaser.GameObjects.GameObject): void {
+    this.floorObjects.push(o);
+  }
+  /** 作废点击走位订单（2s 动作起落时 walkTarget = null）。 */
+  cancelWalkOrder(): void {
+    this.walkTarget = null;
+  }
+  /** 楼层世界重建（捷径跳层：原 tryShortcut 的 clearFloor+drawFloor 两行）。 */
+  rebuildFloor(): void {
+    this.clearFloor();
+    this.drawFloor();
+  }
+  /** 本层容器活引用（floorView.containers——含 items/label/needs 全字段；
+   *  与 TutorialHost 的 containers()（只给 id/x 的世界快照）同名不同面，
+   *  故此处加 floor 前缀）。 */
+  floorContainers(): GeneratedContainer[] {
+    return this.floorView.containers;
+  }
+  /** 本层地面物品活引用（floorView.groundItems）。 */
+  groundItems(): GroundItem[] {
+    return this.floorView.groundItems;
+  }
+  /** 重读楼层视图（开箱/拾取后）。 */
+  refreshFloorView(): void {
+    this.floorView = getFloorView(getGame(), getGame().currentFloor);
+  }
+  /** 地面物品对象（拾取后销毁；簿记留场景）。 */
+  groundObject(key: string): Phaser.GameObjects.Rectangle | undefined {
+    return this.groundObjs.get(key);
+  }
+  /** 摘掉地面物品对象引用（销毁后）。 */
+  forgetGroundObject(key: string): void {
+    this.groundObjs.delete(key);
+  }
+  /** 墙饰源图尺寸（特写面板的 1:1 适配；textures 管理器不整交出）。 */
+  textureSize(key: string): { width: number; height: number } {
+    const src = this.textures.get(key).getSourceImage() as { width: number; height: number };
+    return { width: src.width, height: src.height };
   }
 
   private activateCraftEntry(): void {
@@ -4289,21 +4308,28 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       if (this.encounterOpen && !getGame().combat && !this.encounter) this.dialogueCtl.shopSell();
     }, this);
     // OVERHAUL Wave C2: F buys the paid shortcut at the up stairwell.
-    this.keyF.on('down', () => this.guard('f', this.tryShortcut), this);
+    // RC-03 拆分第 10 步：玩法本体在 InteractionController.tryShortcut，
+    // 面板互斥 guard 逐字留在这条输入骨架里（stairClimb/各面板开合是场景
+    // 交互状态——与 E 的 onInteract 同门）。
+    this.keyF.on('down', () => this.guard('f', () => {
+      if (this.stairClimb || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.interaction.shelterOpen || this.interaction.nightChoiceOpen || this.dialogueCtl.ventureIsOpen) return;
+      this.interaction.tryShortcut();
+    }), this);
     // AG-11: Q opens the quest panel. The panel scene belongs to AG-12; until it
     // is registered this degrades to a flash instead of a console warning.
     this.keyQ.on('down', () => this.guard('q', this.onToggleQuests), this);
-    this.keyL.on('down', () => this.guard('l', this.toggleDeco), this);
+    // RC-03 拆分第 10 步：L 的墙面档案面板开关本体在 InteractionController。
+    this.keyL.on('down', () => this.guard('l', () => this.interaction.toggleDeco()), this);
     this.keyG.on('down', () => this.guard('g', this.onToggleVentures), this);
     // ← → are polled (isDown) for walking, so they have no keydown handler of
     // their own; the archive wants a discrete press, and movement is already
     // frozen while any panel is up. Guarding on decoOpen keeps them invisible to
     // every other screen.
     this.cursors.left.on('down', () => {
-      if (this.decoOpen) this.pageDeco(-1);
+      if (this.interaction.decoOpen) this.interaction.pageDeco(-1);
     });
     this.cursors.right.on('down', () => {
-      if (this.decoOpen) this.pageDeco(1);
+      if (this.interaction.decoOpen) this.interaction.pageDeco(1);
     });
     this.cursors.up.on('down', () => this.guard('up', this.onNavUp), this);
     this.cursors.down.on('down', () => this.guard('down', this.onNavDown), this);
@@ -4343,8 +4369,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.dialogueCtl.panelObjectsForRecovery(),
       this.encounterObjects,
       this.combat.panelObjectsForRecovery(),
-      this.shelterObjects,
-      this.nightChoiceObjects,
+      // RC-03 拆分第 10 步：夜间安排 + 入夜两组合成 interaction 的一个恢复组
+      // （特写面板件不在内——与原清单逐字一致）。
+      this.interaction.panelObjectsForRecovery(),
     ];
     let found = false;
     for (const group of groups) {
@@ -4379,7 +4406,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
    * player would press Q into silence. Say so instead.
    */
   private onToggleQuests(): void {
-    if (this.stairClimb || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen || this.questsOpen) return;
+    if (this.stairClimb || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.interaction.shelterOpen || this.interaction.nightChoiceOpen || this.dialogueCtl.ventureIsOpen || this.questsOpen) return;
     if (!this.scene.get('QuestPanel')) {
       this.flash('任务面板未就绪');
       return;
@@ -4422,7 +4449,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   }
 
   private onToggleMap(): void {
-    if (this.stairClimb || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen) return;
+    if (this.stairClimb || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.interaction.shelterOpen || this.interaction.nightChoiceOpen || this.dialogueCtl.ventureIsOpen) return;
     this.openTowerOverview();
   }
 
@@ -4433,12 +4460,12 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
    * 都走这一个入口，与 I/C/M 同款。
    */
   private onToggleVentures(): void {
-    if (this.stairClimb || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen) return;
+    if (this.stairClimb || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.interaction.shelterOpen || this.interaction.nightChoiceOpen) return;
     this.dialogueCtl.toggleVentures();
   }
 
   private onToggleInventory(): void {
-    if (this.stairClimb || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen) return;
+    if (this.stairClimb || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.interaction.shelterOpen || this.interaction.nightChoiceOpen || this.dialogueCtl.ventureIsOpen) return;
     this.hud.toggle();
   }
 
@@ -4465,7 +4492,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   // 「有没有面板开着」的场景判据只有这一份。
   anyPanelOpen(): boolean {
     return (
-      this.encounterOpen || this.shelterOpen || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.decoOpen || this.dialogueCtl.ventureIsOpen || this.nightChoiceOpen
+      this.encounterOpen || this.interaction.shelterOpen || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.interaction.decoOpen || this.dialogueCtl.ventureIsOpen || this.interaction.nightChoiceOpen
     );
   }
 
@@ -4492,11 +4519,12 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   }
   /**
    * 站到自己床边没有（起始层 + 交互距离）——教程床步的第三条完成路径
-   * （RC-02 XP-3）。判定纯读 state + 常量且另有非教程调用方（床铺交互），
-   * 实现因此留场景、控制器经这层查询面摄入。
+   * （RC-02 XP-3）。RC-03 拆分第 10 步：判定本体随床铺交互迁入
+   * InteractionController（isNearBed 纯读 state + 常量），场景只留这层
+   * TutorialHost 查询面的转发。
    */
   isNearBed(): boolean {
-    return this.nearBed(getGame());
+    return this.interaction.isNearBed();
   }
   /** contextual 槽的世界链当前文本——教程让位判据（世界在教同一个 E 动作）。 */
   worldHintText(): string {
@@ -4669,10 +4697,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       !this.craftingOpen &&
       !this.dialogueCtl.isOpen &&
       !this.pauseOpen &&
-      !this.shelterOpen &&
-      !this.nightChoiceOpen &&
+      !this.interaction.shelterOpen &&
+      !this.interaction.nightChoiceOpen &&
       !this.dialogueCtl.ventureIsOpen &&
-      !this.decoOpen &&
+      !this.interaction.decoOpen &&
       this.clearStrayPanels()
     ) {
       this.flash('面板已清理');
@@ -4703,16 +4731,18 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.closeEncounter();
       return;
     }
-    if (this.nightChoiceOpen) {
-      this.dismissNightPrompt();
+    // RC-03 拆分第 10 步：三个交互面板的关闭/暂拒委托 InteractionController
+    // （面板件生命周期在控制器里，场景只留 Esc 分发骨架）。
+    if (this.interaction.nightChoiceOpen) {
+      this.interaction.dismissNightPrompt();
       return;
     }
-    if (this.shelterOpen) {
-      this.closeShelter();
+    if (this.interaction.shelterOpen) {
+      this.interaction.closeShelter();
       return;
     }
-    if (this.decoOpen) {
-      this.closeDeco();
+    if (this.interaction.decoOpen) {
+      this.interaction.closeDeco();
       return;
     }
     if (this.hud.isOpen) this.hud.toggle();
@@ -4723,18 +4753,18 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   }
 
   private onNavUp(): void {
-    if (this.decoOpen) {
-      this.pageDeco(-1);
+    // RC-03 拆分第 10 步：特写翻页 / 入夜与夜间安排的光标（钳位 + 重画）委托
+    // InteractionController——开关读数仍是场景的骨架判据。
+    if (this.interaction.decoOpen) {
+      this.interaction.pageDeco(-1);
       return;
     }
-    if (this.nightChoiceOpen) {
-      this.nightChoiceSelected = Math.max(0, this.nightChoiceSelected - 1);
-      this.buildNightChoicePanel();
+    if (this.interaction.nightChoiceOpen) {
+      this.interaction.moveNightChoice(-1);
       return;
     }
-    if (this.shelterOpen && !getGame().shelterPlan?.resolved) {
-      this.shelterSelected = Math.max(0, this.shelterSelected - 1);
-      this.buildShelterPanel();
+    if (this.interaction.shelterOpen && !getGame().shelterPlan?.resolved) {
+      this.interaction.moveShelterSelection(-1);
       return;
     }
     // OVERHAUL Wave C1: the shop's cursor.
@@ -4765,18 +4795,16 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   }
 
   private onNavDown(): void {
-    if (this.decoOpen) {
-      this.pageDeco(1);
+    if (this.interaction.decoOpen) {
+      this.interaction.pageDeco(1);
       return;
     }
-    if (this.nightChoiceOpen) {
-      this.nightChoiceSelected = Math.min(NIGHT_CHOICE_ROWS.length - 1, this.nightChoiceSelected + 1);
-      this.buildNightChoicePanel();
+    if (this.interaction.nightChoiceOpen) {
+      this.interaction.moveNightChoice(1);
       return;
     }
-    if (this.shelterOpen && !getGame().shelterPlan?.resolved) {
-      this.shelterSelected = Math.min(SHELTER_ROWS.length - 1, this.shelterSelected + 1);
-      this.buildShelterPanel();
+    if (this.interaction.shelterOpen && !getGame().shelterPlan?.resolved) {
+      this.interaction.moveShelterSelection(1);
       return;
     }
     // OVERHAUL Wave C1: the shop's cursor.
@@ -4813,12 +4841,14 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   // 同款；guard 的 action.call(this) 不依赖可见性）。
   onUse(): void {
     if (this.stairClimb) return;
-    if (this.nightChoiceOpen) {
-      this.activateNightChoice();
+    // RC-03 拆分第 10 步：入夜二选一与夜间安排的 Enter 确认委托
+    // InteractionController（面板件与行动编排在控制器里）。
+    if (this.interaction.nightChoiceOpen) {
+      this.interaction.activateNightChoice();
       return;
     }
-    if (this.shelterOpen) {
-      this.activateShelterChoice();
+    if (this.interaction.shelterOpen) {
+      this.interaction.activateShelterChoice();
       return;
     }
     // OVERHAUL Wave A: the fight's turn key. Once the outcome screen is up,
@@ -4889,60 +4919,20 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     if (this.pauseOpen && !this.statsPanel.isOpen) this.activatePause();
   }
 
-  /**
-   * AG-20：终局层容器 → 演出入口（docs/plans/FINALE_UX.md §2 契约）。
-   * 三重门：终局层 + 容器已开过（openedContainers，二段式的第二段）+ id 有
-   * 映射。任何一关不过返回 null——调用方回落到既有搜刮。交互（onInteract）
-   * 与提示（hint）共用这一个判官，两边不会漂移。
-   */
-  private finaleEntryFor(containerId: string): 'terminal' | 'archive' | 'fuse' | null {
-    const state = getGame();
-    if (state.currentFloor !== FINALE_FLOOR) return null;
-    if (!(state.visitedFloors[state.currentFloor]?.openedContainers.includes(containerId) ?? false)) return null;
-    return containerId === 'counter' ? 'terminal'
-      : containerId === 'security_safe' ? 'archive'
-      : containerId === 'fuse_box' ? 'fuse'
-      : null;
-  }
-
-  /**
-   * AG-20：终局层视线内最近的容器——**不滤空**。
-   *
-   * 为什么不能直接用 nearestContainer：它跳过 items 为空的容器（既有语义，
-   * 空箱不给提示），而二段式的第二段交互的恰恰是空容器——终端台的
-   * guaranteed 水食第一次 E 就舔光了，剩下 45% 的电池 Roll 失败时它就是空的；
-   * 档案柜/配电箱本身就有约三成概率两件 Roll 全空。不滤空，空箱子才「开过」
-   * 得了、才进得了演出。三容器相距 240px，半径 44 内至多一个，不存在歧义。
-   */
-  private nearestFinaleContainer(): GeneratedContainer | null {
-    const state = getGame();
-    if (state.currentFloor !== FINALE_FLOOR) return null;
-    const px = state.player.x;
-    let best: GeneratedContainer | null = null;
-    let bestDist = INTERACT_DISTANCE;
-    for (const c of this.floorView.containers) {
-      const d = Math.abs(c.x - px);
-      if (d <= bestDist) {
-        bestDist = d;
-        best = c;
-      }
-    }
-    return best;
-  }
-
   private onInteract(): void {
     if (this.stairClimb) return;
     // AG-64：夜间二选一面板开着时，面板自己吃 E（同 shelterOpen 模式）。
-    if (this.nightChoiceOpen) {
+    if (this.interaction.nightChoiceOpen) {
       this.onUse();
       return;
     }
     // AG-66：搜刮/挖掘进行中再按 E = 收手（与移动取消同一个出口）。
-    if (this.pendingAction) {
-      this.cancelPendingAction();
+    // RC-03 拆分第 10 步：动作态本体在 InteractionController。
+    if (this.interaction.pendingAction) {
+      this.interaction.cancelPendingAction();
       return;
     }
-    if (this.shelterOpen) {
+    if (this.interaction.shelterOpen) {
       this.onUse();
       return;
     }
@@ -4968,9 +4958,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // 之前：阻碍物是 physical blocker，玩家被钳在它身上时该先挖开路，而不是跟
     // 站在瓦砾旁的邻居聊天（小周的巡查路线正好会压到 222 那类阻碍位）。与容器/
     // 床/梯口不可能同距触发（放置时 keepClear 避让过），不存在歧义。
-    const obstacle = this.nearestObstacle();
+    // RC-03 拆分第 10 步：判定与挖掘编排委托 InteractionController。
+    const obstacle = this.interaction.nearestObstacle();
     if (obstacle) {
-      this.tryClearObstacle(obstacle);
+      this.interaction.tryClearObstacle(obstacle);
       return;
     }
     const npc = this.nearestNpc(state);
@@ -4981,9 +4972,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // AG-51：床铺（自己的床白天翻、夜里睡；室友床搜刮/拆解）与工作台
     // （点它 = 开制作面板）。放在 NPC 之后、容器之前：床和台是家具，不该
     // 被手边半空的柜子抢班。
-    const bunk = this.nearestInteractiveBunk();
+    // RC-03 拆分第 10 步：床铺交互编排委托 InteractionController。
+    const bunk = this.interaction.nearestInteractiveBunk();
     if (bunk) {
-      this.interactWithBunk(state, bunk);
+      this.interaction.interactWithBunk(state, bunk);
       return;
     }
     if (this.nearCraftStation(state)) {
@@ -4995,8 +4987,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.toggleCrafting();
       return;
     }
-    if (this.nearBed(state)) {
-      this.attemptSleep();
+    // RC-03 拆分第 10 步：自己的床（夜里睡/白天翻）委托 InteractionController。
+    if (this.interaction.isNearBed()) {
+      this.interaction.attemptSleep();
       return;
     }
     // AG-20：100000 层（统治核心）的三个容器是终局演出入口
@@ -5015,15 +5008,18 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.takeLift();
       return;
     }
-    const finaleContainer = this.nearestFinaleContainer();
-    const container = finaleContainer ?? this.nearestContainer();
+    // RC-03 拆分第 10 步：终局层与普通层的容器邻近判定/开箱编排委托
+    // InteractionController（finaleEntryFor/nearestFinaleContainer/
+    // nearestContainer/openContainer 随之迁出）。
+    const finaleContainer = this.interaction.nearestFinaleContainer();
+    const container = finaleContainer ?? this.interaction.nearestContainer();
     if (container) {
-      const from = this.finaleEntryFor(container.id);
+      const from = this.interaction.finaleEntryFor(container.id);
       if (from) {
         this.scene.start('Endgame', { from });
         return;
       }
-      this.openContainer(container.id);
+      this.interaction.openContainer(container.id);
       return;
     }
     // M1-4: a stairwell MOUTH is a question even where no stair stands behind
@@ -5048,46 +5044,11 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   // to commit on top of the jump, so one keypress moved the player three
   // floors. A climb or a panel means the world is mid-something; the key
   // waits, exactly as E does.
-  private tryShortcut(): void {
-    const state = getGame();
-    if (state.status !== 'playing') return;
-    if (this.stairClimb || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen) return;
-    const top = Math.max(...PLAYABLE_FLOORS_V01);
-    if (!shortcutAvailable(state.currentFloor, top)) {
-      this.flash('这里没有可抄的近路');
-      return;
-    }
-    const zone = currentInteractionZone(state);
-    if (zone !== 'up') {
-      this.flash('要走上楼口才能抄近路');
-      return;
-    }
-    const salt = (state.runSeed ^ (state.day * 7919) ^ (state.currentFloor * 104729)) >>> 0;
-    // M1-3: one plan, one price — the prompt, the charge and the jump all read
-    // shortcutPlan, so the number advertised can never drift from the number
-    // taken (the skip is segment-clamped inside the plan, once).
-    const plan = shortcutPlan(state, state.currentFloor, salt);
-    if (!charge(state, plan.price)) {
-      this.flash(`抄近路要 ${plan.price} 金，你只有 ${state.player.gold}`);
-      return;
-    }
-    recordShortcut(state);
-    // Apply the jump through the same path a stair uses, then walk the rest.
-    while (state.currentFloor < plan.target) {
-      const r = tryChangeFloor(state, 1);
-      if (!r.ok) break;
-    }
-    recordDepth(state);
-    this.clearFloor();
-    this.drawFloor();
-    saveToStorage(state);
-    this.cameras.main.flash(180, 0, 0, 0);
-    this.flash(`你抄近路跳到了第 ${state.currentFloor} 层（-${plan.price} 金）`);
-    playSfx('goal');
-  }
+  //
+  // RC-03 拆分第 10 步：玩法本体迁入 InteractionController.tryShortcut（同文件
+  // 头 import 处的边界说明）；面板互斥 guard 留在 bindInput 的 keyF 闭包。
 
-  // A panel with a frame but no readable content is the worst failure mode the
-  // UI can produce: it looks like the game broke. This runs in dev only and
+  // A panel with a frame but no readable content is the worst failure mode the  // UI can produce: it looks like the game broke. This runs in dev only and
   // names the panel in the console the moment it opens empty, so a report of
   // "a big empty box appeared" becomes a one-line diagnosis instead of a hunt.
   // public：StatsPanelHost 面之一——统计面板控制器 build() 后当场自查
@@ -5126,8 +5087,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
     if (this.encounterOpen && this.encounter) return '↑/↓ 选择 · Enter 确认 · ESC 离开';
     if (this.encounterOpen) return '↑/↓ 选择 · Enter 买入 · S 卖出 · ESC 离开';
-    if (this.nightChoiceOpen) return '↑/↓ 选择 · Enter 确认 · ESC 今晚再想想';
-    if (this.shelterOpen) return getGame().shelterPlan?.resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回';
+    if (this.interaction.nightChoiceOpen) return '↑/↓ 选择 · Enter 确认 · ESC 今晚再想想';
+    if (this.interaction.shelterOpen) return getGame().shelterPlan?.resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回';
     if (this.hud.isOpen) return '↑/↓ 选择 · Enter 使用 · I 关闭';
     if (this.craftingOpen) return '↑/↓ 选择 · Enter 制作 · 拖拽平移 · 滚轮缩放 · C 关闭';
     if (this.dialogueCtl.ventureIsOpen) return '↑/↓ 选择 · Enter 入股 · G 关闭';
@@ -5136,133 +5097,6 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     if (this.statsPanel.isOpen) return 'ESC 返回暂停菜单';
     if (this.pauseOpen) return '↑/↓ 选择 · Enter 确认 · ESC 继续';
     return null;
-  }
-
-  private nearBed(state: GameState): boolean {
-    return state.currentFloor === STARTING_FLOOR && Math.abs(state.player.x - BED_X) <= INTERACT_DISTANCE;
-  }
-
-  private attemptSleep(): void {
-    const state = getGame();
-    if (!isNight(state.gameMinuteOfDay)) {
-      this.flash('还太早，20:00 后才能安排夜间行动');
-      return;
-    }
-    this.openShelter();
-  }
-
-  // ── AG-51：床铺交互（搜刮 / 拆解） ─────────────────────────────────────
-  // 1 层宿舍的床不是容器（楼层视图里没有它们的一行），所以入口与搜柜分开：
-  // 点击或 E 走到床边触发。概率与产出全在 LootSystem 的纯函数里
-  // （seeded RNG：同 seed 同结果，禁 Math.random），场景只出动画、flash
-  // 与拆床后的清场。
-
-  /** 手边最近的一张可交互床（自己的床 + 室友床；拆过的不再算）。 */
-  private nearestInteractiveBunk(): { id: string; x: number; own: boolean } | null {
-    const state = getGame();
-    let best: { id: string; x: number; own: boolean } | null = null;
-    let bestDist = INTERACT_DISTANCE;
-    for (const [id, bunk] of this.bunkObjs) {
-      if (isBunkDismantled(state, state.currentFloor, id)) continue;
-      const d = Math.abs(bunk.x - state.player.x);
-      if (d <= bestDist) {
-        bestDist = d;
-        best = { id, x: bunk.x, own: bunk.own };
-      }
-    }
-    return best;
-  }
-
-  private interactWithBunk(state: GameState, bunk: { id: string; x: number; own: boolean }): void {
-    if (bunk.own) {
-      // 自己的床：夜里睡觉优先——睡眠是生存主干（survivalBalance 钉着夜间
-      // 代谢与回血），搜刮不抢班；白天才翻床垫底下。
-      if (isNight(state.gameMinuteOfDay)) {
-        this.attemptSleep();
-        return;
-      }
-      this.runBunkSearch(bunk);
-      return;
-    }
-    if (isBunkSearched(state, state.currentFloor, bunk.id)) {
-      // 今天翻过了：包里得有一件能拆床的工具（撬棍/消防斧）才递得上拆解，
-      // 否则老实说明天再来——拆解是「翻过之后」的进阶动作，不是误触陷阱。
-      if (bunkDismantleTool(state.player.inventory)) {
-        this.runBunkDismantle(state, bunk);
-        return;
-      }
-      this.flash('这张床今天已经翻过了，明天再来');
-      return;
-    }
-    this.runBunkSearch(bunk);
-  }
-
-  private runBunkSearch(bunk: { id: string; x: number }): void {
-    // AG-66：与容器同一条 2s 动作——先播 search 动画（翻箱倒柜的那个姿势），
-    // 到点才翻床垫（finishBunkSearch）。「今天翻过了」的闸门仍在
-    // interactWithBunk 入口原样 instant 拦着，不会为一张翻过的床弯腰。
-    this.beginPendingAction({
-      kind: 'bunk',
-      bunkId: bunk.id,
-      atX: bunk.x,
-      busyHint: '翻找床垫中……',
-      cancelHint: '你直起身来，没翻完',
-    });
-  }
-
-  /** AG-66：2s 到点——床铺搜刮的结果落地（原 runBunkSearch 的出货段原样搬来）。 */
-  private finishBunkSearch(bunkId: string, bunkX: number): void {
-    const state = getGame();
-    const result = searchBunk(state, state.currentFloor, bunkId);
-    if (result.already) {
-      this.flash('今天已经翻过这张床了');
-      return;
-    }
-    bumpStat(state, 'bedsSearched'); // AG-81：搜床计数（翻过的不重复计）
-    saveToStorage(state);
-    this.refreshInventory();
-    if (result.took.length > 0) {
-      playFx(this, 'collect-burst', bunkX, PLAYER_FEET_Y - 50, LIGHT_DEPTH);
-      this.lootThisTrip += result.took.reduce((n, t) => n + t.quantity, 0);
-      // AG-77：单次搜刮 3 件+（翻床垫与开箱同一口径）。
-      this.achievements.emit({ type: 'loot_taken', count: result.took.reduce((n, t) => n + t.quantity, 0) });
-      this.flash(`翻到 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${BUNK_SEARCH_COST} 分钟）`);
-    } else if (result.full) {
-      this.flash('背包已满：翻出来的东西放不下，先腾包');
-    } else {
-      this.flash('床垫下面只有灰和一根断头发');
-    }
-    this.chargeTime(BUNK_SEARCH_COST);
-  }
-
-  private runBunkDismantle(state: GameState, bunk: { id: string; x: number }): void {
-    const result = dismantleBunk(state, state.currentFloor, bunk.id);
-    if (!result.ok) {
-      this.flash(result.reason ?? '拆不了这张床');
-      return;
-    }
-    bumpStat(state, 'bedsDismantled'); // AG-81：拆床计数
-    saveToStorage(state);
-    this.refreshInventory();
-    this.removeBunk(bunk.id);
-    // 拆比翻重：search clip 拉长到 520ms，板件应声落地。床就此消失，
-    // 重进楼层也不会回来（bunkgone: 键住在存档里）。
-    this.playActionAnim(searchAnimKey('player'), 520);
-    playFx(this, 'collect-burst', bunk.x, PLAYER_FEET_Y - 40, LIGHT_DEPTH);
-    this.lootThisTrip += result.took.reduce((n, t) => n + t.quantity, 0);
-    this.flash(`拆了床，得到 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${BUNK_DISMANTLE_COST} 分钟）`);
-    // AG-77：累计拆床 10 张。
-    this.achievements.emit({ type: 'bunk_dismantled' });
-    this.chargeTime(BUNK_DISMANTLE_COST);
-  }
-
-  /** 床没了：销毁对象、把 Z 从呼吸队列里摘掉、注销交互热区。 */
-  private removeBunk(id: string): void {
-    const bunk = this.bunkObjs.get(id);
-    if (!bunk) return;
-    for (const o of bunk.objects) o.destroy();
-    this.dormSleepers = this.dormSleepers.filter((s) => !bunk.objects.includes(s.z));
-    this.bunkObjs.delete(id);
   }
 
   /**
@@ -5277,796 +5111,47 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.furnitureLabels.push({ x, label });
   }
 
-  /** 底栏世界提示：床边说什么（null = 不在床边，交给后面的判官）。 */
-  private bunkHint(state: GameState): string | null {
-    const bunk = this.nearestInteractiveBunk();
-    if (!bunk) return null;
-    if (bunk.own) {
-      if (isNight(state.gameMinuteOfDay)) return '按 E 安排夜间行动';
-      return isBunkSearched(state, state.currentFloor, bunk.id) ? '自己的床今天翻过了' : '按 E 翻翻自己的床';
-    }
-    if (!isBunkSearched(state, state.currentFloor, bunk.id)) return '按 E 搜刮床铺';
-    return bunkDismantleTool(state.player.inventory) ? '按 E 拆解床铺' : '这张床今天翻过了';
-  }
-
-  private openShelter(): void {
+  /**
+   * AG-51/AG-20：睡觉跨日编排（RC-03 拆分第 10 步——activateShelterChoice 的
+   * resolved 分支原样留场景）。InteractionController.activateShelterChoice 经
+   * host.sleepNight() 委托到这里：产业账本对比（DialogueController 第 8 步
+   * 「睡觉跨日留场景」同款边界）、夜袭判定、淡入淡出与醒来 flash、死亡切场
+   * 全是场景属主的时钟/相机编排；未决分支（resolveShelterAction）在控制器里。
+   */
+  sleepNight(): void {
     const state = getGame();
-    if (!state.shelterPlan?.resolved && availableShelterActions(state).length === 0) {
-      this.flash('今晚没有可安排的 shelter 行动');
-      return;
-    }
-    const existing = state.shelterPlan?.action;
-    this.shelterSelected = existing ? Math.max(0, SHELTER_ROWS.findIndex((row) => row.action === existing)) : 0;
-    this.shelterOpen = true;
-    this.buildShelterPanel();
-  }
-
-  private closeShelter(): void {
-    this.shelterOpen = false;
-    for (const object of this.shelterObjects) {
-      if (object !== this.shelterMarker) object.destroy();
-    }
-    this.shelterObjects = [];
-    this.shelterMarker.setVisible(false);
-  }
-
-  private buildShelterPanel(): void {
-    for (const object of this.shelterObjects) {
-      if (object !== this.shelterMarker) object.destroy();
-    }
-    this.shelterObjects = [];
-    const state = getGame();
-    const { width, height } = this.viewSize();
-    const panelW = 500;
-    const panelH = 300;
-    const cx = width / 2;
-    const cy = height / 2;
-    const left = cx - panelW / 2;
-    const top = cy - panelH / 2;
-    // Remembered for the mouse: a click outside this rectangle closes the panel.
-    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
-    const depth = PANEL_DEPTH.game.dialogue;
-    const resolved = state.shelterPlan?.resolved === true;
-
-    this.shelterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
-    this.shelterObjects.push(...buildPanelHeader(this, left, top, panelW, '夜间安排 · 宿舍', UI.good, depth + 5));
-    this.shelterObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 44, depth + 5));
-    const stress = Math.round(state.player.stress ?? 20);
-    // RC-01：宿舍面板的「上次：…」读结构化日记（唯一的一套日记）。生产
-    // 写入方是 ShelterSystem 的四个行动与夜袭，文案即当年旧格式的 message。
-    const latest = diaryOf(state, 1)[0];
-    this.shelterObjects.push(
-      this.add.text(left + 24, top + 40, `压力 ${stress}/100${latest ? ` · 上次：${latest.text}` : ' · 今天还没有记录'}`, {
-        fontFamily: FONT_FAMILY,
-        fontSize: `${TYPE.caption}px`,
-        color: hex(stress >= 70 ? TEXT.warn : TEXT.primary),
-        wordWrap: { width: panelW - 48 },
-      }).setOrigin(0, 0.5).setDepth(depth + 6),
-    );
-    const rowsTop = top + 80;
-    for (const [index, row] of SHELTER_ROWS.entries()) {
-      const objects = buildListRow(this, left + 16, rowsTop + index * 26, panelW - 32, depth + 6, {
-        label: row.label,
-        value: row.value,
-        selected: index === this.shelterSelected,
-        dim: resolved && state.shelterPlan?.action !== row.action,
-      });
-      this.shelterObjects.push(...objects);
-      this.shelterObjects.push(
-        this.panelHit( left + 16, rowsTop + index * 26, panelW - 32, 26, depth + 8, {
-          // No buildShelterPanel() here: it re-derives shelterSelected from the
-          // (still unresolved) plan and snaps the cursor back to row 0, so every
-          // click used to schedule 休息 no matter which row was pressed.
-          // activateShelterChoice() rebuilds after it resolves.
-          onClick: () =>
-            this.time.delayedCall(0, () => {
-              this.shelterSelected = index;
-              this.onUse();
-            }),
-        }),
-      );
-      const label = objects.find((object) => object instanceof Phaser.GameObjects.Text && object.text === row.label) as Phaser.GameObjects.Text | undefined;
-      if (index === this.shelterSelected && label) {
-        placeMarker(this.shelterMarker, label);
-        this.shelterMarker.setDepth(depth + 8).setVisible(true).setScrollFactor(0);
-      }
-    }
-    this.shelterObjects.push(
-      this.add.text(cx, top + panelH - 14, resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回', {
-        fontFamily: FONT_FAMILY,
-        fontSize: `${TYPE.caption}px`,
-        color: hex(PALETTE.clothHigh),
-      }).setOrigin(0.5).setDepth(depth + 6),
-    );
-    this.shelterObjects.push(this.shelterMarker);
-    // The one panel that never pinned its contents. It is rebuilt on every open,
-    // so nothing else set their scrollFactor: on floor 2 (scrollY=-200) the skin
-    // stayed locked to the screen while every label kept scrolling with the
-    // world — the frame sat at y=210 and its words 200px above it, on the floor
-    // overhead. Same failure as the encounter panel, fixed the same way.
-    applyPanelDepth(this.shelterObjects, PANEL_DEPTH.game.dialogue);
-    lockToScreen(this.shelterObjects);
-    this.assertPanelContent('shelter', this.shelterObjects);
-  }
-
-  // ── wall-fixture close-up (key L) ───────────────────────────────────────
-  // The eight fixtures from the 2026-11-14 wall sheet. They cannot be wall
-  // dressing — 255-335px against a 16-26px band — and at that ratio a riveted
-  // notice board becomes four grey pixels. Native size is the only size at which
-  // the rivets, the pitting and the chalk strokes survive, so they are shown 1:1
-  // in a panel the player pages through.
-  //
-  // Rebuilt per open rather than toggled, the same way the shelter panel works:
-  // the fixture changes size with every page, so there is nothing worth keeping.
-  private buildDecoPanel(): void {
-    for (const o of this.decoObjects) o.destroy();
-    this.decoObjects = [];
-    const { width, height } = this.viewSize();
-    const panelW = 760;
-    const panelH = 470;
-    const cx = width / 2;
-    const cy = height / 2;
-    const left = cx - panelW / 2;
-    const top = cy - panelH / 2;
-    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
-    const depth = PANEL_DEPTH.game.dialogue;
-    const deco = WALL_DECO[this.decoIndex];
-
-    this.decoObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
-    this.decoObjects.push(...buildPanelHeader(this, left, top, panelW, '墙面档案', UI.good, depth + 5));
-
-    // The fixture sits in its own inset well, centred, never upscaled.
-    const wellX = left + 24;
-    const wellY = top + 58;
-    const wellW = 320;
-    const wellH = 352;
-    this.decoObjects.push(...buildPanelWell(this, wellX, wellY, wellW, wellH, depth + 5));
-    const img = this.add.image(wellX + wellW / 2, wellY + wellH / 2, deco.key).setDepth(depth + 6);
-    const src = this.textures.get(deco.key).getSourceImage() as { width: number; height: number };
-    const fit = Math.min((wellW - 28) / src.width, (wellH - 28) / src.height, 1);
-    img.setDisplaySize(Math.round(src.width * fit), Math.round(src.height * fit));
-    this.decoObjects.push(img);
-
-    const textX = wellX + wellW + 26;
-    const textW = left + panelW - 24 - textX;
-    const name = this.add
-      .text(textX, top + 64, deco.name, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
-      .setDepth(depth + 6);
-    const where = this.add
-      .text(textX, top + 100, deco.floors, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
-      .setDepth(depth + 6);
-    // useAdvancedWrap is load-bearing for the fifth time in this codebase: the
-    // copy is Chinese with no spaces, and the basic wrapper would ignore textW.
-    const body = this.add
-      .text(textX, top + 132, deco.text, {
-        fontFamily: FONT_FAMILY,
-        fontSize: `${TYPE.body}px`,
-        color: hex(TEXT.secondary),
-        lineSpacing: 8,
-        wordWrap: { width: textW, useAdvancedWrap: true },
-      })
-      .setDepth(depth + 6);
-    const page = this.add
-      .text(left + panelW - 24, top + panelH - 44, `${this.decoIndex + 1} / ${WALL_DECO.length}`, {
-        fontFamily: FONT_FAMILY,
-        fontSize: `${TYPE.caption}px`,
-        color: hex(TEXT.dim),
-      })
-      .setOrigin(1, 0)
-      .setDepth(depth + 6);
-    const hint = this.add
-      .text(left + 24, top + panelH - 44, '← → 翻页 · L / ESC 关闭', {
-        fontFamily: FONT_FAMILY,
-        fontSize: `${TYPE.caption}px`,
-        color: hex(PALETTE.clothHigh),
-      })
-      .setDepth(depth + 6);
-    // Two click targets for the pager, under the copy column so they never cover
-    // the fixture itself.
-    const navY = top + panelH - 52;
-    this.decoObjects.push(
-      this.panelHit(textX, navY, 96, 28, depth + 8, { onClick: () => this.pageDeco(-1) }),
-      this.panelHit(textX + 104, navY, 96, 28, depth + 8, { onClick: () => this.pageDeco(1) }),
-    );
-    const prev = this.add
-      .text(textX + 48, navY + 14, '◀ 上一件', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
-      .setOrigin(0.5)
-      .setDepth(depth + 9);
-    const next = this.add
-      .text(textX + 152, navY + 14, '下一件 ▶', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
-      .setOrigin(0.5)
-      .setDepth(depth + 9);
-    this.decoObjects.push(name, where, body, page, hint, prev, next);
-
-    // Same two calls every other panel makes. Missing them is what put the
-    // shelter panel's words on the floor above.
-    applyPanelDepth(this.decoObjects, depth);
-    lockToScreen(this.decoObjects);
-    this.assertPanelContent('deco', this.decoObjects);
-  }
-
-  private toggleDeco(): void {
-    if (this.decoOpen) {
-      this.closeDeco();
-      return;
-    }
-    if (this.anyPanelOpen()) return;
-    this.decoOpen = true;
-    this.decoIndex = 0;
-    this.buildDecoPanel();
-  }
-
-  private closeDeco(): void {
-    this.decoOpen = false;
-    for (const o of this.decoObjects) o.setVisible(false);
-  }
-
-  private pageDeco(delta: number): void {
-    this.decoIndex = (this.decoIndex + delta + WALL_DECO.length) % WALL_DECO.length;
-    this.buildDecoPanel();
-  }
-
-  private activateShelterChoice(): void {
-    const state = getGame();
-    if (state.shelterPlan?.resolved) {
-      // AG-20: 睡醒即跨日，产业结算在 finishNight→sleep 内部发生。前后对比
-      // 账本，「昨夜的收益」才能在醒来时就被看见（只观察，不重复结算）。
-      const ledger = state.growth?.ventures?.length ? this.dialogueCtl.ventureLedgerSnapshot() : null;
-      // AG-64：躺进被窝前把悬挂的造访判定结清——人都睡在屋里了，小偷无从
-      // 下手；睡醒台词里带上昨夜的一句（settlePendingVisitOnSleep 幂等）。
-      const nightPreventedBySleep = settlePendingVisitOnSleep(state);
-      const result = finishNight(state);
-      if (ledger) this.dialogueCtl.diffVentureLedger(ledger);
-      if (!result.ok) {
-        this.flash(result.reason ?? '今晚还不能睡');
-        return;
-      }
-      this.closeShelter();
-      saveToStorage(state);
-      bumpStat(state, 'nightsSurvived'); // AG-81：活过今晚（睡觉跨到新的一天）
-      playSfx('sleep');
-      const cam = this.cameras.main;
-      cam.fadeOut(520, 5, 8, 11);
-      this.time.delayedCall(560, () => {
-        if (!this.scene.isActive()) return;
-        cam.fadeIn(620, 5, 8, 11);
-        this.refreshClock();
-        this.refreshStats();
-        this.applyNightLighting();
-        const attackNote = result.attacked ? ` · 夜袭 -${result.attackDamage} HP` : '';
-        const nightNote = nightWatchWakeNote(state) ?? (nightPreventedBySleep ? ' · 楼道里有脚步声，但你在屋里，没敢进来' : '');
-        this.flash(`睡到第 ${result.nextDay} 天 06:00 · 压力 ${Math.round(state.player.stress ?? 20)}${attackNote}${nightNote}`);
-      });
-      if (state.status === 'lost') {
-        bumpStat(state, 'deaths'); // AG-81：夜袭/睡梦中死亡（finishNight 内部置的 lost）
-        this.scene.start('End');
-      }
-      return;
-    }
-
-    const row = SHELTER_ROWS[this.shelterSelected];
-    if (!row) return;
-    const result = resolveShelterAction(state, row.action);
+    // AG-20: 睡醒即跨日，产业结算在 finishNight→sleep 内部发生。前后对比
+    // 账本，「昨日的收益」才能在醒来时就被看见（只观察，不重复结算）。
+    const ledger = state.growth?.ventures?.length ? this.dialogueCtl.ventureLedgerSnapshot() : null;
+    // AG-64：躺进被窝前把悬挂的造访判定结清——人都睡在屋里了，小偷无从
+    // 下手；睡醒台词里带上昨夜的一句（settlePendingVisitOnSleep 幂等）。
+    const nightPreventedBySleep = settlePendingVisitOnSleep(state);
+    const result = finishNight(state);
+    if (ledger) this.dialogueCtl.diffVentureLedger(ledger);
     if (!result.ok) {
-      this.flash(result.reason ?? result.message);
+      this.flash(result.reason ?? '今晚还不能睡');
       return;
     }
+    this.interaction.closeShelter();
     saveToStorage(state);
-    playSfx('click');
-    this.buildShelterPanel();
-    this.flash(`${result.message} 按 Enter 睡觉`);
-  }
-
-  // ── AG-64：入夜二选一（出去找物资 / 在家守夜）──────────────────────────
-  // 用户 2026-11-17 原话：「晚上的话应该会提示我们是出去找物资还是在家里守夜，
-  // 防止别的 npc 抢我们的东西」。面板语言延用既有面板：buildPanel 铆钉板 +
-  // buildPanelHeader + 选项卡高亮（accent wash + 左竖线，同 buildListRow）+
-  // placeMarker 箭头 + panelHit 鼠标行。判定全在 NightSystem 的纯函数里，
-  // 这里只出面板与反馈。
-  //
-  // 弹窗时机在 update() 的入夜边沿里（只在外层、只一次/夜）；交互走
-  // onUse/onNavUp/onNavDown/onEsc/onInteract 的 nightChoiceOpen 分支。
-
-  private openNightPrompt(): void {
-    this.nightChoiceSelected = 0;
-    this.nightChoiceOpen = true;
-    this.buildNightChoicePanel();
-  }
-
-  private closeNightChoice(): void {
-    this.nightChoiceOpen = false;
-    for (const object of this.nightChoiceObjects) {
-      if (object !== this.nightChoiceMarker) object.destroy();
-    }
-    this.nightChoiceObjects = [];
-    this.nightChoiceMarker.setVisible(false);
-  }
-
-  private buildNightChoicePanel(): void {
-    for (const object of this.nightChoiceObjects) {
-      if (object !== this.nightChoiceMarker) object.destroy();
-    }
-    this.nightChoiceObjects = [];
-    const { width, height } = this.viewSize();
-    const panelW = 460;
-    const panelH = 252;
-    const cx = width / 2;
-    const cy = height / 2;
-    const left = cx - panelW / 2;
-    const top = cy - panelH / 2;
-    // Remembered for the mouse: a click outside this rectangle closes the panel.
-    this.panelBox = { x: left, y: top, w: panelW, h: panelH };
-    const depth = PANEL_DEPTH.game.dialogue;
-
-    this.nightChoiceObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
-    this.nightChoiceObjects.push(...buildPanelHeader(this, left, top, panelW, '入夜 · 宿舍外', UI.good, depth + 5));
-    this.nightChoiceObjects.push(...buildPanelWell(this, left + 12, top + 36, panelW - 24, 30, depth + 5));
-    this.nightChoiceObjects.push(
-      this.add
-        .text(left + 24, top + 51, '天黑了，楼里不会只有你一个人。', {
-          fontFamily: FONT_FAMILY,
-          fontSize: `${TYPE.caption}px`,
-          color: hex(PALETTE.clothHigh),
-        })
-        .setOrigin(0, 0.5)
-        .setScrollFactor(0)
-        .setDepth(depth + 6),
-    );
-    NIGHT_CHOICE_ROWS.forEach((row, index) => {
-      const y = top + 78 + index * 78;
-      const selected = index === this.nightChoiceSelected;
-      if (selected) {
-        // 选中高亮与 buildListRow 同一语言：accent 淡 wash + 左侧 2px 竖线。
-        this.nightChoiceObjects.push(this.add.rectangle(left + 16, y, panelW - 32, 66, UI.accent).setOrigin(0, 0).setScrollFactor(0).setAlpha(0.13).setDepth(depth + 6));
-        this.nightChoiceObjects.push(this.add.rectangle(left + 16, y, 2, 66, UI.accent).setOrigin(0, 0).setScrollFactor(0).setDepth(depth + 7));
-      }
-      this.nightChoiceObjects.push(this.add.image(left + 46, y + 33, row.iconKey).setOrigin(0.5).setScrollFactor(0).setDepth(depth + 7));
-      const title = this.add
-        .text(left + 72, y + 24, row.label, {
-          fontFamily: FONT_FAMILY,
-          fontSize: `${TYPE.body}px`,
-          color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary),
-        })
-        .setOrigin(0, 0.5)
-        .setScrollFactor(0)
-        .setDepth(depth + 7);
-      const consequence = this.add
-        .text(left + 72, y + 48, row.consequence, {
-          fontFamily: FONT_FAMILY,
-          fontSize: `${TYPE.caption}px`,
-          color: '#6b6862',
-          wordWrap: { width: panelW - 110 },
-        })
-        .setOrigin(0, 0.5)
-        .setScrollFactor(0)
-        .setDepth(depth + 7);
-      this.nightChoiceObjects.push(title, consequence);
-      if (selected) {
-        placeMarker(this.nightChoiceMarker, title);
-        this.nightChoiceMarker.setDepth(depth + 8).setVisible(true).setScrollFactor(0);
-      }
-      this.nightChoiceObjects.push(
-        this.panelHit(left + 16, y, panelW - 32, 66, depth + 8, {
-          onOver: () => {
-            if (this.nightChoiceSelected === index) return;
-            this.nightChoiceSelected = index;
-            this.buildNightChoicePanel();
-          },
-          onClick: () =>
-            this.time.delayedCall(0, () => {
-              if (this.nightChoiceSelected !== index) {
-                this.nightChoiceSelected = index;
-                this.buildNightChoicePanel();
-                playSfx('click');
-                return;
-              }
-              this.activateNightChoice();
-            }),
-        }),
-      );
+    bumpStat(state, 'nightsSurvived'); // AG-81：活过今晚（睡觉跨到新的一天）
+    playSfx('sleep');
+    const cam = this.cameras.main;
+    cam.fadeOut(520, 5, 8, 11);
+    this.time.delayedCall(560, () => {
+      if (!this.scene.isActive()) return;
+      cam.fadeIn(620, 5, 8, 11);
+      this.refreshClock();
+      this.refreshStats();
+      this.applyNightLighting();
+      const attackNote = result.attacked ? ` · 夜袭 -${result.attackDamage} HP` : '';
+      const nightNote = nightWatchWakeNote(state) ?? (nightPreventedBySleep ? ' · 楼道里有脚步声，但你在屋里，没敢进来' : '');
+      this.flash(`睡到第 ${result.nextDay} 天 06:00 · 压力 ${Math.round(state.player.stress ?? 20)}${attackNote}${nightNote}`);
     });
-    this.nightChoiceObjects.push(
-      this.add
-        .text(cx, top + panelH - 14, '↑/↓ 选择 · Enter 确认 · ESC 今晚再想想', {
-          fontFamily: FONT_FAMILY,
-          fontSize: `${TYPE.caption}px`,
-          color: hex(PALETTE.clothHigh),
-        })
-        .setOrigin(0.5)
-        .setScrollFactor(0)
-        .setDepth(depth + 6),
-    );
-    this.nightChoiceObjects.push(this.nightChoiceMarker);
-    // 与 shelter 面板同一收尾：统一 depth + 锁屏。所有对象创建时即
-    // scrollFactor(0)（buildListRow 的同款做法），placeMarker 因此量到的是
-    // 屏幕坐标——本面板会在 2 层以上（相机有滚动）弹出，这点不能省。
-    applyPanelDepth(this.nightChoiceObjects, PANEL_DEPTH.game.dialogue);
-    lockToScreen(this.nightChoiceObjects);
-    this.assertPanelContent('night-choice', this.nightChoiceObjects);
-  }
-
-  /** Enter：确认二选一。出去 = 武装一夜的偷取模拟；守夜 = 回家睡，小偷整晚不来。 */
-  private activateNightChoice(): void {
-    const state = getGame();
-    const row = NIGHT_CHOICE_ROWS[this.nightChoiceSelected];
-    if (!row) return;
-    recordNightChoice(state, row.choice);
-    saveToStorage(state);
-    this.closeNightChoice();
-    if (row.choice === 'scavenge') {
-      playSfx('click');
-      this.flash('你推门走进夜色——楼里不会只有你一个人');
-    } else {
-      playSfx('sleep');
-      this.flash('你决定回宿舍守夜——今夜楼里再乱也乱不到你头上');
+    if (state.status === 'lost') {
+      bumpStat(state, 'deaths'); // AG-81：夜袭/睡梦中死亡（finishNight 内部置的 lost）
+      this.scene.start('End');
     }
-  }
-
-  /** ESC：今夜再想想。拒过之后今夜不再问，也不武装偷取。 */
-  private dismissNightPrompt(): void {
-    const state = getGame();
-    recordNightDismissal(state);
-    saveToStorage(state);
-    this.closeNightChoice();
-    this.flash('今夜的事，明天再说');
-  }
-
-  /**
-   * AG-64：一夜的偷取后台模拟（判定全在 NightSystem）。玩家不在那一层也算——
-   * 结果写 localEvents/lootedItems，回层或睡醒时给证据。只有所有面板都关着
-   * 才会跑到这里（update 的面板早退在前），不存在「开着背包被偷」。
-   */
-  private tickNightWatch(): void {
-    const state = getGame();
-    const step = stepNightWatch(state, state.currentFloor === STARTING_FLOOR);
-    if (step.kind === 'none') return;
-    saveToStorage(state);
-    if (step.kind === 'visited') {
-      if (state.currentFloor !== STARTING_FLOOR) {
-        this.flash('楼道里似乎有脚步声——有人往宿舍那边去了……');
-        playSfx('alert');
-      }
-      return;
-    }
-    if (step.kind === 'prevented') {
-      this.flash('你守在屋里——楼道里的脚步声最终远了');
-      // AG-77：守夜成功计数（小偷被守在屋里逼退）。
-      this.achievements.emit({ type: 'night_watch_prevented' });
-      return;
-    }
-    // stolen：玩家不在家，什么被偷走了等回层/睡醒时由
-    // nightWatchEvidenceNote / nightWatchWakeNote 出示，这里不剧透。
-  }
-
-  /** 回到宿舍时的小偷证据：flash 一次，之后 night-theft-seen 标记让它闭嘴。 */
-  private reportNightWatchEvidence(): void {
-    const state = getGame();
-    const note = nightWatchEvidenceNote(state);
-    if (!note) return;
-    saveToStorage(state);
-    this.flash(note);
-  }
-
-  private nearestContainer(): GeneratedContainer | null {
-    const px = getGame().player.x;
-    let best: GeneratedContainer | null = null;
-    let bestDist = INTERACT_DISTANCE;
-    for (const c of this.floorView.containers) {
-      if (c.items.length === 0) continue;
-      const d = Math.abs(c.x - px);
-      if (d <= bestDist) {
-        bestDist = d;
-        best = c;
-      }
-    }
-    return best;
-  }
-
-  private openContainer(containerId: string): void {
-    const state = getGame();
-    const target = this.floorView.containers.find((c) => c.id === containerId);
-    const label = target?.label ?? containerId;
-    // Tools unlock container TYPES rather than recipes: a locked safe is the
-    // reason to carry the crowbar you found on floor 3.
-    if (target?.needs && countItem(state.player.inventory, target.needs) === 0) {
-      const tool = getItem(target.needs).displayName;
-      this.flash(`${label}锁着，需要${tool}`);
-      return;
-    }
-    // AG-66：搜刮是一个动作——点下去先弯腰（search 动画拉满 SEARCH_MS），2s 后
-    // 才翻出东西。这期间移动输入即取消（不出货、不扣时间、不标记已搜，见
-    // update 的 pendingAction 段）。既有边界（锁/满/空/二次搜刮）原样落在
-    // finishContainerSearch 里，一个都没动。
-    this.beginPendingAction({
-      kind: 'container',
-      containerId,
-      atX: state.player.x,
-      busyHint: `翻找${label}中……`,
-      cancelHint: '你直起身来，没翻完',
-    });
-  }
-
-  /** AG-66：2s 到点——容器搜刮的结果落地（原 openContainer 的出货段原样搬来）。 */
-  private finishContainerSearch(containerId: string): void {
-    const state = getGame();
-    const floor = state.currentFloor;
-    const target = this.floorView.containers.find((c) => c.id === containerId);
-    const label = target?.label ?? containerId;
-    const result = lootContainer(state, floor, containerId);
-    if (result.took.length > 0 || result.full) bumpStat(state, 'containersLooted'); // AG-81：开出东西（或包满没拿完）的箱才算开过
-    saveToStorage(state);
-    this.floorView = getFloorView(state, floor);
-    this.setContainerEmptyVisual(containerId, (this.floorView.containers.find((c) => c.id === containerId)?.items.length ?? 0) === 0);
-    this.refreshInventory();
-
-    if (result.took.length === 0 && !result.full) this.flash(`${label} 是空的`);
-    else if (result.full) {
-      // B3-16: the bag takes mergeable stacks and refuses new ones, and nothing
-      // on screen said so — the playtest found players discovering the rule by
-      // being refused three times. Name which half happened.
-      // AG-11: and how much is left behind. lootContainer reports took/full
-      // only, but the post-loot view is re-read above anyway, so the count is
-      // free — "剩余留在容器" without a number made players re-open the crate
-      // to find out whether it was one bottle or five.
-      const remaining = this.floorView.containers.find((c) => c.id === containerId)?.items.length ?? 0;
-      this.flash(
-        result.took.length > 0
-          ? `叠放进的已入包；新物品放不下（背包已满），剩余 ${remaining} 件留在容器`
-          : '背包已满：新物品放不下，能叠进已有堆的才能进包',
-      );
-    } else {
-      // OVERHAUL: a chest thunk for opening a container, distinct from the
-      // ground pickup's lighter blip — the container is the bigger event.
-      playSfx('chest');
-      // THE MOMENT OF GETTING IT. A container opened and its contents appeared in
-      // the bag with nothing on screen saying so; the burst is that beat.
-      // （AG-66：search 动画在 beginPendingAction 就已经播满 2s，这里只放粒子与结果。）
-      playFx(this, 'collect-burst', state.player.x + 10, PLAYER_FEET_Y - 50, LIGHT_DEPTH);
-      this.lootThisTrip += result.took.reduce((n, t) => n + t.quantity, 0);
-      // AG-77：单次搜刮 3 件+（一次开箱拿到几件，取历史最大值）。
-      this.achievements.emit({ type: 'loot_taken', count: result.took.reduce((n, t) => n + t.quantity, 0) });
-      this.flash(`获得 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${ACTION_COSTS.searchContainer} 分钟）`);
-      this.chargeTime(ACTION_COSTS.searchContainer);
-    }
-  }
-
-  private autoPickup(): void {
-    const state = getGame();
-    for (const g of [...this.floorView.groundItems]) {
-      if (Math.abs(g.x - state.player.x) > 12) continue;
-      const r = lootGround(state, state.currentFloor, g.key);
-      if (r.took) {
-        this.groundObjs.get(g.key)?.destroy();
-        this.groundObjs.delete(g.key);
-        this.floorView = getFloorView(state, state.currentFloor);
-        this.refreshInventory();
-        saveToStorage(state);
-        playSfx('pickup');
-        // the same beat as a container, smaller: the item went into the bag.
-        // Its own pose, not search: picking something off the floor is standing
-        // and reaching down, not bending into a locker.
-        playFx(this, 'collect-burst', g.x, PLAYER_FEET_Y - 26, LIGHT_DEPTH);
-        this.playActionAnim(pickupAnimKey(this.metaSelectedCharacter()), 420);
-        this.flash(`拾取 ${getItem(r.took.itemId).displayName}×${r.took.quantity}（-${ACTION_COSTS.pickupGround} 分钟）`);
-        this.chargeTime(ACTION_COSTS.pickupGround);
-      } else if (r.full) {
-        this.flash('背包已满：新物品放不下，能叠进的堆才能拾取');
-      }
-    }
-  }
-
-
-  // ── AG-66：2s 搜刮/挖掘动作 ─────────────────────────────────────────
-  /**
-   * 起一个搜刮/挖掘动作：search clip 拉满时长（容器/床 SEARCH_MS，阻碍物
-   * OBSTACLE_DIG_MS），到点由 finishPendingAction 落地。这期间 update 里的
-   * 任何移动输入都会取消它——不出货、不扣时间、不标记已搜/已挖。
-   */
-  private beginPendingAction(action: {
-    kind: 'container' | 'bunk' | 'dig';
-    containerId?: string;
-    bunkId?: string;
-    obstacleX?: number;
-    atX: number;
-    busyHint: string;
-    cancelHint: string;
-    ms?: number;
-  }): void {
-    if (this.pendingAction) this.cancelPendingAction(true);
-    const ms = action.ms ?? (action.kind === 'dig' ? OBSTACLE_DIG_MS : SEARCH_MS);
-    // 走位订单作废：动作期间不接受点击挪步（新的移动输入照样会在下一帧取消它）。
-    this.walkTarget = null;
-    this.playActionAnim(searchAnimKey('player'), ms);
-    const entry = {
-      kind: action.kind,
-      floor: getGame().currentFloor,
-      containerId: action.containerId,
-      bunkId: action.bunkId,
-      obstacleX: action.obstacleX,
-      atX: action.atX,
-      busyHint: action.busyHint,
-      cancelHint: action.cancelHint,
-      until: this.time.now + ms,
-      timer: undefined as unknown as Phaser.Time.TimerEvent,
-    };
-    this.pendingAction = entry;
-    entry.timer = this.time.delayedCall(ms, () => {
-      // 身份比对：被取消过的动作（或换层后重建的名册）不会落地。
-      if (this.pendingAction === entry) this.finishPendingAction();
-    });
-  }
-
-  /** 收手：摘 timer、清动作态、给一句反馈（silent = 换层/重启时的静默清理）。 */
-  private cancelPendingAction(silent = false): void {
-    const action = this.pendingAction;
-    if (!action) return;
-    action.timer.remove(false);
-    this.pendingAction = undefined;
-    this.walkTarget = null;
-    if (!silent) this.flash(action.cancelHint);
-  }
-
-  /** 到点落地：先对楼层（换层/换场景就地作废），再按 kind 分派。 */
-  private finishPendingAction(): void {
-    const action = this.pendingAction;
-    if (!action) return;
-    this.pendingAction = undefined;
-    if (action.floor !== getGame().currentFloor) return;
-    if (action.kind === 'container' && action.containerId) this.finishContainerSearch(action.containerId);
-    else if (action.kind === 'bunk' && action.bunkId) this.finishBunkSearch(action.bunkId, action.atX);
-    else if (action.kind === 'dig' && action.obstacleX !== undefined) this.finishObstacleDig(action.obstacleX);
-  }
-
-  // ── AG-66：过道阻碍物 ───────────────────────────────────────────────
-  /** 本层阻碍物全集 + 未挖列表（seeded；drawFloor 与清障后各刷一次）。 */
-  private refreshFloorObstacles(): void {
-    const state = getGame();
-    const floor = state.currentFloor;
-    this.floorObstacles = obstaclesForFloor(state, floor);
-    this.activeObstacleList = this.floorObstacles.filter((o) => !isObstacleCleared(state, floor, o.x));
-  }
-
-  /** 交互距离内最近的未挖阻碍物（与 nearestContainer 同型）。 */
-  private nearestObstacle(): FloorObstacle | null {
-    return nearestObstacle(this.activeObstacleList, getGame().player.x, INTERACT_DISTANCE);
-  }
-
-  /** 阻碍物提示：有工具说「按 E 挖」，没工具说缺什么——与 E 的实际行为同源。 */
-  private obstacleHint(o: FloorObstacle): string {
-    const armed = obstacleTool(getGame().player.inventory) !== null;
-    if (o.kind === 'rubble') return armed ? '按 E 挖开这堆瓦砾' : '需要铲子才能挖开这堆瓦砾（撬棍也行）';
-    return armed ? '按 E 撬开这道闸门' : '需要铲子或撬棍才能撬开这道闸门';
-  }
-
-  /** 画本层阻碍物（含挖过的残骸）。程序化 Graphics，16 色板内，不新增贴图。 */
-  private buildObstacles(): void {
-    this.refreshFloorObstacles();
-    const state = getGame();
-    for (const o of this.floorObstacles) {
-      // ACTOR_DEPTH（5），不是默认的 0。阻碍物是玩家要贴着按 E 的实体，必须
-      // 画在家具层之上：2 层前排室友床铺在 depth 4，默认 0 的瓦砾整堆被床
-      // 压住——玩家看见的是床，不知道墙边有一堆该挖的东西（QA-3 收官判定的
-      // 视觉洞，AG-96 上线即有）。选演员层而不是随手一个 >4 的数：与角色、
-      // 怪物同一平面，玩家（同层且后插入）照旧画在瓦砾边上；头顶的灯光
-      // （LIGHT_DEPTH 24）、前景剪影（26）、飘字（29）与 HUD（100+）都在
-      // 其上，相对关系一概不动。挖掉后的残骸用同一个对象重画，depth 不变。
-      const g = this.add.graphics().setDepth(ACTOR_DEPTH);
-      this.drawObstacle(g, o, isObstacleCleared(state, state.currentFloor, o.x));
-      this.obstacleObjs.set(`${o.x}`, g);
-      this.floorObjects.push(g);
-    }
-  }
-
-  /**
-   * 一个阻碍物的画法。瓦砾堆 = 乱石坡（顶面受光、坡脚积尘）；锈闸门 = 石立柱 +
-   * 锈红顶轨 + 斜拉铁丝网。挖过之后同一位址重画成残骸：瓦砾压成矮茬、闸门剩
-   * 一根歪柱几根断丝——还看得出动过土，但不再拦路（cleared 时 activeObstacleList
-   * 已不含它，钳位自然放行）。
-   */
-  private drawObstacle(g: Phaser.GameObjects.Graphics, o: FloorObstacle, cleared: boolean): void {
-    g.clear();
-    const floorY = FLOOR_HEIGHT - FLOOR_BAND;
-    if (o.kind === 'rubble') {
-      if (cleared) {
-        // 残骸：一层矮茬，尘色半透明。
-        g.fillStyle(PALETTE.shadow, 0.5);
-        g.fillRect(o.x - 26, floorY - 6, 52, 6);
-        g.fillStyle(PALETTE.dust, 0.55);
-        g.fillRect(o.x - 18, floorY - 11, 30, 5);
-        g.fillRect(o.x + 6, floorY - 8, 16, 3);
-        g.fillStyle(PALETTE.stone, 0.5);
-        g.fillRect(o.x - 8, floorY - 15, 12, 4);
-        return;
-      }
-      // 三五大石挤在过道中间：主石两块、配石一块，顶面一道受光。
-      g.fillStyle(PALETTE.shadow, 0.9);
-      g.fillRect(o.x - 24, floorY - 4, 48, 4);
-      g.fillStyle(PALETTE.stone, 1);
-      g.fillTriangle(o.x - 22, floorY, o.x - 12, floorY - 24, o.x - 2, floorY);
-      g.fillStyle(PALETTE.stoneLight, 1);
-      g.fillTriangle(o.x - 19, floorY, o.x - 12, floorY - 24, o.x - 8, floorY);
-      g.fillStyle(PALETTE.stone, 1);
-      g.fillTriangle(o.x - 4, floorY, o.x + 6, floorY - 30, o.x + 16, floorY);
-      g.fillStyle(PALETTE.stoneLight, 1);
-      g.fillTriangle(o.x - 1, floorY, o.x + 6, floorY - 30, o.x + 9, floorY);
-      g.fillStyle(PALETTE.stone, 1);
-      g.fillTriangle(o.x + 12, floorY, o.x + 20, floorY - 16, o.x + 26, floorY);
-      g.fillStyle(PALETTE.dust, 0.85);
-      g.fillRect(o.x - 26, floorY - 2, 54, 2);
-      g.fillRect(o.x - 10, floorY - 34, 3, 3);
-      g.fillRect(o.x + 14, floorY - 20, 2, 2);
-      return;
-    }
-    if (cleared) {
-      // 残骸：一根歪柱 + 几根耷拉的断丝。
-      g.fillStyle(PALETTE.stone, 0.8);
-      g.fillRect(o.x - 20, floorY - 30, 5, 30);
-      g.fillStyle(PALETTE.lightDeep, 0.7);
-      g.fillRect(o.x - 20, floorY - 30, 5, 4);
-      g.lineStyle(1, PALETTE.stoneLight, 0.5);
-      g.lineBetween(o.x - 15, floorY - 18, o.x + 4, floorY - 6);
-      g.lineBetween(o.x - 15, floorY - 26, o.x + 2, floorY - 14);
-      g.lineStyle(1, PALETTE.dust, 0.4);
-      g.lineBetween(o.x + 2, floorY - 6, o.x + 10, floorY);
-      return;
-    }
-    // 完好的锈闸门：凹槽里立两根石柱，顶轨锈红，中间斜拉铁丝网。
-    g.fillStyle(PALETTE.ink, 0.85);
-    g.fillRect(o.x - 26, floorY - 56, 52, 56);
-    g.fillStyle(PALETTE.stone, 1);
-    g.fillRect(o.x - 22, floorY - 52, 6, 52);
-    g.fillRect(o.x + 16, floorY - 52, 6, 52);
-    g.fillStyle(PALETTE.stoneLight, 1);
-    g.fillRect(o.x - 22, floorY - 52, 2, 52);
-    g.fillRect(o.x + 16, floorY - 52, 2, 52);
-    g.fillStyle(PALETTE.lightDeep, 1);
-    g.fillRect(o.x - 24, floorY - 58, 48, 6);
-    g.fillStyle(PALETTE.light, 0.9);
-    g.fillRect(o.x - 24, floorY - 58, 48, 2);
-    g.lineStyle(1, PALETTE.stoneLight, 0.65);
-    for (let i = 0; i <= 4; i++) {
-      const t = i / 4;
-      g.lineBetween(o.x - 16 + t * 32, floorY - 52, o.x - 16 + t * 32 + 10, floorY - 4);
-    }
-    g.lineBetween(o.x - 16, floorY - 28, o.x + 16, floorY - 28);
-    g.fillStyle(PALETTE.lightDeep, 0.8);
-    g.fillRect(o.x - 8, floorY - 46, 4, 3);
-    g.fillRect(o.x + 4, floorY - 18, 3, 4);
-  }
-
-  /** E 对准阻碍物：没工具说缺什么；有工具就起 2s 挖掘动作。 */
-  private tryClearObstacle(o: FloorObstacle): void {
-    const state = getGame();
-    if (isObstacleCleared(state, state.currentFloor, o.x)) return;
-    if (!obstacleTool(state.player.inventory)) {
-      this.flash(this.obstacleHint(o));
-      return;
-    }
-    this.beginPendingAction({
-      kind: 'dig',
-      obstacleX: o.x,
-      atX: o.x,
-      busyHint: o.kind === 'rubble' ? '挖开瓦砾中……' : '撬开闸门中……',
-      cancelHint: '你停了下来，还没挖完',
-      ms: OBSTACLE_DIG_MS,
-    });
-  }
-
-  /** 2s 到点：阻碍物消失（变残骸）、过道通、记存档键（回层不复活）。 */
-  private finishObstacleDig(x: number): void {
-    const state = getGame();
-    if (isObstacleCleared(state, state.currentFloor, x)) return;
-    clearObstacle(state, state.currentFloor, x);
-    bumpStat(state, 'obstaclesCleared'); // AG-81：清障计数
-    saveToStorage(state);
-    this.refreshFloorObstacles();
-    const o = this.floorObstacles.find((ob) => ob.x === x);
-    const obj = this.obstacleObjs.get(`${x}`);
-    if (o && obj) this.drawObstacle(obj, o, true);
-    playFx(this, 'collect-burst', x, PLAYER_FEET_Y - 30, LIGHT_DEPTH);
-    playSfx('chest');
-    this.flash(o?.kind === 'gate' ? '撬开了锈闸门，过道通了' : '挖开了瓦砾堆，过道通了');
-    this.chargeTime(OBSTACLE_DIG_COST_MINUTES);
   }
 
   private nearLift(state: GameState): boolean {
@@ -6578,7 +5663,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // is up (openPanelHint returns null then, so the two cannot fight).
     const panelHint = this.openPanelHint();
     if (panelHint !== null) this.hintText.setText(panelHint);
-    if (this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen || this.nightChoiceOpen || this.dialogueCtl.ventureIsOpen || this.questsOpen) return;
+    if (this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.interaction.shelterOpen || this.interaction.nightChoiceOpen || this.dialogueCtl.ventureIsOpen || this.questsOpen) return;
     const state = getGame();
 
     // AG-11: the neighbours walk their own schedule. Pure function of game
@@ -6607,11 +5692,13 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // AG-66：搜刮/挖掘进行中——任何移动输入（方向键或点击走位订单）都取消
     // 动作：不出货、不扣时间、不标记已搜/已挖。这是「防站着刷」的闸口：想拿
     // 东西就得老老实实站完 2s。没有输入则到点落地。
-    if (this.pendingAction) {
+    // RC-03 拆分第 10 步：动作态本体在 InteractionController（取消/落地委托）。
+    const pending = this.interaction.pendingAction;
+    if (pending) {
       if (dir !== 0 || this.walkTarget) {
-        this.cancelPendingAction();
-      } else if (this.time.now >= this.pendingAction.until) {
-        this.finishPendingAction();
+        this.interaction.cancelPendingAction();
+      } else if (this.time.now >= pending.until) {
+        this.interaction.finishPendingAction();
         return;
       }
     }
@@ -6661,7 +5748,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       movePlayerX(state, dx);
       // AG-66：过道阻碍物把玩家钳在占位区之外——贴着进来那一侧的边停，
       // 想过去只能把它挖掉。上一帧就在区间里（落地/传送）则取近的一侧出。
-      state.player.x = clampXAgainstObstacles(this.activeObstacleList, prevX, state.player.x);
+      state.player.x = clampXAgainstObstacles(this.interaction.activeObstacleList, prevX, state.player.x);
     }
     this.syncPlayerWorldObjects(state.player.x, STAIR_START_Y);
 
@@ -6718,6 +5805,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     //      测试会被弹面板；
     //   2. 只在外层算数——在家入夜的玩家走既有的床 → 夜间安排流程
     //      （AG-51/shelter 钉住的行为原样），面对二选一的是身在外层的人。
+    // RC-03 拆分第 10 步：边沿判定留场景（时钟属主在场景），弹面板与一夜
+    // 偷取模拟委托 InteractionController。
     const minuteBeforeNight = this.prevMinuteOfDay;
     this.prevMinuteOfDay = state.gameMinuteOfDay;
     if (
@@ -6728,9 +5817,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       state.currentFloor !== STARTING_FLOOR &&
       nightChoicePending(state)
     ) {
-      this.openNightPrompt();
+      this.interaction.openNightPrompt();
     }
-    this.tickNightWatch();
+    this.interaction.tickNightWatch();
     // AG-77：跨天结算「连续不缺水」。不走 tick.dayChanged 而对比 state.day——
     // 睡觉（ShelterSystem.finishNight）也跨天，那条路不经过这里的帧循环
     // tick。flag 记的是刚过去这一天有没有见底，随后清零（对账在控制器内）。
@@ -6889,7 +5978,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       return;
     }
 
-    this.autoPickup();
+    // RC-03 拆分第 10 步：自动拾取编排委托 InteractionController。
+    this.interaction.autoPickup();
 
     // 裁决记录（merge ag-63）：HEAD 侧此处的 panelHint 块（OVERHAUL 交互
     // 契约）删除——它位于面板早退之后，按构造执行不到，功能已由早退前的
@@ -6900,20 +5990,22 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // chain is the world's again, and it cannot overwrite a panel's hint.
     // AG-66：搜刮/挖掘动作中——底栏只说在干什么，不说周围有什么（面板优先
     // 的契约在上面的 panelHint 段，开着面板时仍旧是面板的话）。
-    if (this.pendingAction) {
-      this.hintText.setText(this.pendingAction.busyHint);
+    if (this.interaction.pendingAction) {
+      this.hintText.setText(this.interaction.pendingAction.busyHint);
       return;
     }
-    const nearObstacle = this.nearestObstacle();
+    // RC-03 拆分第 10 步：阻碍物/床铺/容器邻近判定与提示文案委托
+    // InteractionController——世界链的排序原样保留。
+    const nearObstacle = this.interaction.nearestObstacle();
     // AG-66：阻碍物提示——有工具说「按 E 挖」，没工具说缺什么。与 onInteract
     // 同序（问号点之后、NPC 之前）：被钳在瓦砾上时脚注先说挖开。
     if (nearObstacle) {
-      this.hintText.setText(this.obstacleHint(nearObstacle));
+      this.hintText.setText(this.interaction.obstacleHint(nearObstacle));
       return;
     }
     // AG-51：床铺提示（含自己的床：夜里睡觉/白天翻床垫底下）先于工作台。
     // 两件家具在 1 层东西两端，正常永远不会同时够到，顺序只是保险。
-    const bunkLine = this.bunkHint(state);
+    const bunkLine = this.interaction.bunkHint(state);
     if (bunkLine !== null) {
       this.hintText.setText(bunkLine);
       return;
@@ -6930,8 +6022,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.hintText.setText('此地漏水，地面物资受潮');
       return;
     }
-    const finaleContainer = this.nearestFinaleContainer();
-    const container = this.nearestContainer();
+    const finaleContainer = this.interaction.nearestFinaleContainer();
+    const container = this.interaction.nearestContainer();
     const zone = currentInteractionZone(state);
     // R6-2：第一分支先分辨最近的遭遇点是不是行商——'shop' 是会走动的行商
     // 标记，按 E 走的是 onInteract 的 openShop（交易面板），与问号遭遇不是
@@ -6950,7 +6042,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     else if (finaleContainer) {
       // AG-20：终局层的容器开过之后，E 进的是演出不是搜刮——提示要说得准。
       // 用不滤空的判定：被舔光的空箱子也要告诉玩家还能再看它一眼。
-      this.hintText.setText(this.finaleEntryFor(finaleContainer.id) ? `按 E 查看${finaleContainer.label}` : `按 E 打开 ${finaleContainer.label}`);
+      this.hintText.setText(this.interaction.finaleEntryFor(finaleContainer.id) ? `按 E 查看${finaleContainer.label}` : `按 E 打开 ${finaleContainer.label}`);
     }
     else if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
     // OVERHAUL Wave C2: the up stairwell advertises the paid shortcut, priced

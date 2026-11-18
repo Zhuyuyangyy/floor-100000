@@ -185,4 +185,12 @@ describe('EndScene offers a way back into a run (source contract)', () => {
     expect(src).toContain('recordRows(state,');
     expect(src).toContain('settleRun(state)');
   });
+
+  it('QA-4-02：「死因：」前缀只属于失败分支——胜利画面印存活标语', () => {
+    // 前缀不随 won 分支切换会让「你活了下来」下面顶着「死因：」。reason
+    // 一处产出两分支：失败带「死因：」，胜利是存活标语；渲染层不再拼前缀。
+    expect(src).toContain("won ? '存活至第 8 天");
+    expect(src).toContain('`死因：${causeOf(state)}`');
+    expect(src).not.toContain('`死因：${reason}`');
+  });
 });

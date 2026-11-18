@@ -3,6 +3,7 @@ import { ENTRY_X, PLAYABLE_FLOORS_V01, SCHEMA_VERSION } from './constants';
 import { isItemId } from '../data/items';
 import { addItem } from '../systems/InventorySystem';
 import { createGrowthProfile } from './growth';
+import { createRunStats } from '../systems/StatsSystem';
 import type { GameState, Inventory, ItemId } from './gameTypes';
 
 export function createInventory(slotCount: number): Inventory {
@@ -78,6 +79,10 @@ export function createNewGame(seed: number): GameState {
     dailyGoal: undefined,
     records: { deepestFloor: p.startingFloor, bestScore: 0 },
     encounters: {},
+    // AG-81 统计：出生层（起始层）就是到达过的楼层——maxFloor 从起始层起记，
+    // 与上面 records.deepestFloor 同风格的预置。旧存档没有 stats 块，读取侧
+    // statsOf 兜底全零 + 读数 runMaxFloor（Math.max currentFloor）兼容。
+    stats: { ...createRunStats(), maxFloor: p.startingFloor },
     // OVERHAUL Wave B2/B3: the mode and relics are applied by the character
     // pick (which owns the meta) right after this; vanilla until then.
     mode: 'adventure',

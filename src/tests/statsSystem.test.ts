@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { STARTING_FLOOR } from '../core/constants';
 import { createNewGame } from '../core/gameState';
 import { runScore } from '../systems/progress';
 import {
@@ -16,6 +17,7 @@ import {
   noteFloorReached,
   noteGoldEarned,
   recordRows,
+  runMaxFloor,
   runStatRows,
   saveRunRecords,
   settleRun,
@@ -70,6 +72,47 @@ describe('StatsSystem：本局统计', () => {
     s.currentFloor = 3;
     noteFloorReached(s);
     expect(statsOf(s).maxFloor).toBe(9);
+  });
+
+  // QA-4-01：出生层（第 1 层）从没被记进 maxFloor，新开局「最高层 0」与
+  // 纪录行 Math.max 兜底的「纪录 100000」在同一结算画面并存。三颗钉：
+  // 开局出生层计入、爬梯后到达层计入、两处结算读数同口径（runMaxFloor）。
+  it('QA-4-01：新开局 maxFloor=起始层——出生层计入，不再是 0', () => {
+    const s = createNewGame(42);
+    expect(s.currentFloor).toBe(STARTING_FLOOR);
+    expect(statsOf(s).maxFloor).toBe(STARTING_FLOOR);
+    expect(runMaxFloor(s)).toBe(STARTING_FLOOR);
+    // 本局统计行（暂停统计/死亡结算/终局 epilogue 同一张表）读到起始层
+    const maxFloorRow = runStatRows(s)[STAT_KEYS.indexOf('maxFloor')];
+    expect(maxFloorRow.value).toBe(`${STARTING_FLOOR}`);
+  });
+
+  it('QA-4-01：爬梯后 maxFloor=到达层（出生层之上只增不减）', () => {
+    const s = createNewGame(42);
+    expect(statsOf(s).maxFloor).toBe(STARTING_FLOOR);
+    s.currentFloor = 9;
+    noteFloorReached(s);
+    expect(statsOf(s).maxFloor).toBe(9);
+    // 本局统计行与历史纪录行同口径
+    expect(runStatRows(s)[STAT_KEYS.indexOf('maxFloor')].value).toBe('9');
+    const settled = mergeRunRecords(createRunRecords(), s);
+    expect(recordRows(s, settled)[0].value).toBe('9（纪录 9）');
+  });
+
+  it('QA-4-01：?devfloor= 落层时 stats 未记，两处结算读数仍同口径', () => {
+    // QA 复现场景：devfloor 夹具直接落在 100000 层，没爬梯，stats.maxFloor
+    // 还是开局值——读数侧兜底（runMaxFloor）让两处都显示 100000，不再出现
+    // 「最高层 0」vs「纪录 100000」并存的矛盾。
+    const s = createNewGame(42);
+    s.currentFloor = 100000; // devfloor 夹具落层，不经过爬梯落地钩子
+    expect(statsOf(s).maxFloor).toBe(STARTING_FLOOR);
+    expect(runMaxFloor(s)).toBe(100000);
+    const statRow = runStatRows(s)[STAT_KEYS.indexOf('maxFloor')];
+    const settled = mergeRunRecords(createRunRecords(), s);
+    const recRow = recordRows(s, settled)[0];
+    expect(statRow.value).toBe('100000');
+    expect(recRow.value).toBe('100000（纪录 100000）');
+    expect(settled.beaten).toContain('maxFloor');
   });
 
   it('noteGoldEarned 只计正差：花费不进「金币收入」', () => {

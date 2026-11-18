@@ -206,12 +206,15 @@ export class EndScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(3);
 
-    const reason = won ? '旧版第 8 天阈值 · ?devwin=1 夹具' : causeOf(state);
+    // 死因/标语条：失败分支印「死因：…」，胜利分支印存活标语。前缀随 won
+    // 分支切换（QA-4-02：此前「死因：」硬编码，?devwin=1 胜利画面「你活了
+    // 下来」下面顶着「死因：旧版第 8 天阈值」）。纯文案分支，数值不动。
+    const reason = won ? '存活至第 8 天 · 旧版阈值 · ?devwin=1 夹具' : `死因：${causeOf(state)}`;
     for (const o of buildPanelWell(this, cx - 190, 142, 380, 28, 5)) {
       this.add.existing(o as Phaser.GameObjects.GameObject);
     }
     this.add
-      .text(cx, 156, `死因：${reason}`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
+      .text(cx, 156, reason, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
       .setOrigin(0.5)
       .setDepth(7);
 

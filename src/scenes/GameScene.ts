@@ -95,16 +95,10 @@ import {
 } from '../systems/NightSystem';
 import { recordDepth, runScore } from '../systems/progress';
 import { CHARACTER_NAMES, applyDepth, loadMeta, saveMeta, unlockFromDepth } from '../systems/metaProgress';
-import {
-  evaluateAchievements,
-  freshAchievements,
-  loadAchievements,
-  saveAchievements,
-  type AchievementEvent,
-  type AchievementSave,
-} from '../systems/AchievementSystem';
-import type { AchievementDef } from '../data/achievements';
-import { ACHIEVEMENT_TIER_COLOR, ACHIEVEMENT_TIER_LABEL } from '../render/achievementSkin';
+// AG-77 的求值/计数/持久化（ AchievementSystem ）与 toast 编排
+// （controllers/AchievementController）已随 RC-03 拆分第 5 步迁出；场景只留
+// 事件类型（emitAchievementEvent 委托签名用）。
+import type { AchievementEvent } from '../systems/AchievementSystem';
 import type { CharacterKey } from '../render/artpack';
 import { lowHpPulse, mostUrgentStat, moveSpeedFactor } from '../render/feedback';
 import { GAME_CONFIG } from '../core/config';
@@ -135,6 +129,7 @@ import { StatsPanelController, type PanelBox, type StatsPanelHost } from './cont
 import { MonologueController, type MonologueHost } from './controllers/MonologueController';
 import { PerfController, type PerfHost } from './controllers/PerfController';
 import { TutorialController, type TutorialHost } from './controllers/TutorialController';
+import { AchievementController, type AchievementHost } from './controllers/AchievementController';
 import { charge, recordShortcut, shortcutAvailable, shortcutPlan } from '../systems/shortcut';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
@@ -278,26 +273,8 @@ import {
 import type { NpcPersistedState } from '../ai/types';
 import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId, ShelterAction } from '../core/gameTypes';
 
-// ── AG-77: 成就解锁 toast 的几何与节奏 ─────────────────────────────────────
-// 右上角逐枚堆叠的铆钉小板（与导航条/顶带同一套 drawHudPlate 语言）。两条
-// 硬约束来自邻居：
-//   * 顶缘 112 = HUD 板（contextBottom 102）之下 10px——不压四联圆环；
-//   * 最多同时 3 枚：底边 112 + 3×(64+8) = 328，清开右下状态卡（376..556）。
-// 底部导航条占 672..720，本列离它 344px，永远不相交。
-const TOAST_W = 384;
-const TOAST_H = 64;
-/** 右缘内边距：与 HUD 按钮行同一 16px 边际。 */
-const TOAST_RIGHT_MARGIN = 16;
-const TOAST_TOP = 112;
-const TOAST_PITCH = TOAST_H + 8;
-/** 同屏上限；超出的进队列排队（多成就连亮时读成依次弹出，不是一锅）。 */
-const TOAST_MAX_VISIBLE = 3;
-/** 一枚 toast 的存活时长（ms）。 */
-const TOAST_LIFE_MS = 3600;
-/** 队列里两枚之间的最小间隔（ms）。 */
-const TOAST_STAGGER_MS = 550;
-/** 一枚 toast 的零件：三种都有 setAlpha/销毁语义（Phaser 4 基类不带这些方法）。 */
-type ToastPart = Phaser.GameObjects.Rectangle | Phaser.GameObjects.Graphics | Phaser.GameObjects.Text;
+// AG-77 成就解锁 toast 的几何与节奏（TOAST_* 八常量 + ToastPart 零件类型）
+// 随 controllers/AchievementController 迁出（RC-03 拆分第 5 步）。
 
 // AG-61：树形制作面板的几何。13 条配方的滚动列表整体换成一棵合成树
 // （用户原话：「制作可以用那种二叉树那种合成的方案去做」）：材料列在左，
@@ -823,7 +800,7 @@ function npcStrollPose(npcId: string, floor: number, stationary: boolean, elapse
  * TutorialController（RC-03 拆分第 3 步，TUTORIAL_DONE_FLASH_DELAY_MS）。
  */
 
-export class GameScene extends Phaser.Scene implements StatsPanelHost, MonologueHost, TutorialHost, PerfHost {
+export class GameScene extends Phaser.Scene implements StatsPanelHost, MonologueHost, TutorialHost, PerfHost, AchievementHost {
   private player!: Phaser.GameObjects.Sprite;
   /** The crowbar in the survivor's hand. Follows the attack pose's fist. */
   private weapon?: Phaser.GameObjects.Image;
@@ -957,21 +934,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   /** 程序化生成的铲子图标贴图就绪没有（create 里画一次，背包格用）。 */
   private shovelIconReady = false;
 
-  // ── AG-77: 成就系统（解锁 toast + 跨 run 持久化）────────────────────────
-  // 求值与计数全在 systems/AchievementSystem.ts（纯函数）；场景只做三件事：
-  // 事发一处一行 emitAchievementEvent、新解锁排 toast 队列、把 save 写回
-  // localStorage 的独立键（重置游戏不清空——Steam 成就的永久性语义）。
-  private achievementSave: AchievementSave = freshAchievements();
-  private achievementQueue: AchievementDef[] = [];
-  private activeToasts: Array<{ def: AchievementDef; objects: ToastPart[]; until: number; top: number }> = [];
-  /** 下一枚 toast 最早可出的时刻（队列节流：连亮也不糊成一片）。 */
-  private nextToastAt = 0;
-  /** 本天内口渴是否见底过（跨天结算 thirstStreak 用；睡觉得天由 update 兜）。 */
-  private thirstHitZero = false;
-  /** update 上次记账的 day：睡眠跨日不走帧循环的 dayChanged，用对比兜底。 */
-  private lastAchievementDay = 1;
-  /** 本场战斗累计受到的伤害（零伤击败守门人的判据）。 */
-  private combatDamageTaken = 0;
+  // AG-77 成就字段组（achievementSave/achievementQueue/activeToasts/
+  // nextToastAt/thirstHitZero/lastAchievementDay/combatDamageTaken）随
+  // controllers/AchievementController 迁出（RC-03 拆分第 5 步，见上方
+  // achievements 字段处的接线说明）。
 
   private clockText!: Phaser.GameObjects.Text;
   /** AG-102（性能轮 3）：四联圆环是一张 RenderTexture——Phaser 4 每帧重三角化
@@ -1042,6 +1008,13 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   // 是战斗飘字的下游。PerfHost 的三个场景查询面（createFloatTextPool/
   // setFxDegraded/setMonsterBreathing）落在原性能层段的位置。
   private readonly perf = new PerfController(this);
+  // ── AG-77: 成就系统（RC-03 拆分第 5 步） ──────────────────────────────────
+  // 奖杯柜/toast 队列/跨天记账/本场受伤计数全在 AchievementController
+  // （plain TS 类，Node 可单测），场景只持控制器本体：init(day) 是 create
+  // 的读档+清场、emit 是十处事发钩子、update 是帧循环第一段（面板早退之前
+  // ——解锁可能发生在任何面板里）、clear 是重启/SHUTDOWN 清场。存储键独立
+  // （floor100000.achievements.v1，重置游戏不清空——控制器持 localStorage）。
+  private readonly achievements = new AchievementController(this, localStorage);
   // OVERHAUL: the floor's "?" spots and the encounter panel they open.
   private spotMarkers = new Map<string, { x: number; isBoss: boolean; dot: Phaser.GameObjects.Arc; label: Phaser.GameObjects.Text }>();
   private encounterOpen = false;
@@ -1393,11 +1366,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.pendingAction = undefined;
     // AG-77：成就档从独立键读入（重置游戏不清空），toast 队列与跨天记账随
     // 新跑局清空——字段初始化器不重跑，上一局的排队 toast 会插进新局。
-    this.achievementSave = loadAchievements();
-    this.clearAchievementToasts();
-    this.thirstHitZero = false;
-    this.lastAchievementDay = getGame().day;
-    this.combatDamageTaken = 0;
+    this.achievements.init(getGame().day);
 
     this.cameras.main.setBackgroundColor(0x22303a);
     this.cameras.main.setBounds(0, 0, FLOOR_WIDTH, FLOOR_HEIGHT);
@@ -1522,7 +1491,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.cameras.main?.stopFollow();
       this.feedbackTimer?.remove(false);
       // AG-77：退场动画里的 toast tween 会在场景销毁后打已死对象。
-      this.clearAchievementToasts();
+      this.achievements.clear();
       this.unbindInput();
       stopBgm(); // AG-74：离开楼层就静默（收音机的截止时间保留，回来按上下文重解）
     });
@@ -2716,7 +2685,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   private startCombat(spotId: string, kind: 'ambush' | 'boss'): void {
     const state = getGame();
     // AG-77：本场受伤计数从零起算——「零伤害击败守门人」只认这一场的账。
-    this.combatDamageTaken = 0;
+    this.achievements.resetCombatDamage();
     const monster = this.monsterFor(kind, state, spotId);
     const log: string[] = [combatIntroMessage(kind, monster.name ?? '敌人')];
     // An ambusher's first strike lands before the player acts: the wind-up is
@@ -2726,11 +2695,11 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       const mods = behaviorModifiers('ambusher');
       const strike = Math.max(1, Math.round(monster.damage * mods.firstStrikeMult));
       state.player.hp = Math.max(0, state.player.hp - strike);
-      // 裁决记录（merge ag-81）：偷袭这一口同时进两本账——combatDamageTaken
-      // 是 AG-77「零伤害击败守门人」成就的判据，bumpStat 是 AG-81 本局统计
-      // 的「受到伤害」，两套记账服务不同消费者，并存。
+      // 裁决记录（merge ag-81）：偷袭这一口同时进两本账——AG-77 成就判据
+      // （控制器里的本场受伤计数）与 AG-81 统计（bumpStat）两套记账服务不同
+      // 消费者，并存。
       bumpStat(state, 'damageTaken', strike); // AG-81：偷袭这一口也要进「受到伤害」
-      this.combatDamageTaken += strike; // 抢先扑出也算本场受的伤
+      this.achievements.noteCombatDamage(strike); // 抢先扑出也算本场受的伤
       log.push(`${monster.name} 抢先扑出，造成 ${strike} 点伤害！`);
       // 受伤动画/震屏挪到 playAmbusherStrike——否则紧接着的滑步 walk clip
       // 会把 hurt clip 当场盖掉，偷袭只剩日志没有画面。
@@ -3239,10 +3208,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       const soften = (combat.kind === 'boss' ? guardianDamageMult(state.relics ?? []) * modeGuardianDamageMult(state.mode ?? 'adventure') : guardianDamageMult(state.relics ?? []));
       const dmg = Math.max(1, Math.round(round.monsterDamage * soften));
       state.player.hp = Math.max(0, state.player.hp - dmg);
-      // 裁决记录（merge ag-81）：同上——AG-77 成就判据（combatDamageTaken）
-      // 与 AG-81 统计（bumpStat）两套记账并存。
+      // 裁决记录（merge ag-81）：同上——AG-77 成就判据（控制器里的本场受伤
+      // 计数）与 AG-81 统计（bumpStat）两套记账并存。
       bumpStat(state, 'damageTaken', dmg); // AG-81：敌人反击命中计数（软化后的实扣）
-      this.combatDamageTaken += dmg; // AG-77：零伤守门人的判据在这里记账
+      this.achievements.noteCombatDamage(dmg); // AG-77：零伤守门人的判据在这里记账
       if (action === 'guard') this.playActionAnim(hurtAnimKey(this.metaSelectedCharacter()), 400);
       // AG-91：敌人反击命中 = medium 档（震屏 0.4 trauma + 50ms 顿帧 + 受击
       // 闪白）。原 AG-72 的 shakeIfEnabled(160, 0.008) 被分级表取代。
@@ -3328,7 +3297,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
         state.records = { deepestFloor: Math.max(state.records?.deepestFloor ?? 0, state.currentFloor), bestScore: (state.records?.bestScore ?? 0) + 200 };
         combat.log.push('上楼的路通了。分数 +200');
         // AG-77：零伤害击败守门人（本场累计受伤为 0 才算）。
-        this.emitAchievementEvent({ type: 'boss_won', damageTaken: this.combatDamageTaken });
+        this.achievements.emit({ type: 'boss_won', damageTaken: this.achievements.combatDamage });
       }
       markResolved(state, combat.spotId, `combat:win`);
       playSfx('goal');
@@ -5439,135 +5408,14 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
 
   // ── AG-77: 成就解锁 toast ───────────────────────────────────────────────
   /**
-   * 事发一处一行：把事件喂给纯核心，新解锁排队，落独立键的盘。
-   * 不抛、不阻塞——localStorage 写不进去时内存里的奖杯柜照常显示。
-   * 返回本轮新解锁的 id（e2e dev 句柄用；产品路径忽略返回值）。
+   * dev 句柄入口（main.ts 的 __PHASER_ACHIEVEMENTS__.emit 走这）：派一个事件
+   * 进控制器的真实通路（evaluateAchievements → toast 队列 → 独立键落盘），
+   * 与玩法钩子同一入口。场景不活跃时 main.ts 侧拿不到场景、诚实返回空数组
+   * ——没有活着的 GameScene 就没有通路，静默丢弃好过打一个空场景。
+   * 编排本体在 controllers/AchievementController（RC-03 拆分第 5 步）。
    */
-  private emitAchievementEvent(event: AchievementEvent): string[] {
-    const { save, unlocked } = evaluateAchievements(this.achievementSave, event);
-    this.achievementSave = save;
-    saveAchievements(save);
-    if (unlocked.length === 0) return [];
-    for (const def of unlocked) this.achievementQueue.push(def);
-    playSfx('goal');
-    return unlocked.map((d) => d.id);
-  }
-
-  /** 出一枚 toast：铆钉小板 + tier 色左筋 + 星形章 + 两行字。 */
-  private spawnAchievementToast(def: AchievementDef): void {
-    const color = ACHIEVEMENT_TIER_COLOR[def.tier];
-    const left = DESIGN_WIDTH - TOAST_RIGHT_MARGIN - TOAST_W;
-    const index = this.activeToasts.length;
-    const top = TOAST_TOP + index * TOAST_PITCH;
-    const depth = HUD_FEEDBACK_DEPTH;
-    const objects: ToastPart[] = [];
-
-    const plate = this.add.rectangle(left + 12, top, TOAST_W, TOAST_H, UI.surface).setOrigin(0, 0).setScrollFactor(0).setAlpha(0.92).setDepth(depth).setName('achievement-toast');
-    objects.push(plate);
-    const g = this.add.graphics().setScrollFactor(0).setDepth(depth + 1).setName('achievement-toast-art');
-    // 六段渐变板 + 四角铆钉 + 左筋，与导航条同一语言（drawHudPlate 画的是以
-    // (0,0) 为原点的板，这里平移到 toast 自己的坐标）。
-    const BANDS = 6;
-    for (let i = 0; i < BANDS; i++) {
-      g.fillStyle(0x0b0f12, 0.14 + 0.12 * (i / (BANDS - 1)));
-      g.fillRect(left, top + Math.round((TOAST_H / BANDS) * i), TOAST_W, Math.ceil(TOAST_H / BANDS) + 1);
-    }
-    g.fillStyle(UI.line, 0.9);
-    g.fillRect(left, top, TOAST_W, 1);
-    g.fillRect(left, top + TOAST_H - 1, TOAST_W, 1);
-    g.fillStyle(PALETTE.stoneLight, 0.85);
-    for (const [rx, ry] of [
-      [left + 8, top + 8],
-      [left + TOAST_W - 9, top + 8],
-      [left + 8, top + TOAST_H - 9],
-      [left + TOAST_W - 9, top + TOAST_H - 9],
-    ] as Array<[number, number]>) {
-      g.fillRect(rx, ry, 2, 2);
-    }
-    g.fillStyle(color, 1);
-    g.fillRect(left, top, 3, TOAST_H);
-    objects.push(g);
-    // 星形章（hudSkin 的 16px 格）——「得了颗星」的那个星。
-    const icon = this.add.graphics().setScrollFactor(0).setDepth(depth + 2);
-    drawHudIcon(icon, 'star', left + 14, top + TOAST_H / 2 - 8, 16, color);
-    objects.push(icon);
-    const caption = this.add
-      .text(left + 42, top + 17, '成就解锁', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
-      .setOrigin(0, 0.5)
-      .setScrollFactor(0)
-      .setDepth(depth + 2);
-    objects.push(caption);
-    const name = this.add
-      .text(left + 42, top + 41, def.name, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
-      .setOrigin(0, 0.5)
-      .setScrollFactor(0)
-      .setDepth(depth + 2)
-      .setName('achievement-toast-name');
-    objects.push(name);
-    const tier = this.add
-      .text(left + TOAST_W - 12, top + TOAST_H / 2, ACHIEVEMENT_TIER_LABEL[def.tier], { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(color) })
-      .setOrigin(1, 0.5)
-      .setScrollFactor(0)
-      .setDepth(depth + 2);
-    objects.push(tier);
-
-    // 入场：从右 12px 滑入 + 淡入；出场：淡出后销毁。整组一个 until 到期即走。
-    for (const o of objects) o.setAlpha(0);
-    this.tweens.add({ targets: objects, alpha: 1, duration: 200, ease: 'Cubic.out' });
-    this.tweens.add({ targets: plate, x: left, duration: 200, ease: 'Cubic.out' });
-    this.activeToasts.push({ def, objects, until: this.time.now + TOAST_LIFE_MS, top });
-  }
-
-  /** 每帧（update 第一段，面板早退之前）：排队出票 + 到期退场。 */
-  private updateAchievementToasts(): void {
-    const now = this.time.now;
-    // 到期退场（倒序，splice 安全）。
-    let removed = false;
-    for (let i = this.activeToasts.length - 1; i >= 0; i--) {
-      const toast = this.activeToasts[i];
-      if (now < toast.until) continue;
-      this.activeToasts.splice(i, 1);
-      removed = true;
-      const objects = toast.objects;
-      this.tweens.add({
-        targets: objects,
-        alpha: 0,
-        duration: 240,
-        ease: 'Cubic.in',
-        onComplete: () => {
-          for (const o of objects) o.destroy();
-        },
-      });
-    }
-    // 退场后重排：队列中间走了一枚，后面的补上来——不然顶部永远空一格。
-    // 每条记着自己的 top，按新索引算差量，任意走法都不会算错。
-    if (removed) {
-      this.activeToasts.forEach((toast, i) => {
-        const top = TOAST_TOP + i * TOAST_PITCH;
-        const delta = top - toast.top;
-        if (delta === 0) return;
-        toast.top = top;
-        for (const o of toast.objects) {
-          this.tweens.add({ targets: o, y: o.y + delta, duration: 200, ease: 'Cubic.out' });
-        }
-      });
-    }
-    // 排队出票：同屏不满、队列有货、节流到期，才放下一枚。
-    if (this.achievementQueue.length > 0 && this.activeToasts.length < TOAST_MAX_VISIBLE && now >= this.nextToastAt) {
-      const def = this.achievementQueue.shift();
-      if (def) {
-        this.spawnAchievementToast(def);
-        this.nextToastAt = now + TOAST_STAGGER_MS;
-      }
-    }
-  }
-
-  /** 场景重启/退出：清掉还在场的 toast（字段初始化器不重跑，见 create 的注释）。 */
-  private clearAchievementToasts(): void {
-    for (const toast of this.activeToasts) for (const o of toast.objects) o.destroy();
-    this.activeToasts = [];
-    this.achievementQueue = [];
-    this.nextToastAt = 0;
+  emitAchievementEvent(event: AchievementEvent): string[] {
+    return this.achievements.emit(event);
   }
 
   private applyNightLighting(): void {
@@ -6254,7 +6102,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
         const recipe = getRecipe(entry.id as RecipeId);
         this.flash(`${recipe.kind === 'upgrade' ? '建造了' : '制作了'} ${recipe.displayName}（-${ACTION_COSTS.craft} 分钟）`);
         // AG-77：首次制作 / 四件武器全做。净化水不算「制作」（另一个分支）。
-        this.emitAchievementEvent({ type: 'item_crafted', recipeId: entry.id as string });
+        this.achievements.emit({ type: 'item_crafted', recipeId: entry.id as string });
         this.chargeTime(ACTION_COSTS.craft);
       } else {
         this.flash(result.reason);
@@ -6709,7 +6557,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   private openDialogue(npc: NpcDef): void {
     this.dialogueSessionSeq += 1;
     // AG-77：全 NPC 对话（每位只认第一次开口）。
-    this.emitAchievementEvent({ type: 'npc_talked', npcId: npc.id });
+    this.achievements.emit({ type: 'npc_talked', npcId: npc.id });
     this.dialogue = {
       npc: npc.id,
       level: 'main',
@@ -7892,7 +7740,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       playFx(this, 'collect-burst', bunkX, PLAYER_FEET_Y - 50, LIGHT_DEPTH);
       this.lootThisTrip += result.took.reduce((n, t) => n + t.quantity, 0);
       // AG-77：单次搜刮 3 件+（翻床垫与开箱同一口径）。
-      this.emitAchievementEvent({ type: 'loot_taken', count: result.took.reduce((n, t) => n + t.quantity, 0) });
+      this.achievements.emit({ type: 'loot_taken', count: result.took.reduce((n, t) => n + t.quantity, 0) });
       this.flash(`翻到 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${BUNK_SEARCH_COST} 分钟）`);
     } else if (result.full) {
       this.flash('背包已满：翻出来的东西放不下，先腾包');
@@ -7919,7 +7767,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.lootThisTrip += result.took.reduce((n, t) => n + t.quantity, 0);
     this.flash(`拆了床，得到 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${BUNK_DISMANTLE_COST} 分钟）`);
     // AG-77：累计拆床 10 张。
-    this.emitAchievementEvent({ type: 'bunk_dismantled' });
+    this.achievements.emit({ type: 'bunk_dismantled' });
     this.chargeTime(BUNK_DISMANTLE_COST);
   }
 
@@ -8398,7 +8246,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     if (step.kind === 'prevented') {
       this.flash('你守在屋里——楼道里的脚步声最终远了');
       // AG-77：守夜成功计数（小偷被守在屋里逼退）。
-      this.emitAchievementEvent({ type: 'night_watch_prevented' });
+      this.achievements.emit({ type: 'night_watch_prevented' });
       return;
     }
     // stolen：玩家不在家，什么被偷走了等回层/睡醒时由
@@ -8491,7 +8339,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       playFx(this, 'collect-burst', state.player.x + 10, PLAYER_FEET_Y - 50, LIGHT_DEPTH);
       this.lootThisTrip += result.took.reduce((n, t) => n + t.quantity, 0);
       // AG-77：单次搜刮 3 件+（一次开箱拿到几件，取历史最大值）。
-      this.emitAchievementEvent({ type: 'loot_taken', count: result.took.reduce((n, t) => n + t.quantity, 0) });
+      this.achievements.emit({ type: 'loot_taken', count: result.took.reduce((n, t) => n + t.quantity, 0) });
       this.flash(`获得 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${ACTION_COSTS.searchContainer} 分钟）`);
       this.chargeTime(ACTION_COSTS.searchContainer);
     }
@@ -8834,7 +8682,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.drawFloor();
     recordDepth(state);
     // AG-77：爬塔深度成就（乘电梯跨段时一次点亮途中全部里程碑）。
-    this.emitAchievementEvent({ type: 'floor_reached', floor: state.currentFloor });
+    this.achievements.emit({ type: 'floor_reached', floor: state.currentFloor });
     // A dwell event belongs to the floor it was rolled on; riding out of it is
     // the same escape that walking down the stairs is.
     if (state.worldEvents.activeEvent?.source === 'dwell') state.worldEvents.activeEvent = null;
@@ -8925,7 +8773,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // 裁决记录（merge ag-81）：AG-77 的成就事件与 AG-81 的统计记账是两套
     // 不同消费者的记录（成就判定 vs 本局统计/跨局纪录），并存。
     // AG-77：爬塔深度成就（楼梯落地与乘电梯同一口径）。
-    this.emitAchievementEvent({ type: 'floor_reached', floor: state.currentFloor });
+    this.achievements.emit({ type: 'floor_reached', floor: state.currentFloor });
     bumpStat(state, 'floorsClimbed'); // AG-81：爬梯次数（成功落地才算）
     noteFloorReached(state); // AG-81：最高层取历址最大（下楼不走低）
     const meta = loadMeta();
@@ -9162,7 +9010,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     syncMusic(getGame());
     // AG-77：toast 的出票与退场必须在面板早退之前——解锁可能发生在任何面板
     // 开着的时候（制作面板里做出第一件武器），那时世界模拟整段被跳过。
-    this.updateAchievementToasts();
+    this.achievements.update();
     // AG-26 / RC-01：统一触发器求值接线（AG-26 实现说明留给总控的那一处）。
     // triggers 模块的 import 副作用已完成启动注册；这里每帧求值，把「本 run
     // 曾经如此」的一次性事实（ev:*/st:*/goal:met/combat:active/stat:*/
@@ -9380,12 +9228,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.tickNightWatch();
     // AG-77：跨天结算「连续不缺水」。不走 tick.dayChanged 而对比 state.day——
     // 睡觉（ShelterSystem.finishNight）也跨天，那条路不经过这里的帧循环
-    // tick。flag 记的是刚过去这一天有没有见底，随后清零。
-    if (state.day !== this.lastAchievementDay) {
-      this.emitAchievementEvent({ type: 'day_end', dehydrated: this.thirstHitZero });
-      this.thirstHitZero = false;
-      this.lastAchievementDay = state.day;
-    }
+    // tick。flag 记的是刚过去这一天有没有见底，随后清零（对账在控制器内）。
+    this.achievements.noteDay(state.day);
     // B3-15: dwell pressure — the longer the player lingers on one floor, the
     // more likely the next roll is teeth. Runs after the night roll so a night
     // event already occupying the day's slot suppresses the prowler (an
@@ -9418,9 +9262,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // thirstHitZero 记账行并入。
     const hungry = state.player.hunger <= GAME_CONFIG.player.hungerMax * 0.25;
     const parched = state.player.thirst <= GAME_CONFIG.player.thirstMax * 0.25;
-    // AG-77：口渴见顶即记账（thirstStreak 的「当天缺水」判据）。零也要算——
-    // 归零那一帧就是见底，等它反弹就晚了。
-    if (state.player.thirst <= 0) this.thirstHitZero = true;
+    // AG-77：口渴见顶即记账（thirstStreak 的「当天缺水」判据，账在控制器）。
+    // 零也要算——归零那一帧就是见底，等它反弹就晚了。
+    if (state.player.thirst <= 0) this.achievements.noteThirstZero();
     const starving = hungry || parched;
     // A sprite left over from a previous scene is not a live fx: Phaser clears
     // .scene on destroy(). Treat it as absent — the old code quietly dropped

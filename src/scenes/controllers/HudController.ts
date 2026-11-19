@@ -13,9 +13,8 @@
 // Phaser 场景类型**——
 //   * 构造拿 host（HudHost：add 工厂/textures/viewSize/panelHit/createMarker/
 //     setPanelBox/assertPanelContent/fitHudLine/onUse/createStatRings——
-//     GameScene 天然满足）。STAT_BARS（四联圆环行规格）定义在本类，
-//     GameScene import 它注入 MonologueController 的状态卡——同一份数组
-//     对象，不复制数据。
+//     GameScene 天然满足）。STAT_BARS（四联圆环行规格）定义在本类
+//     （2026-11-19 起右下状态卡已拆除，不再外注 MonologueController）。
 //   * 共享面板渲染件（buildPanel/buildPanelHeader/buildPanelWell）第一参钉死
 //     Phaser.Scene——按 DialogueController 的 SharedPanelScene 先例从签名
 //     反推做唯一一处收窄，运行期 host 就是 GameScene 实例。
@@ -66,16 +65,15 @@ import type { ItemId } from '../../core/gameTypes';
 
 // ── 随迁的模块常量（原 GameScene.ts，逐字保留） ────────────────────────────
 
-/** 四联圆环一行读数的规格（label/key/icon 与 MonologueController 的状态卡
- *  同源；color 目前只作文档——圆环上色走 STAT_COLORS[key]，见 refreshStats）。 */
+/** 四联圆环一行读数的规格（color 目前只作文档——圆环上色走
+ *  STAT_COLORS[key]，见 refreshStats）。 */
 export type StatBarSpec = { key: 'hp' | 'hunger' | 'thirst' | 'energy'; label: string; color: number; icon: HudIconName };
 
 // Row pitch for the four HUD stat bars. 15px gives an 11px label plus a 7px bar
 // with breathing room; 13px was too cramped to read at a glance.
 //
 // 四联圆环的行规格（原 GameScene 467-472 行）。第 9 步起定义住在圆环的本家
-// （本类），GameScene import 它注入 MonologueController 的状态卡（同一份数组
-// 对象，不复制数据）。
+// （本类）。2026-11-19 起右下状态卡按用户裁决拆除，本数组只服务顶带圆环。
 export const STAT_BARS: StatBarSpec[] = [
   { key: 'hp', label: '生命', color: 0xe56d63, icon: 'cross' },
   { key: 'hunger', label: '饥饿', color: 0xf4b66a, icon: 'hunger' },

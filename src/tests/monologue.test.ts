@@ -18,10 +18,10 @@ import {
   type StatusPanelBalance,
 } from '../data/monologue';
 import { HUD_LAYOUT } from '../render/hudLayout';
-import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../core/design';
 
-// AG-67 单测：右下角色状态面板 + 角色自言自语。纯函数层（台词表、节流门、
-// 处境摘要、卡片车道契约），Phaser 渲染由 e2e（ag67-status.spec.ts）实测。
+// AG-67 单测：角色自言自语。纯函数层（台词表、节流门、处境摘要），Phaser
+// 渲染由 e2e（ag67-status.spec.ts）实测。2026-11-19 用户裁决拆除右下常驻
+// 状态卡后，卡片车道契约 describe 退役，AG-54 顶带守卫独立保留。
 
 const CFG = STATUS_PANEL_BALANCE;
 const VOICES: MonologueVoice[] = ['player', 'alin', 'xiaozhou'];
@@ -179,7 +179,9 @@ describe('AG-67 chooseMonologue (the anti-spam gate)', () => {
   });
 });
 
-describe('AG-67 statusSummaryLine (the card\'s one-liner)', () => {
+// statusSummaryLine 是纯函数（原状态卡摘要句的数据源）。卡已拆除，函数与
+// 契约测试保留——摘要文案表仍是独白台词体系的同源数据，未来面板可复用。
+describe('AG-67 statusSummaryLine (the situational one-liner)', () => {
   const full = { hp: 100, hunger: 80, thirst: 80, energy: 80, stress: 20 };
   const cfg = CFG;
 
@@ -220,38 +222,13 @@ describe('AG-67 statusSummaryLine (the card\'s one-liner)', () => {
   });
 });
 
-describe('AG-67 status card lane contract (hudLayout keys)', () => {
+// 原「AG-67 status card lane contract」describe 随卡退役（2026-11-19）：
+// statusCard*/statusRow*/statusSummaryCY 键已从 hudLayout 删除。其中与卡
+// 无关的 AG-54 顶带守卫独立保留如下。
+describe('AG-54 top plate lane guard (regression)', () => {
   const hud = HUD_LAYOUT;
-  const right = hud.statusCardX + hud.statusCardW;
-  const bottom = hud.statusCardY + hud.statusCardH;
 
-  it('hangs in the right-bottom lane, on canvas', () => {
-    // 与按钮行同一个 16px 右边距，不出画布
-    expect(right).toBe(DESIGN_WIDTH - 16);
-    expect(hud.statusCardX).toBeGreaterThan(0);
-    expect(bottom).toBeLessThanOrEqual(DESIGN_HEIGHT);
-  });
-
-  it('never prints through the lanes it shares the corner with', () => {
-    // 底边压在 feedback 车道上沿；按钮行（DESIGN_HEIGHT-56）与脚条都在下面
-    expect(bottom).toBe(hud.feedbackY);
-    expect(bottom).toBeLessThan(DESIGN_HEIGHT - 56);
-    // 顶边在顶部铆钉板（contextBottom）之下
-    expect(hud.statusCardY).toBeGreaterThan(hud.contextBottom);
-    // 与金币/分数段（row1Y..row1Y+53）不同带，不压钱
-    expect(hud.statusCardY).toBeGreaterThan(hud.row1Y + 53);
-  });
-
-  it('keeps the four stat rows and the summary inside the card', () => {
-    const lastRow = hud.statusRowFirstCY + 3 * hud.statusRowPitch;
-    expect(lastRow).toBeLessThan(bottom - 8);
-    expect(hud.statusSummaryCY).toBeGreaterThan(lastRow);
-    expect(hud.statusSummaryCY).toBeLessThan(bottom - 4);
-    // 行内：label + bar + value 不超出卡宽
-    expect(hud.statusRowBarX + hud.statusRowBarW).toBeLessThan(hud.statusCardW - 12);
-  });
-
-  it('leaves the top plate\'s own lanes untouched (AG-54 regression guard)', () => {
+  it('leaves the top plate\'s own lanes untouched', () => {
     expect(hud.statX + 3 * hud.statPitch + hud.statWidth).toBeLessThan(hud.moneyX);
     expect(hud.contextBottom).toBeLessThan(hud.feedbackY);
   });

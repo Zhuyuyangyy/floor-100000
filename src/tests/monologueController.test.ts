@@ -5,9 +5,12 @@
 // tick 的门控语义、模态后不speak、重启 reset、以及 seeded 选句在控制器层
 // 的确定性（同 seed 同脚本 → 同一串句子）。
 //
+// 2026-11-19 用户裁决：右下角「幸存者」常驻状态卡拆除，控制器只留独白
+// ticker。原「卡读数与 state 一致」test 改为反向守卫——build/tick 不得再
+// 产出任何卡件（hud-status-name/value/summary/头像）。
+//
 // 为什么能在 Node 下跑：控制器的 import 链无 Phaser 值导入（host 是结构面
-// 假件，drawHudPlate/drawStatBar/drawLine 只碰 Graphics 的 fillStyle/
-// fillRect/clear——假件全数桩掉）。
+// 假件；气泡只碰 Text 的 setName/setOrigin/setAlpha/destroy——假件全数桩掉）。
 
 import { describe, expect, it } from 'vitest';
 import type Phaser from 'phaser';
@@ -179,16 +182,9 @@ class FakeHost {
   }
 }
 
-const BARS = [
-  { key: 'hp', label: '生命' },
-  { key: 'hunger', label: '饥饿' },
-  { key: 'thirst', label: '口渴' },
-  { key: 'energy', label: '精力' },
-] as const;
-
 /** 建一个控制器并跑首建；state 已由调用方按剧本摆好。 */
 function boot(host: FakeHost): MonologueController {
-  const c = new MonologueController(host.asHost(), BARS);
+  const c = new MonologueController(host.asHost());
   c.build();
   return c;
 }
@@ -216,7 +212,7 @@ describe('AG-67 MonologueController（RC-03 拆分第 2 步）', () => {
     expect(host.clock.delayed[0]?.ms).toBe(2160);
   });
 
-  it('状态卡读数与真实 state 一致（名称/四值/摘要）', () => {
+  it('常驻状态卡已拆除：build/tick 不产出任何卡件（2026-11-19 用户裁决）', () => {
     startNewGame(4242);
     const s = getGame();
     s.player.hp = 37;
@@ -226,13 +222,13 @@ describe('AG-67 MonologueController（RC-03 拆分第 2 步）', () => {
     const host = new FakeHost();
     const c = boot(host);
     c.tick();
-    const byName = (n: string): FakeText | undefined => host.factory.texts.find((t) => t.name === n);
-    expect(byName('hud-status-name')?.text).toBe('幸存者');
-    expect(byName('hud-status-value-hp')?.text).toBe('37');
-    expect(byName('hud-status-value-hunger')?.text).toBe('44');
-    expect(byName('hud-status-value-thirst')?.text).toBe('88');
-    expect(byName('hud-status-value-energy')?.text).toBe('61');
-    expect(byName('hud-status-summary')?.text).toBe('状态尚可');
+    c.tick();
+    // 卡件（名称/四值/摘要/头像）一个都不许再出生；独白职责不受影响——
+    // 本剧本四项都高于阈值，连气泡也不该有。
+    const cardTexts = host.factory.texts.filter((t) => t.name.startsWith('hud-status-') && t.name !== 'hud-status-bubble');
+    expect(cardTexts, '右下状态卡已退役，不得再建卡件').toEqual([]);
+    expect(host.factory.images, '卡头像（walk sheet 裁剪）不再出生').toEqual([]);
+    expect(host.factory.texts.filter((t) => t.name === 'hud-status-bubble')).toEqual([]);
   });
 
   it('9s 总闸：间隔内的第二个处境只入队不出句', () => {
@@ -305,20 +301,20 @@ describe('AG-67 MonologueController（RC-03 拆分第 2 步）', () => {
     expect(bubbleOf(host)?.text.length).toBeGreaterThan(0);
   });
 
-  it('reset：卡件销毁、句数归零（场景重启惯例）', () => {
+  it('reset：气泡销毁、句数归零（场景重启惯例）', () => {
     startNewGame(4242);
     getGame().player.hp = 20;
     const host = new FakeHost();
     const c = boot(host);
     c.tick();
     expect(c.spokenCount).toBe(1);
-    const cardTexts = host.factory.texts.filter((t) => t.name.startsWith('hud-status'));
-    expect(cardTexts.length).toBeGreaterThan(0);
+    const bubbles = host.factory.texts.filter((t) => t.name === 'hud-status-bubble');
+    expect(bubbles.length).toBeGreaterThan(0);
 
     c.reset();
 
     expect(c.spokenCount).toBe(0);
-    expect(cardTexts.every((t) => t.destroyed)).toBe(true);
+    expect(bubbles.every((t) => t.destroyed)).toBe(true);
     expect(host.clock.events.length, '定时器建过一次（reset 走 remove，字段诚实）').toBe(1);
   });
 

@@ -72,36 +72,12 @@ export const HUD_LAYOUT = {
   // Environment chips: icon x positions, text 24px to their right.
   envChipX: [20, 300, 620, 900],
   hazardX: 1080,
-  // ── AG-67: the bottom-right character status card ───────────────────────
-  // A compact riveted card in the right-bottom lane: the picked survivor's
-  // avatar, the four survival stats as mini segmented bars with live numbers,
-  // and one line of situational summary derived from those numbers. The top
-  // plate already carries the four rings (AG-54), so this is deliberately NOT
-  // a second four-ring cluster — it is the character card, "who am I and how
-  // am I holding up", the money/score lane's counterpart at the other corner.
+  // ── AG-67 状态卡已退役（2026-11-19 用户裁决） ───────────────────────────
+  // 右下角「幸存者」常驻卡（头像 + 四迷你分段条 + 一句摘要）整块拆除：顶带
+  // 四圆环（AG-54）已经回答「各槽多满」，卡是同源数据的第二份读数，冗余。
+  // statusCard*/statusRow*/statusSummaryCY 键随之删除；右下 lane（376..556）
+  // 归还世界画面。独白气泡（hud-status-bubble，世界空间头顶飘字）不受影响。
   //
-  // The lane is pinned by its neighbours, not by taste: the card's bottom edge
-  // sits on feedbackY (556) so it never prints through the feedback lane or
-  // the bag-full warning (bagY 624), and its right edge takes the same 16px
-  // margin the HUD button row below it uses. hudLayout.test.ts's lane contract
-  // (contextBottom < feedbackY) is untouched — the card hangs under the plate,
-  // over the transient lanes, clear of the buttons at y 664.
-  statusCardX: DESIGN_WIDTH - 16 - 240,
-  statusCardY: 376,
-  statusCardW: 240,
-  statusCardH: 180,
-  /** Stat rows inside the card: label x, bar x/width/height, row pitch. */
-  statusRowLabelX: 12,
-  statusRowBarX: 52,
-  statusRowBarW: 96,
-  statusRowBarH: 8,
-  /** First row's centre, then pitch; the avatar/name header sits above. */
-  statusRowFirstCY: 448,
-  statusRowPitch: 23,
-  /** The summary line's centre, near the card's bottom. */
-  statusSummaryCY: 542,
-  // 裁决记录（merge ag-63）：两侧各自新增不冲突字段（AG-67 状态卡几何在右
-  // 下 lane 底 556，AG-63 debuff 标记在左脚注线上 668，无重叠），全部保留。
   // AG-63: 饥饿/干渴 debuff 的常驻小标记（身上绿光的名字）。它塞在两条既有
   // lane 之间的一根 25px 线：上是「背包已满」预警（bagY=624，盒高 31，底
   // 655），下是脚注条（DESIGN_HEIGHT - HUD_FOOT_H = 680）。中线 668 让这条
@@ -110,14 +86,11 @@ export const HUD_LAYOUT = {
   // 同一条左边缘，读起来像脚注条上面的状态行，而不是又一块新板子。
   debuffMarkX: 8,
   debuffMarkY: 668,
-  // 裁决记录（merge ag-80）：AG-80 的 FPS 计数器几何（右上腰 y 108）与
-  // AG-63 debuffMark（左脚注线 668）、AG-67 状态卡（右下 376..556）均无
-  // 重叠，两侧新增字段全部保留。
   // ── AG-80: the FPS counter (perf HUD) ─────────────────────────────────
   // 右上角逐个：顶板的三条横向车道（row1 钱币/分数、goalY 目标、
   // environmentY 环境 chips）都在 y ≤ 105，计数器右缘钉 12px 内边距、落在
-  // 顶板下沿（contextBottom 102）之下 6px——状态卡（statusCardY 376）之上
-  // 的整段右腰没有任何 HUD。默认不可见（F3 切换），不参与既有车道取证；
+  // 顶板下沿（contextBottom 102）之下 6px——整段右腰没有任何常驻 HUD
+  // （AG-67 状态卡已于 2026-11-19 拆除）。默认不可见（F3 切换），不参与既有车道取证；
   // 文字自带 0b0f12 底板（hud-feedback 同款读法），世界再亮也读得清。
   // 为什么不是 F 键：F 是 AG-50 的「楼梯口抄近路」快捷键，抢键会让玩家在
   // 梯口按一下计数器就付一笔金子。调试覆盖层的通用键位是 F3。
@@ -141,8 +114,8 @@ export const HUD_LAYOUT = {
 //   * height 48 —— 20px 文案的线盒是 25px（fontLineBox），上下各留 11/12px；
 //     drawHudPlate 的四角铆钉落在板内 8 与 h-9=39 两行。
 //   * 板顶 672 = DESIGN_HEIGHT - 48：背包警告文案底约 655（hudLayout.spec.ts
-//     钉的 bagY+52<680 车道不变），状态卡底 556 更在其上，世界可读区（角色
-//     居中在屏高 360 附近）不相交。
+//     钉的 bagY+52<680 车道不变），世界可读区（角色居中在屏高 360 附近）
+//     不相交。
 export const NAV_BAR = {
   /** 板高，下缘钉在设计画布底边（DESIGN_HEIGHT）。 */
   height: 48,
@@ -183,7 +156,7 @@ export function hudClockLabel(day: number, minute: number): string {
 // 中央文字面板因此整块拆除，换成底部一条三个大按钮的动作条；战斗信息
 // （掉血/未命中/格挡）走角色头顶飘字，日志降级成左下角三行半透明小字。
 //
-// 硬边界（导航条 AG-71 板顶 672，bagY 警告车道 624，状态卡底 556）：
+// 硬边界（导航条 AG-71 板顶 672，bagY 警告车道 624）：
 //   * 板体 y 604..656：底边 656 距导航条顶 672 留 16px 净空，距 bagY
 //     警告文本顶 624 有 20px——x 上也错开（见下），两者永不同框；
 //   * 三个按钮等宽 200、间距 16，总宽 632，居中（左缘 combatBarX()）；

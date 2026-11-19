@@ -118,7 +118,7 @@ import { DialogueController, type DialogueHost } from './controllers/DialogueCon
 // buildHud 编排与公开委托面。BAG_BALANCE 随迁出后经此 re-export——
 // bagPanel.test.ts 的 import 路径（'../scenes/GameScene'）不变（同第 7 步
 // combatWeaponLabel 的先例）。
-import { HudController, STAT_BARS } from './controllers/HudController';
+import { HudController } from './controllers/HudController';
 export { BAG_BALANCE, type BagBalance } from './controllers/HudController';
 // RC-03 拆分第 10 步（设计文档最后一步）：交互逻辑本体（床铺/搜刮挖掘/阻碍物/
 // 墙饰特写/入夜面板/夜间安排/付费捷径/容器邻近判定）在
@@ -443,8 +443,8 @@ const WANDERER_FLEE_SAFE_DISTANCE = 280;
 const WANDERER_FLEE_EXIT_MARGIN = 24;
 
 // STAT_BARS（四联圆环行规格）随 HUD 带迁入 HudController（RC-03 拆分第 9
-// 步）——定义住在圆环的本家，本文件 import 它注入 MonologueController 的
-// 状态卡（同一份数组对象，不复制数据）。
+// 步）——定义住在圆环的本家。（2026-11-19 起 MonologueController 的右下
+// 状态卡已按用户裁决拆除，不再注入这份数组。）
 
 // Body heat gets its own readout rather than a fifth bar: it is the one stat a
 // floor owns, so it reads as "where you are" as much as "how you are". The bar
@@ -789,14 +789,13 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   // OVERHAUL: the day's objective and the run's score, top-right; the low-HP
   // vignette; the environment row's four chips; the standing bag-full warning
   // —— 全部随 HUD 带迁入 HudController（RC-03 拆分第 9 步）。
-  // ── AG-67: the bottom-right character card + the monologue ticker ──────
-  // RC-03 拆分第 2 步：卡片件/气泡/ticker 状态全在 controllers/Monologue-
-  // Controller.ts（plain TS 类，Node 可单测）。字段初始化器不随场景重启重跑
-  // ——buildHud 里 monologue.reset() 先毁后建（旧代码 statusCard*/monologue*
-  // 字段组的重置惯例）。STAT_BARS 注入：行规格与 HUD 圆环同源，第 9 步起
-  // 定义住在 HudController（圆环的本家），这里 import 同一份数组注入，
-  // 不复制数据。
-  private readonly monologue = new MonologueController(this, STAT_BARS);
+  // ── AG-67: the monologue ticker ────────────────────────────────────────
+  // RC-03 拆分第 2 步：气泡/ticker 状态全在 controllers/MonologueController.ts
+  // （plain TS 类，Node 可单测）。字段初始化器不随场景重启重跑——buildHud 里
+  // monologue.reset() 先毁后建（旧代码 monologue* 字段组的重置惯例）。
+  // 2026-11-19 用户裁决：右下角「幸存者」常驻状态卡拆除（与顶带四圆环同源
+  // 冗余），控制器只留独白职责，STAT_BARS 注入随之取消。
+  private readonly monologue = new MonologueController(this);
   // ── AG-80: 性能层（RC-03 拆分第 4 步） ───────────────────────────────────
   // 飘字池/帧预算守卫/FPS 计数器/降级边沿四样全在 PerfController（plain TS
   // 类，Node 可单测），场景只持控制器本体：init() 先毁再建（场景重启不清
@@ -3239,11 +3238,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // 这个状态对象留场景——世界链逐帧写它，控制器经 worldHintText() 读。
     this.navBar.build();
 
-    // ── AG-67: the bottom-right character card + the monologue ticker ────
-    // Built last, so the card's lane is measured against the FINISHED hud:
-    // money lane, nav bar (see render/hudLayout.ts statusCard*). 拆分第 2 步
-    // 后卡片与循环 ticker（含定时器本身）都建在 MonologueController 里——
-    // tick 周期与门控同源，不拆半个 ticker 在场景里。
+    // ── AG-67: the monologue ticker ──────────────────────────────────────
+    // Built last, alongside the FINISHED hud. 拆分第 2 步后循环 ticker（含
+    // 定时器本身）建在 MonologueController 里——tick 周期与门控同源，不拆
+    // 半个 ticker 在场景里。（右下角状态卡已于 2026-11-19 按用户裁决拆除。）
     this.monologue.build();
   }
 

@@ -28,8 +28,6 @@ describe('AG-71 bottom navigation bar geometry', () => {
     // 下面 17px（hudLayout.spec.ts 钉的 bagY+52<680 旧脚注车道不变）。
     const bagBottom = HUD_LAYOUT.bagY + fontLineBox(TYPE.caption) + 6;
     expect(bagBottom).toBeLessThan(top);
-    // 状态卡底 556 更在其上。
-    expect(HUD_LAYOUT.statusCardY + HUD_LAYOUT.statusCardH).toBeLessThan(top);
     // 角色居中在屏高 360 附近，世界可读区（一层楼高 200 世界像素 @zoom0.5
     // ≈ 屏上 280..380）与板不相交。
     expect(top).toBeGreaterThan(DESIGN_HEIGHT / 2 + 100);

@@ -9,7 +9,7 @@ import { playSfx } from '../render/audio';
 // AG-74：BGM 音乐层。菜单是音频的入口——这里惰性建 AudioContext（suspended
 // 态诞生不违规），首次点击/按键时 resume 并播主菜单 BGM；离开菜单（SHUTDOWN）
 // 静默。游戏内音乐由 GameScene 的 startFloorMusic 接管。
-import { startMenuBgm, stopBgm } from '../systems/AudioSystem';
+import { refreshBgmBusGain, startMenuBgm, stopBgm } from '../systems/AudioSystem';
 import {
   LANGUAGE_LABELS,
   TEXT_SPEEDS,
@@ -852,6 +852,9 @@ class SettingsPanelView {
       const next = Phaser.Math.Clamp(current + delta * VOLUME_STEP, 0, 100);
       if (next === current) return;
       updateSettings(this.selected === 0 ? { sfxVolume: next } : { bgmVolume: next });
+      // BUG-AG127-01：BGM 行调完即时刷总线增益。标题屏没有每帧 syncMusic，
+      // 不刷的话玩家听不到变化（SFX 侧 playSfx 每次现读设置，天然即时）。
+      if (this.selected === 1) refreshBgmBusGain();
       changed = true;
     } else if (this.selected === 2) {
       updateSettings({ screenShake: !settings.screenShake });

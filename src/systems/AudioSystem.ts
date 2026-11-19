@@ -951,6 +951,21 @@ export function syncMusic(host: MusicHost): void {
   dispatch({ type: 'context', ctx: contextOf(host) });
 }
 
+/**
+ * 只把 BGM 总线增益刷到当前设置值，不碰曲目/上下文/调度器。
+ *
+ * BUG-AG127-01 修复：标题屏设置面板调 bgmVolume 时，getSettings()/localStorage
+ * 立即更新，但总线增益卡死——因为 bus.gain 只在 dispatch→syncFromState 刷新，
+ * 而 MenuScene.update 不驱动任何 dispatch（对比 GameScene 每帧 syncMusic）。
+ * 不能直接调 syncMusic：resolveTrackId 没有 'menu' 分支，会把菜单曲误切成
+ * 'floor'。本入口只动 gain.value，曲目/播放意图一概不碰，标题屏调音量即时
+ * 生效且不换曲。GameScene 共享 SettingsPanelView 也调它——与每帧 syncMusic
+ * 幂等叠加，无副作用。bus 未建（音频未初始化）时 no-op。
+ */
+export function refreshBgmBusGain(): void {
+  if (bus) bus.gain.value = volumeGain(readBgmVolume());
+}
+
 /** 停掉音乐（场景销毁）。保留收音机截止时间——回来时按上下文重解。 */
 export function stopBgm(): void {
   dispatch({ type: 'stop' });

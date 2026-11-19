@@ -121,6 +121,14 @@ async function combatState(page: Page): Promise<{ inCombat: boolean; monsterHp: 
   });
 }
 
+/** 战斗日志末尾两行——回合结算的权威记录（ag70 ③ 同款判据）。 */
+async function combatLogTail(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const s = window.__PHASER_SESSION__?.getState() as unknown as { combat?: { log: string[] } } | null;
+    return s?.combat?.log.slice(-2).join(' | ') ?? '';
+  });
+}
+
 async function waitForScene(page: Page, key: string): Promise<void> {
   await page.waitForFunction(
     (k) => !!window.__PHASER_GAME__?.scene.getScenes(true).some((s) => s.scene.key === k),
@@ -202,6 +210,20 @@ function summarize(frames: JuiceFrame[]): {
   return s;
 }
 
+/**
+ * 「发生了且恢复了」判定（CI 慢环境适配，run 44389231159）：
+ * juice 的计时器按真实帧 delta 衰减（src/render/juice.ts 的 update），CI 慢帧
+ * 下 tracer 的第一个采样帧时已衰减过半——实测 maxHitstop 71.67ms（large 设计
+ * 120ms）、maxFlash 21.67ms（设计 70ms），而 minTimeScale=0（模拟真被闸冻）、
+ * maxTrauma 0.90（large 档真触了）——是时长缩放不是功能缺失。e2e 因此守性质：
+ * fired 条件出现过（>0），且其后有归零/复位的帧（最终恢复）。设计值的精确
+ * 时长由单测 juice.test.ts 守，这里只证「这一下真的发生了且收尾了」。
+ */
+function firedAndRecovered(frames: JuiceFrame[], fired: (f: JuiceFrame) => boolean): boolean {
+  const at = frames.findIndex(fired);
+  return at >= 0 && frames.slice(at + 1).some((f) => !fired(f));
+}
+
 test('AG-91 juice：命中/受击/击杀三档反馈 + 帧序列截图（seed 42，2 层伏击）', async ({ page }) => {
   test.setTimeout(240_000);
   const errors: string[] = [];
@@ -214,6 +236,45 @@ test('AG-91 juice：命中/受击/击杀三档反馈 + 帧序列截图（seed 42
   await installJuiceTracer(page);
   await openAmbush(page);
   await page.waitForTimeout(1200); // 滑步 + 偷袭演出落地
+
+  // ── ⓪ medium 档（玩家受击）：先格挡一回合，让怪物反击命中 ──
+  // 为什么需要这一回合：本地 trace 实证（evidence.json 的 flashFrames），
+  // seed 42 这只怪物在「玩家攻击」回合里的反击全部未命中（每回合 rng 按
+  // combat-turn-N 独立走 seed，纯函数确定），整个击杀循环只有 small+large
+  // 两档——旧断言 `flash>=50 && trauma<1` 其实是被 large 击杀的首帧
+  // （本地 53.33ms/CI 21.67ms）误满足的，「medium 发生过」从未被真证过。
+  // 格挡回合换 rng 消耗序（只掷怪物一击），seed 42 的 turn-1 格挡确定命
+  // 中——ag70 ③ 同款机位在 run 44389231159 的 CI 日志里走的正是
+  // 「击中你」分支。玩家受击 = medium 档（0.4 trauma + 50ms 顿帧 + 闪白，
+  // CombatController.ts:935），三档自此都有真实事件。
+  await page.keyboard.press('ArrowDown'); // 格挡：本回合不出手，挨一下
+  await page.waitForTimeout(120);
+  await page.keyboard.press('Enter');
+  // 等回合结算（turn 推进）再读日志——反击命中是 medium 事件发生的权威判据
+  // （轮询真实条件，不用固定 sleep 赌演出时长）。
+  await page.waitForFunction(
+    () => ((window.__PHASER_SESSION__?.getState() as { combat?: { turn: number } } | null)?.combat?.turn ?? 0) >= 2,
+    undefined,
+    { timeout: 15_000 },
+  );
+  expect(await combatLogTail(page), 'seed 42 格挡回合怪物应反击命中（medium 档事件源）').toContain('击中你');
+  // 光标归位：medium 段按了 ArrowDown 选「格挡」，动作条光标停在 index 1——
+  // 击杀循环的 Enter 会继续执行格挡（日志「你架起姿态格挡，本回合不出手」，
+  // 怪永远不死）。按 ArrowUp 回「攻击」（index 0）再进 small 档取证。
+  await page.keyboard.press('ArrowUp');
+  await page.waitForTimeout(120);
+  // 等受击飘字退场（floatText 900ms 寿命，CI 慢环境里对应的 wall-time 更长）
+  // 再进 small 档取证——轮询真实条件，不用固定 sleep 赌它一定死了。
+  await page.waitForFunction(
+    () => {
+      const scene = (window.__PHASER_GAME__ as unknown as {
+        scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean }> } } | null };
+      }).scene.getScene('Game');
+      return !(scene?.children.list ?? []).some((c) => c.type === 'Text' && c.visible && /^-\d+$/.test(c.text ?? ''));
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
 
   // ── ① 普通命中（small）：Enter 攻击，180ms 帧截飘字 + 击退同帧 ──
   await page.keyboard.press('Enter');
@@ -237,7 +298,12 @@ test('AG-91 juice：命中/受击/击杀三档反馈 + 帧序列截图（seed 42
     }
   });
   let killAt = -1;
-  for (let round = 0; round < 16; round++) {
+  // 循环上限 100 而非 40：开打时的饥饿 debuff（seed 42 凌晨路径饥饿掉到
+  // 阈值以下，「饿虚弱资格栏半回合不出手」）让前段攻击半速——本地实测
+  // 43 回合才击杀（40 轮不够）；debuff 是路径耗时的时序耦合（走到问号点
+  // 慢的那次饥饿更低），不是每跑都触发。100 轮对无 debuff 的 4.5 回合和
+  // 有 debuff 的半速都有余量，240s 的 test timeout 也罩得住。
+  for (let round = 0; round < 100; round++) {
     const before = await combatState(page);
     if (!before.inCombat) break;
     shotFrames.length = 0;
@@ -250,7 +316,8 @@ test('AG-91 juice：命中/受击/击杀三档反馈 + 帧序列截图（seed 42
     if (now.monsterHp === 0) { killAt = round; break; }
     await page.waitForTimeout(320);
   }
-  expect(killAt, 'the fight reaches a kill within 16 rounds').toBeGreaterThanOrEqual(0);
+  expect(killAt, 'the fight reaches a kill within 100 rounds').toBeGreaterThanOrEqual(0);
+  console.log(`[ag91] killAt round: ${killAt}`);
 
   // 帧序列落盘（仓库外）：screencast 逐帧 + page.screenshot 补两个稳帧。
   const FRAMES = `${OUT}/kill-frames`;
@@ -268,34 +335,46 @@ test('AG-91 juice：命中/受击/击杀三档反馈 + 帧序列截图（seed 42
 
   // 量化取证落盘（仓库外 QA 证据目录）：汇总 + 击杀窗口逐帧明细。
   const killWindow = frames.filter((f) => f.trauma > 0.5).slice(0, 24);
+  // 闪白燃过的全部帧（medium/large 两档都产 flash）——CI 慢环境对账用：
+  // 慢帧下闪白只观测到设计值的零头（run 44389231159：21.67ms vs 70ms），
+  // 明细帧能分开「medium 燃过但短」与「medium 没发生」。
+  const flashFrames = frames.filter((f) => f.flash > 0);
   writeFileSync(
     `${OUT}/evidence.json`,
-    JSON.stringify({ summary: s, killWindow, totalFrames: frames.length }, null, 2),
+    JSON.stringify({ summary: s, killWindow, flashFrames, totalFrames: frames.length }, null, 2),
   );
   console.log(`[ag91] juice trace: ${JSON.stringify(s)}`);
   console.log(`[ag91] kill window (trauma>0.5): ${JSON.stringify(killWindow)}`);
+  console.log(`[ag91] flash frames (flash>0): ${JSON.stringify(flashFrames)}`);
 
   // ── 断言：三档全部落地 ──
-  // large（击杀）：满 trauma + 120ms 顿帧 + 70ms 闪白 + 180ms 缩放。
+  // large（击杀）：满 trauma + 顿帧 + 闪白 + squash & stretch。
   // trauma 峰值允许一帧 rAF（~50ms）的线性衰减误差：impact 同步把 trauma
   // 钉到 1.0，第一个采样帧时已按 2 次/秒衰减到 ≈0.9+，单测里钉的是精确值
   // （juice.test.ts），这里证的是「满幅那一下真的发生了」。
   expect(s.maxTrauma, 'large tier trauma').toBeGreaterThan(0.9);
-  expect(s.maxHitstop, 'large tier hitstop').toBeGreaterThanOrEqual(100);
-  expect(s.maxFlash, 'large tier flash timer').toBeGreaterThanOrEqual(50);
-  expect(s.maxScale, 'large tier squash timer').toBeGreaterThanOrEqual(100);
+  // CI 慢环境适配（run 44389231159 trace：maxHitstop 71.67ms vs 设计 120ms、
+  // maxFlash 21.67ms vs 设计 70ms、maxScale 131.67ms vs 设计 180ms）：计时器
+  // 按真实帧 delta 衰减，慢帧下首个采样帧已衰减过半，「时长 ≥设计值」会把
+  // 慢环境误判成功能缺失。改性质断言——发生了（>0）且最终恢复（计时器归零 /
+  // timeScale 回 1），依据与数字见 firedAndRecovered 注释。
+  expect(firedAndRecovered(frames, (f) => f.hitstop > 0), 'large tier hitstop fired and recovered').toBe(true);
+  expect(firedAndRecovered(frames, (f) => f.flash > 0), 'large tier flash fired and recovered').toBe(true);
+  expect(firedAndRecovered(frames, (f) => f.scale > 0), 'large tier squash fired and recovered').toBe(true);
   // Phaser 自己的 Flash 效果真在跑（alpha 从 1 褪到 0）——不是只有计时器。
   expect(s.maxFxFlash, 'phaser flashEffect alpha').toBeGreaterThan(0);
-  // 顿帧可观测：tweens.timeScale 被闸到 0（冻结模拟）。
-  expect(s.minTimeScale, 'hitstop freezes tweens').toBe(0);
+  // 顿帧可观测：tweens.timeScale 被闸到 0（冻结模拟）且随后回 1。
+  expect(firedAndRecovered(frames, (f) => f.ts === 0), 'hitstop freezes tweens and thaws').toBe(true);
   // 震屏：偏移非零且有界（maxShakePx 12 × 强度 0.7 = 8.4）。
   expect(s.nonzeroOffsetFrames, 'camera offset frames').toBeGreaterThan(3);
   expect(s.maxAbsOffset, 'camera offset bound').toBeLessThanOrEqual(12 * 0.7 + 0.01);
   // small（命中）：非零帧里存在低 trauma 段（0.15 起步震）——由飘字帧佐证。
   expect(floater, 'damage number on the hit frame').toMatch(/^(-\d+|未命中)$/);
-  // medium（受击）：伏击偷袭或敌人反击命中过——闪白计时器到过 70ms，
-  // 且 trauma 未满（区别于击杀的 large 闪白）。
-  const midFlash = frames.filter((f) => f.flash >= 50 && f.trauma < 1).length;
+  // medium（受击）：伏击偷袭或敌人反击命中过——闪白计时器燃过（>0）且
+  // trauma 停在 medium 量级（<0.7，区别于击杀 large 的 ≈0.9 首帧）。
+  // CI 慢环境适配：旧阈值 flash>=50ms 在 CI 上只观测到 21.67ms（设计 70ms），
+  // 会把慢帧误判成「medium 没发生」；同事件同 seed 下它确实燃过，只是短。
+  const midFlash = frames.filter((f) => f.flash > 0 && f.trauma < 0.7).length;
   expect(midFlash, 'medium tier flash observed (ambush/counter hit)').toBeGreaterThan(0);
 
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
@@ -336,7 +415,11 @@ test('AG-91 juice 无障碍：震屏总闸关闭时偏移恒 0，顿帧照常', 
   expect(s.nonzeroOffsetFrames).toBe(0);
   // 但打击节奏反馈不关：顿帧仍然发生过（trauma 也照常累计到满幅附近，
   // 容一帧 rAF 的衰减误差，同见测试①的注释）。
-  expect(s.maxHitstop, 'hitstop still fires').toBeGreaterThanOrEqual(100);
+  // CI 慢环境适配（run 44389231159：maxHitstop 73.34ms vs 旧阈值 100ms）：
+  // 「时长 ≥设计值」在慢帧上误判，改性质——顿帧发生了（>0）、模拟被闸冻
+  // （timeScale 到 0）且随后恢复（回 1）；精确时长由 juice.test.ts 守。
+  expect(firedAndRecovered(frames, (f) => f.hitstop > 0), 'hitstop still fires and recovers').toBe(true);
+  expect(firedAndRecovered(frames, (f) => f.ts === 0), 'hitstop freezes tweens and thaws').toBe(true);
   expect(s.maxTrauma, 'trauma still accrues').toBeGreaterThan(0.9);
 
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);

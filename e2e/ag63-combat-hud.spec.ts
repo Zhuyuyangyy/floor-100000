@@ -234,8 +234,11 @@ test('AG-63-2: 绿光有名字了——≤25% 闪一次、左下角常驻、恢�
   expect(mark!.y + mark!.height, '标记不压脚注条').toBeLessThanOrEqual(hintBound!.y);
 
   // ── 2. 只提示一次：flash 1600ms 后清空，且阈值内不再刷 ──
-  await page.waitForTimeout(2200);
-  expect(await hudText(page, 'hud-feedback'), 'flash 应已清空').toBe('');
+  // CI 慢环境适配（run 44389231159：等 2200ms 后 flash 仍是「饥肠辘辘……」）：
+  // flash 驻留按帧 delta 计时，CI 慢帧下 1600ms 游戏时间被拉长到更长真实
+  // 时间——固定 2200ms 不够。改轮询真实条件（清空为止，6s 上限罩慢环境），
+  // 「只提示一次」的语义不变：清空后不再刷。
+  await expect.poll(async () => hudText(page, 'hud-feedback'), { timeout: 6000 }).toBe('');
   await page.waitForTimeout(1500);
   expect(await hudText(page, 'hud-feedback'), '阈值内不重复刷').toBe('');
   expect((await allTexts(page)).find((o) => o.name === 'hud-debuff-mark')!.visible, '阈值内标记常驻').toBe(true);

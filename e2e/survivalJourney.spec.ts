@@ -91,6 +91,9 @@ test.describe('B3-02 full survival journey', () => {
     const dir = targetX < from ? 'ArrowLeft' : 'ArrowRight';
     await page.keyboard.down(dir);
     try {
+      // CI 慢环境适配（run 44389231159：40s 走不到目标 X）：慢帧下位移慢+
+      // AG-66 阻碍物/遭遇战会中断行走，40s 在 CI 容器不够。放大到 90s
+      // （test timeout 600s 罩得住；本机 40s 内到达的路径不受影响）。
       await page.waitForFunction(
         ({ t, d }) => {
           const s = window.__PHASER_SESSION__?.getState();
@@ -98,7 +101,7 @@ test.describe('B3-02 full survival journey', () => {
           return d === 'ArrowLeft' ? s.player.x <= t : s.player.x >= t;
         },
         { t: targetX, d: dir },
-        { timeout: 40_000 },
+        { timeout: 90_000 },
       );
     } finally {
       await page.keyboard.up(dir);

@@ -284,12 +284,23 @@ test('② 点攻击：挥击 + 闪白 + 击退 + 掉血飘字同帧', async ({ p
   // 页面内 rAF 采样器会被本 test 自己的截图/评估往返饿死（见 sampleMonsterX）。
   const xs: number[] = [before.monsterX];
   let floater: string | null = '';
+  let floaterShot = false;
   for (let i = 1; i <= 24; i++) {
     await page.waitForTimeout(25);
     xs.push(await monsterViewX(page));
-    if (i === 7) {
-      floater = await probeFloater(page);
-      await page.screenshot({ path: 'output/ag70/02-attack.png' });
+    // CI 慢环境适配（run 44389231159：单点 i===7 读到 null）：攻击帧的飘字
+    // 在慢帧下（顿帧+滑步 tween 拉长）落点漂移，175ms 单点采样会整个错过。
+    // 改窗口轮询——600ms 内任何一步读到非空飘字即收（攻击帧必在窗口内），
+    // 截图仍取第一次读到的帧（保证 floater 与截图同帧）。
+    if (floater === '' || floater === null) {
+      const f = await probeFloater(page);
+      if (f) {
+        floater = f;
+        if (!floaterShot) {
+          await page.screenshot({ path: 'output/ag70/02-attack.png' });
+          floaterShot = true;
+        }
+      }
     }
   }
   const min = Math.min(...xs);
@@ -332,13 +343,26 @@ test('③ 敌人反击：前冲 + 受伤 + 震屏 + 掉血飘字', async ({ page
   // 截图落在前冲到位的半程。
   const xs: number[] = [spotX];
   let floater: string | null = '';
-  for (let i = 1; i <= 24; i++) {
+  let floaterShot = false;
+  // CI 慢环境适配（run 44389231159：600ms 窗口 min=spot，前冲整体错过）：
+  // 回合结算动画在慢帧下整体后移，前冲 130ms 窗口落在采样窗外的概率不低。
+  // 窗口 24→40 步（1s）罩住慢环境的结算延迟；floater 同 ② 改窗口轮询。
+  for (let i = 1; i <= 40; i++) {
     await page.waitForTimeout(25);
     xs.push(await monsterViewX(page));
-    if (i === 5) floater = await probeFloater(page);
+    if ((floater === '' || floater === null) && i >= 5) {
+      const f = await probeFloater(page);
+      if (f) {
+        floater = f;
+        if (!floaterShot) {
+          await page.screenshot({ path: 'output/ag70/03-counter.png' });
+          floaterShot = true;
+        }
+      }
+    }
   }
+  if (!floaterShot) await page.screenshot({ path: 'output/ag70/03-counter.png' });
   const min = Math.min(...xs);
-  await page.screenshot({ path: 'output/ag70/03-counter.png' });
   await page.waitForTimeout(400);
 
   const after = await probeStage(page);

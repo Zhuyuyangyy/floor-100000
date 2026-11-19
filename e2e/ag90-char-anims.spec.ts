@@ -66,6 +66,33 @@ async function readTrace(page: Page): Promise<AnimSample[]> {
   });
 }
 
+/**
+ * CI 慢环境适配（run 44389231159）：①/⑥ 原来用固定 sleep 赌「采样窗口一定
+ * 走得完一轮 GIF」——CI 上 2400ms 只采到 idle 的 0,1 两帧（1000ms/帧的两帧
+ * 循环没走完一轮）、die 只采到 0,1（第三帧在 1800ms game-time 才出现，慢环境
+ * 里 2400ms wall 走不到）。固定窗口在快机器上绰绰有余、在 CI 容器里差几秒，
+ * 是窗口问题不是功能问题（三档 GIF 都在播，只是短）。
+ * 改法：轮询真实条件——页内 trace 里该 key 的去重帧序列长度达标（一轮循环 =
+ * 长度 ≥3：0→1→0；die 三帧 = 0→1→2），tracer 保持运行，收样仍由 readTrace 做。
+ * timeout 15s：一轮循环 2s game-time，15s ≈ 7 轮余量，CI 再慢也够。
+ */
+async function waitForTraceFrameCount(page: Page, key: string, min: number, timeout = 15_000): Promise<void> {
+  await page.waitForFunction(
+    ({ k, n }) => {
+      const w = (window as unknown as { __ag90Trace?: { samples: AnimSample[] } }).__ag90Trace;
+      if (!w) return false;
+      const seen: number[] = [];
+      for (const s of w.samples) {
+        if (s.key !== k) continue;
+        if (seen.length === 0 || seen[seen.length - 1] !== s.frame) seen.push(s.frame);
+      }
+      return seen.length >= n;
+    },
+    { k: key, n: min },
+    { timeout },
+  );
+}
+
 /** 记录器里某个动画 key 出现过的帧号序列（按出现顺序去重相邻项）。 */
 function framesOf(samples: AnimSample[], key: string): number[] {
   const out: number[] = [];
@@ -189,12 +216,16 @@ test('① 世界待机：idle GIF 两帧循环真的在走', async ({ page }) =>
 
   await startGame(page);
   await installAnimTracer(page);
-  await page.waitForTimeout(2400); // 两轮多一点的 2s 循环
+  // CI 慢环境适配（run 44389231159：固定 2400ms 在 CI 上只采到 0,1 两帧）：
+  // 轮询「去重帧数 ≥3」这个真实条件（= 至少走完一轮 0→1→0），见
+  // waitForTraceFrameCount 注释。功能断言不变：贴图 key、两帧集合、在播。
+  await waitForTraceFrameCount(page, 'idle-player', 3);
 
   const samples = await readTrace(page);
   const idleFrames = framesOf(samples, 'idle-player');
   expect(texturesOf(samples, 'idle-player'), 'idle 播在 GIF 待机图集上').toEqual(['char-anim-player-idle']);
-  // 1000ms/帧的两帧循环：2400ms 里至少走完一轮（0 -> 1 -> 0）。
+  // 1000ms/帧的两帧循环：至少走完一轮（0 -> 1 -> 0）才算「在走」——
+  // 走完一轮由 waitForTraceFrameCount 轮询保证（CI 慢环境适配），这里钉结果。
   expect(idleFrames.length, `idle frames over time: ${idleFrames.join(',')}`).toBeGreaterThanOrEqual(3);
   expect(new Set(idleFrames)).toEqual(new Set([0, 1]));
 
@@ -364,11 +395,20 @@ test('⑥ 死亡：die GIF 倒地播完才切结局卡', async ({ page }) => {
   );
   // GIF 3x900ms：第三帧（倒地）在 1.8s 后——2.4s 处截图落在倒地姿势上，
   // 且此时结局卡还没切（切场在 2700+100ms）。
+  // CI 慢环境适配：game-time 在慢机器上落后于 wall-time，2400ms wall 处离
+  // 切场（2800ms game-time）只更远不会更近，中段探针反而更稳；die-player
+  // 这个 key 在整个 clip 内不变，探的是「倒地帧停住、没被 walk/idle 抢回」。
   await page.waitForTimeout(2400);
   const mid = await probePlayer(page);
   await page.screenshot({ path: 'output/ag90/06-world-die.png' });
   expect(mid.key, '倒地帧停住，未被 walk/idle 挑选抢回').toBe('die-player');
   expect(mid.textureKey).toBe('char-anim-player-die');
+
+  // CI 慢环境适配（run 44389231159：固定窗口收样只拿到 [0,1]，第三帧在
+  // 1800ms game-time 才演到，慢环境里 2400ms wall 走不到）：轮询 trace 出现
+  // 第三帧再收样——GIF 三帧确实播完了，只是 CI 上演得慢（功能没问题，
+  // 是窗口问题）。见 waitForTraceFrameCount 注释。
+  await waitForTraceFrameCount(page, 'die-player', 3);
 
   const samples = await readTrace(page);
   expect(texturesOf(samples, 'die-player')).toEqual(['char-anim-player-die']);

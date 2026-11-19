@@ -233,7 +233,10 @@ describe('stair climb camera (AG-50)', () => {
     // 直接把 standScrollY 定义成 PLAYER_FEET_Y - viewH/2（follow 固定点本身），
     // 同一个修复由两路独立落地，centreY 常量因此删除。断言改钉 standScrollY 的
     // 定义与 tween 终点——语义不变：落地点 = 玩家居中的 follow 固定点。
-    expect(SCENE_SRC).toContain('const standScrollY = PLAYER_FEET_Y - viewH / 2;');
+    // 2026-11-20 家区剖面：standScrollY 带 homeBelow 分支（家区脚线 45% 高，
+    // 非家区仍是居中 viewH/2）——断言钉两个分支都在，且 tween 终点仍是 toY。
+    expect(SCENE_SRC).toContain('PLAYER_FEET_Y - viewH / 2');
+    expect(SCENE_SRC).toContain('PLAYER_FEET_Y - viewH * HOME_SECTION_FEET_FRAC');
     expect(SCENE_SRC).toMatch(/scrollY: toY,/);
     expect(SCENE_SRC).not.toContain('PLAYER_FEET_Y - FLOOR_HEIGHT * 0.5');
   });

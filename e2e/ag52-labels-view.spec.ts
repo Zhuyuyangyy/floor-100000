@@ -6,11 +6,17 @@ import { expect, test, type Page } from '@playwright/test';
 //   AG52_PHASE=after   改动后功能断言（靠近才现 0.35 隐形字 / 站立只画本层 /
 //                      爬梯画目标层且角色完整可见）
 //
+// 2026-11-20 家区剖面（用户裁决「前 5 层是自己家，下面要能看见」）：
+// 2-5 层站立态常驻画楼下那层（neighbourLayers=1、bounds 含剖面一层），
+// 1 层（地基）与 6 层起维持 AG-52 单层契约。断言按新口径分家区/非家区。
+// 功能断言默认生效（不再要求显式 AG52_PHASE=after——旧默认 'run' 会让
+// expect 块整体静默跳过，等于没有门禁）；before 模式仍只测量不断言。
+//
 // 截图落 output/ag52/<phase>/（gitignore 的本地证据目录），测量 JSON 以
 // testInfo.attach 附在报告里。
 
-const PHASE = process.env.AG52_PHASE ?? 'run';
-const EXPECT_AFTER = PHASE === 'after';
+const PHASE = process.env.AG52_PHASE ?? 'after';
+const EXPECT_AFTER = PHASE !== 'before';
 const STACK_DEPTH = -10; // render/lighting.ts：邻居层容器的深度
 const VIEW_H = 720; // DESIGN_HEIGHT，zoom 1 时即世界像素
 
@@ -232,19 +238,21 @@ test.describe('AG-52 容器名签 + 只画本层', () => {
       expect(worstBottom, '脚底不出视口底边').toBeLessThanOrEqual(VIEW_H);
     }
 
-    // 落地 2F：只画本层
+    // 落地 2F：家区剖面——楼下 1F（玩家宿舍）常驻在画，bounds 含剖面一层。
     await expect
       .poll(async () => (await probeScene(page)).floor, { timeout: 10_000 })
       .toBe(2);
-    // 落地缓动 220ms 期间 bounds 是临时放宽的（旧帧→站立位），等它收回一层。
+    // 落地缓动 220ms 期间 bounds 是临时放宽的（旧帧→站立位），等它收回站立位。
     await page.waitForTimeout(500);
     const landed = await probeScene(page);
     await page.screenshot({ path: `output/ag52/${PHASE}/landed-floor2.png` });
     await testInfo.attach('landed', { body: JSON.stringify({ before, landed }, null, 2), contentType: 'application/json' });
     console.log(`[ag52 landed-2F] ${JSON.stringify(landed)}`);
     if (EXPECT_AFTER) {
-      expect(landed.neighbourLayers, '落地后收回本层').toBe(0);
-      expect(landed.boundHeight, '落地后 bounds 仍是一层').toBeLessThanOrEqual(220);
+      expect(landed.neighbourLayers, '家区 2F 站立态常驻画楼下 1F（自己家）').toBe(1);
+      expect(landed.boundHeight, '家区 bounds 含剖面：视口高一层').toBeGreaterThanOrEqual(VIEW_H - 1);
+      // 脚线在视口 45% 处（HOME_SECTION_FEET_FRAC 0.45 × 720 = 324）。
+      expect(landed.playerScreenBottom).toBeCloseTo(VIEW_H * 0.45, 0);
     }
 
     expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);

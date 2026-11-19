@@ -282,6 +282,14 @@ const CRAFT_TREE_BUTTON_H = 34;
 const TYPE_BODY = 26;
 const TYPE_AUX = 22;
 
+// ── 家区剖面（2026-11-20 用户裁决：「前 5 层是自己家，下面要能看见」）──────
+// 1-5 层是基础发育区（塔图 TOWER_MAP.baseFloors 同口径）。站在 2-5 层时把
+// 楼下那层画成剖面背景；1 层是地基没有楼下。6 层起维持 AG-52 单层契约。
+const HOME_SECTION_TOP = 5;
+// 家区站立位：脚线落在视口高度的这个比例处（0.45 → 720 视口下脚线屏幕
+// y=324，楼下层的墙带从 y≈460 起进入画面下半屏）。非家区仍是 0.5 居中。
+const HOME_SECTION_FEET_FRAC = 0.45;
+
 // ── 货运电梯 ────────────────────────────────────────────────────────────────
 // The lift stands beside the down stairwell (x=1240) on the top floor of a
 // segment. 1165 is measured, not chosen: the door is 52 wide (1139..1191), the
@@ -696,6 +704,11 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   // AG-65：爬梯态天花板洞口透出的目标层地板（与目标层同生共死：成功落地由
   // clearFloor 收，拒绝落地由 destroyClimbTargetLayer 收）。
   private climbHoleReveal: Phaser.GameObjects.GameObject[] = [];
+  // 2026-11-20 家区剖面（用户裁决「前 5 层是自己家，下面要能看见」）：
+  // 站立态常驻的楼下邻居层容器。与爬梯态的 climbTargetLayer 区分——它随
+  // drawFloor 重建、随 clearFloor 批量销毁；syncClimbTargetFloor 靠这个引用
+  // 判断「目标层已在画」而不重复补画。非家区恒 undefined。
+  private homeBelowLayer?: Phaser.GameObjects.GameObject;
   // AG-65：洞与中梯的实际绘制矩形（e2e 像素取证用——画在哪由 seeded 位置定，
   // 这里把画出来的矩形交出来，实测才能核对「画的位置 = floorGeometryFor 的位置」）。
   private floorFeatureRects: { hole: [number, number, number, number] | null; ladder: [number, number, number, number] | null } = { hole: null, ladder: null };
@@ -1291,6 +1304,11 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // 走。那层由 syncClimbTargetFloor（下面的 UPDATE 监听）在爬梯态补画、
     // 落地或拒绝落地时撤走——楼梯 therefore shows where it goes exactly
     // while you are on it, and the rest of the time the tower is one floor.
+    //
+    // 2026-11-20 第二个例外——家区剖面（用户裁决「前 5 层是自己家，在下面
+    // 可以看见」）：2-5 层站立态常驻画楼下那层，见下文 buildEncounterSpots
+    // 之后的 homeBelow 段（必须在本层全部件建完后画——drawNeighbourFloor
+    // 的「新对象扫进层」会把开工后出生的一切收进邻居容器）。
     const syncClimbTarget = (): void => this.syncClimbTargetFloor();
     const previousSyncer = CLIMB_TARGET_SYNCERS.get(this);
     if (previousSyncer) this.events.off(Phaser.Scenes.Events.UPDATE, previousSyncer);
@@ -1340,6 +1358,20 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
     // OVERHAUL: the floor's question marks go up last, above the room.
     this.buildEncounterSpots();
+
+    // ── 家区剖面（2026-11-20 用户裁决「前 5 层是自己家，下面要能看见」）──
+    // 2-5 层站立态常驻画楼下那层：复用爬梯态的 drawNeighbourFloor（distance 1
+    // 同款压暗/距离雾/火焰隐藏），层容器 depth STACK_DEPTH(-10) 压在本层全部
+    // 件之下。1 层是地基没有楼下；6 层起回到 AG-52 单层契约。
+    // 必须画在本层全部件（含 encounter spots）之后、玩家精灵之前：
+    // drawNeighbourFloor 尾部的「新对象扫进层」会把它开工后出生的一切收进
+    // 邻居容器——画早了会把本层的梯子/容器卷进 depth -10 被墙盖住。
+    // 相机 bounds 的 homeBelow 放宽见下文（同一个楼层判定）。
+    this.homeBelowLayer = undefined;
+    if (floor >= 2 && floor <= HOME_SECTION_TOP && hasFloorContent(floor - 1)) {
+      this.drawNeighbourFloor(floor - 1, FLOOR_HEIGHT, false, 1, this.downExit);
+      this.homeBelowLayer = this.floorObjects[this.floorObjects.length - 1];
+    }
 
     // The side-view walk sheet, not the front-facing portrait: the camera is a
     // side-scroller, and a figure seen face-on while it moves laterally reads as
@@ -1395,10 +1427,19 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // 角色居中：scrollY = PLAYER_FEET_Y - 视口高/2。旧代码在塔底/塔沿还各有
     // 特判（-contextBottom / +FLOOR_BAND），现在一层之内没有邻居要避让，
     // 所有楼层同一个数。
+    //
+    // 2026-11-20 家区例外（用户裁决：「前 5 层是自己家，在下面可以看见」）：
+    // 1-5 层是基础发育区，站立态把楼下那一层画成剖面背景（复用爬梯态的
+    // drawNeighbourFloor，distance 1 同款压暗），bounds 底沿随之放宽一层，
+    // 让视口装得下「本层 + 楼下层」。1 层是地基、下面没有层，保持单层。
+    // 6 层起回到 AG-52 单层契约，一个像素都不变。
     const viewH = this.viewSize().height;
-    const standScrollY = PLAYER_FEET_Y - viewH / 2;
+    const homeBelow = floor >= 2 && floor <= HOME_SECTION_TOP && hasFloorContent(floor - 1);
+    // 家区站立位：本层脚线落在视口 45% 高处（而非居中 50%），给楼下层留出
+    // 下半屏。standScrollY 由「脚线屏幕位置」反推，bounds 顶沿仍钉站立位。
+    const standScrollY = homeBelow ? PLAYER_FEET_Y - viewH * HOME_SECTION_FEET_FRAC : PLAYER_FEET_Y - viewH / 2;
     const topBound = standScrollY;
-    const bottomBound = topBound + FLOOR_HEIGHT;
+    const bottomBound = topBound + (homeBelow ? viewH : FLOOR_HEIGHT);
     // 落地缓动要的「旧帧」必须在站立 bounds 落位之前抓：Phaser 的 setBounds
     // 会当场把 scrollY 钳进新 bounds（BaseCamera.setBounds 的 else 分支），
     // 一层高的站立 bounds 会把攀爬末帧的 scrollY 钳成 standScrollY——之后再算
@@ -1438,8 +1479,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
         duration: 220,
         ease: 'Sine.easeOut',
         onComplete: () => {
-          // 收回一层：站立态虚空永远滚不到。
-          cam.setBounds(0, standScrollY, this.floorW, FLOOR_HEIGHT);
+          // 收回站立 bounds：非家区一层（虚空永远滚不到）；家区含楼下剖面
+          // 一层（2026-11-20），与 drawFloor 的 bottomBound 同口径。
+          cam.setBounds(0, standScrollY, this.floorW, bottomBound - topBound);
           cam.startFollow(this.player, true, 0.15, 0.15);
         },
       });
@@ -1525,6 +1567,11 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       // Only authored floors get drawn as a target — the same rule the old
       // cross-section used, and stairNeighbour() already guarantees it.
       if (!hasFloorContent(climb.to)) return;
+      // 家区剖面（2026-11-20）：下行目标层若已作为常驻楼下层在画（2-5 层
+      // 站立态），不再补画第二份——同一个容器两份会叠深一倍。climbTargetLayer
+      // 保持 undefined：落地走 clearFloor 批量销毁，拒绝落地时这层本来就该
+      // 留着（它是站立态的一部分，不随爬梯结束撤走）。
+      if (this.homeBelowLayer && climb.to === getGame().currentFloor - 1) return;
       const above = climb.direction === 1;
       // AG-65：把出发层梯口传给目标层绘制——梯口随机化后，落点不再是目标层
       // 自己的下行口，而是这趟梯子出发的那个 x（起止同 x 的竖井）。
@@ -1605,6 +1652,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.cameras.main.stopFollow();
     for (const o of this.floorObjects) o.destroy();
     this.floorObjects = [];
+    // 家区剖面层随 floorObjects 批量销毁了，引用同步清掉（防 stale）。
+    this.homeBelowLayer = undefined;
     // The Zzz texts were floor objects; a stale reference here would animate a
     // destroyed Text after the next floor change.
     this.dormSleepers = [];

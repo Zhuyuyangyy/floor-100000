@@ -20,6 +20,82 @@ import { PALETTE } from './palette.ts';
 
 export const WEAPON_KEY = 'weapon-crowbar';
 
+export type WeaponSwingEffect = 'sword-slash' | 'heavy-cleave';
+
+export interface WeaponVisualDefinition {
+  id: 'crowbar' | 'fire-axe' | 'cleaver' | 'short-sword' | 'dagger';
+  label: string;
+  textureKey: string;
+  /** File under public/, or null for the existing code-drawn crowbar. */
+  imagePath: string | null;
+  gripX: number;
+  gripY: number;
+  displayScale: number;
+  /** Three visual-only angles, one for each existing attack animation frame. */
+  swingAnglesDeg: readonly [number, number, number];
+  effect: WeaponSwingEffect;
+  effectScale: number;
+  effectTimeScale: number;
+}
+
+/**
+ * Player-selected appearance only. This catalogue is intentionally separate
+ * from inventory/equipment/combat data: changing it never changes a rule.
+ */
+export const WEAPON_VISUALS = [
+  {
+    id: 'crowbar', label: '撬棍', textureKey: WEAPON_KEY, imagePath: null,
+    gripX: 4, gripY: 9, displayScale: 1,
+    swingAnglesDeg: [140, 12, 65], effect: 'sword-slash', effectScale: 1.35, effectTimeScale: 0.7,
+  },
+  {
+    id: 'fire-axe', label: '消防斧', textureKey: 'weapon-fire-axe', imagePath: 'assets/weapons/fire-axe.png',
+    gripX: 10, gripY: 9, displayScale: 1,
+    swingAnglesDeg: [214, 48, 94], effect: 'heavy-cleave', effectScale: 1.1, effectTimeScale: 0.82,
+  },
+  {
+    id: 'cleaver', label: '砍刀', textureKey: 'weapon-cleaver', imagePath: 'assets/weapons/cleaver.png',
+    gripX: 7, gripY: 9, displayScale: 0.98,
+    swingAnglesDeg: [164, 24, 72], effect: 'heavy-cleave', effectScale: 0.92, effectTimeScale: 0.9,
+  },
+  {
+    id: 'short-sword', label: '短剑', textureKey: 'weapon-short-sword', imagePath: 'assets/weapons/short-sword.png',
+    gripX: 7, gripY: 9, displayScale: 1,
+    swingAnglesDeg: [198, -8, 34], effect: 'sword-slash', effectScale: 1.1, effectTimeScale: 0.82,
+  },
+  {
+    id: 'dagger', label: '匕首', textureKey: 'weapon-dagger', imagePath: 'assets/weapons/dagger.png',
+    gripX: 7, gripY: 9, displayScale: 0.8,
+    swingAnglesDeg: [205, -34, 12], effect: 'sword-slash', effectScale: 0.76, effectTimeScale: 1.35,
+  },
+] as const satisfies readonly WeaponVisualDefinition[];
+
+export type WeaponVisualId = (typeof WEAPON_VISUALS)[number]['id'];
+export const WEAPON_TEXTURE_KEYS = WEAPON_VISUALS.map((weapon) => weapon.textureKey);
+
+export function weaponVisual(id: WeaponVisualId): (typeof WEAPON_VISUALS)[number] {
+  return WEAPON_VISUALS.find((weapon) => weapon.id === id) ?? WEAPON_VISUALS[0];
+}
+
+/** Advance only the local visual selection; there is no GameState or save input. */
+export function nextWeaponVisual(id: WeaponVisualId): WeaponVisualId {
+  const index = WEAPON_VISUALS.findIndex((weapon) => weapon.id === id);
+  return WEAPON_VISUALS[(index + 1) % WEAPON_VISUALS.length].id;
+}
+
+/** Frame-specific visual angle for the weapon sprite; combat pose/rules stay untouched. */
+export function weaponSwingAngle(id: WeaponVisualId, frameIndex: number): number {
+  const safeFrame = Number.isFinite(frameIndex) ? Math.max(0, Math.min(2, Math.floor(frameIndex))) : 0;
+  return (weaponVisual(id).swingAnglesDeg[safeFrame] * Math.PI) / 180;
+}
+
+/** Load the four owner-supplied images; the crowbar remains code-drawn. */
+export function loadWeaponArt(scene: Phaser.Scene): void {
+  for (const weapon of WEAPON_VISUALS) {
+    if (weapon.imagePath) scene.load.image(weapon.textureKey, weapon.imagePath);
+  }
+}
+
 // Long enough to read as a weapon beside a 64x96 figure, short enough that it
 // does not cross the whole corridor when it is swung.
 //

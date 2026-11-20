@@ -27,6 +27,7 @@ import {
   STACK_BELOW,
   WANDERER_DAMAGE,
   WANDERER_HIT_COOLDOWN_MS,
+  WANDERER_MIN_SPAWN_FLOOR,
   WANDERER_SPEED,
 } from '../core/constants';
 import {
@@ -64,6 +65,7 @@ import { recordDepth, runScore } from '../systems/progress';
 import { CHARACTER_NAMES, applyDepth, loadMeta, saveMeta, unlockFromDepth } from '../systems/metaProgress';
 import type { CharacterKey } from '../render/artpack';
 import { lowHpPulse, mostUrgentStat, moveSpeedFactor } from '../render/feedback';
+import { combatFeedbackSignals } from '../render/combatFeedback';
 import { GAME_CONFIG } from '../core/config';
 import {
   markResolved,
@@ -76,9 +78,9 @@ import {
   type EncounterChoice,
 } from '../systems/encounters';
 import { encounterSpots, nudgeSpotX, placeClearX } from '../systems/encounterSpots';
-import { resolveRound, playerCombatant, GUARD_ENERGY_RESTORE, type CombatAction, type CombatRound, type Combatant } from '../systems/combat';
-import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster } from '../systems/monsters';
-import { guardianDamageMult, lootBonus, moveSpeedMult } from '../systems/relics';
+import { applyCombatDamage, resolveRound, playerCombatant, GUARD_ENERGY_RESTORE, type CombatAction, type CombatRound, type Combatant } from '../systems/combat';
+import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster, shouldCowardBreakOff } from '../systems/monsters';
+import { relicDamageMultForCombat, lootBonus, moveSpeedMult } from '../systems/relics';
 import { modeGuardianDamageMult } from '../systems/modes';
 import { buy, sell, shopStock, type ShopEntry } from '../systems/shop';
 import { charge, recordShortcut, shortcutAvailable, shortcutPrice, shortcutSkip, timesTaken } from '../systems/shortcut';
@@ -116,7 +118,7 @@ import {
   walkAnimKey,
   walkSheetKey,
 } from '../render/walkcycle';
-import { WEAPON_GRIP_X, WEAPON_GRIP_Y, WEAPON_H, WEAPON_KEY, WEAPON_W } from '../render/weapon.ts';
+import { WEAPON_H, WEAPON_W, nextWeaponVisual, weaponSwingAngle, weaponVisual, type WeaponVisualId } from '../render/weapon.ts';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
@@ -239,7 +241,7 @@ const SHELTER_ROWS: Array<{ action: ShelterAction; label: string; value: string 
   { action: 'repair', label: '修理', value: '木材×2 + 胶带×1' },
   { action: 'care', label: '照顾邻居', value: '口粮×1 · 压力 -12' },
 ];
-type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 's' | 'f' | 'up' | 'down';
+type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 's' | 'f' | 'q' | 'up' | 'down';
 type DirKeys = {
   up: Phaser.Input.Keyboard.Key;
   down: Phaser.Input.Keyboard.Key;
@@ -253,8 +255,10 @@ type DirKeys = {
 // renders and feeds input back through pure logic functions.
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
-  /** The crowbar in the survivor's hand. Follows the attack pose's fist. */
+  /** The manually selected visual weapon in the survivor's hand. */
   private weapon?: Phaser.GameObjects.Image;
+  private selectedVisualWeapon: WeaponVisualId = 'crowbar';
+  private syncedVisualWeapon?: WeaponVisualId;
   private cursors!: DirKeys;
   private wasd!: { left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key };
   private keyE!: Phaser.Input.Keyboard.Key;
@@ -294,6 +298,7 @@ export class GameScene extends Phaser.Scene {
   // switch back on the very next frame and the clip would never be seen.
   private actionAnimKey = '';
   private actionAnimUntil = 0;
+  private playerHitFxToken = 0;
 
   private clockText!: Phaser.GameObjects.Text;
   private barsGfx!: Phaser.GameObjects.Graphics;
@@ -377,6 +382,7 @@ export class GameScene extends Phaser.Scene {
   private keyM!: Phaser.Input.Keyboard.Key;
   private keyS!: Phaser.Input.Keyboard.Key;
   private keyF!: Phaser.Input.Keyboard.Key;
+  private keyQ!: Phaser.Input.Keyboard.Key;
 
   private dialogueOpen = false;
   // sessionId/revision：AI 异步返回的保鲜键。玩家每次开对话 sessionId+1，
@@ -411,7 +417,7 @@ export class GameScene extends Phaser.Scene {
   // drain, so every menu action has to be accepted at most once per frame —
   // otherwise one ArrowDown moves the pause selection two entries and the
   // player lands on 重新开始 when they asked for 塔楼地图.
-  private lastInputFrame: Record<GameKey, number> = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, up: -1, down: -1 };
+  private lastInputFrame: Record<GameKey, number> = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, q: -1, up: -1, down: -1 };
 
   constructor() {
     super({ key: 'Game' });
@@ -425,7 +431,9 @@ export class GameScene extends Phaser.Scene {
     this.lastActiveEvent = null;
     // The frame counter is monotonic across the session, so a stale slot would
     // never match anyway — reset to keep the per-create state honest.
-    this.lastInputFrame = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, up: -1, down: -1 };
+    this.lastInputFrame = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, q: -1, up: -1, down: -1 };
+    this.selectedVisualWeapon = 'crowbar';
+    this.syncedVisualWeapon = undefined;
     // Field initialisers do not re-run, so the HUD's cached visibility has to be
     // re-derived against the fresh bag of a restarted run.
     this.bagFullShown = false;
@@ -516,7 +524,7 @@ export class GameScene extends Phaser.Scene {
     this.bindInput();
 
     if (getGame().day === 1) {
-      this.flash('目标：从第 1 层一路爬到第 100000 层。A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图');
+      this.flash('目标：从第 1 层一路爬到第 100000 层。A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观');
     }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -612,14 +620,17 @@ export class GameScene extends Phaser.Scene {
       // painted over by all of them - the player was invisible in the middle of
       // an empty floor with nothing wrong in the console.
       .setDepth(ACTOR_DEPTH);
-    // The crowbar goes in before the first sync so the survivor is armed from
-    // the frame the floor appears, not from the first step. Its depth is set by
-    // syncWeapon (behind the figure when slung, in front when swung).
+    // The selected visual weapon exists from the frame the floor appears, not
+    // from the first step. syncWeapon handles its depth and attack-frame pose.
+    const visual = weaponVisual(this.selectedVisualWeapon);
     this.weapon?.destroy();
     this.weapon = this.add
-      .image(state.player.x, PLAYER_FEET_Y - 54, WEAPON_KEY)
-      .setOrigin(WEAPON_GRIP_X / WEAPON_W, WEAPON_GRIP_Y / WEAPON_H)
+      .image(state.player.x, PLAYER_FEET_Y - 54, visual.textureKey)
+      .setOrigin(visual.gripX / WEAPON_W, visual.gripY / WEAPON_H)
+      .setScale(visual.displayScale)
+      .setName('visual-weapon')
       .setDepth(ACTOR_DEPTH - 1);
+    this.syncedVisualWeapon = visual.id;
     this.floorObjects.push(this.weapon);
     this.playerLight?.setName('player-light');
     this.syncPlayerWorldObjects(state.player.x, STAIR_START_Y);
@@ -664,9 +675,10 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.stopFollow();
     for (const o of this.floorObjects) o.destroy();
     this.floorObjects = [];
-    // The crowbar went with the floor; drop the reference so drawFloor builds a
-    // new one instead of trying to reuse a destroyed image.
+    // The visual weapon went with the floor; drop the reference so drawFloor
+    // builds a new image instead of trying to reuse a destroyed one.
     this.weapon = undefined;
+    this.syncedVisualWeapon = undefined;
     for (const shadow of this.playerShadow) shadow.destroy();
     this.playerShadow = [];
     this.speedX = 0;
@@ -707,6 +719,13 @@ export class GameScene extends Phaser.Scene {
   private syncWeapon(): void {
     const w = this.weapon;
     if (!w || !w.active) return;
+    const visual = weaponVisual(this.selectedVisualWeapon);
+    if (this.syncedVisualWeapon !== visual.id) {
+      w.setTexture(visual.textureKey)
+        .setOrigin(visual.gripX / WEAPON_W, visual.gripY / WEAPON_H)
+        .setScale(visual.displayScale);
+      this.syncedVisualWeapon = visual.id;
+    }
     const flip = this.player.flipX;
     // A dying survivor lets go of it. The fall clip drops the body through the
     // height the grip is anchored at, so a held crowbar would hover over the
@@ -735,13 +754,9 @@ export class GameScene extends Phaser.Scene {
       const dx = (hand.x - FRAME_W / 2) * (flip ? -1 : 1);
       const dy = FRAME_H - hand.y;
       w.setPosition(this.player.x + dx, this.player.y - dy);
-      // 0 rad points right and grows clockwise; the pose's angle is measured from
-      // straight down, so facing right is a quarter turn. Facing left the bar has
-      // to point the other way, which is a half turn more - NOT a negated angle.
-      // setFlipX does not help here: it mirrors the texture inside a frame that
-      // still occupies the same 46 pixels to the right of the origin, so a
-      // mirrored weapon on a left-facing survivor stayed across the body.
-      const rot = Math.PI / 2 - (swing * Math.PI) / 180;
+      // Each appearance has its own frame-by-frame weapon arc. Facing left uses
+      // the mirrored angle; combat animation frames and combat rules are shared.
+      const rot = weaponSwingAngle(this.selectedVisualWeapon, f);
       w.setRotation(flip ? Math.PI - rot : rot);
       w.setDepth(ACTOR_DEPTH + 1);
       w.setAlpha(1);
@@ -1191,7 +1206,7 @@ export class GameScene extends Phaser.Scene {
 
     this.encounterObjects.push(
       this.add
-        .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 出招 · ESC 撤退', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+        .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 出招 · ESC 撤退 · Q 切换武器外观（仅视觉）', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
         .setOrigin(0.5)
         .setDepth(depth + 7),
     );
@@ -1208,16 +1223,10 @@ export class GameScene extends Phaser.Scene {
   private playSwingFx(killed = false): void {
     const state = getGame();
     const facing = this.player?.flipX ? -1 : 1;
-    const slash = playFx(this, 'sword-slash', state.player.x + 30 * facing, PLAYER_FEET_Y - 18, LIGHT_DEPTH, {
-      // The atlas's usable arc is about 90x60 inside a 136x104 frame, and its
-      // pivot sits near the bottom of that frame - so the arc rises about 57px
-      // above whatever point it is anchored to. Anchoring at chest height put
-      // the whole arc above the survivor's head; anchoring near the feet puts it
-      // across the body, which is where a swing happens. 1.35 is roughly the
-      // crowbar's reach; 0.7 stretches the 800ms cut to 1.14s, long enough to
-      // survive a glance away at the log.
-      scale: 1.35,
-      timeScale: 0.7,
+    const visual = weaponVisual(this.selectedVisualWeapon);
+    const slash = playFx(this, visual.effect, state.player.x + 30 * facing, PLAYER_FEET_Y - 18, LIGHT_DEPTH, {
+      scale: visual.effectScale,
+      timeScale: visual.effectTimeScale,
     });
     // The arc is drawn facing right; a survivor facing left needs it mirrored or
     // the slash trails behind them.
@@ -1227,11 +1236,33 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Brief red body flash for confirmed incoming damage; presentation only. */
+  private flashPlayerHurt(): void {
+    const player = this.player;
+    if (!player?.active) return;
+    const token = ++this.playerHitFxToken;
+    player.setTint(0xff6b62).setTintMode(Phaser.TintModes.FILL);
+    this.time.delayedCall(110, () => {
+      if (player.active && token === this.playerHitFxToken) player.clearTint();
+    });
+  }
+
+  /** Weapon-agnostic contact spark; only called after the combat result says a hit landed. */
+  private playGenericHitSpark(): void {
+    const state = getGame();
+    const facing = this.player?.flipX ? -1 : 1;
+    playFx(this, 'hit-spark', state.player.x + 42 * facing, PLAYER_FEET_Y - 34, LIGHT_DEPTH + 2, {
+      scale: 0.7,
+      timeScale: 1.4,
+    });
+  }
+
   // Feedback is deliberately downstream of the pure combat result. It can add
   // sprites, a short shake, and an action pose, but it never rolls, mutates HP,
   // or decides whether the turn continues.
   private playCombatFeedback(round: CombatRound, action: CombatAction): void {
     const state = getGame();
+    const visual = combatFeedbackSignals(round, action);
     // The swing happens whether or not it lands.
     //
     // It used to be gated on playerDamage > 0, which meant a miss produced
@@ -1239,12 +1270,14 @@ export class GameScene extends Phaser.Scene {
     // common case. The one visual sign that the survivor carries a weapon was an
     // effect that appeared in roughly half the rounds, for two thirds of a
     // second, above a figure holding nothing. A swing that whiffs still swings.
-    if (action === 'attack') this.playSwingFx(round.monsterDead);
-    if (action === 'guard' && round.monsterDamage > 0 && !round.fled) {
+    if (visual.swing) this.playSwingFx(round.monsterDead);
+    if (visual.hitSpark) this.playGenericHitSpark();
+    if (visual.parry) {
       playFx(this, 'parry', state.player.x + 10, PLAYER_FEET_Y - 50, LIGHT_DEPTH + 1, { scale: 1.3 });
     }
-    if (round.monsterDamage > 0 && !round.fled) {
+    if (visual.playerHurt) {
       playFx(this, 'hit-flash', state.player.x, PLAYER_FEET_Y - 48, LIGHT_DEPTH + 2);
+      this.flashPlayerHurt();
     }
   }
 
@@ -1282,28 +1315,27 @@ export class GameScene extends Phaser.Scene {
     if (action === 'guard') {
       state.player.energy = Math.min(GAME_CONFIG.player.energyMax, state.player.energy + GUARD_ENERGY_RESTORE);
     }
+    // Check post-action HP independently of hit rolls: a coward already below
+    // its threshold flees even when the player's attack misses this turn.
+    if (shouldCowardBreakOff(combat.monster, round)) {
+      combat.log.push(`${combat.monster.name} 伤痕累累地逃走了。`);
+      this.finishCombat('coward');
+      return;
+    }
     if (round.monsterDamage > 0 && !round.monsterDead && !round.fled) {
-      // A coward that dropped below its threshold breaks off the fight and
-      // runs — the player keeps what they already did to it.
-      const cowardFrac = behaviorModifiers('coward').fleeAtHpFrac;
-      if (combat.monster.behavior === 'coward' && cowardFrac > 0 && combat.monster.hp / combat.monster.maxHp < cowardFrac) {
-        combat.log.push(`${combat.monster.name} 伤痕累累地逃走了。`);
-        this.finishCombat('coward');
-        return;
-      }
-      // OVERHAUL Wave B2/B3: the guardian totem and easy mode both soften the
-      // hit the player takes; the relic applies to any monster, the mode only
-      // to the guardian.
-      const soften = (combat.kind === 'boss' ? guardianDamageMult(state.relics ?? []) * modeGuardianDamageMult(state.mode ?? 'adventure') : guardianDamageMult(state.relics ?? []));
-      const dmg = Math.max(1, Math.round(round.monsterDamage * soften));
-      state.player.hp = Math.max(0, state.player.hp - dmg);
+      // The guardian totem and easy mode soften guardian attacks only; ordinary
+      // ambushes retain their full damage.
+      const relicMult = relicDamageMultForCombat(combat.kind, state.relics ?? []);
+      const modeMult = combat.kind === 'boss' ? modeGuardianDamageMult(state.mode ?? 'adventure') : 1;
+      const soften = relicMult * modeMult;
+      state.player.hp = applyCombatDamage(state.player.hp, round.monsterDamage, soften);
       if (action === 'guard') this.playActionAnim(hurtAnimKey('player'), 400);
       this.cameras.main.shake(160, 0.008);
     }
     combat.turn += 1;
     this.refreshStats();
 
-    if (round.playerDead || state.player.hp <= 0) {
+    if (state.player.hp <= 0) {
       state.player.hp = 0;
       state.status = 'lost';
       saveToStorage(state);
@@ -1505,6 +1537,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (result.hpChange < 0) {
       this.cameras.main.shake(160, 0.008);
+      this.flashPlayerHurt();
       this.refreshStats();
     }
     // Outcome panel: the message, and the item flow the player actually got.
@@ -3046,6 +3079,7 @@ export class GameScene extends Phaser.Scene {
     this.keyM = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
     this.keyS = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyF = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
+    this.keyQ = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
 
     this.keyE.on('down', () => this.guard('e', this.onInteract), this);
     this.keyEsc.on('down', () => this.guard('esc', this.onEsc), this);
@@ -3059,6 +3093,7 @@ export class GameScene extends Phaser.Scene {
     }, this);
     // OVERHAUL Wave C2: F buys the paid shortcut at the up stairwell.
     this.keyF.on('down', () => this.guard('f', this.tryShortcut), this);
+    this.keyQ.on('down', () => this.guard('q', this.cycleWeaponVisual), this);
     this.cursors.up.on('down', () => this.guard('up', this.onNavUp), this);
     this.cursors.down.on('down', () => this.guard('down', this.onNavDown), this);
   }
@@ -3102,6 +3137,15 @@ export class GameScene extends Phaser.Scene {
     action.call(this);
   }
 
+  /** Change only the scene-local appearance; never touches GameState or saves. */
+  private cycleWeaponVisual(): void {
+    if (!this.weapon?.active || this.stairClimb || this.pauseOpen) return;
+    this.selectedVisualWeapon = nextWeaponVisual(this.selectedVisualWeapon);
+    this.syncedVisualWeapon = undefined;
+    this.syncWeapon();
+    this.flash(`${weaponVisual(this.selectedVisualWeapon).label}外观（只改变武器显示、挥击和特效）`);
+  }
+
   private unbindInput(): void {
     // removeAllListeners per key rather than off(): the bound handlers above are
     // closures, and Phaser does not re-run field initialisers on a scene restart
@@ -3115,6 +3159,7 @@ export class GameScene extends Phaser.Scene {
     this.keyM?.removeAllListeners();
     this.keyS?.removeAllListeners();
     this.keyF?.removeAllListeners();
+    this.keyQ?.removeAllListeners();
     this.cursors?.up.removeAllListeners();
     this.cursors?.down.removeAllListeners();
   }
@@ -4034,6 +4079,8 @@ export class GameScene extends Phaser.Scene {
     const event = state.worldEvents.activeEvent;
     const active =
       event?.type === 'wanderer' &&
+      typeof event.floor === 'number' &&
+      event.floor >= WANDERER_MIN_SPAWN_FLOOR &&
       eventStatus(event) !== 'resolved' &&
       state.currentFloor === event.floor &&
       (isNight(state.gameMinuteOfDay) || event.source === 'dwell');
@@ -4097,6 +4144,7 @@ export class GameScene extends Phaser.Scene {
       this.refreshStats();
       this.playActionAnim(hurtAnimKey('player'), 400);
       playSfx('hurt');
+      this.flashPlayerHurt();
       this.cameras.main.shake(160, 0.008);
       this.cameras.main.flash(140, 230, 109, 99);
       playFx(this, 'ground-slam', state.player.x, PLAYER_FEET_Y - 6, LIGHT_DEPTH);

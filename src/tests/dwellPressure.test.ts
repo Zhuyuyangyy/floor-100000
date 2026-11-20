@@ -11,6 +11,7 @@ import {
 } from '../systems/dwellPressure';
 import type { DwellStateExt } from '../systems/dwellPressure';
 import { GAME_CONFIG } from '../core/config';
+import { WANDERER_MIN_SPAWN_FLOOR } from '../core/constants';
 import { createNewGame } from '../core/gameState';
 import type { DwellState, GameState } from '../core/gameTypes';
 
@@ -97,8 +98,8 @@ describe('dwell rolls', () => {
   it('gives every outcome a non-empty message', () => {
     const s = stateWith(11);
     for (let rolls = 0; rolls < 6; rolls++) {
-      const d: DwellState = { floor: 2, minutes: 60, nextRollAt: 60, rolls };
-      const o = rollDwellEvent(s, d, 2);
+      const d: DwellState = { floor: 5, minutes: 60, nextRollAt: 60, rolls };
+      const o = rollDwellEvent(s, d, 5);
       if (o.kind !== 'nothing') expect(o.message.length).toBeGreaterThan(0);
     }
   });
@@ -113,8 +114,8 @@ describe('dwell rolls', () => {
       let prowlers = 0;
       for (let seed = 1; seed <= SAMPLES; seed++) {
         const s = stateWith(seed);
-        const d: DwellState = { floor: 2, minutes: 60, nextRollAt: 60, rolls };
-        if (rollDwellEvent(s, d, 2).kind === 'prowler') prowlers++;
+        const d: DwellState = { floor: 5, minutes: 60, nextRollAt: 60, rolls };
+        if (rollDwellEvent(s, d, 5).kind === 'prowler') prowlers++;
       }
       rates.push(prowlers / SAMPLES);
     }
@@ -131,9 +132,37 @@ describe('dwell rolls', () => {
     // roll past the designed ceiling, but the ceiling keeps applying. W2 added
     // 'scout' to the row-3 outcome set, so it belongs in the allowed kinds.
     const s = stateWith(3);
-    const d: DwellState = { floor: 4, minutes: 9999, nextRollAt: 9999, rolls: 50 };
-    const o = rollDwellEvent(s, d, 4);
+    const d: DwellState = { floor: 5, minutes: 9999, nextRollAt: 9999, rolls: 50 };
+    const o = rollDwellEvent(s, d, 5);
     expect(['nothing', 'atmosphere', 'scout', 'prowler']).toContain(o.kind);
+  });
+});
+
+describe('wanderer floor gate', () => {
+  it('keeps both prowlers and scout telegraphs off floors 1–4', () => {
+    for (let floor = 1; floor < WANDERER_MIN_SPAWN_FLOOR; floor++) {
+      for (let rolls = 0; rolls < 6; rolls++) {
+        for (let seed = 1; seed <= 80; seed++) {
+          const s = stateWith(seed);
+          const d: DwellStateExt = { floor, minutes: 60, nextRollAt: 60, rolls, scoutedLast: true };
+          const outcome = rollDwellEvent(s, d, floor);
+          expect(['nothing', 'atmosphere']).toContain(outcome.kind);
+          expect(d.scoutedLast).not.toBe(true);
+        }
+      }
+    }
+  });
+
+  it('allows a prowler on floor 5 and higher', () => {
+    for (const floor of [WANDERER_MIN_SPAWN_FLOOR, WANDERER_MIN_SPAWN_FLOOR + 1]) {
+      let spawned = false;
+      for (let seed = 1; seed <= 300 && !spawned; seed++) {
+        const s = stateWith(seed);
+        const d: DwellState = { floor, minutes: 60, nextRollAt: 60, rolls: 1 };
+        spawned = rollDwellEvent(s, d, floor).kind === 'prowler';
+      }
+      expect(spawned, `floor=${floor}`).toBe(true);
+    }
   });
 });
 
@@ -145,8 +174,8 @@ describe('scout outcome (W2)', () => {
     for (const rolls of [0, 1, 2]) {
       for (let seed = 1; seed <= SAMPLES; seed++) {
         const s = stateWith(seed);
-        const d: DwellState = { floor: 2, minutes: 60, nextRollAt: 60, rolls };
-        expect(rollDwellEvent(s, d, 2).kind, `rolls=${rolls} seed=${seed}`).not.toBe('scout');
+        const d: DwellState = { floor: 5, minutes: 60, nextRollAt: 60, rolls };
+        expect(rollDwellEvent(s, d, 5).kind, `rolls=${rolls} seed=${seed}`).not.toBe('scout');
       }
     }
     // 第 4 行起 scout = 0.15：300 个固定 seed 下必须能观测到，且落带合理
@@ -154,8 +183,8 @@ describe('scout outcome (W2)', () => {
     let scouts = 0;
     for (let seed = 1; seed <= SAMPLES; seed++) {
       const s = stateWith(seed);
-      const d: DwellState = { floor: 2, minutes: 60, nextRollAt: 60, rolls: 3 };
-      if (rollDwellEvent(s, d, 2).kind === 'scout') scouts++;
+      const d: DwellState = { floor: 5, minutes: 60, nextRollAt: 60, rolls: 3 };
+      if (rollDwellEvent(s, d, 5).kind === 'scout') scouts++;
     }
     expect(scouts).toBeGreaterThan(0);
     expect(scouts / SAMPLES).toBeGreaterThan(0.05);
@@ -170,8 +199,8 @@ describe('scout outcome (W2)', () => {
     let rearmed = 0; // 加成 roll 又抽中 scout 的次数——标记应重新置上
     for (let seed = 1; seed <= SAMPLES; seed++) {
       const s = stateWith(seed);
-      const d: DwellStateExt = { floor: 2, minutes: 60, nextRollAt: 60, rolls: 3, scoutedLast: true };
-      const o = rollDwellEvent(s, d, 2);
+      const d: DwellStateExt = { floor: 5, minutes: 60, nextRollAt: 60, rolls: 3, scoutedLast: true };
+      const o = rollDwellEvent(s, d, 5);
       if (o.kind === 'prowler') prowlers++;
       if (o.kind === 'scout') {
         rearmed++;
@@ -191,8 +220,8 @@ describe('scout outcome (W2)', () => {
     let scoutDwell: DwellStateExt | null = null;
     for (let seed = 1; seed <= 5000 && !scoutDwell; seed++) {
       const s = stateWith(seed);
-      const d: DwellStateExt = { floor: 2, minutes: 60, nextRollAt: 60, rolls: 3 };
-      if (rollDwellEvent(s, d, 2).kind === 'scout') scoutDwell = d;
+      const d: DwellStateExt = { floor: 5, minutes: 60, nextRollAt: 60, rolls: 3 };
+      if (rollDwellEvent(s, d, 5).kind === 'scout') scoutDwell = d;
     }
     expect(scoutDwell).not.toBeNull();
     expect(scoutDwell!.scoutedLast).toBe(true);
@@ -201,16 +230,16 @@ describe('scout outcome (W2)', () => {
     let boostedDwell: DwellStateExt | null = null;
     for (let seed = 1; seed <= 5000 && !boostedDwell; seed++) {
       const s = stateWith(seed);
-      const d: DwellStateExt = { floor: 2, minutes: 60, nextRollAt: 60, rolls: 3, scoutedLast: true };
-      if (rollDwellEvent(s, d, 2).kind === 'prowler') boostedDwell = d;
+      const d: DwellStateExt = { floor: 5, minutes: 60, nextRollAt: 60, rolls: 3, scoutedLast: true };
+      if (rollDwellEvent(s, d, 5).kind === 'prowler') boostedDwell = d;
     }
     expect(boostedDwell).not.toBeNull();
     expect(boostedDwell!.scoutedLast).not.toBe(true);
   });
 
   it('a floor change clears the scout mark with the rest of the dwell state', () => {
-    const d: DwellStateExt = { floor: 2, minutes: 60, nextRollAt: 60, rolls: 3, scoutedLast: true };
-    tickDwell(d, 3, 10);
+    const d: DwellStateExt = { floor: 5, minutes: 60, nextRollAt: 60, rolls: 3, scoutedLast: true };
+    tickDwell(d, 6, 10);
     expect(d.scoutedLast).not.toBe(true);
     expect(d.rolls).toBe(0);
   });
@@ -219,8 +248,8 @@ describe('scout outcome (W2)', () => {
     let sawScout = false;
     for (let seed = 1; seed <= 5000 && !sawScout; seed++) {
       const s = stateWith(seed);
-      const d: DwellState = { floor: 2, minutes: 60, nextRollAt: 60, rolls: 3 };
-      const o = rollDwellEvent(s, d, 2);
+      const d: DwellState = { floor: 5, minutes: 60, nextRollAt: 60, rolls: 3 };
+      const o = rollDwellEvent(s, d, 5);
       if (o.kind === 'scout') {
         sawScout = true;
         expect(o.message.length).toBeGreaterThan(0);

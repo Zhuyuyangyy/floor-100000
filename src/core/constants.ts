@@ -15,6 +15,9 @@ export const STARTING_FLOOR = GAME_CONFIG.player.startingFloor;
 // The slum range the player starts in (floors 1..5). Floor 100000 is the
 // summit and the long-term goal, never the spawn point.
 export const PLAYABLE_FLOORS_V01: readonly number[] = GAME_CONFIG.world.playableFloorsV01;
+// The tower's roaming threat is introduced at floor 5; keep all generation
+// paths and the runtime scene guard on the same boundary.
+export const WANDERER_MIN_SPAWN_FLOOR = 5;
 
 // Dev-only: the retired v0.1 dorm scene, kept for testing. Reachable only via
 // the ?devfloor= query parameter, never as a normal spawn point.

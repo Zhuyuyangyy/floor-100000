@@ -35,7 +35,28 @@ async function readPlayer(page: Page): Promise<{ hp: number; status: string; gol
 async function loadedCombatFx(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const scene = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as { textures?: { exists: (key: string) => boolean } } | null;
-    return ['sword-slash', 'parry', 'hit-flash'].filter((key) => Boolean(scene?.textures?.exists(key)));
+    return ['sword-slash', 'heavy-cleave', 'parry', 'hit-flash'].filter((key) => Boolean(scene?.textures?.exists(key)));
+  });
+}
+
+async function readWeaponAppearance(page: Page): Promise<{ selected: string; texture: string; state: string; saves: Array<[string, string | null]> }> {
+  return page.evaluate(() => {
+    const game = window.__PHASER_GAME__;
+    const scene = game?.scene.getScene('Game') as unknown as {
+      selectedVisualWeapon?: string;
+      weapon?: { texture?: { key?: string } };
+    } | null;
+    const state = window.__PHASER_SESSION__?.getState();
+    const saves = Array.from({ length: localStorage.length }, (_, index) => {
+      const key = localStorage.key(index)!;
+      return [key, localStorage.getItem(key)] as [string, string | null];
+    }).sort(([a], [b]) => a.localeCompare(b));
+    return {
+      selected: scene?.selectedVisualWeapon ?? '',
+      texture: scene?.weapon?.texture?.key ?? '',
+      state: JSON.stringify(state) ?? '',
+      saves,
+    };
   });
 }
 
@@ -184,4 +205,25 @@ test('fleeing costs a turn and leaves the spot unspent', async ({ page }) => {
   // both are legal, and neither may crash.
   if (after) expect(after.turn).toBeGreaterThanOrEqual(2);
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+});
+
+test('Q switches only the visual weapon and leaves GameState and saved data unchanged', async ({ page }) => {
+  await startAndClimb(page);
+  expect(await loadedCombatFx(page)).toEqual(expect.arrayContaining(['sword-slash', 'heavy-cleave']));
+
+  // Freeze the simulation loop while testing input so ordinary hunger, thirst,
+  // and clock ticks cannot be mistaken for mutations caused by the appearance key.
+  await page.evaluate(() => {
+    window.__PHASER_GAME__?.loop.stop();
+  });
+  const before = await readWeaponAppearance(page);
+  expect(before.selected).toBe('crowbar');
+  expect(before.texture).toBe('weapon-crowbar');
+
+  await page.keyboard.press('Q');
+  const after = await readWeaponAppearance(page);
+  expect(after.selected).toBe('fire-axe');
+  expect(after.texture).toBe('weapon-fire-axe');
+  expect(after.state).toBe(before.state);
+  expect(after.saves).toEqual(before.saves);
 });

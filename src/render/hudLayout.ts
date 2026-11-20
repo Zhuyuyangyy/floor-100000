@@ -34,6 +34,12 @@ export const HUD_LAYOUT = {
   // instead (row1Y below).
   goalY: 52,
   environmentY: 80,
+  // 2026-11-20「加个指引」：顶带板（contextBottom=102）正下方一条常驻操作
+  // 提示，开局就告诉玩家 A/D 移动 · E 交互 · 滚轮缩放 · 0 复位。y=108 落在
+  // 天花板带——角色脚在屏幕 y≈360（家区 324），世界画面从不把角色画到这里；
+  // FPS 计数（fpsY=108）在右端且默认隐藏，提示条靠左不撞它。scrollFactor 0
+  // 归 uiCam，世界缩放时这条字不跟着变。
+  controlHintY: 108,
   feedbackY: 556,
   bagY: 624,
   // Row 1 anchors: icons sit 2px above their label's cap height.

@@ -416,6 +416,16 @@ export class HudController {
     this.envHumidText = chip(hud.envChipX[2], 'hud-humid', hex(TEXT.secondary));
     this.envNightText = chip(hud.envChipX[3], 'hud-night', hex(TEXT.secondary));
 
+    // 2026-11-20「加个指引」：顶带板正下方的常驻操作提示。开局就摆在那里，
+    // 不必等玩家按一次缩放才知道有这功能。一条 Text + 自带半透明底板，
+    // scrollFactor 0 归 uiCam（不随世界 zoom 缩放），靠左不让右端 FPS 计数
+    // （默认隐藏）。放在 feedback 本体创建之前，冻结探针的显示列表次序稳定。
+    this.host.add.text(20, hud.controlHintY,
+      'A/D 或 ←/→ 移动 · E 交互 · Shift 跑 · I 背包 · C 制作 · M 地图 · 滚轮/+- 缩放 · 0 复位',
+      { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary),
+        backgroundColor: '#0b0f12cc', padding: { x: 8, y: 3 } },
+    ).setName('hud-control-hint').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+
     // Feedback has a dedicated lower lane. It remains above modal panels but
     // can never collide with the daily objective or the permanent environment.
     // 本体在场景（flash 的同一出口），创建点位在这里——环境 chips 之后、预警

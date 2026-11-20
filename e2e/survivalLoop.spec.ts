@@ -33,10 +33,11 @@ interface State {
 
 const CONTAINER_X: Record<string, number> = {
   // Floor 3 and 4 hold every material the three upgrades need.
-  '3/crate_wood': 480,
-  '3/crate_metal': 800,
-  '4/fuse_box': 640,
-  '4/water_tank': 240,
+  // 2026-11-20 tier1 变长后按层宽重算：3 层 1600、4 层 1920 宽。
+  '3/crate_wood': 600,
+  '3/crate_metal': 1000,
+  '4/fuse_box': 960,
+  '4/water_tank': 360,
 };
 
 async function waitForScene(page: Page, key: string): Promise<void> {
@@ -100,7 +101,14 @@ async function climbTo(page: Page, target: number): Promise<void> {
 async function descendTo(page: Page, target: number): Promise<void> {
   for (let attempt = 0; attempt < 10; attempt++) {
     if ((await readState(page)).currentFloor === target) return;
-    await setX(page, 1240); // DOWN_EXIT_X
+    // tier1 下行口随层 seeded，读场景当前层权威值（不再钉 1240）。
+    const downX = await page.evaluate(() => {
+      const s = (window as unknown as {
+        __PHASER_GAME__?: { scene: { getScene: (k: string) => { downExit?: number } | null } };
+      }).__PHASER_GAME__?.scene.getScene('Game');
+      return s?.downExit ?? 1240;
+    });
+    await setX(page, downX);
     await page.keyboard.press('E');
     await page.waitForFunction(
       (floor) => window.__PHASER_SESSION__?.getState()?.currentFloor === floor,
@@ -159,11 +167,15 @@ async function alinStandSpot(page: Page): Promise<number | null> {
     const sc = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as {
       npcObjs?: Map<string, { sprite: { x: number } }>;
       activeObstacleList?: Array<{ x: number }>;
+      spotMarkers?: Map<string, { x: number }>;
     } | null;
     const rec = sc?.npcObjs?.get('alin');
+    // tier1 变长后 encounter/行商 spot 可能落在阿林身边——E 会开行商而不是
+    // 对话，把这些 x 也列入避让。
+    const spotXs = [...(sc?.spotMarkers?.values() ?? [])].map((m) => m.x);
     return {
       npcX: rec ? rec.sprite.x : null,
-      obstacleXs: (sc?.activeObstacleList ?? []).map((o) => o.x),
+      obstacleXs: [...(sc?.activeObstacleList ?? []).map((o) => o.x), ...spotXs],
     };
   });
   if (both.npcX === null) return null;
@@ -248,7 +260,7 @@ test('a player can gather every upgrade material and build all three upgrades', 
   await climbTo(page, 3);
   await openContainer(page, '3/crate_wood');
   await openContainer(page, '3/crate_metal');
-  await pickUpGround(page, 3, 160); // the guaranteed loose battery
+  await pickUpGround(page, 3, 200); // 保底地面电池（模板@160，3 层 1600 宽缩放@200）
   await climbTo(page, 4);
   await openContainer(page, '4/fuse_box');
   await openContainer(page, '4/water_tank');
@@ -329,6 +341,12 @@ test('barter converts resources and never creates them', async ({ page }) => {
   // patrol band, standing on her opens the rubble instead of the dialogue).
   for (let i = 0; i < 6; i++) {
     if (await hasVisibleText(page, '阿林（维修工）')) break;
+    // tier1 变长后 2 层行商 spot 落在阿林附近：E 可能开的是「行商」面板，
+    // 它会吃掉后续所有 E。发现就 ESC 关掉再重试。
+    if (await hasVisibleText(page, '行商')) {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(150);
+    }
     // 阿林 walks (AG-11 autonomy): the constant above is her spawn anchor in
     // npcs.ts, not where she is now (measured 224 vs 480). Re-seat the player
     // beside her live sprite before each try, or E opens nothing.

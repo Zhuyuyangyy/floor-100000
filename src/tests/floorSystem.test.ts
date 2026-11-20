@@ -443,10 +443,11 @@ describe('natural stair traversal', () => {
     const state = createNewGame(1);
     state.currentFloor = 2;
     const traversal = stairTraversalFor(state, -1);
-    expect(traversal).toMatchObject({ startX: DOWN_EXIT_X, endX: DOWN_EXIT_X, from: 2, to: 1 });
+    const downX = downExitXFor(2); // tier1 也 seeded 随机，不再钉 1240 常量
+    expect(traversal).toMatchObject({ startX: downX, endX: downX, from: 2, to: 1 });
     completeStairTraversal(state, traversal!);
     expect(state.currentFloor).toBe(1);
-    expect(state.player.x).toBe(DOWN_EXIT_X);
+    expect(state.player.x).toBe(downX);
   });
 });
 
@@ -563,7 +564,7 @@ describe('currentInteractionZone', () => {
     s.currentFloor = 3; // has both up and down exits
     s.player.x = UP_EXIT_X;
     expect(currentInteractionZone(s)).toBe('up');
-    s.player.x = DOWN_EXIT_X;
+    s.player.x = downExitXFor(3); // 3 层下行口已随机到 792，不再是 1240
     expect(currentInteractionZone(s)).toBe('down');
     s.player.x = ENTRY_X;
     expect(currentInteractionZone(s)).toBeNull();

@@ -15,7 +15,6 @@ import { expect, test, type Page } from '@playwright/test';
 // are the same item and land in one slot.
 
 const UP_EXIT_X = 40;
-const DOWN_EXIT_X = 1240;
 const CRAFT_X = 480; // dorm workbench on floor 1
 // The standing warning, deliberately not the substring the 1.6s flash uses
 // ('背包已满，剩余留在容器') — otherwise a stale flash would satisfy this.
@@ -156,8 +155,18 @@ test.describe('B3-02.1 bag-full feedback', () => {
     throw new Error(`could not open ${floor}/${id}`);
   }
 
+  // tier1 下行口 2026-11-20 起随层 seeded（1/2/3/4/5 层 840/664/792/1400/1328），
+  // 走下梯前读场景当前层的 downExit 权威值，不再钉 1240。
+  const downExitOf = (page: Page): Promise<number> =>
+    page.evaluate(() => {
+      const s = (window as unknown as {
+        __PHASER_GAME__?: { scene: { getScene: (k: string) => { downExit?: number } | null } };
+      }).__PHASER_GAME__?.scene.getScene('Game');
+      return s?.downExit ?? 1240;
+    });
+
   async function takeStairs(page: Page, dir: 'up' | 'down', expectedFloor: number): Promise<void> {
-    const exitX = dir === 'up' ? UP_EXIT_X : DOWN_EXIT_X;
+    const exitX = dir === 'up' ? UP_EXIT_X : await downExitOf(page);
     const onFloor = async (): Promise<boolean> => (await readState(page)).currentFloor === expectedFloor;
     await walkTo(page, exitX);
     await settle(page);
@@ -211,20 +220,23 @@ test.describe('B3-02.1 bag-full feedback', () => {
     await takeStairs(page, 'up', 3);
     // 3 层落地侧（左）补捡地上电池@160：旧路线从木箱走回梯子时顺手捡，
     // 新路线不经过那块地——先捡上。
-    await walkTo(page, 160);
+    await walkTo(page, 200); // 3 层地面电池（模板@160，1600 宽缩放@200）
     await takeStairs(page, 'up', 4);
-    await openContainer(page, 4, 'fuse_box', 640);
+    // tier1 变长后 F4 gate@775 把入口与 fuse_box@960 隔开，无工具过不去——
+    // 改为从 F5 下梯口掉回右侧后再开（见下面 down 4 后）。
     await takeStairs(page, 'up', 5);
     // 下行绕行的通路：F5 从 40 走到 1240 必经地上面包@160。捡了它，
     // 在 F5 上用真实背包面板吃掉（格数才能与旧路线一致——补给架的面包
     // 稍后要当一个新栈把空出来的格子填满）。
-    await walkTo(page, DOWN_EXIT_X);
+    await walkTo(page, await downExitOf(page)); // F5 下行口 1328（原 1240）
     await eatOneBread(page);
     await takeStairs(page, 'down', 4);
+    // 从 F5 下梯口(1328)落到 F4 右侧，gate@775 在左边——fuse_box@960 可达。
+    await openContainer(page, 4, 'fuse_box', 960);
     await takeStairs(page, 'down', 3);
-    // 3 层右侧：两只箱子（从 1240 往左走过去会顺手捡起地上布料@1120）。
-    await openContainer(page, 3, 'crate_metal', 800);
-    await openContainer(page, 3, 'crate_wood', 480);
+    // 3 层右侧：两只箱子（从下梯口往左走过去会顺手捡起地上布料）。
+    await openContainer(page, 3, 'crate_metal', 1000);
+    await openContainer(page, 3, 'crate_wood', 600);
 
     // The bag is one short of full with everything but the water: same eleven
     // stacks the straight route carried (bread eaten, crate battery absent on
@@ -243,7 +255,7 @@ test.describe('B3-02.1 bag-full feedback', () => {
     await takeStairs(page, 'up', 2);
     await takeStairs(page, 'up', 3);
     await takeStairs(page, 'up', 4);
-    await openContainer(page, 4, 'water_tank', 240);
+    await openContainer(page, 4, 'water_tank', 360);
     const full = await readState(page);
     expect(full.player.inventory.slots.length).toBe(full.player.inventory.slotCount);
 
@@ -308,7 +320,7 @@ test.describe('B3-02.1 bag-full feedback', () => {
     await takeStairs(page, 'up', 3);
     await takeStairs(page, 'up', 4);
     await takeStairs(page, 'up', 5);
-    await openContainer(page, 5, 'pantry', 1120);
+    await openContainer(page, 5, 'pantry', 1680);
     const refilled = await readState(page);
     expect(await count(page, 'bread')).toBeGreaterThanOrEqual(1);
     expect(refilled.player.inventory.slots.length).toBe(refilled.player.inventory.slotCount);

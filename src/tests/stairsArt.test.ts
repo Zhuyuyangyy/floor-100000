@@ -286,12 +286,14 @@ describe('爬梯动画曲线：直梯是一条垂线', () => {
   });
 
   it('下行：同样垂直，朝左面朝梯子', () => {
+    // tier1 下行口也 seeded 随机（2 层 664），不再钉常量 1240。
+    const downX = downExitXFor(2);
     const mid = stairClimbPose(2, down, down.durationMs / 2);
-    expect(mid.x).toBe(DOWN_EXIT_X);
+    expect(mid.x).toBe(downX);
     expect(mid.y).toBeCloseTo(STAIR_START_Y + STAIR_RISE / 2, 6);
     expect(mid.faceX).toBe(-1);
     const end = stairClimbPose(2, down, down.durationMs);
-    expect(end).toMatchObject({ x: DOWN_EXIT_X, y: STAIR_START_Y + STAIR_RISE, progress: 1 });
+    expect(end).toMatchObject({ x: downX, y: STAIR_START_Y + STAIR_RISE, progress: 1 });
   });
 
   it('工业区竖井梯同曲线，只是换了一种梯子', () => {
@@ -335,10 +337,12 @@ describe('既有契约不破坏（AG-09 / FloorSystem 交接面）', () => {
     const state = createNewGame(1);
     state.player.x = UP_EXIT_X;
     expect(stairMouthZone(state)).toBe('up');
-    state.player.x = DOWN_EXIT_X;
+    // 当前层是 1 层，下行口 840（tier1 随机后不再是 1240）。
+    const downX = downExitXFor(1);
+    state.player.x = downX;
     expect(stairMouthZone(state)).toBe('down');
     expect(stairPath(1, UP_EXIT_X, STAIR_START_Y)[0].x).toBe(UP_EXIT_X);
-    expect(stairPath(-1, DOWN_EXIT_X, STAIR_START_Y)[0].x).toBe(DOWN_EXIT_X);
+    expect(stairPath(-1, downX, STAIR_START_Y)[0].x).toBe(downX);
   });
 
   it('AG-09 的邻居规则与色调表原样在（本模块没碰它们）', () => {

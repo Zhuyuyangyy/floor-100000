@@ -203,7 +203,7 @@ async function npcSpriteX(page: Page, npcId: string): Promise<number | null> {
 }
 
 test.describe('AG-65 楼层几何实测', () => {
-  test('连爬：tier1 保持现值，tier2+ 每层长度不同、梯口不同 x', async ({ page }) => {
+  test('连爬：tier1 也层长/口位不同，tier2+ 每层长度不同、梯口不同 x', async ({ page }) => {
     test.setTimeout(180_000);
     await startRun(page);
 
@@ -218,14 +218,19 @@ test.describe('AG-65 楼层几何实测', () => {
       if (geo.midLadderX !== null) await page.screenshot({ path: `output/ag65/midLadder-floor${geo.floor}.png` });
       if (f < 10) await climbOne(page, f);
     }
-    // 1-10：基础发育区现值——4 房 1280，下行口仍在右端 1240。
+    // 1-10：2026-11-20 起 tier1 也参与差异（用户「每一层长短都不一样」）。
+    // 房间数 4~6、下行口 seeded 中段随机、上梯口仍在 40；这里钉「多种层长」，
+    // 逐层精确值由单测 floorGeometry.test.ts 的 TABLE 冻结。
     const tier1 = seen.filter((g) => g.floor <= 10);
     expect(tier1.length).toBe(10);
     for (const g of tier1) {
-      expect({ floor: g.floor, rooms: g.rooms, width: g.width, downX: g.downX, upX: g.upX })
-        .toEqual({ floor: g.floor, rooms: 4, width: 1280, downX: 1240, upX: 40 });
+      expect(g.upX, `floor ${g.floor} upX`).toBe(40);
+      expect(g.width, `floor ${g.floor} width = rooms*320`).toBe(g.rooms * 320);
+      expect(g.downX, `floor ${g.floor} downX in band`).toBeGreaterThanOrEqual(40);
+      expect(g.downX, `floor ${g.floor} downX in band`).toBeLessThanOrEqual(g.width - 40);
     }
-    // 9/10 层有楼板洞（当前推导：464 / 744）——上面循环里当场截了。
+    expect(new Set(tier1.map((g) => g.width)).size, 'tier1 至少两种层长').toBeGreaterThanOrEqual(2);
+    // 9/10 层有楼板洞（当前推导：432 / 1152）——上面循环里当场截了。
     expect(seen.some((g) => g.holeX !== null), 'floors 1-10 里至少一层有楼板洞').toBeTruthy();
 
     await rideLiftUp(page, 'work_badge', 10, 100);
@@ -298,10 +303,10 @@ test.describe('AG-65 楼层几何实测', () => {
     for (let f = 1; f <= 8; f++) await climbOne(page, f); // 停在第 9 层（有洞）
     // 等相机落位：落地缓动 220ms + follow 阻尼，瞬态帧里天花板还在 HUD 板后面。
     await page.waitForTimeout(800);
-    // 第 9 层有楼板洞（seeded x=464）。
+    // 第 9 层有楼板洞（seeded x=432，tier1 变长后重算）。
     const geo9 = await readGeo(page);
     expect(geo9.floor).toBe(9);
-    expect(geo9.holeX).toBe(464);
+    expect(geo9.holeX).toBe(432);
 
     const rects = await page.evaluate(() => {
       const g = (window.__PHASER_GAME__ as unknown as {

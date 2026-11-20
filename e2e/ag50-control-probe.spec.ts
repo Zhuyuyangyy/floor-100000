@@ -297,10 +297,14 @@ test('AG-50 探针：点击走 / 双击跑 / 跑动画 / 标记 / Shift / 爬梯
     const max = Math.max(...after.map((f) => f.scrollY));
     const last = after[after.length - 1].scrollY;
     console.log(`[ag50 stair] after-landing scrollY min=${min.toFixed(1)} max=${max.toFixed(1)} last=${last.toFixed(1)} range=${(max - min).toFixed(1)}`);
-    // 修后：相机从旧帧（≈-181）单调收敛到静止位 -200，不越过、不荡回。
-    expect(min, '落地后相机不越过静止位（无弹跳）').toBeGreaterThanOrEqual(-200 - 5);
-    expect(max, '落地首帧即旧帧，无 200px 预跳').toBeLessThanOrEqual(-175);
-    expect(Math.abs(last - -200), '落地后停在 follow 静止位').toBeLessThan(10);
+    // after[] 是落地到 **2 层** 的帧（landIdx = floor===2）。家区剖面（AG-52，
+    // 2-5 层常驻画楼下层）把 2 层站立静止位设为
+    //   PLAYER_FEET_Y - viewH*0.45 = 160 - 324 = -164；
+    // 爬梯末帧旧帧 ≈ -181。相机从 -181 单调收敛到 -164，不越过、不荡回。
+    // 旧断言钉 -200（家区剖面之前「脚线居中」的值），已不适用。
+    expect(min, '落地后相机不越过旧帧（无弹跳）').toBeGreaterThanOrEqual(-181 - 5);
+    expect(max, '落地后相机不越过 2 层家区静止位 -164（无预跳反弹）').toBeLessThanOrEqual(-164 + 5);
+    expect(Math.abs(last - -164), '落地后停在 2 层家区 follow 静止位').toBeLessThan(10);
   }
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });

@@ -83,9 +83,9 @@
     }
   },
   "floorGeometry": {
-    "_comment": "AG-65 楼层几何（2026-11-17 用户原话：「每一层宽度长度都不一样，不能一样，有的长」「梯子的位置也不是说一定是起点和终点」「每层小概率在中间开个楼板洞/加个梯子」）。全部 seeded 派生（deriveSeed/makeRng，禁 Math.random），且种子只认楼层号不认 runSeed：FloorSystem/GameScene/存量测试都按楼层号读数，同一层每次进都是同一个答案，爬上去再爬回来梯子不跑。tier1（1-10 层）全部保持现值：roomSpread 0、下行口仍在右端，存量单测/e2e 因此不用改。",
-    "roomSpreadByTier": { "1": 0, "2": 2, "3": 2, "4": 2, "5": 2, "6": 2 },
-    "stairRandomFromTier": 2,
+    "_comment": "AG-65 楼层几何（2026-11-17 用户原话：「每一层宽度长度都不一样，不能一样，有的长」「梯子的位置也不是说一定是起点和终点」「每层小概率在中间开个楼板洞/加个梯子」）。全部 seeded 派生（deriveSeed/makeRng，禁 Math.random），且种子只认楼层号不认 runSeed：FloorSystem/GameScene/存量测试都按楼层号读数，同一层每次进都是同一个答案，爬上去再爬回来梯子不跑。2026-11-20 用户裁决「每一层长短都不一样」下放到 tier1：roomSpread[1] 0→2（1-10 层也变长），下行口随机下放到 tier1（stairRandomFromTier 2→1），梯口不再钉右端。存量单测/e2e 的 1240/1280 硬编码随之改读 downExitXFor/floorWidthFor 权威值。",
+    "roomSpreadByTier": { "1": 2, "2": 2, "3": 2, "4": 2, "5": 2, "6": 2 },
+    "stairRandomFromTier": 1,
     "stairEdgeMarginPx": 80,
     "stairBandLowPct": 0.3,
     "stairBandHighPct": 0.75,

@@ -78,19 +78,21 @@ function traversalFor(floor: number, direction: 1 | -1) {
 // ── 1. encounterSpots：宽楼遭遇点/行商落右半 ────────────────────────────────
 
 describe('AG-104 encounterSpots：宽楼投放范围按楼层宽', () => {
-  it('tier1 布局逐点不变（默认走 FLOOR_WIDTH，存量答案冻结）', () => {
-    // 钉字面量：任何把 tier1 也悄悄换掉的改动都会红在这里。
+  it('tier1 遭遇点按本层宽度投放，逐点冻结', () => {
+    // 2026-11-20 tier1 也变长：3 层 1600、5 层 1920，遭遇点随宽度重算。
+    // 钉字面量守住 seeded 推导，任何无意改动都会红在这里。
     expect(encounterSpots(42, 3)).toEqual([
-      { id: '3:spot0', x: 940, isBoss: false },
-      { id: '3:spot1', x: 643, isBoss: false },
+      { id: '3:spot0', x: 980, isBoss: false },
+      { id: '3:spot1', x: 603, isBoss: false },
     ]);
     expect(encounterSpots(42, 5)).toEqual([
-      { id: '5:spot0', x: 1014, isBoss: false },
+      { id: '5:spot0', x: 894, isBoss: false },
       { id: '5:boss', x: 110, isBoss: true },
     ]);
     for (const floor of PLAYABLE_FLOORS_V01.filter((f) => tierOfFloor(f) === 1)) {
+      const width = floorWidthFor(floor);
       for (const spot of encounterSpots(42, floor)) {
-        expect(spot.x, `tier1 floor ${floor} spot ${spot.id}`).toBeLessThan(FLOOR_WIDTH);
+        expect(spot.x, `tier1 floor ${floor} spot ${spot.id}`).toBeLessThan(width);
       }
     }
   });
@@ -233,10 +235,11 @@ describe('AG-104 stairPath：宽楼梯口折返朝楼层中间', () => {
 // ── 3. 流浪者：出生/巡逻/撤退覆盖全层 ───────────────────────────────────────
 
 describe('AG-104 流浪者：宽楼覆盖全层', () => {
-  it('wandererNightSpawnX：tier1 逐点不变（字面量冻结）', () => {
-    expect(wandererNightSpawnX(createNewGame(42), 'night', 3)).toBe(482);
-    expect(wandererNightSpawnX(createNewGame(1), 'night', 3)).toBe(119);
-    expect(wandererNightSpawnX(createNewGame(2026), 'night', 3)).toBe(945);
+  it('wandererNightSpawnX：tier1 逐点冻结（3 层变长后重算）', () => {
+    // 3 层 1600 宽后夜游者出生点随层宽重算；钉字面量守住 seeded 推导。
+    expect(wandererNightSpawnX(createNewGame(42), 'night', 3)).toBe(599);
+    expect(wandererNightSpawnX(createNewGame(1), 'night', 3)).toBe(139);
+    expect(wandererNightSpawnX(createNewGame(2026), 'night', 3)).toBe(1188);
   });
 
   it('wandererNightSpawnX：宽楼能出生在右半，且不出界', () => {

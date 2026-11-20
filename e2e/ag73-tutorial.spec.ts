@@ -430,12 +430,12 @@ test('finding the bed on floor 1 finishes the tutorial before nightfall', async 
 
   // 把时钟摁在上午：证明收尾不靠入夜（入夜 = 18:00，这里离它还有半天）。
   await setMinute(page, 10 * 60);
-  // 爬回 1 层：把玩家摆到 2 层下行梯口（1240，tier1 钉右端）按 E——与上面
-  // 爬梯同款 evaluate 摆位，顺带避开 2 层可能刷新的阻碍物（seed 42 的 2 层
-  // 就有瓦砾，真实行走会被挡住，10s 内下不来）。
+  // 爬回 1 层：把玩家摆到 2 层下行梯口（tier1 变长后 seeded 中段 664）按 E——
+  // 与上面爬梯同款 evaluate 摆位，顺带避开 2 层可能刷新的阻碍物（seed 42 的
+  // 2 层就有瓦砾，真实行走会被挡住，10s 内下不来）。
   await page.evaluate(() => {
     const s = window.__PHASER_SESSION__?.getState();
-    if (s) s.player.x = 1240;
+    if (s) s.player.x = 664;
   });
   await page.waitForTimeout(150);
   await page.keyboard.press('E');
@@ -444,7 +444,7 @@ test('finding the bed on floor 1 finishes the tutorial before nightfall', async 
     undefined,
     { timeout: 10_000 },
   );
-  // 下梯落点在 1 层右端（downExitXFor(2)=1240），床在 1120——往左走。
+  // 下梯落点 = 2 层下行口（664），床在 1120——往右走（方向按实际落点判断）。
   const landX = await page.evaluate(() => window.__PHASER_SESSION__?.getState()?.player?.x ?? 0);
   await walkTo(page, landX > 1120 ? 'ArrowLeft' : 'ArrowRight', 1120);
   // 走到床边：教程当场收尾，flash 是六步全过的那一句。

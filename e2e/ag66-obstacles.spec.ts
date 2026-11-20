@@ -12,14 +12,15 @@ import { expect, test, type Page } from '@playwright/test';
 //   ⑤ 挖过的再回层不复活。
 // 取消语义附在①里：动作中移动 = 收手，不出货、不标记、可重来。
 //
-// 楼层数据（seed 42）：F2 瓦砾堆 x=222、货架 x=1120（面包×2+砍刀×1）；
-// F3 瓦砾堆 x=251、木箱 x=480（木材×2+胶带×1）、铁箱 x=800。
+// 楼层数据（seed 42；2026-11-20 tier1 变长后的实测值）：
+// F2（1600 宽）瓦砾堆 x=170、货架 x=1400（面包×2+砍刀×1）；
+// F3（1600 宽）瓦砾堆 x=360、木箱 x=600（木材×2+胶带×1）、铁箱 x=1000。
 // 制作面板只能在 1 层宿舍开（onToggleCrafting 的既有设计），所以④回 1 层做。
 // 截图落 output/ag66/（gitignore 的本地证据目录），全程 pageerror 清零。
 
-const SHELF_X = 1120; // F2 邻居货架
-const CRATE_X = 480; // F3 木箱
-const RUBBLE_X = 222; // F2 瓦砾堆
+const SHELF_X = 1400; // F2 邻居货架（原 1120，随层宽 ×1.25）
+const CRATE_X = 600; // F3 木箱（原 480）
+const RUBBLE_X = 170; // F2 瓦砾堆（原 222）
 const BLOCK_EDGE = RUBBLE_X - 26; // 占位左沿（blockHalfWidth=26）
 
 interface State {
@@ -162,9 +163,15 @@ async function climbUp(page: Page, target: number): Promise<void> {
   await page.waitForTimeout(300); // 落地缓动 + drawFloor
 }
 
-/** 走到下梯口按 E，等到达 target 层。 */
+/** 走到当前层的下梯口按 E，等到达 target 层（口位随层变，读场景权威值）。 */
 async function climbDown(page: Page, target: number): Promise<void> {
-  await setX(page, 1240);
+  const downX = await page.evaluate(() => {
+    const s = (window as unknown as {
+      __PHASER_GAME__?: { scene: { getScene: (k: string) => { downExit?: number } | null } };
+    }).__PHASER_GAME__?.scene.getScene('Game');
+    return s?.downExit ?? 664;
+  });
+  await setX(page, downX);
   await page.keyboard.press('E');
   await page.waitForFunction(
     (t) => {
@@ -258,12 +265,13 @@ test('AG-66: 阻碍物拦过往道，没工具说缺什么，做了铲子挖开�
   expect(roster.all, 'F2 应有一个瓦砾堆').toEqual([RUBBLE_X]);
   expect(roster.active).toEqual([RUBBLE_X]);
 
-  // ── 1. ② 走到阻碍物被拦：从 150 按住 D 走 700ms，钳在占位左沿 ──────────
-  await setX(page, 150);
-  await holdWalk(page, 'd', 700); // 无阻碍能走 ~91px 到 241
+  // ── 1. ② 走到阻碍物被拦：从远处按住 D 走，钳在占位左沿 ─────────────────
+  // 瓦砾从 222 移到 170，起点必须退到占位左沿 144 之外（60）。
+  await setX(page, 60);
+  await holdWalk(page, 'd', 700); // 无阻碍能走 ~91px 到 151，实际被钳在 144
   const blocked = await playerX(page);
   expect(blocked, `被钳在 ${blocked}，应贴占位左沿 ${BLOCK_EDGE}`).toBeLessThanOrEqual(BLOCK_EDGE);
-  expect(blocked).toBeGreaterThan(150);
+  expect(blocked).toBeGreaterThan(60);
   await page.screenshot({ path: 'output/ag66/04-blocked.png' });
 
   // ── 2. ③ 没铲子：提示与 E 的反馈都说要工具 ────────────────────────────
@@ -273,8 +281,8 @@ test('AG-66: 阻碍物拦过往道，没工具说缺什么，做了铲子挖开�
   await expect.poll(async () => hudText(page, 'hud-feedback'), { timeout: 5000 }).toBe('需要铲子才能挖开这堆瓦砾（撬棍也行）');
   await page.screenshot({ path: 'output/ag66/05-need-tool.png' });
   // 提示归提示，路还是堵着。
-  await setX(page, 150);
-  await holdWalk(page, 'd', 500);
+  await setX(page, 60);
+  await holdWalk(page, 'd', 700);
   expect(await playerX(page)).toBeLessThanOrEqual(BLOCK_EDGE);
 
   // ── 3. ④ 回宿舍做铲子（制作面板只能在 1 层开——onToggleCrafting 既有设计）──
@@ -331,9 +339,9 @@ test('AG-66: 阻碍物拦过往道，没工具说缺什么，做了铲子挖开�
   expect(afterDig.all).toEqual([RUBBLE_X]);
   expect(afterDig.active).toEqual([]);
 
-  // 过道通：原地起步直接走过去。
-  await setX(page, 150);
-  await holdWalk(page, 'd', 900); // 无阻碍 ~117px → 267
+  // 过道通：从远处起步直接走过去（要跨过占位右沿 196）。
+  await setX(page, 60);
+  await holdWalk(page, 'd', 1400); // 无阻碍 ~182px → 242 > 196
   const passed = await playerX(page);
   expect(passed, `应走过占位区，实际停在 ${passed}`).toBeGreaterThan(RUBBLE_X + 26);
   await page.screenshot({ path: 'output/ag66/08-passage-open.png' });
@@ -366,8 +374,8 @@ test('AG-66: 挖过的阻碍物回层不复活', async ({ page }) => {
   expect((await readState(page)).visitedFloors['2'].lootedItems).toContain(`obstacle:2:${RUBBLE_X}`);
 
   // 直接走过原阻碍位，不被拦。
-  await setX(page, 150);
-  await holdWalk(page, 'd', 900);
+  await setX(page, 60);
+  await holdWalk(page, 'd', 1400);
   expect(await playerX(page)).toBeGreaterThan(RUBBLE_X + 26);
   await page.screenshot({ path: 'output/ag66/09-no-respawn.png' });
 

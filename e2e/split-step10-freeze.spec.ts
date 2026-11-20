@@ -321,7 +321,7 @@ test('交互链冻结（世界/特写/入夜/夜间安排/挖掘中/床铺搜刮
   //    （500x300 居中；attemptSleep 的 20:00 门禁 + openShelter）。
   await page.keyboard.press('Escape');
   await page.waitForTimeout(250);
-  await setX(page, 1240);
+  await setX(page, 664); // 2 层下行口（tier1 变长后 seeded 中段，原 1240）
   await pressEUntil(page, async () => (await readState(page)).currentFloor === 1);
   await setMinute(page, 1200);
   await setX(page, 1120); // BED_X 自己的床
@@ -354,7 +354,7 @@ test('交互链冻结（世界/特写/入夜/夜间安排/挖掘中/床铺搜刮
   //    （同一 busy 稳定态，床铺域）。
   await page.keyboard.press('E'); // pendingAction 分支 = 收手
   await page.waitForTimeout(250);
-  await setX(page, 1240);
+  await setX(page, 664); // 2 层下行口（tier1 变长后 seeded 中段，原 1240）
   await pressEUntil(page, async () => (await readState(page)).currentFloor === 1);
   await setX(page, 236); // 前排室友床（dorm_bed_1_236）
   await expect.poll(() => hudText(page, 'hud-hint'), { timeout: 5000 }).toBe('按 E 搜刮床铺');

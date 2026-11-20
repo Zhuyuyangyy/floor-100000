@@ -30,10 +30,11 @@ const BALANCE = JSON.parse(readFileSync(join(process.cwd(), 'config/game-balance
 //   2                         -> up            (shelf skipped: 50% empty, 1.5km detour)
 //   3  (loose battery@160)    -> up            (crates deferred: AG-66 rubble seals
 //                                               them from the spawn side — 见下行注释)
-//   4  fuse_box@640 (arrival), water_tank@240 -> up
-//   5  counter@480, pantry@1120, loaf@160 -> down   (loaf eaten here — 见 eatOneBread)
+//   4  fuse_box@960 (arrival), water_tank@360 -> up
+//   5  counter@720, pantry@1680, loaf@240 -> down   (loaf eaten here — 见 eatOneBread)
 //   4                         -> down
-//   3  crate_metal@800, crate_wood@480 -> down  (opened from the down-exit side)
+//   3  crate_metal@1000, crate_wood@600 -> down  (opened from the down-exit side)
+// （2026-11-20 tier1 变长后坐标按层宽重算：4/5 层 1920 宽，3 层 1600 宽。）
 //   2                         -> down
 //   1  cabinet re-check (no duplicate) -> bed@1120 -> sleep
 // then reload and 继续游戏 to prove the save round-trips.
@@ -42,17 +43,27 @@ const BALANCE = JSON.parse(readFileSync(join(process.cwd(), 'config/game-balance
 // 改为「上去再从上层下口掉回右侧」的开箱路线（BFS 实证可达），其余流程原样。
 
 const UP_EXIT_X = 40;
-const DOWN_EXIT_X = 1240;
 
 test.describe('B3-02 full survival journey', () => {
   test.setTimeout(600_000); // the walk and the wait for nightfall are the point
 
-  const readState = (page: Page): Promise<E2EGameState> =>
-    page.evaluate(() => {
-      const s = window.__PHASER_SESSION__?.getState();
-      if (!s) throw new Error('no session');
-      return s;
-    });
+  // 等入夜的循环里场景可能正好切换（遭遇战/存档重载），evaluate 会撞上
+  // "Execution context was destroyed"——重试一次即可，不是真的没状态。
+  const readState = async (page: Page): Promise<E2EGameState> => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await page.evaluate(() => {
+          const s = window.__PHASER_SESSION__?.getState();
+          if (!s) throw new Error('no session');
+          return s;
+        });
+      } catch (e) {
+        if (attempt === 2) throw e;
+        await page.waitForTimeout(150);
+      }
+    }
+    throw new Error('unreachable');
+  };
 
   const count = (page: Page, itemId: string): Promise<number> =>
     page.evaluate((id) => {
@@ -198,8 +209,30 @@ test.describe('B3-02 full survival journey', () => {
   // Wait for the landing: the traversal is a visible 1000 ms animation, so a
   // blind 220 ms retry can start a second climb on the commit frame and skip a
   // floor (measured: a route that asked for 2 ended on 5).
+  // 下行口 2026-11-20 起 tier1 也 seeded 随机（1/2/3/4/5 层分别 840/664/
+  // 792/1400/1328），不能再钉 1240——读场景当前层的 downExit 权威值。
+  const downExitOf = (page: Page): Promise<number> =>
+    page.evaluate(() => {
+      const s = (window as unknown as {
+        __PHASER_GAME__?: { scene: { getScene: (k: string) => { downExit?: number } | null } };
+      }).__PHASER_GAME__?.scene.getScene('Game');
+      return s?.downExit ?? 1240;
+    });
+
   async function takeStairs(page: Page, dir: 'up' | 'down', expectedFloor: number): Promise<void> {
-    await walkTo(page, dir === 'up' ? UP_EXIT_X : DOWN_EXIT_X);
+    // tier1 变长后 encounter/行商 spot 会压在走位路径上，残留面板（行商或
+    // 暂停）吃掉移动与 E。逐个甄别后 ESC 关掉——无面板时按 ESC 反而会开
+    // 暂停，所以必须条件判断并循环清理。
+    for (let k = 0; k < 3; k++) {
+      // 用面板独有文本判据——'行商' 也可能是 NPC 头顶常驻标签，误判会
+      // 反手按出暂停菜单（实测踩过）。
+      const shop = await hasVisibleText(page, '材料货架');
+      const paused = await hasVisibleText(page, '已暂停');
+      if (!shop && !paused) break;
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(120);
+    }
+    await walkTo(page, dir === 'up' ? UP_EXIT_X : await downExitOf(page));
     for (let i = 0; i < 6; i++) {
       if ((await readState(page)).currentFloor === expectedFloor) return;
       await page.keyboard.press('E');
@@ -212,7 +245,15 @@ test.describe('B3-02 full survival journey', () => {
         .then(() => true)
         .catch(() => false);
       if (landed) return;
-      await walkTo(page, dir === 'up' ? UP_EXIT_X : DOWN_EXIT_X);
+      // E 落在行商 spot 上会开商店面板而非爬梯——关掉再走，否则面板吃输入。
+      for (let k = 0; k < 3; k++) {
+        const shop = await hasVisibleText(page, '行商');
+        const paused = await hasVisibleText(page, '已暂停');
+        if (!shop && !paused) break;
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(120);
+      }
+      await walkTo(page, dir === 'up' ? UP_EXIT_X : await downExitOf(page));
     }
     throw new Error(`could not go ${dir} to floor ${expectedFloor} (at ${(await readState(page)).currentFloor})`);
   }
@@ -286,24 +327,22 @@ test.describe('B3-02 full survival journey', () => {
     // 自己就在瓦砾后面——直走 800 永远到不了。RC-01 分诊：探针缺陷——旧脚本
     // 按 AG-66 之前的世界直走；游戏设计没坏（AG-96 保每个落点至少一个可达
     // 口，本层上口@40 就可达），正确路线是「上去再从上层下口掉回右侧」。
-    // 箱子改在回程开（见第 3 节），这里只补捡地上电池@160——旧路线从
-    // crate_wood 走回梯子时经过它，新路线不经过，往返一次补上。
-    await walkTo(page, 160);
+    // 箱子改在回程开（见第 3 节），这里只补捡地上电池（模板@160，3 层
+    // 1600 宽缩放后@200）——旧路线从 crate_wood 走回梯子时经过，新路线不经过。
+    await walkTo(page, 200);
     await walkTo(page, 40);
     await takeStairs(page, 'up', 4);
     expect(await count(page, 'battery')).toBeGreaterThanOrEqual(1);
     await page.screenshot({ path: 'e2e/screenshots/42-journey-3-floor3.png' });
 
-    // Floor 4: the player lands at the far stair and walks to the fusebox.
-    await openContainer(page, 4, 'fuse_box', 640);
-    expect(await count(page, 'wire')).toBe(2);
-    expect(await count(page, 'filter')).toBe(1);
-    expect(await count(page, 'fuse')).toBe(1);
+    // Floor 4: 落点在上梯口 40（左侧）。tier1 变长后 gate@775 把左侧入口与
+    // fuse_box@960 隔开，无工具过不去——改为从 F5 下梯口掉回右侧后再开（见
+    // 回程 4 层段），这里直接上 5 层。wire/filter/fuse 的断言随之挪下去。
     await takeStairs(page, 'up', 5);
     await page.screenshot({ path: 'e2e/screenshots/43-journey-4-floor4.png' });
 
     // Floor 5 is the top of the range: no up exit, only back down.
-    await openContainer(page, 5, 'counter', 480);
+    await openContainer(page, 5, 'counter', 720);
     // 2 starting + 3 from the counter. A floor rather than an exact count: the
     // OVERHAUL daily-goal reward hands out a ration when the day's objective
     // closes — on the AG-66 route the third container (floor 3's crates) is
@@ -332,12 +371,16 @@ test.describe('B3-02 full survival journey', () => {
     // ── 3. come home ────────────────────────────────────────────────────
     const beforeReturn = await readState(page);
     await takeStairs(page, 'down', 4);
+    // 从 F5 下梯口(1328)落到 F4 右侧，gate@775 在左边——fuse_box@960 可达。
+    await openContainer(page, 4, 'fuse_box', 960);
+    expect(await count(page, 'wire')).toBe(2);
+    expect(await count(page, 'filter')).toBe(1);
+    expect(await count(page, 'fuse')).toBe(1);
     await takeStairs(page, 'down', 3);
-    // AG-66：3 层两只箱子在上层路线里被瓦砾@251 封在出生侧，改在这里开——
-    // 从 4 层下口(1240)落地在瓦砾右侧，crate_metal@800 / crate_wood@480 可达
-    // （BFS 实证：探针输出见 REPORT.md）。开箱顺序保持铁箱→木箱：撬棍与废金属
-    // 是这段行程的意义本体，也给回程腾位置的动作链收尾。
-    await openContainer(page, 3, 'crate_metal', 800);
+    // AG-66：3 层两只箱子在上层路线里被瓦砾@360 封在出生侧，改在这里开——
+    // 从 4 层下口(1400)落地在瓦砾右侧，crate_metal@1000 / crate_wood@600 可达
+    // （tier1 变长后按层宽重算，BFS 可达性不变）。开箱顺序保持铁箱→木箱。
+    await openContainer(page, 3, 'crate_metal', 1000);
     expect(await count(page, 'scrap_metal')).toBe(3); // guaranteed, no slack
     expect(await count(page, 'crowbar')).toBe(1);
     // Third and last bottle, between the two crates: lootContainer is
@@ -350,7 +393,7 @@ test.describe('B3-02 full survival journey', () => {
     // Thirst pacing: start / floor 5 / homeward between floor 3's crates.
     await drinkOneBottle(page);
     expect(await count(page, 'clean_water')).toBe(0);
-    await openContainer(page, 3, 'crate_wood', 480);
+    await openContainer(page, 3, 'crate_wood', 600);
     expect(await count(page, 'wood')).toBe(2);
     expect(await count(page, 'tape')).toBe(1);
     // The loose cloth at x=1120 was picked up on the walk in to the metal crate.
@@ -359,7 +402,7 @@ test.describe('B3-02 full survival journey', () => {
 
     const home = await readState(page);
     expect(home.currentFloor).toBe(HOME_FLOOR);
-    expect(home.player.x).toBe(1240); // the home floor's down-stair landing
+    expect(home.player.x).toBe(664); // 从 2 层下到 1 层的落点 = downExitXFor(2)
     // Nothing was lost on the way: the bag, the survival stats, the clock.
     expect(home.player.hp).toBe(beforeReturn.player.hp);
     expect(home.player.hunger).toBeLessThanOrEqual(beforeReturn.player.hunger);

@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createNewGame } from '../core/gameState';
-import { FLOOR_WIDTH } from '../core/constants';
+import { FLOOR_WIDTH, floorWidthFor } from '../core/constants';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem, countItem } from '../systems/InventorySystem';
 import { getItem } from '../data/items';
@@ -973,7 +973,8 @@ describe('流浪者跨层寻仇（planWandererVendetta）', () => {
     expect(plan.floor).toBe(night.currentFloor); // 寻仇楼层 = 玩家所在层
     expect(plan.spawnX).toBe(wandererNightSpawnX(night, 'vendetta', plan.floor));
     expect(plan.spawnX).toBeGreaterThanOrEqual(48);
-    expect(plan.spawnX).toBeLessThanOrEqual(FLOOR_WIDTH - 48);
+    // 寻仇楼层可能是 tier1 变长层（宽 >1280），上界按该层实际宽度。
+    expect(plan.spawnX).toBeLessThanOrEqual(floorWidthFor(plan.floor) - 48);
     expect(plan.aggroRange).toBe(390);
     expect(plan.reason).toBe('');
   });

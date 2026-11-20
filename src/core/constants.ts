@@ -76,9 +76,12 @@ const ROOMS_BY_TIER: Record<number, number> = { 1: 4, 2: 5, 3: 6, 4: 7, 5: 8, 6:
 // 楼层号、不认 runSeed——FloorSystem/GameScene 与存量测试都按楼层号读数，同一层
 // 每次进都是同一个答案（爬上去再爬回来，梯子还在原地），因此不需要进存档。
 //
-// tier1（1-10 层）整体保持现值：roomSpreadByTier[1] = 0、stairRandomFromTier
-// 从 2 起——floorSystem/stairsArt/uiLayout 有测试钉 tier1 的 1240/UP_EXIT_X，
-// 首章 e2e 也按 40/1240 走位，基础发育区必须稳。
+// 2026-11-20 起 tier1 也放开差异（用户「每一层长短都不一样」）：
+// roomSpreadByTier[1] = 2、stairRandomFromTier = 1。此前 tier1 靠 spread 0 /
+// 梯口钉右端守住 floorSystem/stairsArt/uiLayout 的 1240/UP_EXIT_X 钉子与首章
+// e2e 的 40/1240 走位；现在这些测试一律改读 roomCountFor/downExitXFor 的
+// 权威值，不再硬编码。家具（床/工作台）同步走 bedXFor/craftXFor，梯口
+// 随机避开它们（floorKeepClearXs）。
 export interface FloorGeometryBalance {
   /** 阶层内房间数在 ROOMS_BY_TIER 基础上的 seeded 上浮（0 = 该阶层一档封死） */
   roomSpreadByTier: Record<number, number>;
@@ -178,16 +181,15 @@ export function floorWidthFor(floor: number): number {
   return roomCountFor(floor) * ROOM_WIDTH;
 }
 
-/** The down stairwell sits at the right end, whatever the floor's length. */
+/** 下行梯口：stairRandomFromTier 起在本层中段 seeded 随机，否则钉右端 -40。
+ * 2026-11-20 起 stairRandomFromTier=1，tier1 也随机（用户「每层长短不一样」）。 */
 export function downExitXFor(floor: number): number {
   const width = floorWidthFor(floor);
-  // tier1 保持现值（右端 -40）：floorSystem/stairsArt 的存量断言与首章 e2e
-  // 都按它走位。
   if (tierOfFloor(floor) < FLOOR_GEOMETRY_BALANCE.stairRandomFromTier) {
     return width - 40;
   }
-  // AG-65：tier2 起，下行梯口不再钉在右端——在本层中段 seeded 随机，避开
-  // 容器/地面物资/床铺/上梯口/电梯，玩家按 E 爬的是梯不是箱子。
+  // AG-65：下行梯口不钉右端——在本层中段 seeded 随机，避开容器/地面物资/
+  // 床铺/上梯口/电梯，玩家按 E 爬的是梯不是箱子。
   return pickSeededX(deriveSeed(FLOOR_GEO_SEED_TAG, 'stairDown', floor), width, floorKeepClearXs(floor));
 }
 export const PLAYER_SPEED = 130; // px / second
@@ -210,6 +212,13 @@ export const STAIR_RISE = FLOOR_HEIGHT;
 // #d9b48f arriving as #cdaa88, and 40% of it inside the wall's camouflage band.
 // Raising the design resolution instead of zooming is what removed the resample.
 export const FLOOR_VIEW_ZOOM = 1;
+// 用户视图缩放（2026-11-20「可以放大缩小」）：在 FLOOR_VIEW_ZOOM 基准之上的
+// 运行时乘数，滚轮/+- 键调整、0 复位。基准 1 不动——像素精确性的硬约束由
+// 「世界相机 zoom、UI 相机恒 1」的双相机承担：世界放大时 HUD/面板不跟着糊。
+// 下限 0.5（看全更宽的楼）、上限 2（贴脸看像素），步进 1.25 几何级数。
+export const VIEW_ZOOM_MIN = 0.5;
+export const VIEW_ZOOM_MAX = 2;
+export const VIEW_ZOOM_STEP = 1.25;
 // How many floors are drawn around the player: two above, two below, plus the
 // player's own. The view is 3.6 floors tall, so one above and one below leaves a
 // 120px band of empty black at whichever edge the player is not centred on —
@@ -540,6 +549,10 @@ export function floorKeepClearXs(floor: number): number[] {
     for (const g of template.ground) out.push(Math.round(g.x * k));
     if (DENSE_BUNK_TIERS.has(tierOfFloor(floor))) out.push(300, width - 300);
   }
+  // 起始层的自己的床/工作台不在 floorTemplates 里（它们是场景直接画的），
+  // 但 tier1 梯口 2026-11-20 起也随机了，必须把这两个占用点报进去，否则
+  // 梯口会开在床/工作台上——玩家按 E 爬的是箱子而不是梯。
+  if (floor === STARTING_FLOOR) out.push(bedXFor(floor), craftXFor(floor));
   return out;
 }
 
@@ -577,6 +590,12 @@ export function pickSeededX(seed: number, width: number, clears: readonly number
 }
 export const BED_X = 1120; // dorm bed on the starting floor (sleep to pass the night)
 export const CRAFT_X = 480; // dorm workbench on the starting floor (crafting station)
+// 床/工作台按本层长度缩放（与 getFloorView 的 k=width/1280 同口径）。BED_X/CRAFT_X
+// 是 1280 网格上的模板坐标；tier1 变长后（2026-11-20）必须随层宽缩放，否则宽楼
+// 的床/工作台挤在左半、右半空荡。STARTING_FLOOR 恒 1 层，bedXFor()/craftXFor()
+// 是玩法判定（睡觉/制作/教程高亮）与绘制共用的权威值。
+export const bedXFor = (floor: number): number => Math.round(BED_X * (floorWidthFor(floor) / FLOOR_WIDTH));
+export const craftXFor = (floor: number): number => Math.round(CRAFT_X * (floorWidthFor(floor) / FLOOR_WIDTH));
 
 // Night wanderer threat (docs/01_GDD.md §10): slower than the player so it can be
 // outrun, and it only ever chips HP on a cooldown — never an unavoidable kill.

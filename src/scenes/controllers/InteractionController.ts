@@ -82,7 +82,7 @@ import { itemIconKey } from '../../render/itemIcons';
 import { pickupAnimKey, searchAnimKey } from '../../render/walkcycle';
 import { ACTOR_DEPTH, LIGHT_DEPTH } from '../../render/lighting';
 import {
-  BED_X,
+  bedXFor,
   FLOOR_BAND,
   FLOOR_HEIGHT,
   INTERACT_DISTANCE,
@@ -414,7 +414,7 @@ export class InteractionController {
    *  isNearBed() 委托）。 */
   isNearBed(): boolean {
     const state = getGame();
-    return state.currentFloor === STARTING_FLOOR && Math.abs(state.player.x - BED_X) <= INTERACT_DISTANCE;
+    return state.currentFloor === STARTING_FLOOR && Math.abs(state.player.x - bedXFor(STARTING_FLOOR)) <= INTERACT_DISTANCE;
   }
 
   /** 自己的床：夜里走睡觉（20:00 门禁），白天翻床垫——onInteract 的

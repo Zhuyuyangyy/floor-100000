@@ -5,8 +5,8 @@ import { FloatTextPool, playFx, setFxDegraded, startFxLoop } from '../render/fx'
 import { DESIGN_HEIGHT } from '../core/design';
 import { getGame, hasGame, startNewGame } from '../core/session';
 import {
-  BED_X,
-  CRAFT_X,
+  bedXFor,
+  craftXFor,
   DOWN_EXIT_X,
   downExitXFor,
   floorWidthFor,
@@ -14,6 +14,9 @@ import {
   FLOOR_GEOMETRY_BALANCE,
   FLOOR_GEO_SEED_TAG,
   FLOOR_VIEW_ZOOM,
+  VIEW_ZOOM_MIN,
+  VIEW_ZOOM_MAX,
+  VIEW_ZOOM_STEP,
   ENTRY_X,
   FLOOR_BAND,
   FLOOR_HEIGHT,
@@ -23,7 +26,6 @@ import {
   PLAYER_FEET_Y,
   PLAYER_DECELERATION,
   PLAYER_SPEED,
-  ROOM_COUNT,
   ROOM_WIDTH,
   STARTING_FLOOR,
   STAIR_START_Y,
@@ -739,6 +741,13 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   // can widen them and the landing can put them back. drawFloor owns the
   // standing values; these are only a mirror of the last setBounds call.
   private standingCamBounds?: { top: number; bottom: number };
+  // ── 用户视图缩放（2026-11-20「可以放大缩小」）─────────────────────────────
+  // 双相机：main 是世界相机（zoom = FLOOR_VIEW_ZOOM × viewZoom，随用户缩放），
+  // uiCam 恒 zoom 1 画 HUD/面板/导航条——世界放大时 UI 不跟着糊。分流靠
+  // cameraFilter：UI 对象（scrollFactor 0）划给 uiCam、世界对象划给 main。
+  // viewZoom 是运行时乘数，基准 FLOOR_VIEW_ZOOM=1 不动（像素精确性硬约束）。
+  private uiCam?: Phaser.Cameras.Scene2D.Camera;
+  private viewZoom = 1;
   // AG-52: the climb's target floor, drawn beside the live one while the player
   // is on the stairs (see syncClimbTargetFloor). The layer reference is only
   // needed to take it down on a REFUSED landing — a successful landing's
@@ -963,6 +972,13 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   private keyL!: Phaser.Input.Keyboard.Key;
   /** AG-20: G opens the venture ledger (产业投资面板). */
   private keyG!: Phaser.Input.Keyboard.Key;
+  // 视图缩放键（2026-11-20）：+ / - 步进、0 复位。滚轮另走 worldWheelHandler。
+  private keyZoomIn!: Phaser.Input.Keyboard.Key;
+  private keyZoomOut!: Phaser.Input.Keyboard.Key;
+  private keyZoomReset!: Phaser.Input.Keyboard.Key;
+  private keyNumpadAdd!: Phaser.Input.Keyboard.Key;
+  private keyNumpadSub!: Phaser.Input.Keyboard.Key;
+  private keyNumpadZero!: Phaser.Input.Keyboard.Key;
   /** The quests:changed subscription survives a Game restart; the panel scene does not restart. */
   private questsEventBound = false;
 
@@ -1095,6 +1111,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
 
     this.cameras.main.setBackgroundColor(0x22303a);
     this.cameras.main.setBounds(0, 0, FLOOR_WIDTH, FLOOR_HEIGHT);
+    // 双相机装配（世界 zoom / UI 恒 1）+ 每帧分流。须在 drawFloor 之前——
+    // drawFloor 的相机数学读 effectiveZoom()，HUD 装配读 viewSize()（uiCam）。
+    this.setupViewCameras();
     this.nightOverlay = this.add
       .rectangle(FLOOR_WIDTH / 2, FLOOR_HEIGHT / 2, FLOOR_WIDTH, FLOOR_HEIGHT)
       // THE FILL ALPHA IS THE WHOLE BUG.
@@ -1246,8 +1265,11 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
    * Controller）构造注入后按打开时刻的画布定位，与场景各面板同一口径。
    */
   viewSize(): { width: number; height: number } {
-    const cam = this.cameras.main;
-    return { width: cam.width * cam.zoom, height: cam.height * cam.zoom };
+    // 画布像素（HUD/面板定位口径）。双相机后读 uiCam——它恒 zoom 1，width/height
+    // 就是画布尺寸，不随世界缩放变。世界相机 main 的 zoom 会缩放世界，但 HUD
+    // 钉在画布上，所以面板几何永远按 uiCam 的画布尺寸算。
+    const cam = this.uiCam ?? this.cameras.main;
+    return { width: cam.width, height: cam.height };
   }
 
   private drawFloor(): void {
@@ -1418,7 +1440,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // 1 following x only, which could never show more than the floor you were
     // standing on.
     const cam = this.cameras.main;
-    cam.setZoom(FLOOR_VIEW_ZOOM);
+    // 世界相机 zoom = 基准 × 用户乘数（2026-11-20 缩放）。基准 1 不动，用户
+    // 缩放只是运行时乘数；HUD 由 uiCam 恒 1 单独画，不随这里变。
+    cam.setZoom(this.effectiveZoom());
     // AG-52: 只看见一层 —— 相机 bounds 收到本层。角色站在一层上 y 不动
     // （PLAYER_FEET_Y），follow 本来就把相机钉在角色身上；bounds 从「3.6 层
     // 高的剖面」收紧到「角色身边一层」之后，虚空永远滚不到——这是"根据角色
@@ -1433,7 +1457,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // drawNeighbourFloor，distance 1 同款压暗），bounds 底沿随之放宽一层，
     // 让视口装得下「本层 + 楼下层」。1 层是地基、下面没有层，保持单层。
     // 6 层起回到 AG-52 单层契约，一个像素都不变。
-    const viewH = this.viewSize().height;
+    // 视口世界高 = 画布高 / zoom（zoom 越大看见的世界越少）。相机数学一律用
+    // 世界像素，不能用 viewSize()（那是 HUD 的画布像素口径）。zoom=1 时两者
+    // 相等，存量行为不变。
+    const viewH = cam.height / this.effectiveZoom();
     const homeBelow = floor >= 2 && floor <= HOME_SECTION_TOP && hasFloorContent(floor - 1);
     // 家区站立位：本层脚线落在视口 45% 高处（而非居中 50%），给楼下层留出
     // 下半屏。standScrollY 由「脚线屏幕位置」反推，bounds 顶沿仍钉站立位。
@@ -1467,8 +1494,6 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       this.landingEase = false;
       const dir = this.lastClimbDirection ?? 1;
       const fromY = climbEndScrollY + FLOOR_HEIGHT * dir;
-      console.log('[ag50-dbg] landing ease: cam.scrollY=', cam.scrollY, 'dir=', dir, 'fromY=', fromY, 'toY=', standScrollY);
-      console.log('[ag50-dbg] landing ease: cam.scrollY=', cam.scrollY, 'dir=', dir, 'fromY=', fromY, 'toY=', standScrollY);
       const toY = standScrollY;
       cam.stopFollow();
       cam.setBounds(0, Math.min(fromY, toY), this.floorW, viewH + FLOOR_HEIGHT);
@@ -1522,7 +1547,8 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // 底沿已经够高就不动）。follow 因此全程有路可走、攀爬者始终居中；反方向
     // 一格不收紧，塔沿之外的虚空在站立时仍然藏着。落地由 drawFloor 的
     // landingEase 接棒（单向缓动到站立位），拒绝落地由 resetCameraBounds 接棒。
-    const camH = cam.height;
+    // 视口世界高（zoom 感知）：攀爬者居中所需的 scroll 行程按世界像素算。
+    const camH = cam.height / this.effectiveZoom();
     const nearScroll = climb.startY - camH / 2;
     const farScroll = climb.endY - camH / 2;
     const lo = Math.min(nearScroll, farScroll);
@@ -1543,6 +1569,103 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // The climb stopped the follow; a refused landing must hand it back or the
     // camera stays parked where the climb began.
     cam.startFollow(this.player, true, 0.15, 0.15);
+  }
+
+  // ── 用户视图缩放（2026-11-20「可以放大缩小」）─────────────────────────────
+  // 双相机装配：main 画世界（zoom 随用户缩放），uiCam 恒 zoom 1 画 HUD/面板。
+  // uiCam 透明背景（alpha 0）——渲染节点只在 backgroundColor.alphaGL>0 时填底，
+  // 所以它叠在世界之上而不遮住世界。两相机同尺寸同位置（全屏），只是 zoom 与
+  // cameraFilter 分流不同。create() 里调一次；场景重启复用同一对相机。
+  private setupViewCameras(): void {
+    const main = this.cameras.main;
+    if (!this.uiCam) {
+      this.uiCam = this.cameras.add(0, 0, main.width, main.height);
+      this.uiCam.setName('ui-camera');
+      // 透明：不填底、不清屏，世界透过它显示。
+      this.uiCam.setBackgroundColor('rgba(0,0,0,0)');
+      this.uiCam.setZoom(1);
+      // UI 相机不跟随、不滚动——HUD 钉在画布像素上。
+      this.uiCam.setScroll(0, 0);
+      // 分流：每帧渲染前按 scrollFactor 把对象划给对应相机。UI 全 scrollFactor 0
+      // （lockToScreen/applyPanelDepth/各 HUD 件），世界全默认 1——判据干净无交叉。
+      // 放在 PRE_RENDER：所有 update（含面板懒建、drawFloor）已落定，链式
+      // .setScrollFactor(0) 也已设好，渲染前一刻分流最稳。容器子件逐个 willRender
+      // 检查 cameraFilter，所以必须递归进容器（邻居层/面板盒都是容器）。
+      this.events.on(Phaser.Scenes.Events.PRE_RENDER, this.routeCameras, this);
+      this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+        this.events.off(Phaser.Scenes.Events.PRE_RENDER, this.routeCameras, this);
+      });
+    }
+    this.applyViewZoom();
+  }
+
+  // cameraFilter 是位掩码：与相机 id 按位与非零 → 该相机不画它。main.id=1、
+  // uiCam.id=2。世界对象要「只在 main 画」→ 屏蔽 uiCam（filter|=2）；UI 对象
+  // 要「只在 uiCam 画」→ 屏蔽 main（filter|=1）。用「目标掩码」整体赋值而非
+  // 累加，避免对象在两类间迁移时残留旧位。
+  private routeCameras(): void {
+    const ui = this.uiCam;
+    if (!ui) return;
+    const mainId = this.cameras.main.id;
+    const uiId = ui.id;
+    const route = (o: Phaser.GameObjects.GameObject): void => {
+      const isUi = (o as Phaser.GameObjects.Image).scrollFactorX === 0;
+      // 目标：UI 屏蔽 main、世界屏蔽 uiCam。只在不一致时写，省每帧赋值。
+      const target = isUi ? mainId : uiId;
+      if (o.cameraFilter !== target) o.cameraFilter = target;
+      // 容器（邻居层）：子件逐个 willRender 查 cameraFilter，必须递归。Container
+      // 没有 isParent（那是 Group），按 type 判别；子件继承容器的 UI/世界归属。
+      if (o.type === 'Container') {
+        for (const child of (o as Phaser.GameObjects.Container).list) {
+          if (child.cameraFilter !== target) child.cameraFilter = target;
+        }
+      }
+    };
+    for (const o of this.children.list) route(o);
+  }
+
+  // 世界相机的有效 zoom = 基准 × 用户乘数。基准 FLOOR_VIEW_ZOOM=1 是像素精确
+  // 性的锚（见 constants 注释），用户缩放只是运行时乘数，不改基准。
+  private effectiveZoom(): number {
+    return FLOOR_VIEW_ZOOM * this.viewZoom;
+  }
+
+  // 把当前 viewZoom 落到世界相机，并按新 zoom 重算站立 bounds（视口世界高随
+  // zoom 变：cam.height/zoom）。HUD 相机恒 1 不动。bounds 顶沿按「脚线屏幕
+  // 位置」反推，与 drawFloor 同一公式；调用方负责随后定位 scroll（锚点或居中）。
+  private applyViewZoom(): void {
+    const cam = this.cameras.main;
+    cam.setZoom(this.effectiveZoom());
+    if (!this.standingCamBounds) return;
+    // 站立 bounds 随 zoom 重算：视口世界高 = cam.height/zoom。家区含楼下剖面
+    // 一层、非家区单层——与 drawFloor 的 homeBelow 判定同口径（读当前层）。
+    const floor = getGame().currentFloor;
+    const homeBelow = floor >= 2 && floor <= HOME_SECTION_TOP && hasFloorContent(floor - 1);
+    const viewH = cam.height / this.effectiveZoom();
+    const standScrollY = homeBelow ? PLAYER_FEET_Y - viewH * HOME_SECTION_FEET_FRAC : PLAYER_FEET_Y - viewH / 2;
+    const bottomBound = standScrollY + (homeBelow ? viewH : FLOOR_HEIGHT);
+    this.standingCamBounds = { top: standScrollY, bottom: bottomBound };
+    cam.setBounds(0, standScrollY, this.floorW, bottomBound - standScrollY);
+  }
+
+  // 滚轮/+- 键的统一入口：以指针（或视口中心）为锚点缩放，锚点下的世界点在
+  // 缩放前后保持不动。factor>1 放大、<1 缩小。缩放后按锚点反推 scroll（bounds
+  // 会钳制）；键盘缩放无指针锚点，锚定角色脚线（视口中心）。
+  private zoomView(factor: number, anchorX?: number, anchorY?: number): void {
+    const cam = this.cameras.main;
+    const z0 = this.viewZoom;
+    const z1 = Phaser.Math.Clamp(z0 * factor, VIEW_ZOOM_MIN, VIEW_ZOOM_MAX);
+    if (z1 === z0) return;
+    // 锚点的世界坐标（缩放前）。未给锚点取视口中心。
+    const ax = anchorX ?? cam.width / 2;
+    const ay = anchorY ?? cam.height / 2;
+    const worldX = cam.scrollX + ax / this.effectiveZoom();
+    const worldY = cam.scrollY + ay / this.effectiveZoom();
+    this.viewZoom = z1;
+    this.applyViewZoom();
+    // 锚点不动：反推缩放后应有的 scroll，使同一世界点仍落在锚点屏幕位置。
+    cam.setScroll(worldX - ax / this.effectiveZoom(), worldY - ay / this.effectiveZoom());
+    this.flash(`视图缩放 ${Math.round(z1 * 100)}%（滚轮/+- 调整 · 0 复位）`);
   }
 
   // ── AG-52: the climb's target floor ───────────────────────────────────────
@@ -2158,21 +2281,24 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   // — the ceiling shadow, the light sources, and the doors.
   private drawDormRoom(): void {
     const wallH = FLOOR_HEIGHT - FLOOR_BAND;
+    // 2026-11-20 tier1 变长：起始层不再是死 1280，墙/地板必须 tileSprite，
+    // 否则宽楼右半露黑。房间数走权威值，家具/灯/门/人群按本层实际长度铺开。
+    const roomCount = roomCountFor(STARTING_FLOOR);
 
-    const wall = this.add.image(0, 8, wallKeyFor(STARTING_FLOOR)).setOrigin(0, 0);
-    const floor = this.add.image(0, wallH, floorKeyFor(STARTING_FLOOR)).setOrigin(0, 0);
+    const wall = this.add.tileSprite(0, 8, this.floorW, 128, wallKeyFor(STARTING_FLOOR)).setOrigin(0, 0);
+    const floor = this.add.tileSprite(0, wallH, this.floorW, 64, floorKeyFor(STARTING_FLOOR)).setOrigin(0, 0);
 
     const g = this.add.graphics();
     // Ceiling shadow only. The skirting, the two service pipes, the damp patches
     // and the pinned notice all used to be drawn here; the wall image has them, and
     // drawing them again printed them straight over the art.
     g.fillStyle(0x0b0f12, 1);
-    g.fillRect(0, 0, FLOOR_WIDTH, 8);
+    g.fillRect(0, 0, this.floorW, 8);
 
     // One lit window per room. The pool is drawn row by row as an ellipse with
     // banded alpha: three stacked rectangles used to sit here, and over textured
     // wall art their edges read as a glowing box rather than as light.
-    for (let r = 0; r < ROOM_COUNT; r++) {
+    for (let r = 0; r < roomCount; r++) {
       const cx = r * ROOM_WIDTH + ROOM_WIDTH / 2;
       // Cold daylight through the glass, as an ADD glow: the ellipse halo this
       // replaced read as a beige shape painted on the wall rather than as light.
@@ -2190,7 +2316,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
 
     // Wall lamps between the windows, each with its own small pool of light —
     // the warm counterpoint to the cold daylight through the glass.
-    for (let r = 0; r < ROOM_COUNT; r++) {
+    for (let r = 0; r < roomCount; r++) {
       const cx = r * ROOM_WIDTH + ROOM_WIDTH / 2;
       const lampX = cx + (r % 2 === 0 ? 96 : -96);
       // The fixture is now a pixelfx candle, and the light is its own.
@@ -2217,7 +2343,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     }
 
     // Doors on the room boundaries, standing on the floor line.
-    for (let i = 1; i < ROOM_COUNT; i++) {
+    for (let i = 1; i < roomCount; i++) {
       this.floorObjects.push(placeDoor(this, i * ROOM_WIDTH, wallH, STARTING_FLOOR));
     }
 
@@ -2231,7 +2357,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // 100000 floors: it sleeps as many as the rest of the tier. Drawn after the
     // beds so the people in front read as lying among them.
     const crowd: Phaser.GameObjects.GameObject[] = [];
-    for (let r = 0; r < ROOM_COUNT; r++) {
+    for (let r = 0; r < roomCount; r++) {
       drawCrowd(this, crowd, { roomX: r * ROOM_WIDTH, floorY: FLOOR_HEIGHT - 60, floor: STARTING_FLOOR, room: r });
     }
     this.floorObjects.push(...crowd);
@@ -2240,42 +2366,44 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // reflections under the lights — the four cues that make a flat side view
     // read as a room with depth.
     const lampXs: number[] = [];
-    for (let r = 0; r < ROOM_COUNT; r++) {
+    for (let r = 0; r < roomCount; r++) {
       const cx = r * ROOM_WIDTH + ROOM_WIDTH / 2;
       lampXs.push(cx + (r % 2 === 0 ? 96 : -96));
     }
     this.floorObjects.push(
       ...buildRoomDepth(this, {
-        width: FLOOR_WIDTH,
+        width: this.floorW,
         wallBottom: wallH,
         height: FLOOR_HEIGHT,
         lightXs: lampXs,
       }),
       // Water streaks, panel seams, base stains, tile lines and puddles: the
       // detail that stops the two largest surfaces being flat.
-      ...buildSurfaceDetail(this, { width: FLOOR_WIDTH, wallBottom: wallH, height: FLOOR_HEIGHT, seed: 11 }),
-      ...buildCeilingLights(this, { width: FLOOR_WIDTH, seed: 5, top: 16, fixtures: this.lightFixtures }),
+      ...buildSurfaceDetail(this, { width: this.floorW, wallBottom: wallH, height: FLOOR_HEIGHT, seed: 11 }),
+      ...buildCeilingLights(this, { width: this.floorW, seed: 5, top: 16, fixtures: this.lightFixtures }),
       // The room's density: pipes, vents, junction boxes and signage on the
       // background plane, debris on the floor line. Without this a floor that
       // measures well still looks empty, because an empty frame can pass every
       // colour metric while having nothing in it.
       // Aerial perspective: the wall loses contrast with height, so it recedes.
-      ...buildAerialHaze(this, { width: FLOOR_WIDTH, wallBottom: wallH, hazeColor: ambienceFor(STARTING_FLOOR).color, strength: 0.34 }),
-      ...buildWallDressing(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: 3, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
-      ...buildFloorClutter(this, { width: FLOOR_WIDTH, wallBottom: wallH, seed: 3, keepClear: [UP_EXIT_X, DOWN_EXIT_X] }),
+      ...buildAerialHaze(this, { width: this.floorW, wallBottom: wallH, hazeColor: ambienceFor(STARTING_FLOOR).color, strength: 0.34 }),
+      // tier1 梯口 2026-11-20 起也随机——占用点传本层真实 downExit，
+      // 否则墙饰/杂物会画在梯口上（DOWN_EXIT_X 常量已不是起始层的答案）。
+      ...buildWallDressing(this, { width: this.floorW, wallBottom: wallH, seed: 3, keepClear: [UP_EXIT_X, this.downExit] }),
+      ...buildFloorClutter(this, { width: this.floorW, wallBottom: wallH, seed: 3, keepClear: [UP_EXIT_X, this.downExit] }),
     );
 
     // The foreground layer last: ceiling beam, floor debris, side margins. This
     // is what puts the camera inside the room instead of in front of a backdrop.
     this.floorObjects.push(
-      ...buildForeground(this, { width: FLOOR_WIDTH, height: FLOOR_HEIGHT, wallBottom: wallH, seed: 7 }),
+      ...buildForeground(this, { width: this.floorW, height: FLOOR_HEIGHT, wallBottom: wallH, seed: 7 }),
     );
 
     // OVERHAUL Art Pass: the lighting layer over the dorm too — the bed and the
     // workbench are where the player works, so they get the warm pools.
     this.lightLayer?.destroy();
     this.lightLayer = buildLightLayer(this, {
-      width: FLOOR_WIDTH,
+      width: this.floorW,
       height: FLOOR_HEIGHT,
       isDorm: true,
       hasUpExit: true,
@@ -2619,7 +2747,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // 3 a store room whether the player is standing on them or looking at them.
     const detail = this.add.graphics();
     const props: Phaser.GameObjects.GameObject[] = [];
-    for (let r = 0; r < ROOM_COUNT; r++) {
+    for (let r = 0; r < roomCountFor(floor); r++) {
       drawCorridorRoom({ scene: this, g: detail, floor, roomX: r * ROOM_WIDTH, floorY: wallH, room: r, objects: props });
     }
     // The starting floor is the dorm and has no corridor theme, so as a
@@ -2627,11 +2755,16 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // furniture that make it recognisable from the floor above, plus its lit
     // windows — the player should be able to look back down at their own room.
     if (floor === STARTING_FLOOR) {
-      for (let r = 0; r < ROOM_COUNT; r++) {
+      for (let r = 0; r < roomCountFor(floor); r++) {
         props.push(placeWindow(this, r * ROOM_WIDTH + ROOM_WIDTH / 2 - 8, 116, floor));
       }
-      props.push(this.add.image(BED_X, wallH + 4, 'furn_bed').setOrigin(0.5, 1));
-      props.push(this.add.image(CRAFT_X, wallH + 4, 'furn_workbench').setOrigin(0.5, 1));
+      // 宿舍家具按该层自己的长度缩放（tier1 变长后，1120/480 不再钉死）。
+      // 坐标先存局部变量——textureKeys.test 的扫描正则把 add.image(...) 内
+      // 第一个 ')' 当终点，直接传 bedXFor(floor) 会截断而扫不到 furn_bed。
+      const nbBedX = bedXFor(floor);
+      const nbCraftX = craftXFor(floor);
+      props.push(this.add.image(nbBedX, wallH + 4, 'furn_bed').setOrigin(0.5, 1));
+      props.push(this.add.image(nbCraftX, wallH + 4, 'furn_workbench').setOrigin(0.5, 1));
     }
     // The floor below is not an empty diorama: it sleeps as many as it would if
     // the player were standing on it. Its own crowd density applies, so the
@@ -2768,7 +2901,9 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     if (!SLEEPING_FLOORS.has(floor)) return;
     const state = getGame();
     if (state.currentFloor !== floor) return;
-    const { width } = this.viewSize();
+    // 床铺沿本层世界宽度排（floorW），不是视口宽——viewSize() 是 HUD 画布口径，
+    // 世界排布要用楼层自己的长度（tier2+ 比 1280 宽）。
+    const width = this.floorW;
     const y = FLOOR_HEIGHT - 64;
     const taken = this.floorView.containers.map((c) => c.x);
     for (let x = 76; x <= width - 76; x += 128) {
@@ -3161,6 +3296,12 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   private drawDormBeds(floor: number, front: readonly number[], back: readonly number[], interactive = false): void {
     const floorY = FLOOR_HEIGHT - 60; // the front row's floor line
     const backY = floorY - 26; // the back row stands further from the camera
+    // 床排坐标写在 1280 模板网格上。tier1 变长后按层宽缩放，与 getFloorView 的
+    // k=floorWidthFor/FLOOR_WIDTH 同口径——起始层 k=1（坐标/bunk id 都不变，
+    // e2e 钉的 dorm_bed_1_236 保持有效），2 层邻居宿舍 k=1.25 自动铺开。
+    const k = floorWidthFor(floor) / FLOOR_WIDTH;
+    const frontXs = front.map((x) => Math.round(x * k));
+    const backXs = back.map((x) => Math.round(x * k));
     const g = this.add.graphics().setDepth(4);
     this.floorObjects.push(g);
     const backG = this.add.graphics().setDepth(2);
@@ -3210,40 +3351,41 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     };
 
     // Back row first, so the front row overlaps it.
-    back.forEach((x, i) => drawBedAt(x, true, i));
+    backXs.forEach((x, i) => drawBedAt(x, true, i));
     // Pitch 96, so the row is crowded - beds nearly touching.
-    front.forEach((x, i) => drawBedAt(x, false, i));
+    frontXs.forEach((x, i) => drawBedAt(x, false, i));
   }
 
   // The player's own bed, in the same 3/4 view as the roommates' so the row
   // reads as one set of furniture rather than a sprite next to drawings.
   private drawBed(): void {
     const floorY = FLOOR_HEIGHT - 60;
+    const bedX = bedXFor(STARTING_FLOOR); // 随层宽缩放（tier1 变长后床不再挤左半）
     const g = this.add.graphics().setDepth(4);
     this.floorObjects.push(g);
-    this.drawBed3D(g, BED_X - 41, floorY, {
+    this.drawBed3D(g, bedX - 41, floorY, {
       blanket: PALETTE.clothDeep,
       fold: PALETTE.cloth,
       scale: 1,
       sleeper: false,
     });
-    this.floorObjects.push(...addContactShadow(this, BED_X, floorY + 2, 70, 2, 0.35));
+    this.floorObjects.push(...addContactShadow(this, bedX, floorY + 2, 70, 2, 0.35));
     // AG-11：depth 105 压在 HUD 上下文带（100）与其 chrome（101）之上。旧位置
     // 不设 depth 时整块落在带里，像素实测 max lum=33，22px 标签一个像素都不显。
     // AG-51：字号改成隐形档（18px）并按距离出生——与容器名签同一条契约，
     // 远了什么都没有，贴近了才浮出 0.35 的「床（睡觉）」。
     const bedLabel = this.add
-      .text(BED_X, floorY - 62, '床（睡觉）', { fontFamily: FONT_FAMILY, fontSize: `${CONTAINER_LABEL_STEALTH_FONT}px`, color: hex(TEXT.primary) })
+      .text(bedX, floorY - 62, '床（睡觉）', { fontFamily: FONT_FAMILY, fontSize: `${CONTAINER_LABEL_STEALTH_FONT}px`, color: hex(TEXT.primary) })
       .setOrigin(0.5)
       .setDepth(105);
     this.floorObjects.push(bedLabel);
-    this.registerFurnitureLabel(BED_X, bedLabel);
+    this.registerFurnitureLabel(bedX, bedLabel);
     // AG-51：自己的床也进可交互床铺表——白天 E 翻床垫底下，夜里 E 照旧走
     // 睡觉（interactWithBunk 里 night 分支优先，睡眠是生存主干）。刻意不给
     // 拆：这是全塔唯一能睡觉的床，拆了夜间安排就没了着落。
     // 键带绝对层号（own_bed_1）：与 LootSystem 键的 ${floor} 对齐，将来若有
     // 别的楼层也注册床铺，两张床不会撞同一个键。
-    this.bunkObjs.set(`own_bed_${STARTING_FLOOR}`, { x: BED_X, own: true, objects: [g, bedLabel] });
+    this.bunkObjs.set(`own_bed_${STARTING_FLOOR}`, { x: bedX, own: true, objects: [g, bedLabel] });
   }
 
   // ── HUD & inventory UI（RC-03 拆分第 9 步：编排留场景，本体在 HudController）─
@@ -3451,18 +3593,19 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   }
 
   private nearCraftStation(state: GameState): boolean {
-    return state.currentFloor === STARTING_FLOOR && Math.abs(state.player.x - CRAFT_X) <= INTERACT_DISTANCE;
+    return state.currentFloor === STARTING_FLOOR && Math.abs(state.player.x - craftXFor(STARTING_FLOOR)) <= INTERACT_DISTANCE;
   }
 
   private drawWorkbench(): void {
     const y = FLOOR_HEIGHT - 64;
-    const bench = this.add.image(CRAFT_X, y + 4, 'furn_workbench').setOrigin(0.5, 1);
+    const craftX = craftXFor(STARTING_FLOOR); // 随层宽缩放
+    const bench = this.add.image(craftX, y + 4, 'furn_workbench').setOrigin(0.5, 1);
     // AG-11: depth 0 → 105，与床标签、容器名签同线（同一个 HUD 上下文带吞字
     // 问题，UI.md 12b：工作台招牌旧实测 max lum=33，完全不可见）。
     // AG-51：与容器名签同一条隐形化契约——远处无字，贴近才浮出 0.35 隐形字。
-    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: FONT_FAMILY, fontSize: `${CONTAINER_LABEL_STEALTH_FONT}px`, color: hex(TEXT.primary) }).setOrigin(0.5).setDepth(105);
-    this.registerFurnitureLabel(CRAFT_X, benchLabel);
-    this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    const benchLabel = this.add.text(craftX, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: FONT_FAMILY, fontSize: `${CONTAINER_LABEL_STEALTH_FONT}px`, color: hex(TEXT.primary) }).setOrigin(0.5).setDepth(105);
+    this.registerFurnitureLabel(craftX, benchLabel);
+    this.upgradeBoard = this.add.text(craftX, y + 34, '', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
     this.floorObjects.push(bench, benchLabel, this.upgradeBoard);
     this.refreshUpgradeBoard();
   }
@@ -3851,6 +3994,18 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.layoutCraftTree(this.craftEntries()[this.craftSelected]?.id);
   };
 
+  /**
+   * 世界视图滚轮缩放（2026-11-20「可以放大缩小」）：制作面板开着时滚轮归
+   * craftWheelHandler（先注册、先消费），这里只在无面板时缩放世界。以指针为
+   * 锚点——指针下的世界点在缩放前后不动。任何面板/爬梯占用屏幕时不缩放。
+   */
+  private readonly worldWheelHandler = (pointer: Phaser.Input.Pointer, _over: unknown[], _dx: number, dy: number): void => {
+    if (this.craftingOpen) return;
+    if (this.stairClimb || this.hud.isOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.interaction.shelterOpen || this.interaction.nightChoiceOpen || this.dialogueCtl.ventureIsOpen || this.questsOpen) return;
+    const factor = dy < 0 ? VIEW_ZOOM_STEP : 1 / VIEW_ZOOM_STEP;
+    this.zoomView(factor, pointer.x, pointer.y);
+  };
+
   private toggleCrafting(): void {
     this.craftingOpen = !this.craftingOpen;
     for (const o of this.craftObjects) o.setVisible(this.craftingOpen);
@@ -4133,7 +4288,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
         // The work happens at the bench, so the effect is at the bench. Crafting
         // was a sound and a line of text with nothing on screen; the burst is
         // anchored to the station the player is standing at, not to the player.
-        playFx(this, 'collect-burst', CRAFT_X, PLAYER_FEET_Y - 40, LIGHT_DEPTH);
+        playFx(this, 'collect-burst', craftXFor(STARTING_FLOOR), PLAYER_FEET_Y - 40, LIGHT_DEPTH);
         const recipe = getRecipe(entry.id as RecipeId);
         this.flash(`${recipe.kind === 'upgrade' ? '建造了' : '制作了'} ${recipe.displayName}（-${ACTION_COSTS.craft} 分钟）`);
         // AG-77：首次制作 / 四件武器全做。净化水不算「制作」（另一个分支）。
@@ -4150,7 +4305,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
         this.refreshInventory();
         playSfx('craft');
         // Same bench, same beat: purifying water is work done at the station.
-        playFx(this, 'collect-burst', CRAFT_X, PLAYER_FEET_Y - 40, LIGHT_DEPTH);
+        playFx(this, 'collect-burst', craftXFor(STARTING_FLOOR), PLAYER_FEET_Y - 40, LIGHT_DEPTH);
         // B3-05.2: this used to read 「净化了 1 瓶净水」 whatever the real count was,
         // while purifyWater() converts the whole carry and reports it in
         // `converted`. A player who purified six bottles was told they got one and
@@ -4343,6 +4498,14 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // AG-20: G opens the venture ledger — the tower's three industries and the
     // run's investment books (已投入 / 昨日收益 / 累计).
     this.keyG = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.G);
+    // 视图缩放（2026-11-20）：主键盘 +/= 放大、-/_ 缩小、0 复位。小键盘同号
+    // 另绑一份（NUMPAD_ADD/SUBTRACT/ZERO 的 keyCode 与主键盘不同）。
+    this.keyZoomIn = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.PLUS);
+    this.keyZoomOut = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.MINUS);
+    this.keyZoomReset = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ZERO);
+    this.keyNumpadAdd = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.NUMPAD_ADD);
+    this.keyNumpadSub = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.NUMPAD_SUBTRACT);
+    this.keyNumpadZero = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.NUMPAD_ZERO);
 
     this.keyE.on('down', () => this.guard('e', this.onInteract), this);
     this.keyEsc.on('down', () => this.guard('esc', this.onEsc), this);
@@ -4368,6 +4531,27 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // RC-03 拆分第 10 步：L 的墙面档案面板开关本体在 InteractionController。
     this.keyL.on('down', () => this.guard('l', () => this.interaction.toggleDeco()), this);
     this.keyG.on('down', () => this.guard('g', this.onToggleVentures), this);
+    // 视图缩放键：与滚轮同一互斥门（面板/爬梯占用屏幕时不缩放）。键盘无指针
+    // 锚点，zoomView 锚定视口中心。复位直接置 1 再 applyViewZoom + 居中角色。
+    const zoomGuard = (fn: () => void): void => {
+      if (this.stairClimb || this.hud.isOpen || this.craftingOpen || this.dialogueCtl.isOpen || this.pauseOpen || this.encounterOpen || this.interaction.shelterOpen || this.interaction.nightChoiceOpen || this.dialogueCtl.ventureIsOpen || this.questsOpen) return;
+      fn();
+    };
+    const zoomIn = (): void => zoomGuard(() => this.zoomView(VIEW_ZOOM_STEP));
+    const zoomOut = (): void => zoomGuard(() => this.zoomView(1 / VIEW_ZOOM_STEP));
+    const zoomReset = (): void => zoomGuard(() => {
+      if (this.viewZoom === 1) return;
+      this.viewZoom = 1;
+      this.applyViewZoom();
+      this.cameras.main.centerOn(getGame().player.x, PLAYER_FEET_Y);
+      this.flash('视图缩放 100%（已复位）');
+    });
+    this.keyZoomIn.on('down', zoomIn, this);
+    this.keyZoomOut.on('down', zoomOut, this);
+    this.keyZoomReset.on('down', zoomReset, this);
+    this.keyNumpadAdd.on('down', zoomIn, this);
+    this.keyNumpadSub.on('down', zoomOut, this);
+    this.keyNumpadZero.on('down', zoomReset, this);
     // ← → are polled (isDown) for walking, so they have no keydown handler of
     // their own; the archive wants a discrete press, and movement is already
     // frozen while any panel is up. Guarding on decoOpen keeps them invisible to
@@ -4393,6 +4577,11 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // 否则残留的 pending 会在下一拍空白按下时被误执行。
     this.input.off('wheel', this.craftWheelHandler);
     this.input.on('wheel', this.craftWheelHandler);
+    // 世界视图滚轮缩放（2026-11-20）：注册在 craftWheelHandler 之后——制作面板
+    // 开着时 craft 先消费（它内部 craftingOpen 守卫），世界 handler 自身也守卫
+    // craftingOpen，两者互斥不叠加。
+    this.input.off('wheel', this.worldWheelHandler);
+    this.input.on('wheel', this.worldWheelHandler);
     this.input.off('pointermove', this.craftPointerMoveHandler);
     this.input.on('pointermove', this.craftPointerMoveHandler);
     this.input.off('pointerup', this.craftPointerUpHandler);
@@ -4489,6 +4678,12 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     this.keyQ?.removeAllListeners();
     this.keyL?.removeAllListeners();
     this.keyG?.removeAllListeners();
+    this.keyZoomIn?.removeAllListeners();
+    this.keyZoomOut?.removeAllListeners();
+    this.keyZoomReset?.removeAllListeners();
+    this.keyNumpadAdd?.removeAllListeners();
+    this.keyNumpadSub?.removeAllListeners();
+    this.keyNumpadZero?.removeAllListeners();
     this.cursors?.left?.removeAllListeners();
     this.cursors?.right?.removeAllListeners();
     this.cursors?.up.removeAllListeners();
@@ -4635,13 +4830,13 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     if (this.floorView.containers.some((c) => c.items.length > 0 && near(c.x))) return true;
     for (const marker of this.spotMarkers.values()) if (near(marker.x)) return true;
     if (near(UP_EXIT_X) || near(this.downExit)) return true;
-    if (state.currentFloor === STARTING_FLOOR && near(BED_X)) return true;
+    if (state.currentFloor === STARTING_FLOOR && near(bedXFor(STARTING_FLOOR))) return true;
     // AG-51：工作台与室友床铺也要在这里报名。点击走位带的是
     // interact=hasInteractableNear(x)——不报名，玩家点了工作台/床，人走到
     // 了，onInteract 却永远不会被叫（用户原话：「我点击这个工作台它也
     // 没有反应」）。半径与 E 判定同源（INTERACT_DISTANCE），点击与按键
     // 因此是同一件事。
-    if (state.currentFloor === STARTING_FLOOR && near(CRAFT_X)) return true;
+    if (state.currentFloor === STARTING_FLOOR && near(craftXFor(STARTING_FLOOR))) return true;
     for (const bunk of this.bunkObjs.values()) if (near(bunk.x)) return true;
     return false;
   }

@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  DOWN_EXIT_X,
   FLOOR_GEOMETRY_BALANCE,
-  FLOOR_WIDTH,
   PLAYABLE_FLOORS_V01,
   ROOM_WIDTH,
   UP_EXIT_X,
@@ -43,23 +41,29 @@ const SEGMENTS: ReadonlyArray<{ name: string; floors: readonly number[] }> = [
   { name: '富人区 50000-50010', floors: [50000, 50001, 50002, 50003, 50004, 50005, 50006, 50007, 50008, 50009, 50010] },
 ];
 
-describe('tier1（1-10 层）保持现值', () => {
-  it('每一层都是 4 房 1280，下行口仍在右端', () => {
+describe('tier1（1-10 层）也参与层长/口位差异（2026-11-20 用户裁决）', () => {
+  it('层长与下行口都是楼层号的纯函数，上梯口仍在起点', () => {
+    // tier1 不再是「4 房 1280 + 右端 1240」的固定区：roomSpreadByTier[1]=2、
+    // stairRandomFromTier=1 后，1-10 层的房间数 4~6、下行口 seeded 中段随机。
+    // 这里不再钉常量，改钉「同层同答案」的纯函数契约（爬上去再回来梯口原地）。
+    const widths = new Set<number>();
     for (const floor of SEGMENTS[0].floors) {
-      expect(roomCountFor(floor), `floor ${floor} rooms`).toBe(4);
-      expect(floorWidthFor(floor), `floor ${floor} width`).toBe(FLOOR_WIDTH);
-      expect(downExitXFor(floor), `floor ${floor} downX`).toBe(DOWN_EXIT_X);
+      expect(floorWidthFor(floor), `floor ${floor} width`).toBe(roomCountFor(floor) * ROOM_WIDTH);
+      expect(downExitXFor(floor), `floor ${floor} downX`).toBe(downExitXFor(floor));
       expect(upExitXFor(floor), `floor ${floor} upX`).toBe(UP_EXIT_X);
+      widths.add(floorWidthFor(floor));
     }
+    expect(widths.size, 'tier1 至少两种层长').toBeGreaterThanOrEqual(2);
   });
 
-  it('爬梯起止点也还是常量（存量 e2e 按 40/1240 走位）', () => {
+  it('爬梯起止点取本层实际口位（不再是 40/1240 常量走位）', () => {
     const state = createNewGame(1);
     state.currentFloor = 3;
     const up = stairTraversalFor(state, 1);
     expect(up).toMatchObject({ startX: UP_EXIT_X, endX: UP_EXIT_X });
     const down = stairTraversalFor(state, -1);
-    expect(down).toMatchObject({ startX: DOWN_EXIT_X, endX: DOWN_EXIT_X });
+    const downX = downExitXFor(3);
+    expect(down).toMatchObject({ startX: downX, endX: downX });
   });
 });
 
@@ -213,16 +217,18 @@ describe('seeded 同层同答案（爬上去再爬回来，梯子还在原地）
 describe('几何数值表（当前推导快照）', () => {
   const TABLE: ReadonlyArray<[number, number, number, number, number | null, number | null]> = [
     // floor, rooms, width, downX, holeX, midLadderX
-    [1, 4, 1280, 1240, null, null],
-    [2, 4, 1280, 1240, null, null],
-    [3, 4, 1280, 1240, null, null],
-    [4, 4, 1280, 1240, null, null],
-    [5, 4, 1280, 1240, null, null],
-    [6, 4, 1280, 1240, null, null],
-    [7, 4, 1280, 1240, null, null],
-    [8, 4, 1280, 1240, null, null],
-    [9, 4, 1280, 1240, 464, null],
-    [10, 4, 1280, 1240, 744, null],
+    // tier1 2026-11-20 起也 seeded 差异（roomSpreadByTier[1]=2,
+    // stairRandomFromTier=1）：房间 4~6、下行口落中段，快照随之更新。
+    [1, 4, 1280, 840, null, null],
+    [2, 5, 1600, 664, null, null],
+    [3, 5, 1600, 792, null, null],
+    [4, 6, 1920, 1400, null, null],
+    [5, 6, 1920, 1328, null, null],
+    [6, 4, 1280, 584, null, null],
+    [7, 4, 1280, 392, null, null],
+    [8, 4, 1280, 520, null, null],
+    [9, 4, 1280, 736, 432, null],
+    [10, 6, 1920, 808, 1152, null],
     [100, 6, 1920, 1296, null, 672],
     [101, 7, 2240, 1648, null, 784],
     [102, 5, 1600, 496, null, null],

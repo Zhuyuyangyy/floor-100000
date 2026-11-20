@@ -270,7 +270,7 @@ test.describe('AG-52 容器名签 + 只画本层', () => {
     await expect
       .poll(async () => (await probeScene(page)).floor, { timeout: 10_000 })
       .toBe(2);
-    await setX(page, 1240); // 2 层下楼口（floorWidthFor(2)-40）
+    await setX(page, 664); // 2 层下楼口（tier1 变长后 seeded 中段，原 1240）
 
     const sampling = sampleClimb(page, 2);
     await page.keyboard.press('E');

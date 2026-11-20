@@ -177,7 +177,7 @@ test('the wanderer is avoidable — leaving the floor escapes it undamaged', asy
   // spawns — so it appears at x=48, which IS the up exit. Walking up teleports the
   // player into its path (setX below) and it lands a hit before the stair registers,
   // which is correct game behaviour and a broken test. Going down walks away from it.
-  await setX(page, 1240); // DOWN_EXIT_X
+  await setX(page, 664); // 2 层下行口（tier1 变长后 seeded 中段，原 1240）
   const floorBefore = (await readState(page)).currentFloor;
   await pressEUntil(page, async () => (await readState(page)).currentFloor < floorBefore);
   expect(await hasWanderer(page)).toBe(false); // gone with the floor

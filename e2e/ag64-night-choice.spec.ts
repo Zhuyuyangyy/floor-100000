@@ -16,7 +16,7 @@ import { expect, test, type Page } from '@playwright/test';
 // 截图落 output/ag64/（gitignore 的本地证据目录），全程 pageerror 清零。
 
 const UP_EXIT_X = 40; // 1 层上梯口
-const DOWN_EXIT_X_F2 = 1240; // 2 层下梯口
+const DOWN_EXIT_X_F2 = 664; // 2 层下梯口（tier1 变长后 seeded 中段，原 1240）
 const BED_X = 1120; // 1 层自己的床
 const NIGHTFALL = 1075; // 17:55——等帧循环把时钟推过 18:00（1080）
 

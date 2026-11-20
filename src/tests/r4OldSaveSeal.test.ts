@@ -19,8 +19,11 @@ import type { GameState } from '../core/gameTypes';
 
 // R4 回归（QA 第 2 轮 probeA-R3-compat-result.json）：AG-96（R3 修复）让正常
 // 楼层按 roll 率生成阻碍物后，修复前创建的旧档重进这些层时，玩家位置可能落在
-// 新布局的「无口区间」里——没铲子就到不了任何梯口（seed 4 第 2 层 x=365 夹在
-// rubble@272 与 gate@458 之间，可行走区间 [298,432]）。护栏挂在 GameScene
+// 新布局的「无口区间」里——没铲子就到不了任何梯口。夹具取 seed 4 第 2 层 x=365：
+// 原布局 rubble@272/gate@458 把 365 夹在 [298,432]；2026-11-20 tier1 变长后
+// 2 层 1600 宽、布局变 rubble@192/gate@442、下梯口 664，365 仍被夹死，夹具
+// 语义（软锁→护栏迁到最近安全位→无铲可达）原样保留，只更新数值。
+// 护栏挂在 GameScene
 // .drawFloor（新档/继续/dev 入口/每次爬梯落地的同一条路），纯函数在
 // LootSystem.rescueSealedPlayerX——这里钉它的契约：
 //   ① QA 同款场景被迁到安全位且可达梯口；
@@ -37,25 +40,27 @@ function reachable(list: readonly FloorObstacle[], from: number, to: number): bo
 }
 
 describe('rescueSealedPlayerX — QA 同款场景（seed 4 第 2 层 x=365）', () => {
+  const DOWN2 = downExitXFor(2); // tier1 变长后 2 层下行口 664（原 1240）
+
   it('被封死的旧档位置被迁到最近的安全位，且无铲子也走得通', () => {
     const s = createNewGame(4);
     s.currentFloor = 2;
     s.player.x = 365;
     const active = activeObstacles(s, 2);
-    expect(active.map((o) => o.x)).toEqual([272, 458]); // 复现 QA 实测布局
+    expect(active.map((o) => o.x)).toEqual([192, 442]); // tier1 变长后的实测布局
     // 复现软锁本身：365 到两个口都不可达。
     expect(reachable(active, 365, UP_EXIT_X)).toBe(false);
-    expect(reachable(active, 365, 1240)).toBe(false);
+    expect(reachable(active, 365, DOWN2)).toBe(false);
 
     const rescued = rescueSealedPlayerX(active, 365, floorExitXs(2), homewardExitXs(2));
-    // 两侧远侧边缘距离并列（都是 119）时取向家一侧：484 → 下梯口 1240。
-    expect(rescued).toBe(484);
+    // 365 夹在 gate@442 近侧，迁到其远侧沿 468 → 下梯口 664（距 103）。
+    expect(rescued).toBe(468);
     // 迁后站得住：贴着阻碍物远侧沿，不被每帧钳位推走。
     expect(clampXAgainstObstacles(active, rescued!, rescued!)).toBe(rescued);
     // 迁后走得通：无铲子也能走到下梯口（下楼回家）。
-    expect(reachable(active, rescued!, 1240)).toBe(true);
-    // 迁移距离最小化：119px，不大于任一侧边缘方案。
-    expect(Math.abs(rescued! - 365)).toBe(119);
+    expect(reachable(active, rescued!, DOWN2)).toBe(true);
+    // 迁移距离最小化：103px，不大于任一侧边缘方案。
+    expect(Math.abs(rescued! - 365)).toBe(103);
   });
 
   it('旧档玩家压在新阻碍物上（inside-obstacle）不迁移——钳位会推出，QA 已确认', () => {
@@ -72,7 +77,8 @@ describe('rescueSealedPlayerX — 新档零行为变化', () => {
     const s = createNewGame(4);
     s.currentFloor = 2;
     const active = activeObstacles(s, 2);
-    for (const at of [640, 40, 1240, 298, 432, 246, 484]) {
+    // 新布局 rubble@192/gate@442、下梯口 664：这些位置都不在封死区间内。
+    for (const at of [640, 40, downExitXFor(2), 432, 484]) {
       expect(rescueSealedPlayerX(active, at, floorExitXs(2), homewardExitXs(2)), `x=${at}`).toBeNull();
     }
   });
@@ -138,12 +144,12 @@ describe('rescueSealedPlayerX — 旧档加载路径', () => {
     const before = strip(state);
     const active = activeObstacles(state, 2);
     const rescued = rescueSealedPlayerX(active, state.player.x, floorExitXs(2), homewardExitXs(2));
-    expect(rescued).toBe(484);
+    expect(rescued).toBe(468); // tier1 变长后 2 层新布局的救援位
     state.player.x = rescued!;
     // 只挪 x：除 player.x 外一个字节都不动。
     expect(strip(state)).toBe(before);
     // 迁后可达下梯口（无铲子）。
-    expect(reachable(active, state.player.x, 1240)).toBe(true);
+    expect(reachable(active, state.player.x, downExitXFor(2))).toBe(true);
   });
 });
 
@@ -243,9 +249,10 @@ describe('R4 护栏接线', () => {
     }
   });
 
-  it('AG-96 布局本身未被改动（seed 4 第 2 层仍是 272/458）', () => {
+  it('AG-96 布局本身未被改动（seed 4 第 2 层 = 192/442）', () => {
     // 护栏只在进层时挪玩家，不碰生成侧——这条钉的就是「没动」。
+    // tier1 变长后 2 层 1600 宽，布局随层宽重算；钉新值守住生成侧不受护栏影响。
     const s = createNewGame(4);
-    expect(obstaclesForFloor(s, 2).map((o) => `${o.kind}@${o.x}`)).toEqual(['rubble@272', 'gate@458']);
+    expect(obstaclesForFloor(s, 2).map((o) => `${o.kind}@${o.x}`)).toEqual(['rubble@192', 'gate@442']);
   });
 });

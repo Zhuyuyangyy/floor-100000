@@ -15,7 +15,7 @@
 // 代价：进度存在本机，换浏览器/清存储会重看；以及中途退出的对局从存档续上
 // 时，教程从 localStorage 记的步数接着走（这正是「进度持久化」的本意）。
 
-import { BED_X, CRAFT_X, STARTING_FLOOR, UP_EXIT_X } from '../core/constants';
+import { bedXFor, craftXFor, STARTING_FLOOR, UP_EXIT_X } from '../core/constants';
 import { HUD_LAYOUT } from '../render/hudLayout';
 import { isNight } from './SurvivalSystem';
 import { TUTORIAL_STEPS, type TutorialStepId } from '../data/tutorial';
@@ -250,11 +250,11 @@ export function tutorialYieldsToWorld(state: TutorialState, world: TutorialWorld
     case 1:
       return nearestUnopenedContainer(world, TUTORIAL_LOOT_RANGE_PX) !== null;
     case 3:
-      return near(CRAFT_X);
+      return near(craftXFor(STARTING_FLOOR));
     case 4:
       return near(UP_EXIT_X);
     case 5:
-      return near(BED_X);
+      return near(bedXFor(STARTING_FLOOR));
     default:
       return false;
   }
@@ -314,11 +314,11 @@ export function tutorialHighlight(state: TutorialState, world: TutorialWorld): T
     case 2:
       return ringsBox();
     case 3:
-      return world.currentFloor === STARTING_FLOOR ? propBox(CRAFT_X, CONTAINER_BOX_W) : null;
+      return world.currentFloor === STARTING_FLOOR ? propBox(craftXFor(STARTING_FLOOR), CONTAINER_BOX_W) : null;
     case 4:
       return world.currentFloor === STARTING_FLOOR ? propBox(UP_EXIT_X, STAIR_BOX_W) : null;
     case 5:
-      return world.currentFloor === STARTING_FLOOR ? propBox(BED_X, BED_BOX_W) : null;
+      return world.currentFloor === STARTING_FLOOR ? propBox(bedXFor(STARTING_FLOOR), BED_BOX_W) : null;
     default:
       return null;
   }

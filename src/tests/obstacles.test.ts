@@ -162,10 +162,11 @@ describe('obstaclesForFloor — 每层 seeded 0-2 个', () => {
 
   it('hosts obstacles on the normal early floors across seeds (R3 回归)', () => {
     // R3（QA 第 1 轮）根因回归：旧口径「每个落点到每个其它出口都可达」把
-    // 1-10 层退化成空集——上梯口钉在 40、下梯口在 1240，摆放带整体嵌在
-    // (40,1240) 开区间里，任何阻碍物都截断 40↔1240 那一对，60 seed 复算
-    // 只剩 50000 层 13 个。修复后 2-9 层每层在 30 个 seed 里都应有阻碍物；
-    // 1 层是宿舍、10 层是段顶（从 40 落点必须够到 1240），按设计保持为空。
+    // 1-10 层退化成空集——摆放带整体嵌在上/下梯口的开区间里，任何阻碍物都
+    // 截断那一对。修复后普通层在 30 个 seed 里应有阻碍物；1 层是宿舍按设计
+    // 为空。2026-11-20 tier1 也放宽层长/口位后，个别层（如 7 层下行口中段
+    // 392，摆放带 [130,302] 被容器/落点挤满）合法地放不下障碍——R3 守的是
+    // 「不全空」，不是「每层必有一个」，故改钉「多数层有 + 总数可观」。
     const perFloor: Record<number, number> = {};
     for (let seed = 1; seed <= 30; seed++) {
       const s = createNewGame(seed);
@@ -173,11 +174,10 @@ describe('obstaclesForFloor — 每层 seeded 0-2 个', () => {
         perFloor[floor] = (perFloor[floor] ?? 0) + obstaclesForFloor(s, floor).length;
       }
       expect(obstaclesForFloor(s, 1), `seed ${seed} 宿舍不过道`).toEqual([]);
-      expect(obstaclesForFloor(s, 10), `seed ${seed} 段顶从 40 必须够到 1240`).toEqual([]);
     }
-    for (let floor = 2; floor <= 9; floor++) {
-      expect(perFloor[floor], `F${floor} 在 30 个 seed 里应有阻碍物（实测 ${perFloor[floor]}）`).toBeGreaterThan(0);
-    }
+    const hosted = Object.values(perFloor).filter((n) => n > 0).length;
+    expect(hosted, `2-9 层多数应有阻碍物（实测 ${hosted}/8）`).toBeGreaterThanOrEqual(6);
+    expect(Object.values(perFloor).reduce((a, b) => a + b, 0), '早期层总阻碍物数').toBeGreaterThan(100);
   });
 
   it('spawns both kinds across seeds, and only inside the corridor', () => {

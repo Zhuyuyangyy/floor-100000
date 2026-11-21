@@ -349,6 +349,7 @@ export class GameScene extends Phaser.Scene {
   private shelterOpen = false;
   private shelterSelected = 0;
   private shelterObjects: PanelObject[] = [];
+  private shelterInputObjects: Phaser.GameObjects.Zone[] = [];
   private shelterMarker!: Phaser.GameObjects.Image;
   private feedbackTimer?: Phaser.Time.TimerEvent;
   private lastClock = '';
@@ -394,6 +395,8 @@ export class GameScene extends Phaser.Scene {
   // NPC 自己的问候语）。未配置模型时整个 Map 为空，行为与改造前一致。
   private aiRuntimes = new Map<string, NpcRuntimeConfig>();
   private dialogueObjects: PanelObject[] = [];
+  /** Modal click shield and option/footer hit areas; kept separate from panel art. */
+  private dialogueInputObjects: Phaser.GameObjects.Zone[] = [];
   /** one selection band per dialogue row, toggled in refreshDialogue */
   private dialogueBands: Array<{ band: Phaser.GameObjects.Rectangle; rule: Phaser.GameObjects.Rectangle }> = [];
   private dialogueTitle!: Phaser.GameObjects.Text;
@@ -456,10 +459,12 @@ export class GameScene extends Phaser.Scene {
     this.pauseOptionTexts = [];
     this.pauseMarker = createMarker(this);
     this.dialogueObjects = [];
+    this.dialogueInputObjects = [];
     this.dialogueOptions = [];
     this.dialogueOptionIcons = [];
     this.dialogueMarker = createMarker(this);
     this.shelterObjects = [];
+    this.shelterInputObjects = [];
     this.shelterMarker = createMarker(this);
     // 重新开始 runs while the pause menu is still open, and these flags survive a
     // restart. Left set, update() early-returns forever and every panel handler
@@ -1143,6 +1148,38 @@ export class GameScene extends Phaser.Scene {
     this.buildEncounterSpots();
   }
 
+  /** Keep clicks inside a modal from reaching world objects behind it. */
+  private addModalClickShield(objects: Phaser.GameObjects.GameObject[], depth: number): void {
+    const { width, height } = this.viewSize();
+    const shield = this.add
+      .zone(width / 2, height / 2, width, height)
+      .setInteractive()
+      .setDepth(depth + 4)
+      .setScrollFactor(0);
+    shield.on('pointerdown', () => undefined);
+    objects.push(shield);
+  }
+
+  /** An explicit clickable control, rendered above its modal click shield. */
+  private addModalClickTarget(
+    objects: Phaser.GameObjects.GameObject[],
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    depth: number,
+    action: () => void,
+  ): Phaser.GameObjects.Zone {
+    const target = this.add
+      .zone(x, y, width, height)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(depth + 8)
+      .setScrollFactor(0);
+    target.on('pointerdown', action);
+    objects.push(target);
+    return target;
+  }
+
   private buildCombatPanel(): void {
     for (const o of this.encounterObjects) o.destroy();
     this.encounterObjects = [];
@@ -1160,6 +1197,7 @@ export class GameScene extends Phaser.Scene {
     const isBoss = combat.kind === 'boss';
 
     this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
+    this.addModalClickShield(this.encounterObjects, depth);
     // OVERHAUL UI: the fight uses the same header strip, segmented bar and row
     // bands as every other panel, instead of its own centred title and a flat
     // two-rectangle HP bar. A boss gets the danger accent on the header rule.
@@ -1495,10 +1533,14 @@ export class GameScene extends Phaser.Scene {
     });
     this.encounterObjects.push(
       this.add
-        .text(cx, outTop + outH - 12, 'Enter / ESC 继续', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+        .text(cx, outTop + outH - 12, '点击继续 · Enter / ESC', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
         .setOrigin(0.5)
         .setDepth(outDepth + 7),
     );
+    this.addModalClickShield(this.encounterObjects, outDepth);
+    this.addModalClickTarget(this.encounterObjects, cx, outTop + outH - 12, outW - 24, 24, outDepth, () => {
+      if (this.encounterOpen && this.combatDone) this.closeCombat();
+    });
     lockToScreen(this.encounterObjects);
     // The fight is over: the outcome screen waits for one Enter, then
     // closeCombat clears state.combat and the floor's spots.
@@ -1530,6 +1572,7 @@ export class GameScene extends Phaser.Scene {
 
     const depth = PANEL_DEPTH.game.dialogue;
     this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
+    this.addModalClickShield(this.encounterObjects, depth);
     // OVERHAUL UI: header strip, the message in an inset well, and choices as
     // banded rows instead of '> label' text runs.
     this.encounterObjects.push(
@@ -1548,29 +1591,48 @@ export class GameScene extends Phaser.Scene {
         .setDepth(depth + 7),
     );
     if (!enc.resolved) {
+      const encounterRows: Array<{ highlight: Phaser.GameObjects.Rectangle; marker: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text }> = [];
       enc.choices.forEach((choice, i) => {
         const y = top + 84 + i * 28;
         const selected = i === enc.selected;
-        if (selected) {
-          this.encounterObjects.push(
-            this.add.rectangle(left + 12, y, panelW - 24, 26, UI.accent).setOrigin(0, 0).setAlpha(0.14).setDepth(depth + 5),
-            this.add.rectangle(left + 12, y, 2, 26, UI.accent).setOrigin(0, 0).setDepth(depth + 6),
-          );
-        }
+        const highlight = this.add.rectangle(left + 12, y, panelW - 24, 26, UI.accent).setOrigin(0, 0).setAlpha(selected ? 0.14 : 0).setDepth(depth + 5);
+        const marker = this.add.rectangle(left + 12, y, 2, 26, UI.accent).setOrigin(0, 0).setAlpha(selected ? 1 : 0).setDepth(depth + 6);
+        const label = this.add
+          .text(left + 24, y + 13, CHOICE_LABELS[choice], {
+            fontFamily: FONT_FAMILY,
+            fontSize: `${TYPE.body}px`,
+            color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.secondary),
+          })
+          .setOrigin(0, 0.5)
+          .setDepth(depth + 7);
         this.encounterObjects.push(
-          this.add
-            .text(left + 24, y + 13, CHOICE_LABELS[choice], {
-              fontFamily: FONT_FAMILY,
-              fontSize: `${TYPE.body}px`,
-              color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.secondary),
-            })
-            .setOrigin(0, 0.5)
-            .setDepth(depth + 7),
+          highlight,
+          marker,
+          label,
         );
+        encounterRows.push({ highlight, marker, label });
+        const selectChoice = (): void => {
+          if (!this.encounterOpen || !this.encounter || this.encounter.resolved) return;
+          this.encounter.selected = i;
+          encounterRows.forEach((row, index) => {
+            const isSelected = index === i;
+            row.highlight.setAlpha(isSelected ? 0.14 : 0);
+            row.marker.setAlpha(isSelected ? 1 : 0);
+            row.label.setColor(isSelected ? hex(PALETTE.lightHigh) : hex(TEXT.secondary));
+          });
+        };
+        const hitArea = this.add.zone(cx, y + 13, panelW - 24, 26).setInteractive({ useHandCursor: true }).setDepth(depth + 8);
+        hitArea.on('pointerover', selectChoice);
+        hitArea.on('pointerdown', () => {
+          if (!this.encounterOpen || !this.encounter || this.encounter.resolved) return;
+          this.encounter.selected = i;
+          this.activateEncounterChoice();
+        });
+        this.encounterObjects.push(hitArea);
       });
       this.encounterObjects.push(
         this.add
-          .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确认 · ESC 离开', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+          .text(cx, top + panelH - 12, '点击选项 · ↑/↓ 选择 · Enter 确认 · ESC 离开', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
           .setOrigin(0.5)
           .setDepth(depth + 7),
       );
@@ -1616,22 +1678,27 @@ export class GameScene extends Phaser.Scene {
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
     const isBoss = enc.encounter.kind === 'boss';
-    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.dialogue));
+    const depth = PANEL_DEPTH.game.dialogue;
+    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
+    this.encounterObjects.push(...buildPanelHeader(this, left, top, panelW, ENCOUNTER_TITLES[enc.encounter.kind], isBoss ? UI.danger : UI.accent, depth + 5));
+    this.encounterObjects.push(...buildPanelWell(this, left + 12, top + 26, panelW - 24, 100, depth + 5));
     this.encounterObjects.push(
-      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: FONT_FAMILY, fontSize: '32px', color: isBoss ? hex(TEXT.warn) : hex(PALETTE.lightHigh) }).setOrigin(0.5),
-    );
-    this.encounterObjects.push(
-      this.add.text(left + 20, top + 44, result.message, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+      this.add.text(left + 20, top + 38, result.message, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0).setDepth(depth + 7),
     );
     const loot = result.items.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、');
     if (loot) {
       this.encounterObjects.push(
-        this.add.text(left + 20, top + 104, `获得：${loot}`, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+        this.add.text(left + 20, top + 82, `获得：${loot}`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0).setDepth(depth + 7),
       );
     }
     this.encounterObjects.push(
-      this.add.text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.dim) }).setOrigin(0.5),
+      this.add.text(cx, top + panelH - 12, '点击继续 · Enter / ESC', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) }).setOrigin(0.5).setDepth(depth + 7),
     );
+    this.addModalClickShield(this.encounterObjects, depth);
+    this.addModalClickTarget(this.encounterObjects, cx, top + panelH - 12, panelW - 24, 24, depth, () => {
+      if (this.encounterOpen && this.encounter?.resolved) this.closeEncounter();
+    });
+    lockToScreen(this.encounterObjects);
     if (state.status === 'lost') {
       this.scene.start('End');
     }
@@ -2910,6 +2977,14 @@ export class GameScene extends Phaser.Scene {
 
     const depth = PANEL_DEPTH.game.dialogue;
     this.dialogueObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
+    const dialogueShield = this.add
+      .zone(cx, cy, width, height)
+      .setInteractive()
+      .setDepth(depth + 1)
+      .setScrollFactor(0)
+      .setVisible(false);
+    dialogueShield.on('pointerdown', () => undefined);
+    this.dialogueInputObjects.push(dialogueShield);
     // OVERHAUL UI: the same header strip every other panel uses, with the NPC's
     // name on it, and the message in an inset well so speech reads as speech
     // rather than as more body text.
@@ -2949,16 +3024,45 @@ export class GameScene extends Phaser.Scene {
       this.dialogueOptionIcons.push(icon);
       this.dialogueOptions.push(t);
       this.dialogueObjects.push(icon, t);
+      const optionHitArea = this.add
+        .zone(cx, rowY + 13, panelW - 24, 26)
+        .setInteractive({ useHandCursor: true })
+        .setDepth(depth + 8)
+        .setScrollFactor(0)
+        .setVisible(false);
+      const selectOption = (): void => {
+        if (!this.dialogueOpen || !this.dialogue) return;
+        if (!this.dialogueOptionsView()[i]) return;
+        this.dialogue.selected = i;
+        this.refreshDialogue();
+      };
+      optionHitArea.on('pointerover', selectOption);
+      optionHitArea.on('pointerdown', () => {
+        selectOption();
+        if (this.dialogueOpen && this.dialogue?.selected === i) this.activateDialogueOption();
+      });
+      this.dialogueInputObjects.push(optionHitArea);
     }
     const footer = this.add
-      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+      .text(cx, top + panelH - 12, '点击选项执行 · ↑/↓选择 · Enter确定 · 点此/ESC返回', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5)
       .setDepth(depth + 7);
     this.dialogueObjects.push(footer, this.dialogueMarker);
+    const footerHitArea = this.add
+      .zone(cx, top + panelH - 12, panelW - 24, 24)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(depth + 8)
+      .setScrollFactor(0)
+      .setVisible(false);
+    footerHitArea.on('pointerdown', () => {
+      if (this.dialogueOpen) this.dialogueBack();
+    });
+    this.dialogueInputObjects.push(footerHitArea);
 
     applyPanelDepth(this.dialogueObjects, PANEL_DEPTH.game.dialogue);
     this.assertPanelContent('dialogue', this.dialogueObjects);
     for (const o of this.dialogueObjects) o.setVisible(false);
+    this.dialogueInputObjects.forEach((o) => o.setVisible(false));
   }
 
   // Label + icon key per dialogue option. The icon is the item the player
@@ -3070,6 +3174,7 @@ export class GameScene extends Phaser.Scene {
     };
     this.dialogueOpen = true;
     for (const o of this.dialogueObjects) o.setVisible(true);
+    this.dialogueInputObjects.forEach((o) => o.setVisible(true));
     this.refreshDialogue();
     void this.enhanceOpeningLine(npc);
   }
@@ -3078,6 +3183,7 @@ export class GameScene extends Phaser.Scene {
     this.dialogueOpen = false;
     this.dialogue = null;
     for (const o of this.dialogueObjects) o.setVisible(false);
+    this.dialogueInputObjects.forEach((o) => o.setVisible(false));
   }
 
   private dialogueBack(): void {
@@ -3223,6 +3329,7 @@ export class GameScene extends Phaser.Scene {
       this.dialogueObjects,
       this.encounterObjects,
       this.shelterObjects,
+      this.shelterInputObjects,
     ];
     let found = false;
     for (const group of groups) {
@@ -3556,13 +3663,13 @@ export class GameScene extends Phaser.Scene {
   // Returns null when no panel is open, so the world hint can take over.
   private openPanelHint(): string | null {
     const combat = getGame().combat;
-    if (this.encounterOpen && combat) return '↑/↓ 选择 · Enter 出招 · ESC 撤退';
-    if (this.encounterOpen && this.encounter) return '↑/↓ 选择 · Enter 确认 · ESC 离开';
+    if (this.encounterOpen && combat) return '点击选项出招 · ↑/↓ 选择 · Enter 出招 · ESC 撤退';
+    if (this.encounterOpen && this.encounter) return '点击选项执行 · ↑/↓ 选择 · Enter 确认 · ESC 离开';
     if (this.encounterOpen) return '↑/↓ 选择 · Enter 买入 · S 卖出 · ESC 离开';
     if (this.shelterOpen) return getGame().shelterPlan?.resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回';
     if (this.inventoryOpen) return '↑/↓ 选择 · Enter 使用 · I 关闭';
     if (this.craftingOpen) return '↑/↓ 选择 · Enter 制作 · C 关闭';
-    if (this.dialogueOpen) return '↑/↓ 选择 · Enter 确定 · ESC 返回';
+    if (this.dialogueOpen) return '点击选项执行 · ↑/↓ 选择 · Enter 确定 · ESC 返回';
     if (this.pauseOpen) return '↑/↓ 选择 · Enter 确认 · ESC 继续';
     return null;
   }
@@ -3597,7 +3704,9 @@ export class GameScene extends Phaser.Scene {
     for (const object of this.shelterObjects) {
       if (object !== this.shelterMarker) object.destroy();
     }
+    this.shelterInputObjects.forEach((object) => object.destroy());
     this.shelterObjects = [];
+    this.shelterInputObjects = [];
     this.shelterMarker.setVisible(false);
   }
 
@@ -3605,7 +3714,9 @@ export class GameScene extends Phaser.Scene {
     for (const object of this.shelterObjects) {
       if (object !== this.shelterMarker) object.destroy();
     }
+    this.shelterInputObjects.forEach((object) => object.destroy());
     this.shelterObjects = [];
+    this.shelterInputObjects = [];
     const state = getGame();
     const { width, height } = this.viewSize();
     const panelW = 500;
@@ -3618,17 +3729,26 @@ export class GameScene extends Phaser.Scene {
     const resolved = state.shelterPlan?.resolved === true;
 
     this.shelterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
+    // The shelter is modal: outside clicks must not reach world interactions.
+    const clickShield = this.add
+      .zone(cx, cy, width, height)
+      .setInteractive()
+      .setDepth(depth + 4)
+      .setScrollFactor(0);
+    clickShield.on('pointerdown', () => undefined);
+    this.shelterInputObjects.push(clickShield);
     this.shelterObjects.push(...buildPanelHeader(this, left, top, panelW, '夜间安排 · 宿舍', UI.good, depth + 5));
     this.shelterObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 44, depth + 5));
     const stress = Math.round(state.player.stress ?? 20);
     const latest = recentDiary(state, 1)[0];
     this.shelterObjects.push(
-      this.add.text(left + 24, top + 40, `压力 ${stress}/100${latest ? ` · 上次：${latest.message}` : ' · 今天还没有记录'}`, {
+      this.add.text(left + 24, top + 30, `压力 ${stress}/100${latest ? ` · 上次：${latest.message}` : ' · 今天还没有记录'}`, {
         fontFamily: FONT_FAMILY,
         fontSize: `${TYPE.caption}px`,
         color: hex(stress >= 70 ? TEXT.warn : TEXT.primary),
         wordWrap: { width: panelW - 48 },
-      }).setOrigin(0, 0.5).setDepth(depth + 6),
+        maxLines: 2,
+      }).setOrigin(0, 0).setDepth(depth + 6),
     );
     const rowsTop = top + 80;
     for (const [index, row] of SHELTER_ROWS.entries()) {
@@ -3644,15 +3764,55 @@ export class GameScene extends Phaser.Scene {
         placeMarker(this.shelterMarker, label);
         this.shelterMarker.setDepth(depth + 8).setVisible(true).setScrollFactor(0);
       }
+      const hitArea = this.add
+        .zone(cx, rowsTop + index * 26 + 13, panelW - 32, 26)
+        .setInteractive({ useHandCursor: true })
+        .setDepth(depth + 9)
+        .setScrollFactor(0);
+      hitArea.on('pointerdown', () => {
+        if (!this.shelterOpen || getGame().shelterPlan?.resolved) return;
+        this.shelterSelected = index;
+        this.activateShelterChoice();
+      });
+      this.shelterInputObjects.push(hitArea);
     }
-    this.shelterObjects.push(
-      this.add.text(cx, top + panelH - 14, resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回', {
+    if (resolved) {
+      const sleepX = left + panelW * 0.28;
+      const returnX = left + panelW * 0.72;
+      this.shelterObjects.push(
+        this.add.text(sleepX, top + panelH - 24, '点击睡觉', {
+          fontFamily: FONT_FAMILY,
+          fontSize: `${TYPE.caption}px`,
+          color: hex(PALETTE.clothHigh),
+        }).setOrigin(0.5).setDepth(depth + 6),
+        this.add.text(returnX, top + panelH - 24, '点击返回', {
+          fontFamily: FONT_FAMILY,
+          fontSize: `${TYPE.caption}px`,
+          color: hex(PALETTE.clothHigh),
+        }).setOrigin(0.5).setDepth(depth + 6),
+      );
+      for (const [x, action] of [[sleepX, () => this.activateShelterChoice()], [returnX, () => this.closeShelter()]] as const) {
+        const hitArea = this.add
+          .zone(x, top + panelH - 24, panelW * 0.36, 28)
+          .setInteractive({ useHandCursor: true })
+          .setDepth(depth + 9)
+          .setScrollFactor(0);
+        hitArea.on('pointerdown', () => {
+          if (this.shelterOpen && getGame().shelterPlan?.resolved) action();
+        });
+        this.shelterInputObjects.push(hitArea);
+      }
+    } else {
+      this.shelterObjects.push(this.add.text(cx, top + panelH - 22, '点击选项安排 · ↑/↓ 选择 · Enter 安排 · ESC 返回', {
         fontFamily: FONT_FAMILY,
         fontSize: `${TYPE.caption}px`,
         color: hex(PALETTE.clothHigh),
-      }).setOrigin(0.5).setDepth(depth + 6),
-    );
+      }).setOrigin(0.5).setDepth(depth + 6));
+    }
     this.shelterObjects.push(this.shelterMarker);
+    // Frame, text, summary, footer and hit areas stay at screen coordinates.
+    lockToScreen(this.shelterObjects);
+    lockToScreen(this.shelterInputObjects);
     this.assertPanelContent('shelter', this.shelterObjects);
   }
 

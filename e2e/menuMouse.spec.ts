@@ -107,6 +107,16 @@ test('title menu mouse hover and clicks work with no save', async ({ page }) => 
   await expect.poll(() => selectedMenuOption(page)).toBe('操作说明');
   await clickMenuText(page, '操作说明');
   await expect.poll(() => hasVisibleText(page, 'A/D 或 ←/→ 移动')).toBe(true);
+  expect(await hasVisibleText(page, '点击关闭 · Enter / ESC')).toBe(true);
+  await clickMenuText(page, '点击关闭 · Enter / ESC');
+  await expect.poll(() => hasVisibleText(page, 'A/D 或 ←/→ 移动')).toBe(false);
+  await expect.poll(() => selectedMenuOption(page)).toBe('操作说明');
+
+  await clickMenuText(page, '操作说明');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => hasVisibleText(page, 'A/D 或 ←/→ 移动')).toBe(false);
+
+  await clickMenuText(page, '操作说明');
   await page.keyboard.press('Escape');
   await expect.poll(() => hasVisibleText(page, 'A/D 或 ←/→ 移动')).toBe(false);
 

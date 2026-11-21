@@ -287,7 +287,12 @@ export class MenuScene extends Phaser.Scene {
       '目标：爬到第 100000 层',
     ];
     const texts = lines.map((line, i) => this.add.text(left + 24, top + 72 + i * 38, line, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }));
-    const footer = this.add.text(cx, top + panelH - 30, '按 Enter / ESC 关闭', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    const footer = this.add.text(cx, top + panelH - 30, '点击关闭 · Enter / ESC', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    footer.setInteractive({ useHandCursor: true });
+    footer.on('pointerup', (_pointer: Phaser.Input.Pointer, _localX: number, _localY: number, event: Phaser.Types.Input.EventData) => {
+      event.stopPropagation();
+      if (this.helpOpen) this.toggleHelp();
+    });
     this.helpObjects.push(title, ...texts, footer);
     applyPanelDepth(this.helpObjects, PANEL_DEPTH.menu.help);
     for (const o of this.helpObjects) o.setVisible(false);

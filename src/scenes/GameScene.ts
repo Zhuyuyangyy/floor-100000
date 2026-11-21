@@ -168,8 +168,9 @@ import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId
 const INVENTORY_SLOTS = 12;
 // Row pitch for the inventory list: 20px fits a full-size 16x16 icon with a 2px
 // gap either side, and keeps every offset an integer (no scaling, no blur).
-// Crafting rows: same 16px icon, 24px pitch keeps the cost text readable.
-const CRAFT_ROW_PITCH = 24;
+// Craft rows use separate name/status and material lines, with enough vertical
+// pitch to keep long costs clear of the status column.
+const CRAFT_ROW_PITCH = 48;
 // HUD type scale (docs/05_ART_GUIDE.md §2: no size too small to read). Title 16 /
 // body 13 / auxiliary 11 — all integer pixels, since any fractional size would be
 // resampled and blur the pixel look.
@@ -362,7 +363,7 @@ export class GameScene extends Phaser.Scene {
 
   private craftingOpen = false;
   private craftObjects: PanelObject[] = [];
-  private craftRows: Array<{ band: Phaser.GameObjects.Rectangle; name: Phaser.GameObjects.Text; status: Phaser.GameObjects.Text }> = [];
+  private craftRows: Array<{ band: Phaser.GameObjects.Rectangle; name: Phaser.GameObjects.Text; cost: Phaser.GameObjects.Text; status: Phaser.GameObjects.Text }> = [];
   private craftMarker!: Phaser.GameObjects.Image;
   private craftSelected = 0;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
@@ -1134,7 +1135,7 @@ export class GameScene extends Phaser.Scene {
     const cx = width / 2;
     const cy = height / 2;
     const panelW = 440;
-    const panelH = 232;
+    const panelH = 248;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
     const depth = PANEL_DEPTH.game.dialogue;
@@ -1167,16 +1168,37 @@ export class GameScene extends Phaser.Scene {
     // The log's tail: the last three lines, on a dark well so they read as a
     // record of what happened rather than as more body text.
     const logTop = top + 56;
-    const logH = 62;
+    const logH = 74;
     this.encounterObjects.push(...buildPanelWell(this, left + 12, logTop, panelW - 24, logH, depth + 5));
     const tail = combat.log.slice(-3);
+    // Combat.log keeps its full, authoritative wording; only the narrow visual
+    // tail is clipped to one line. Fixed 22px rows are enough for the 20px
+    // caption font, but wrapping a long boss/loot result would still let one
+    // record grow into and cover the next row.
+    const logWidth = panelW - 40;
+    const logFont = { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px` };
+    const logMeasure = this.add.text(0, 0, '', logFont).setVisible(false);
+    const fitLogLine = (line: string): string => {
+      const singleLine = line.replace(/[\r\n]+/g, ' ');
+      logMeasure.setText(singleLine);
+      if (logMeasure.width <= logWidth) return singleLine;
+      let prefix = '';
+      for (const glyph of Array.from(singleLine)) {
+        const candidate = `${prefix}${glyph}…`;
+        logMeasure.setText(candidate);
+        if (logMeasure.width > logWidth) break;
+        prefix += glyph;
+      }
+      return `${prefix}…`;
+    };
     tail.forEach((line, i) => {
       this.encounterObjects.push(
         this.add
-          .text(left + 20, logTop + 8 + i * 17, line, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim), wordWrap: { width: panelW - 40 } })
+          .text(left + 20, logTop + 8 + i * 22, fitLogLine(line), { ...logFont, color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim) })
           .setDepth(depth + 7),
       );
     });
+    logMeasure.destroy();
 
     // The three actions, as rows with a status column - the key, what it does,
     // and what it costs. A list of three verbs in a row was the old shape.
@@ -1185,23 +1207,48 @@ export class GameScene extends Phaser.Scene {
       ['格挡', '受伤减半', '回 3 精力'],
       ['撤退', '按 ESC', '逃跑可能失败'],
     ];
+    const selectionRows: Array<{
+      highlight: Phaser.GameObjects.Rectangle;
+      marker: Phaser.GameObjects.Rectangle;
+      label: Phaser.GameObjects.Text;
+    }> = [];
     choices.forEach(([label, key, note], i) => {
-      const y = top + 126 + i * 26;
+      const y = top + 136 + i * 26;
       const selected = i === this.combatSelected;
-      if (selected) {
-        this.encounterObjects.push(this.add.rectangle(left + 12, y, panelW - 24, 24, UI.accent).setOrigin(0, 0).setAlpha(0.14).setDepth(depth + 5));
-        this.encounterObjects.push(this.add.rectangle(left + 12, y, 2, 24, UI.accent).setOrigin(0, 0).setDepth(depth + 6));
-      }
+      const highlight = this.add.rectangle(left + 12, y, panelW - 24, 24, UI.accent).setOrigin(0, 0).setAlpha(selected ? 0.14 : 0).setDepth(depth + 5);
+      const marker = this.add.rectangle(left + 12, y, 2, 24, UI.accent).setOrigin(0, 0).setAlpha(selected ? 1 : 0).setDepth(depth + 6);
+      const rowLabel = this.add
+        .text(left + 22, y + 12, label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary) })
+        .setOrigin(0, 0.5)
+        .setDepth(depth + 7);
+      selectionRows.push({ highlight, marker, label: rowLabel });
       this.encounterObjects.push(
-        this.add
-          .text(left + 22, y + 12, label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary) })
-          .setOrigin(0, 0.5)
-          .setDepth(depth + 7),
+        highlight,
+        marker,
+        rowLabel,
         this.add
           .text(left + panelW - 22, y + 12, `${key} · ${note}`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
           .setOrigin(1, 0.5)
           .setDepth(depth + 7),
       );
+      const selectChoice = (): void => {
+        if (!this.encounterOpen || !getGame().combat || this.combatDone) return;
+        this.combatSelected = i;
+        selectionRows.forEach((row, index) => {
+          const isSelected = index === i;
+          row.highlight.setAlpha(isSelected ? 0.14 : 0);
+          row.marker.setAlpha(isSelected ? 1 : 0);
+          row.label.setColor(isSelected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
+        });
+      };
+      const hitArea = this.add.zone(left + panelW / 2, y + 12, panelW - 24, 24).setInteractive().setDepth(depth + 8);
+      hitArea.on('pointerover', selectChoice);
+      hitArea.on('pointerdown', () => {
+        if (!this.encounterOpen || !getGame().combat || this.combatDone) return;
+        selectChoice();
+        this.activateCombatChoice();
+      });
+      this.encounterObjects.push(hitArea);
     });
 
     this.encounterObjects.push(
@@ -2396,7 +2443,10 @@ export class GameScene extends Phaser.Scene {
       const stack = slots[i];
       if (stack) {
         // Keyed by item id, never by display name — see itemIconKey().
-        icon.setTexture(itemIconKey(stack.itemId)).setVisible(true);
+        // Loot/pickup refreshes can run while the panel is closed. Keep content
+        // visibility owned by the panel lifecycle instead of exposing orphaned
+        // icons when those refreshes update the slot data.
+        icon.setTexture(itemIconKey(stack.itemId)).setVisible(this.inventoryOpen);
         badge.setText(stack.quantity > 1 ? `${stack.quantity}` : '');
       } else {
         icon.setVisible(false);
@@ -2411,7 +2461,7 @@ export class GameScene extends Phaser.Scene {
 
     const selected = slots[this.invSelected];
     const cell = this.invCells[this.invSelected];
-    this.invMarker.setVisible(selected !== undefined && cell !== undefined);
+    this.invMarker.setVisible(this.inventoryOpen && selected !== undefined && cell !== undefined);
     if (selected && cell) placeMarkerLeftOf(this.invMarker, cell);
 
     if (selected) {
@@ -2557,10 +2607,11 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < 4; i++) {
       const rowY = top + 30 + i * CRAFT_ROW_PITCH;
       const band = this.add.rectangle(left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.34).setDepth(PANEL_DEPTH.game.craft + 5);
-      const name = this.add.text(left + 18, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-      const status = this.add.text(left + panelW - 16, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-      this.craftRows.push({ band, name, status });
-      this.craftObjects.push(band, name, status);
+      const name = this.add.text(left + 18, rowY + 11, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      const cost = this.add.text(left + 18, rowY + 35, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      const status = this.add.text(left + panelW - 16, rowY + 11, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      this.craftRows.push({ band, name, cost, status });
+      this.craftObjects.push(band, name, cost, status);
     }
     const footer = this.add.text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
     this.craftObjects.push(footer, this.craftMarker);
@@ -2586,19 +2637,21 @@ export class GameScene extends Phaser.Scene {
       const entry = entries[i];
       if (!entry) {
         row.name.setText('');
+        row.cost.setText('');
         row.status.setText('');
         row.band.setAlpha(0);
         continue;
       }
       const selected = i === this.craftSelected;
-      row.band.setAlpha(selected ? 0.72 : 0.3);
+      row.band.setAlpha(selected ? 0.18 : 0.3);
       row.band.setFillStyle(selected ? UI.accent : UI.surfaceRaised, 1);
       if (entry.kind === 'recipe') {
         const recipe = getRecipe(entry.id!);
         const cost = Object.entries(recipe.cost)
           .map(([id, n]) => `${getItem(id as ItemId).displayName}×${n}`)
           .join(' ');
-        row.name.setText(`${recipe.displayName}  ${cost}`);
+        row.name.setText(recipe.displayName);
+        row.cost.setText(cost);
         row.name.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
         const built = hasUpgrade(state, entry.id!);
         const ok = canCraft(state, entry.id!).ok;
@@ -2606,7 +2659,8 @@ export class GameScene extends Phaser.Scene {
         row.status.setColor(built ? hex(PALETTE.clothHigh) : ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
       } else {
         const can = countItem(state.player.inventory, 'dirty_water') >= 1;
-        row.name.setText('净化  脏水→净水');
+        row.name.setText('净化');
+        row.cost.setText('脏水→净水');
         row.name.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
         row.status.setText(can ? '可净化' : '缺脏水');
         row.status.setColor(can ? hex(PALETTE.clothHigh) : hex(TEXT.dim));

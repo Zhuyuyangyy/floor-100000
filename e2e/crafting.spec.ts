@@ -139,6 +139,31 @@ test('insufficient materials are refused with no deduction', async ({ page }) =>
   expect(await count(page, 'clean_water')).toBeGreaterThanOrEqual(3);
 });
 
+test('craft material descriptions never overlap the right-side status', async ({ page }) => {
+  await startGame(page, 42);
+  await page.keyboard.press('C');
+  await page.waitForTimeout(200);
+
+  const rows = await page.evaluate(() => {
+    const g = (window as unknown as {
+      __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean; getBounds: () => { x: number; y: number; width: number; height: number } }> } } | null } };
+    }).__PHASER_GAME__;
+    return (g?.scene.getScene('Game')?.children.list ?? [])
+      .filter((o) => o.type === 'Text' && o.visible && o.text)
+      .map((o) => ({ text: o.text!, ...o.getBounds() }));
+  });
+
+  const recipeCosts = ['电池×1 电线×1 废金属×1', '木材×2 胶带×1', '废金属×2 滤芯×1 电线×1'];
+  for (const description of recipeCosts) {
+    const cost = rows.find((row) => row.text === description);
+    expect(cost, `visible material line for ${description}`).toBeDefined();
+    const status = rows
+      .filter((row) => ['材料不足', '可制作', '已建'].includes(row.text))
+      .find((row) => cost!.y >= row.y + row.height && cost!.y - (row.y + row.height) < 20);
+    expect(status, `a non-overlapping status row for ${description}`).toBeDefined();
+  }
+});
+
 test('the dorm lamp lights the night and persists', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));

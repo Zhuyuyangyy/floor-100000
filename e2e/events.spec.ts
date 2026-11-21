@@ -155,12 +155,12 @@ test('the wanderer is avoidable — leaving the floor escapes it undamaged', asy
   page.on('pageerror', (e) => errors.push(e.message));
 
   await startGame(page, 42);
-  await goUp(page); // 2
+  for (let floor = 2; floor <= 5; floor++) await goUp(page);
   await page.evaluate(() => {
     const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
     if (!s) return;
     s.gameMinuteOfDay = 1320;
-    s.worldEvents.activeEvent = { type: 'wanderer', floor: 2, message: 'test' };
+    s.worldEvents.activeEvent = { type: 'wanderer', floor: 5, message: 'test' };
   });
 
   await page.waitForFunction(() => {

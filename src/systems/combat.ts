@@ -80,6 +80,15 @@ function clampToRemainingHp(damage: number, hp: number): number {
   return Math.min(damage, Math.max(hp, 0));
 }
 
+// Apply encounter-specific mitigation after the generic round has resolved.
+// Death must be decided from this resulting HP, not CombatRound.playerDead,
+// which only describes the unmitigated generic hit.
+export function applyCombatDamage(currentHp: number, incomingDamage: number, multiplier = 1): number {
+  if (incomingDamage <= 0) return Math.max(0, currentHp);
+  const adjustedDamage = Math.max(1, Math.round(incomingDamage * multiplier));
+  return Math.max(0, currentHp - adjustedDamage);
+}
+
 // 结算一个回合。调用顺序固定为「玩家先手、怪物后手」，保证：
 //  - 玩家打死怪物时怪物不会还手（死人不反击）；
 //  - 逃跑成功时完全无伤（不存在「白打一击」）；

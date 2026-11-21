@@ -14,7 +14,9 @@ import {
   applyBehavior,
   behaviorModifiers,
   rollMonster,
+  shouldCowardBreakOff,
 } from '../systems/monsters';
+import { resolveRound } from '../systems/combat';
 import type { Combatant, MonsterBehavior, MonsterDef } from '../systems/monsters';
 import type { Rng } from '../core/rng';
 
@@ -239,6 +241,31 @@ describe('behaviorModifiers 七种行为', () => {
     const a = behaviorModifiers('fast');
     a.accuracyBonus = 999;
     expect(behaviorModifiers('fast').accuracyBonus).toBe(3);
+  });
+});
+
+describe('shouldCowardBreakOff', () => {
+  it('胆小怪低于 40% 血线时即使玩家攻击落空、双方本回合都未造成伤害仍会退战', () => {
+    const player: Combatant = { hp: 20, maxHp: 20, damage: 2, accuracy: 0, defense: 0, evasion: 11 };
+    const coward: Combatant & { behavior: string } = {
+      hp: 3, maxHp: 10, damage: 1, accuracy: 0, defense: 0, evasion: 11, behavior: 'coward',
+    };
+    const round = resolveRound(player, coward, 'attack', makeRng(1));
+
+    expect(round.playerDamage).toBe(0);
+    expect(round.monsterDamage).toBe(0);
+    expect(shouldCowardBreakOff(coward, round)).toBe(true);
+  });
+
+  it('严格低于 40% 才退战，击败、玩家成功撤退或普通怪不触发胆小怪退战', () => {
+    const round = { monsterDead: false, fled: false } as const;
+    const coward = { hp: 4, maxHp: 10, behavior: 'coward' };
+
+    expect(shouldCowardBreakOff(coward, round)).toBe(false);
+    expect(shouldCowardBreakOff({ ...coward, hp: 3 }, round)).toBe(true);
+    expect(shouldCowardBreakOff({ ...coward, hp: 3 }, { ...round, monsterDead: true })).toBe(false);
+    expect(shouldCowardBreakOff({ ...coward, hp: 3 }, { ...round, fled: true })).toBe(false);
+    expect(shouldCowardBreakOff({ ...coward, hp: 3, behavior: 'normal' }, round)).toBe(false);
   });
 });
 

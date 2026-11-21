@@ -5,7 +5,8 @@ import { deriveSeed, makeRng } from '../core/rng';
 import type { Rng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
 import type { CombatAction, Combatant } from '../systems/combat';
-import { GUARD_ENERGY_RESTORE, playerCombatant, resolveRound } from '../systems/combat';
+import { applyCombatDamage, GUARD_ENERGY_RESTORE, playerCombatant, resolveRound } from '../systems/combat';
+import { modeGuardianDamageMult } from '../systems/modes';
 
 // 通用测试体：默认取「中间态」数值，再用 Partial 覆盖成各分支需要的边界态。
 // name 给「拾荒者」，让日志文案断言贴近工单示例。
@@ -259,6 +260,18 @@ describe('死亡判定与不过杀', () => {
     expect(r.monsterDamage).toBe(2);
     expect(r.playerDead).toBe(false);
     expect(r.monsterDead).toBe(false);
+  });
+
+  it('简单模式守门人减伤后以实际 HP 判定存活，而非沿用未减伤的 playerDead', () => {
+    const player = practiceDummy({ hp: 5, defense: 2, evasion: 0 });
+    const gatekeeper = punchingBag({ damage: 8, accuracy: 200 });
+    const round = resolveRound(player, gatekeeper, 'attack', makeRng(1));
+
+    // 守门人原始伤害会被夹为 5，并在通用回合结果中标记致死；简单模式
+    // 再将 5 × 0.7 四舍五入为 4，实际应剩 1 HP。
+    expect(round.monsterDamage).toBe(5);
+    expect(round.playerDead).toBe(true);
+    expect(applyCombatDamage(player.hp, round.monsterDamage, modeGuardianDamageMult('easy'))).toBe(1);
   });
 });
 

@@ -1,6 +1,6 @@
 import { makeRng, deriveSeed } from '../core/rng';
 import { GAME_CONFIG } from '../core/config';
-import { STARTING_FLOOR } from '../core/constants';
+import { STARTING_FLOOR, WANDERER_MIN_SPAWN_FLOOR } from '../core/constants';
 import type { DwellState, GameState } from '../core/gameTypes';
 
 // B3-15: dwell pressure. Staying on one floor too long makes something come
@@ -155,22 +155,27 @@ export function rollDwellEvent(state: GameState, dwell: DwellState, floor: numbe
   // spawned would make every later roll on the floor carry the bonus, and the
   // "leaving resets everything" escape would stop meaning anything.
   if (scoutedLast) ext.scoutedLast = false;
-  const prowlerChance = scoutedLast
-    ? Math.min(SCOUT_PROWLER_CAP, row.prowler + SCOUT_PROWLER_BONUS)
-    : row.prowler;
+  const wandererEligible = floor >= WANDERER_MIN_SPAWN_FLOOR;
+  const prowlerChance = wandererEligible
+    ? (scoutedLast ? Math.min(SCOUT_PROWLER_CAP, row.prowler + SCOUT_PROWLER_BONUS) : row.prowler)
+    : 0;
+  const scoutChance = wandererEligible ? row.scout : 0;
+  // Before floor 5, keep dwell pressure atmospheric rather than introducing
+  // either the creature or its scout telegraph; its probability becomes ambience.
+  const atmosphereChance = wandererEligible ? row.atmosphere : row.atmosphere + row.prowler + row.scout;
 
   const rng = makeRng(deriveSeed(state.runSeed, state.day, floor, dwell.rolls, 'dwell'));
   const roll = rng.nextFloat();
   if (roll < prowlerChance) {
     return { kind: 'prowler', message: `你在 ${floor} 层待得太久了，有东西被动静引了过来。` };
   }
-  if (roll < prowlerChance + row.scout) {
+  if (roll < prowlerChance + scoutChance) {
     // W2: mark the floor — the next roll's prowler chance gets the bonus.
     ext.scoutedLast = true;
     const line = SCOUT_LINES[Math.floor(rng.nextFloat() * SCOUT_LINES.length)];
     return { kind: 'scout', message: line };
   }
-  if (roll < prowlerChance + row.scout + row.atmosphere) {
+  if (roll < prowlerChance + scoutChance + atmosphereChance) {
     const line = ATMOSPHERE[Math.floor(rng.nextFloat() * ATMOSPHERE.length)];
     return { kind: 'atmosphere', message: line };
   }

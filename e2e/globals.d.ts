@@ -41,6 +41,9 @@ declare global {
         getScenes: (r?: boolean) => Array<{ scene: { key: string } }>;
         getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean; y: number }> } } | null;
       };
+      loop: {
+        stop: () => void;
+      };
     };
     __PHASER_SESSION__?: { getState: () => E2EGameState | null };
     __PHASER_TOWER__?: unknown;

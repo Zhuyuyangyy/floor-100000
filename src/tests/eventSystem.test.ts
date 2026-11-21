@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
+import { WANDERER_MIN_SPAWN_FLOOR } from '../core/constants';
 import { ensureNightEvent, rollDayEvent } from '../systems/EventSystem';
 import { isNight } from '../systems/SurvivalSystem';
 
@@ -15,13 +16,19 @@ describe('rollDayEvent', () => {
     expect(types.size).toBeGreaterThan(1);
   });
 
-  it('never targets the safe dorm (1) with a wanderer/leak', () => {
+  it('keeps night wanderers on floor 5+ and never targets the safe dorm with a leak', () => {
+    let sawWanderer = false;
     for (let seed = 1; seed <= 60; seed++) {
       for (let day = 1; day <= 6; day++) {
         const e = rollDayEvent(seed, day);
-        if (e.type === 'wanderer' || e.type === 'leak') expect(e.floor).not.toBe(1);
+        if (e.type === 'wanderer') {
+          sawWanderer = true;
+          expect(e.floor).toBeGreaterThanOrEqual(WANDERER_MIN_SPAWN_FLOOR);
+        }
+        if (e.type === 'leak') expect(e.floor).not.toBe(1);
       }
     }
+    expect(sawWanderer).toBe(true);
   });
 
   it('always carries a player-facing message', () => {

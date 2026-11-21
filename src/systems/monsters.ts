@@ -17,7 +17,7 @@
 // 尚未就绪，曾用本地结构副本占位；A1 交付后已核对字段逐字一致并切回
 // import type）。只 import 类型、不 import 任何运行时值——本模块保持
 // 零 Phaser、零战斗引擎依赖的纯数据/纯函数形态。
-import type { Combatant } from './combat';
+import type { Combatant, CombatRound } from './combat';
 import type { Rng } from '../core/rng';
 
 // 对外保持 Combatant 可见：applyBehavior 的签名里要用它，调用方
@@ -192,6 +192,17 @@ export function behaviorModifiers(b: MonsterBehavior): BehaviorMods {
       // 在 A1 的小数级伤害上仍读得出差别，又不会一换一击杀。
       return { damageMult: 1.4, accuracyBonus: -2, defenseBonus: 0, evasionBonus: 0, guardPierce: 0, firstStrikeMult: 1, fleeAtHpFrac: 0 };
   }
+}
+
+// Resolve the coward's retreat from its post-player-action HP. Deliberately
+// does not depend on either side dealing damage this round: a coward already
+// below its flee line will still break off after a missed attack.
+export function shouldCowardBreakOff(
+  monster: Pick<Combatant, 'hp' | 'maxHp'> & { behavior: string },
+  round: Pick<CombatRound, 'monsterDead' | 'fled'>,
+): boolean {
+  if (monster.behavior !== 'coward' || round.monsterDead || round.fled || monster.maxHp <= 0) return false;
+  return monster.hp / monster.maxHp < behaviorModifiers('coward').fleeAtHpFrac;
 }
 
 // 把行为修饰符应用到一个 Combatant，返回新对象（纯函数，不改入参）。

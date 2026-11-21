@@ -124,6 +124,14 @@ export class MenuScene extends Phaser.Scene {
         .text(width / 2, MENU_TOP + i * MENU_STEP, entry.label, { fontFamily: FONT_FAMILY, fontSize: '36px', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
         .setOrigin(0.5);
       this.optionTexts.push(t);
+      // The title menu is also a pointer-driven list: hovering updates the same
+      // selection marker as the keyboard, and releasing on an entry activates it.
+      t.setInteractive({ useHandCursor: true });
+      t.on('pointerover', () => this.select(i));
+      t.on('pointerup', () => {
+        this.select(i);
+        this.activate();
+      });
       // Entrance: a fade-in only. An earlier version also settled each entry
       // down 8px, which broke the e2e selection probe — it finds the
       // highlighted entry by comparing the marker's y to the entries' y, and a
@@ -199,7 +207,11 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private move(delta: number): void {
-    this.selected = Phaser.Math.Clamp(this.selected + delta, 0, this.entries.length - 1);
+    this.select(Phaser.Math.Clamp(this.selected + delta, 0, this.entries.length - 1));
+  }
+
+  private select(index: number): void {
+    this.selected = index;
     this.refreshOptions();
     this.hideMessage();
   }
@@ -275,7 +287,12 @@ export class MenuScene extends Phaser.Scene {
       '目标：爬到第 100000 层',
     ];
     const texts = lines.map((line, i) => this.add.text(left + 24, top + 72 + i * 38, line, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }));
-    const footer = this.add.text(cx, top + panelH - 30, '按 Enter / ESC 关闭', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    const footer = this.add.text(cx, top + panelH - 30, '点击关闭 · Enter / ESC', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    footer.setInteractive({ useHandCursor: true });
+    footer.on('pointerup', (_pointer: Phaser.Input.Pointer, _localX: number, _localY: number, event: Phaser.Types.Input.EventData) => {
+      event.stopPropagation();
+      if (this.helpOpen) this.toggleHelp();
+    });
     this.helpObjects.push(title, ...texts, footer);
     applyPanelDepth(this.helpObjects, PANEL_DEPTH.menu.help);
     for (const o of this.helpObjects) o.setVisible(false);

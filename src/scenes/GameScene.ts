@@ -27,6 +27,7 @@ import {
   STACK_BELOW,
   WANDERER_DAMAGE,
   WANDERER_HIT_COOLDOWN_MS,
+  WANDERER_MIN_SPAWN_FLOOR,
   WANDERER_SPEED,
 } from '../core/constants';
 import {
@@ -64,6 +65,7 @@ import { recordDepth, runScore } from '../systems/progress';
 import { CHARACTER_NAMES, applyDepth, loadMeta, saveMeta, unlockFromDepth } from '../systems/metaProgress';
 import type { CharacterKey } from '../render/artpack';
 import { lowHpPulse, mostUrgentStat, moveSpeedFactor } from '../render/feedback';
+import { combatFeedbackSignals } from '../render/combatFeedback';
 import { GAME_CONFIG } from '../core/config';
 import {
   markResolved,
@@ -76,9 +78,9 @@ import {
   type EncounterChoice,
 } from '../systems/encounters';
 import { encounterSpots, nudgeSpotX, placeClearX } from '../systems/encounterSpots';
-import { resolveRound, playerCombatant, GUARD_ENERGY_RESTORE, type CombatAction, type CombatRound, type Combatant } from '../systems/combat';
-import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster } from '../systems/monsters';
-import { guardianDamageMult, lootBonus, moveSpeedMult } from '../systems/relics';
+import { applyCombatDamage, resolveRound, playerCombatant, GUARD_ENERGY_RESTORE, type CombatAction, type CombatRound, type Combatant } from '../systems/combat';
+import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster, shouldCowardBreakOff } from '../systems/monsters';
+import { relicDamageMultForCombat, lootBonus, moveSpeedMult } from '../systems/relics';
 import { modeGuardianDamageMult } from '../systems/modes';
 import { buy, sell, shopStock, type ShopEntry } from '../systems/shop';
 import { charge, recordShortcut, shortcutAvailable, shortcutPrice, shortcutSkip, timesTaken } from '../systems/shortcut';
@@ -116,7 +118,7 @@ import {
   walkAnimKey,
   walkSheetKey,
 } from '../render/walkcycle';
-import { WEAPON_GRIP_X, WEAPON_GRIP_Y, WEAPON_H, WEAPON_KEY, WEAPON_W } from '../render/weapon.ts';
+import { WEAPON_H, WEAPON_W, nextWeaponVisual, weaponSwingAngle, weaponVisual, type WeaponVisualId } from '../render/weapon.ts';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
 import { corridorTint, drawCorridorRoom } from '../render/corridors';
@@ -166,8 +168,9 @@ import type { ActiveEvent, GameState, GeneratedContainer, GeneratedFloor, ItemId
 const INVENTORY_SLOTS = 12;
 // Row pitch for the inventory list: 20px fits a full-size 16x16 icon with a 2px
 // gap either side, and keeps every offset an integer (no scaling, no blur).
-// Crafting rows: same 16px icon, 24px pitch keeps the cost text readable.
-const CRAFT_ROW_PITCH = 24;
+// Craft rows use separate name/status and material lines, with enough vertical
+// pitch to keep long costs clear of the status column.
+const CRAFT_ROW_PITCH = 48;
 // HUD type scale (docs/05_ART_GUIDE.md §2: no size too small to read). Title 16 /
 // body 13 / auxiliary 11 — all integer pixels, since any fractional size would be
 // resampled and blur the pixel look.
@@ -239,7 +242,7 @@ const SHELTER_ROWS: Array<{ action: ShelterAction; label: string; value: string 
   { action: 'repair', label: '修理', value: '木材×2 + 胶带×1' },
   { action: 'care', label: '照顾邻居', value: '口粮×1 · 压力 -12' },
 ];
-type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 's' | 'f' | 'up' | 'down';
+type GameKey = 'e' | 'esc' | 'i' | 'enter' | 'c' | 'm' | 's' | 'f' | 'q' | 'up' | 'down';
 type DirKeys = {
   up: Phaser.Input.Keyboard.Key;
   down: Phaser.Input.Keyboard.Key;
@@ -253,8 +256,10 @@ type DirKeys = {
 // renders and feeds input back through pure logic functions.
 export class GameScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Sprite;
-  /** The crowbar in the survivor's hand. Follows the attack pose's fist. */
+  /** The manually selected visual weapon in the survivor's hand. */
   private weapon?: Phaser.GameObjects.Image;
+  private selectedVisualWeapon: WeaponVisualId = 'crowbar';
+  private syncedVisualWeapon?: WeaponVisualId;
   private cursors!: DirKeys;
   private wasd!: { left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key };
   private keyE!: Phaser.Input.Keyboard.Key;
@@ -294,6 +299,7 @@ export class GameScene extends Phaser.Scene {
   // switch back on the very next frame and the clip would never be seen.
   private actionAnimKey = '';
   private actionAnimUntil = 0;
+  private playerHitFxToken = 0;
 
   private clockText!: Phaser.GameObjects.Text;
   private barsGfx!: Phaser.GameObjects.Graphics;
@@ -343,6 +349,7 @@ export class GameScene extends Phaser.Scene {
   private shelterOpen = false;
   private shelterSelected = 0;
   private shelterObjects: PanelObject[] = [];
+  private shelterInputObjects: Phaser.GameObjects.Zone[] = [];
   private shelterMarker!: Phaser.GameObjects.Image;
   private feedbackTimer?: Phaser.Time.TimerEvent;
   private lastClock = '';
@@ -357,7 +364,7 @@ export class GameScene extends Phaser.Scene {
 
   private craftingOpen = false;
   private craftObjects: PanelObject[] = [];
-  private craftRows: Array<{ band: Phaser.GameObjects.Rectangle; name: Phaser.GameObjects.Text; status: Phaser.GameObjects.Text }> = [];
+  private craftRows: Array<{ band: Phaser.GameObjects.Rectangle; name: Phaser.GameObjects.Text; cost: Phaser.GameObjects.Text; status: Phaser.GameObjects.Text }> = [];
   private craftMarker!: Phaser.GameObjects.Image;
   private craftSelected = 0;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
@@ -377,6 +384,7 @@ export class GameScene extends Phaser.Scene {
   private keyM!: Phaser.Input.Keyboard.Key;
   private keyS!: Phaser.Input.Keyboard.Key;
   private keyF!: Phaser.Input.Keyboard.Key;
+  private keyQ!: Phaser.Input.Keyboard.Key;
 
   private dialogueOpen = false;
   // sessionId/revision：AI 异步返回的保鲜键。玩家每次开对话 sessionId+1，
@@ -387,6 +395,8 @@ export class GameScene extends Phaser.Scene {
   // NPC 自己的问候语）。未配置模型时整个 Map 为空，行为与改造前一致。
   private aiRuntimes = new Map<string, NpcRuntimeConfig>();
   private dialogueObjects: PanelObject[] = [];
+  /** Modal click shield and option/footer hit areas; kept separate from panel art. */
+  private dialogueInputObjects: Phaser.GameObjects.Zone[] = [];
   /** one selection band per dialogue row, toggled in refreshDialogue */
   private dialogueBands: Array<{ band: Phaser.GameObjects.Rectangle; rule: Phaser.GameObjects.Rectangle }> = [];
   private dialogueTitle!: Phaser.GameObjects.Text;
@@ -411,7 +421,7 @@ export class GameScene extends Phaser.Scene {
   // drain, so every menu action has to be accepted at most once per frame —
   // otherwise one ArrowDown moves the pause selection two entries and the
   // player lands on 重新开始 when they asked for 塔楼地图.
-  private lastInputFrame: Record<GameKey, number> = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, up: -1, down: -1 };
+  private lastInputFrame: Record<GameKey, number> = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, q: -1, up: -1, down: -1 };
 
   constructor() {
     super({ key: 'Game' });
@@ -425,7 +435,9 @@ export class GameScene extends Phaser.Scene {
     this.lastActiveEvent = null;
     // The frame counter is monotonic across the session, so a stale slot would
     // never match anyway — reset to keep the per-create state honest.
-    this.lastInputFrame = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, up: -1, down: -1 };
+    this.lastInputFrame = { e: -1, esc: -1, i: -1, enter: -1, c: -1, m: -1, s: -1, f: -1, q: -1, up: -1, down: -1 };
+    this.selectedVisualWeapon = 'crowbar';
+    this.syncedVisualWeapon = undefined;
     // Field initialisers do not re-run, so the HUD's cached visibility has to be
     // re-derived against the fresh bag of a restarted run.
     this.bagFullShown = false;
@@ -447,10 +459,12 @@ export class GameScene extends Phaser.Scene {
     this.pauseOptionTexts = [];
     this.pauseMarker = createMarker(this);
     this.dialogueObjects = [];
+    this.dialogueInputObjects = [];
     this.dialogueOptions = [];
     this.dialogueOptionIcons = [];
     this.dialogueMarker = createMarker(this);
     this.shelterObjects = [];
+    this.shelterInputObjects = [];
     this.shelterMarker = createMarker(this);
     // 重新开始 runs while the pause menu is still open, and these flags survive a
     // restart. Left set, update() early-returns forever and every panel handler
@@ -516,7 +530,7 @@ export class GameScene extends Phaser.Scene {
     this.bindInput();
 
     if (getGame().day === 1) {
-      this.flash('目标：从第 1 层一路爬到第 100000 层。A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图');
+      this.flash('目标：从第 1 层一路爬到第 100000 层。A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观');
     }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -612,14 +626,17 @@ export class GameScene extends Phaser.Scene {
       // painted over by all of them - the player was invisible in the middle of
       // an empty floor with nothing wrong in the console.
       .setDepth(ACTOR_DEPTH);
-    // The crowbar goes in before the first sync so the survivor is armed from
-    // the frame the floor appears, not from the first step. Its depth is set by
-    // syncWeapon (behind the figure when slung, in front when swung).
+    // The selected visual weapon exists from the frame the floor appears, not
+    // from the first step. syncWeapon handles its depth and attack-frame pose.
+    const visual = weaponVisual(this.selectedVisualWeapon);
     this.weapon?.destroy();
     this.weapon = this.add
-      .image(state.player.x, PLAYER_FEET_Y - 54, WEAPON_KEY)
-      .setOrigin(WEAPON_GRIP_X / WEAPON_W, WEAPON_GRIP_Y / WEAPON_H)
+      .image(state.player.x, PLAYER_FEET_Y - 54, visual.textureKey)
+      .setOrigin(visual.gripX / WEAPON_W, visual.gripY / WEAPON_H)
+      .setScale(visual.displayScale)
+      .setName('visual-weapon')
       .setDepth(ACTOR_DEPTH - 1);
+    this.syncedVisualWeapon = visual.id;
     this.floorObjects.push(this.weapon);
     this.playerLight?.setName('player-light');
     this.syncPlayerWorldObjects(state.player.x, STAIR_START_Y);
@@ -664,9 +681,10 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.stopFollow();
     for (const o of this.floorObjects) o.destroy();
     this.floorObjects = [];
-    // The crowbar went with the floor; drop the reference so drawFloor builds a
-    // new one instead of trying to reuse a destroyed image.
+    // The visual weapon went with the floor; drop the reference so drawFloor
+    // builds a new image instead of trying to reuse a destroyed one.
     this.weapon = undefined;
+    this.syncedVisualWeapon = undefined;
     for (const shadow of this.playerShadow) shadow.destroy();
     this.playerShadow = [];
     this.speedX = 0;
@@ -707,6 +725,13 @@ export class GameScene extends Phaser.Scene {
   private syncWeapon(): void {
     const w = this.weapon;
     if (!w || !w.active) return;
+    const visual = weaponVisual(this.selectedVisualWeapon);
+    if (this.syncedVisualWeapon !== visual.id) {
+      w.setTexture(visual.textureKey)
+        .setOrigin(visual.gripX / WEAPON_W, visual.gripY / WEAPON_H)
+        .setScale(visual.displayScale);
+      this.syncedVisualWeapon = visual.id;
+    }
     const flip = this.player.flipX;
     // A dying survivor lets go of it. The fall clip drops the body through the
     // height the grip is anchored at, so a held crowbar would hover over the
@@ -735,13 +760,9 @@ export class GameScene extends Phaser.Scene {
       const dx = (hand.x - FRAME_W / 2) * (flip ? -1 : 1);
       const dy = FRAME_H - hand.y;
       w.setPosition(this.player.x + dx, this.player.y - dy);
-      // 0 rad points right and grows clockwise; the pose's angle is measured from
-      // straight down, so facing right is a quarter turn. Facing left the bar has
-      // to point the other way, which is a half turn more - NOT a negated angle.
-      // setFlipX does not help here: it mirrors the texture inside a frame that
-      // still occupies the same 46 pixels to the right of the origin, so a
-      // mirrored weapon on a left-facing survivor stayed across the body.
-      const rot = Math.PI / 2 - (swing * Math.PI) / 180;
+      // Each appearance has its own frame-by-frame weapon arc. Facing left uses
+      // the mirrored angle; combat animation frames and combat rules are shared.
+      const rot = weaponSwingAngle(this.selectedVisualWeapon, f);
       w.setRotation(flip ? Math.PI - rot : rot);
       w.setDepth(ACTOR_DEPTH + 1);
       w.setAlpha(1);
@@ -942,31 +963,47 @@ export class GameScene extends Phaser.Scene {
           selected,
         }),
       );
-      if (!selected) return;
-      // The selected row also shows what the trade would do, since the only
-      // feedback otherwise arrives after the gold is already spent.
-      const canBuy = state.player.gold >= e.price;
-      this.encounterObjects.push(
-        this.add
-          .text(left + panelW - 20, y + 20, canBuy ? 'Enter 买入' : '金币不足', {
-            fontFamily: FONT_FAMILY,
-            fontSize: `${TYPE.caption}px`,
-            color: canBuy ? hex(PALETTE.clothHigh) : hex(TEXT.warn),
-          })
-          .setOrigin(1, 0.5)
-          .setDepth(depth + 7),
-      );
+      const hitArea = this.add.zone(left + panelW / 2, y + 13, panelW - 16, 26)
+        .setInteractive({ useHandCursor: true }).setDepth(depth + 8);
+      hitArea.on('pointerdown', () => {
+        if (!this.encounterOpen || getGame().combat || this.encounter) return;
+        this.shopSelected = i;
+        this.buildShopPanel();
+      });
+      this.encounterObjects.push(hitArea);
     });
 
-    // The sell hint lives in its own strip at the bottom: the stock list is
-    // what the player is browsing, and the sell mechanics apply to the whole bag
-    // rather than to the highlighted row.
+    // The buy status has its own line below the stock, rather than sitting on
+    // top of the selected row's price and carried count.
+    const selectedEntry = this.shopEntries[this.shopSelected];
+    if (selectedEntry) {
+      const canBuy = state.player.gold >= selectedEntry.price;
+      this.encounterObjects.push(this.add.text(left + 18, top + 135, canBuy ? '选中商品：可买入' : '选中商品：金币不足', {
+        fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: canBuy ? hex(PALETTE.clothHigh) : hex(TEXT.warn),
+      }).setOrigin(0, 0.5).setName('shop-status').setDepth(depth + 7));
+    }
+    const shopButtons: PanelObject[] = [
+      ...this.panelMouseButton(cx - 132, top + 177, '买入', () => {
+        if (this.encounterOpen && !getGame().combat && !this.encounter) this.shopBuy();
+      }),
+      ...this.panelMouseButton(cx, top + 177, '卖出', () => {
+        if (this.encounterOpen && !getGame().combat && !this.encounter) this.shopSell();
+      }),
+      ...this.panelMouseButton(cx + 132, top + 177, '关闭', () => {
+        if (this.encounterOpen && !getGame().combat && !this.encounter) this.closeShop();
+      }),
+    ];
+    shopButtons.forEach((button) => button.setDepth(depth + 8));
+    this.encounterObjects.push(...shopButtons);
+
+    // S sells the selected stock item, not an arbitrary item from the bag.
     const footY = top + panelH - 34;
     this.encounterObjects.push(...buildPanelWell(this, left + 8, footY, panelW - 16, 22, depth + 5));
     this.encounterObjects.push(
       this.add
-        .text(left + 16, footY + 11, 'S 卖出背包里的一件  ·  ESC 离开', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
+        .text(left + 16, footY + 11, '↑/↓ 选 · Enter 买 · S 卖选中 · ESC 关', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
         .setOrigin(0, 0.5)
+        .setName('shop-help')
         .setDepth(depth + 7),
     );
     // This panel is rebuilt on every open, so it never runs applyPanelDepth -
@@ -984,6 +1021,7 @@ export class GameScene extends Phaser.Scene {
     // The trade, seen. Gold changing hands was a number in the HUD and a line of
     // text; the coin spins over the counter while the deal is open.
     if (r.ok) {
+      saveToStorage(state);
       const coin = startFxLoop(this, 'coin-spin', state.player.x + 26, PLAYER_FEET_Y - 62, LIGHT_DEPTH);
       if (coin) this.encounterObjects.push(coin);
     }
@@ -1000,6 +1038,7 @@ export class GameScene extends Phaser.Scene {
     playSfx(r.ok ? 'chest' : 'pickup');
     this.flash(r.ok ? r.message : r.reason);
     if (r.ok) {
+      saveToStorage(state);
       const coin = startFxLoop(this, 'coin-spin', state.player.x + 26, PLAYER_FEET_Y - 62, LIGHT_DEPTH);
       if (coin) this.encounterObjects.push(coin);
     }
@@ -1109,6 +1148,38 @@ export class GameScene extends Phaser.Scene {
     this.buildEncounterSpots();
   }
 
+  /** Keep clicks inside a modal from reaching world objects behind it. */
+  private addModalClickShield(objects: Phaser.GameObjects.GameObject[], depth: number): void {
+    const { width, height } = this.viewSize();
+    const shield = this.add
+      .zone(width / 2, height / 2, width, height)
+      .setInteractive()
+      .setDepth(depth + 4)
+      .setScrollFactor(0);
+    shield.on('pointerdown', () => undefined);
+    objects.push(shield);
+  }
+
+  /** An explicit clickable control, rendered above its modal click shield. */
+  private addModalClickTarget(
+    objects: Phaser.GameObjects.GameObject[],
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    depth: number,
+    action: () => void,
+  ): Phaser.GameObjects.Zone {
+    const target = this.add
+      .zone(x, y, width, height)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(depth + 8)
+      .setScrollFactor(0);
+    target.on('pointerdown', action);
+    objects.push(target);
+    return target;
+  }
+
   private buildCombatPanel(): void {
     for (const o of this.encounterObjects) o.destroy();
     this.encounterObjects = [];
@@ -1119,13 +1190,14 @@ export class GameScene extends Phaser.Scene {
     const cx = width / 2;
     const cy = height / 2;
     const panelW = 440;
-    const panelH = 232;
+    const panelH = 248;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
     const depth = PANEL_DEPTH.game.dialogue;
     const isBoss = combat.kind === 'boss';
 
     this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
+    this.addModalClickShield(this.encounterObjects, depth);
     // OVERHAUL UI: the fight uses the same header strip, segmented bar and row
     // bands as every other panel, instead of its own centred title and a flat
     // two-rectangle HP bar. A boss gets the danger accent on the header rule.
@@ -1152,16 +1224,37 @@ export class GameScene extends Phaser.Scene {
     // The log's tail: the last three lines, on a dark well so they read as a
     // record of what happened rather than as more body text.
     const logTop = top + 56;
-    const logH = 62;
+    const logH = 74;
     this.encounterObjects.push(...buildPanelWell(this, left + 12, logTop, panelW - 24, logH, depth + 5));
     const tail = combat.log.slice(-3);
+    // Combat.log keeps its full, authoritative wording; only the narrow visual
+    // tail is clipped to one line. Fixed 22px rows are enough for the 20px
+    // caption font, but wrapping a long boss/loot result would still let one
+    // record grow into and cover the next row.
+    const logWidth = panelW - 40;
+    const logFont = { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px` };
+    const logMeasure = this.add.text(0, 0, '', logFont).setVisible(false);
+    const fitLogLine = (line: string): string => {
+      const singleLine = line.replace(/[\r\n]+/g, ' ');
+      logMeasure.setText(singleLine);
+      if (logMeasure.width <= logWidth) return singleLine;
+      let prefix = '';
+      for (const glyph of Array.from(singleLine)) {
+        const candidate = `${prefix}${glyph}…`;
+        logMeasure.setText(candidate);
+        if (logMeasure.width > logWidth) break;
+        prefix += glyph;
+      }
+      return `${prefix}…`;
+    };
     tail.forEach((line, i) => {
       this.encounterObjects.push(
         this.add
-          .text(left + 20, logTop + 8 + i * 17, line, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim), wordWrap: { width: panelW - 40 } })
+          .text(left + 20, logTop + 8 + i * 22, fitLogLine(line), { ...logFont, color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim) })
           .setDepth(depth + 7),
       );
     });
+    logMeasure.destroy();
 
     // The three actions, as rows with a status column - the key, what it does,
     // and what it costs. A list of three verbs in a row was the old shape.
@@ -1170,28 +1263,53 @@ export class GameScene extends Phaser.Scene {
       ['格挡', '受伤减半', '回 3 精力'],
       ['撤退', '按 ESC', '逃跑可能失败'],
     ];
+    const selectionRows: Array<{
+      highlight: Phaser.GameObjects.Rectangle;
+      marker: Phaser.GameObjects.Rectangle;
+      label: Phaser.GameObjects.Text;
+    }> = [];
     choices.forEach(([label, key, note], i) => {
-      const y = top + 126 + i * 26;
+      const y = top + 136 + i * 26;
       const selected = i === this.combatSelected;
-      if (selected) {
-        this.encounterObjects.push(this.add.rectangle(left + 12, y, panelW - 24, 24, UI.accent).setOrigin(0, 0).setAlpha(0.14).setDepth(depth + 5));
-        this.encounterObjects.push(this.add.rectangle(left + 12, y, 2, 24, UI.accent).setOrigin(0, 0).setDepth(depth + 6));
-      }
+      const highlight = this.add.rectangle(left + 12, y, panelW - 24, 24, UI.accent).setOrigin(0, 0).setAlpha(selected ? 0.14 : 0).setDepth(depth + 5);
+      const marker = this.add.rectangle(left + 12, y, 2, 24, UI.accent).setOrigin(0, 0).setAlpha(selected ? 1 : 0).setDepth(depth + 6);
+      const rowLabel = this.add
+        .text(left + 22, y + 12, label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary) })
+        .setOrigin(0, 0.5)
+        .setDepth(depth + 7);
+      selectionRows.push({ highlight, marker, label: rowLabel });
       this.encounterObjects.push(
-        this.add
-          .text(left + 22, y + 12, label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary) })
-          .setOrigin(0, 0.5)
-          .setDepth(depth + 7),
+        highlight,
+        marker,
+        rowLabel,
         this.add
           .text(left + panelW - 22, y + 12, `${key} · ${note}`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
           .setOrigin(1, 0.5)
           .setDepth(depth + 7),
       );
+      const selectChoice = (): void => {
+        if (!this.encounterOpen || !getGame().combat || this.combatDone) return;
+        this.combatSelected = i;
+        selectionRows.forEach((row, index) => {
+          const isSelected = index === i;
+          row.highlight.setAlpha(isSelected ? 0.14 : 0);
+          row.marker.setAlpha(isSelected ? 1 : 0);
+          row.label.setColor(isSelected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
+        });
+      };
+      const hitArea = this.add.zone(left + panelW / 2, y + 12, panelW - 24, 24).setInteractive().setDepth(depth + 8);
+      hitArea.on('pointerover', selectChoice);
+      hitArea.on('pointerdown', () => {
+        if (!this.encounterOpen || !getGame().combat || this.combatDone) return;
+        selectChoice();
+        this.activateCombatChoice();
+      });
+      this.encounterObjects.push(hitArea);
     });
 
     this.encounterObjects.push(
       this.add
-        .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 出招 · ESC 撤退', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+        .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 出招 · ESC 撤退 · Q 切换武器外观（仅视觉）', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
         .setOrigin(0.5)
         .setDepth(depth + 7),
     );
@@ -1208,16 +1326,10 @@ export class GameScene extends Phaser.Scene {
   private playSwingFx(killed = false): void {
     const state = getGame();
     const facing = this.player?.flipX ? -1 : 1;
-    const slash = playFx(this, 'sword-slash', state.player.x + 30 * facing, PLAYER_FEET_Y - 18, LIGHT_DEPTH, {
-      // The atlas's usable arc is about 90x60 inside a 136x104 frame, and its
-      // pivot sits near the bottom of that frame - so the arc rises about 57px
-      // above whatever point it is anchored to. Anchoring at chest height put
-      // the whole arc above the survivor's head; anchoring near the feet puts it
-      // across the body, which is where a swing happens. 1.35 is roughly the
-      // crowbar's reach; 0.7 stretches the 800ms cut to 1.14s, long enough to
-      // survive a glance away at the log.
-      scale: 1.35,
-      timeScale: 0.7,
+    const visual = weaponVisual(this.selectedVisualWeapon);
+    const slash = playFx(this, visual.effect, state.player.x + 30 * facing, PLAYER_FEET_Y - 18, LIGHT_DEPTH, {
+      scale: visual.effectScale,
+      timeScale: visual.effectTimeScale,
     });
     // The arc is drawn facing right; a survivor facing left needs it mirrored or
     // the slash trails behind them.
@@ -1227,11 +1339,33 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Brief red body flash for confirmed incoming damage; presentation only. */
+  private flashPlayerHurt(): void {
+    const player = this.player;
+    if (!player?.active) return;
+    const token = ++this.playerHitFxToken;
+    player.setTint(0xff6b62).setTintMode(Phaser.TintModes.FILL);
+    this.time.delayedCall(110, () => {
+      if (player.active && token === this.playerHitFxToken) player.clearTint();
+    });
+  }
+
+  /** Weapon-agnostic contact spark; only called after the combat result says a hit landed. */
+  private playGenericHitSpark(): void {
+    const state = getGame();
+    const facing = this.player?.flipX ? -1 : 1;
+    playFx(this, 'hit-spark', state.player.x + 42 * facing, PLAYER_FEET_Y - 34, LIGHT_DEPTH + 2, {
+      scale: 0.7,
+      timeScale: 1.4,
+    });
+  }
+
   // Feedback is deliberately downstream of the pure combat result. It can add
   // sprites, a short shake, and an action pose, but it never rolls, mutates HP,
   // or decides whether the turn continues.
   private playCombatFeedback(round: CombatRound, action: CombatAction): void {
     const state = getGame();
+    const visual = combatFeedbackSignals(round, action);
     // The swing happens whether or not it lands.
     //
     // It used to be gated on playerDamage > 0, which meant a miss produced
@@ -1239,12 +1373,14 @@ export class GameScene extends Phaser.Scene {
     // common case. The one visual sign that the survivor carries a weapon was an
     // effect that appeared in roughly half the rounds, for two thirds of a
     // second, above a figure holding nothing. A swing that whiffs still swings.
-    if (action === 'attack') this.playSwingFx(round.monsterDead);
-    if (action === 'guard' && round.monsterDamage > 0 && !round.fled) {
+    if (visual.swing) this.playSwingFx(round.monsterDead);
+    if (visual.hitSpark) this.playGenericHitSpark();
+    if (visual.parry) {
       playFx(this, 'parry', state.player.x + 10, PLAYER_FEET_Y - 50, LIGHT_DEPTH + 1, { scale: 1.3 });
     }
-    if (round.monsterDamage > 0 && !round.fled) {
+    if (visual.playerHurt) {
       playFx(this, 'hit-flash', state.player.x, PLAYER_FEET_Y - 48, LIGHT_DEPTH + 2);
+      this.flashPlayerHurt();
     }
   }
 
@@ -1282,28 +1418,27 @@ export class GameScene extends Phaser.Scene {
     if (action === 'guard') {
       state.player.energy = Math.min(GAME_CONFIG.player.energyMax, state.player.energy + GUARD_ENERGY_RESTORE);
     }
+    // Check post-action HP independently of hit rolls: a coward already below
+    // its threshold flees even when the player's attack misses this turn.
+    if (shouldCowardBreakOff(combat.monster, round)) {
+      combat.log.push(`${combat.monster.name} 伤痕累累地逃走了。`);
+      this.finishCombat('coward');
+      return;
+    }
     if (round.monsterDamage > 0 && !round.monsterDead && !round.fled) {
-      // A coward that dropped below its threshold breaks off the fight and
-      // runs — the player keeps what they already did to it.
-      const cowardFrac = behaviorModifiers('coward').fleeAtHpFrac;
-      if (combat.monster.behavior === 'coward' && cowardFrac > 0 && combat.monster.hp / combat.monster.maxHp < cowardFrac) {
-        combat.log.push(`${combat.monster.name} 伤痕累累地逃走了。`);
-        this.finishCombat('coward');
-        return;
-      }
-      // OVERHAUL Wave B2/B3: the guardian totem and easy mode both soften the
-      // hit the player takes; the relic applies to any monster, the mode only
-      // to the guardian.
-      const soften = (combat.kind === 'boss' ? guardianDamageMult(state.relics ?? []) * modeGuardianDamageMult(state.mode ?? 'adventure') : guardianDamageMult(state.relics ?? []));
-      const dmg = Math.max(1, Math.round(round.monsterDamage * soften));
-      state.player.hp = Math.max(0, state.player.hp - dmg);
+      // The guardian totem and easy mode soften guardian attacks only; ordinary
+      // ambushes retain their full damage.
+      const relicMult = relicDamageMultForCombat(combat.kind, state.relics ?? []);
+      const modeMult = combat.kind === 'boss' ? modeGuardianDamageMult(state.mode ?? 'adventure') : 1;
+      const soften = relicMult * modeMult;
+      state.player.hp = applyCombatDamage(state.player.hp, round.monsterDamage, soften);
       if (action === 'guard') this.playActionAnim(hurtAnimKey('player'), 400);
       this.cameras.main.shake(160, 0.008);
     }
     combat.turn += 1;
     this.refreshStats();
 
-    if (round.playerDead || state.player.hp <= 0) {
+    if (state.player.hp <= 0) {
       state.player.hp = 0;
       state.status = 'lost';
       saveToStorage(state);
@@ -1398,10 +1533,14 @@ export class GameScene extends Phaser.Scene {
     });
     this.encounterObjects.push(
       this.add
-        .text(cx, outTop + outH - 12, 'Enter / ESC 继续', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+        .text(cx, outTop + outH - 12, '点击继续 · Enter / ESC', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
         .setOrigin(0.5)
         .setDepth(outDepth + 7),
     );
+    this.addModalClickShield(this.encounterObjects, outDepth);
+    this.addModalClickTarget(this.encounterObjects, cx, outTop + outH - 12, outW - 24, 24, outDepth, () => {
+      if (this.encounterOpen && this.combatDone) this.closeCombat();
+    });
     lockToScreen(this.encounterObjects);
     // The fight is over: the outcome screen waits for one Enter, then
     // closeCombat clears state.combat and the floor's spots.
@@ -1433,6 +1572,7 @@ export class GameScene extends Phaser.Scene {
 
     const depth = PANEL_DEPTH.game.dialogue;
     this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
+    this.addModalClickShield(this.encounterObjects, depth);
     // OVERHAUL UI: header strip, the message in an inset well, and choices as
     // banded rows instead of '> label' text runs.
     this.encounterObjects.push(
@@ -1451,29 +1591,48 @@ export class GameScene extends Phaser.Scene {
         .setDepth(depth + 7),
     );
     if (!enc.resolved) {
+      const encounterRows: Array<{ highlight: Phaser.GameObjects.Rectangle; marker: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text }> = [];
       enc.choices.forEach((choice, i) => {
         const y = top + 84 + i * 28;
         const selected = i === enc.selected;
-        if (selected) {
-          this.encounterObjects.push(
-            this.add.rectangle(left + 12, y, panelW - 24, 26, UI.accent).setOrigin(0, 0).setAlpha(0.14).setDepth(depth + 5),
-            this.add.rectangle(left + 12, y, 2, 26, UI.accent).setOrigin(0, 0).setDepth(depth + 6),
-          );
-        }
+        const highlight = this.add.rectangle(left + 12, y, panelW - 24, 26, UI.accent).setOrigin(0, 0).setAlpha(selected ? 0.14 : 0).setDepth(depth + 5);
+        const marker = this.add.rectangle(left + 12, y, 2, 26, UI.accent).setOrigin(0, 0).setAlpha(selected ? 1 : 0).setDepth(depth + 6);
+        const label = this.add
+          .text(left + 24, y + 13, CHOICE_LABELS[choice], {
+            fontFamily: FONT_FAMILY,
+            fontSize: `${TYPE.body}px`,
+            color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.secondary),
+          })
+          .setOrigin(0, 0.5)
+          .setDepth(depth + 7);
         this.encounterObjects.push(
-          this.add
-            .text(left + 24, y + 13, CHOICE_LABELS[choice], {
-              fontFamily: FONT_FAMILY,
-              fontSize: `${TYPE.body}px`,
-              color: selected ? hex(PALETTE.lightHigh) : hex(TEXT.secondary),
-            })
-            .setOrigin(0, 0.5)
-            .setDepth(depth + 7),
+          highlight,
+          marker,
+          label,
         );
+        encounterRows.push({ highlight, marker, label });
+        const selectChoice = (): void => {
+          if (!this.encounterOpen || !this.encounter || this.encounter.resolved) return;
+          this.encounter.selected = i;
+          encounterRows.forEach((row, index) => {
+            const isSelected = index === i;
+            row.highlight.setAlpha(isSelected ? 0.14 : 0);
+            row.marker.setAlpha(isSelected ? 1 : 0);
+            row.label.setColor(isSelected ? hex(PALETTE.lightHigh) : hex(TEXT.secondary));
+          });
+        };
+        const hitArea = this.add.zone(cx, y + 13, panelW - 24, 26).setInteractive({ useHandCursor: true }).setDepth(depth + 8);
+        hitArea.on('pointerover', selectChoice);
+        hitArea.on('pointerdown', () => {
+          if (!this.encounterOpen || !this.encounter || this.encounter.resolved) return;
+          this.encounter.selected = i;
+          this.activateEncounterChoice();
+        });
+        this.encounterObjects.push(hitArea);
       });
       this.encounterObjects.push(
         this.add
-          .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确认 · ESC 离开', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+          .text(cx, top + panelH - 12, '点击选项 · ↑/↓ 选择 · Enter 确认 · ESC 离开', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
           .setOrigin(0.5)
           .setDepth(depth + 7),
       );
@@ -1505,6 +1664,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (result.hpChange < 0) {
       this.cameras.main.shake(160, 0.008);
+      this.flashPlayerHurt();
       this.refreshStats();
     }
     // Outcome panel: the message, and the item flow the player actually got.
@@ -1518,22 +1678,27 @@ export class GameScene extends Phaser.Scene {
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
     const isBoss = enc.encounter.kind === 'boss';
-    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', PANEL_DEPTH.game.dialogue));
+    const depth = PANEL_DEPTH.game.dialogue;
+    this.encounterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'yellow', depth));
+    this.encounterObjects.push(...buildPanelHeader(this, left, top, panelW, ENCOUNTER_TITLES[enc.encounter.kind], isBoss ? UI.danger : UI.accent, depth + 5));
+    this.encounterObjects.push(...buildPanelWell(this, left + 12, top + 26, panelW - 24, 100, depth + 5));
     this.encounterObjects.push(
-      this.add.text(cx, top + 18, ENCOUNTER_TITLES[enc.encounter.kind], { fontFamily: FONT_FAMILY, fontSize: '32px', color: isBoss ? hex(TEXT.warn) : hex(PALETTE.lightHigh) }).setOrigin(0.5),
-    );
-    this.encounterObjects.push(
-      this.add.text(left + 20, top + 44, result.message, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+      this.add.text(left + 20, top + 38, result.message, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0).setDepth(depth + 7),
     );
     const loot = result.items.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、');
     if (loot) {
       this.encounterObjects.push(
-        this.add.text(left + 20, top + 104, `获得：${loot}`, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0),
+        this.add.text(left + 20, top + 82, `获得：${loot}`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.highlight), wordWrap: { width: panelW - 40 } }).setOrigin(0, 0).setDepth(depth + 7),
       );
     }
     this.encounterObjects.push(
-      this.add.text(cx, top + panelH - 14, 'Enter / ESC 继续', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.dim) }).setOrigin(0.5),
+      this.add.text(cx, top + panelH - 12, '点击继续 · Enter / ESC', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) }).setOrigin(0.5).setDepth(depth + 7),
     );
+    this.addModalClickShield(this.encounterObjects, depth);
+    this.addModalClickTarget(this.encounterObjects, cx, top + panelH - 12, panelW - 24, 24, depth, () => {
+      if (this.encounterOpen && this.encounter?.resolved) this.closeEncounter();
+    });
+    lockToScreen(this.encounterObjects);
     if (state.status === 'lost') {
       this.scene.start('End');
     }
@@ -2306,6 +2471,11 @@ export class GameScene extends Phaser.Scene {
       const x = GRID_X + col * (CELL + GAP);
       const y = GRID_Y + row * (CELL + GAP);
       const cell = this.add.rectangle(x, y, CELL, CELL, 0x080c0f).setOrigin(0, 0).setAlpha(0.6).setDepth(depth + 5);
+      cell.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+        if (!this.inventoryOpen || !getGame().player.inventory.slots[i]) return;
+        this.invSelected = i;
+        this.refreshInventory();
+      });
       const border = this.add.graphics().setDepth(depth + 6);
       border.lineStyle(1, UI.line, 0.85);
       border.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
@@ -2343,8 +2513,14 @@ export class GameScene extends Phaser.Scene {
       .setDepth(depth + 7);
     this.invObjects.push(this.invDetailName, this.invDetailMeta, this.invDetailBody);
 
+    this.invObjects.push(...this.panelMouseButton(cx - 68, top + 186, '使用', () => {
+      if (this.inventoryOpen) this.onUse();
+    }));
+    this.invObjects.push(...this.panelMouseButton(cx + 68, top + 186, '关闭', () => {
+      if (this.inventoryOpen) this.toggleInventory();
+    }));
     const footer = this.add
-      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+      .text(cx, top + panelH - 12, '点击选择 · ↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5, 0.5)
       .setDepth(depth + 6);
     this.invObjects.push(footer, this.invMarker);
@@ -2363,7 +2539,10 @@ export class GameScene extends Phaser.Scene {
       const stack = slots[i];
       if (stack) {
         // Keyed by item id, never by display name — see itemIconKey().
-        icon.setTexture(itemIconKey(stack.itemId)).setVisible(true);
+        // Loot/pickup refreshes can run while the panel is closed. Keep content
+        // visibility owned by the panel lifecycle instead of exposing orphaned
+        // icons when those refreshes update the slot data.
+        icon.setTexture(itemIconKey(stack.itemId)).setVisible(this.inventoryOpen);
         badge.setText(stack.quantity > 1 ? `${stack.quantity}` : '');
       } else {
         icon.setVisible(false);
@@ -2378,7 +2557,7 @@ export class GameScene extends Phaser.Scene {
 
     const selected = slots[this.invSelected];
     const cell = this.invCells[this.invSelected];
-    this.invMarker.setVisible(selected !== undefined && cell !== undefined);
+    this.invMarker.setVisible(this.inventoryOpen && selected !== undefined && cell !== undefined);
     if (selected && cell) placeMarkerLeftOf(this.invMarker, cell);
 
     if (selected) {
@@ -2499,6 +2678,18 @@ export class GameScene extends Phaser.Scene {
     this.upgradeBoard.setText(built.length > 0 ? `已建：${built.join('、')}` : '');
   }
 
+  /** A separate action button prevents selecting an item from consuming it. */
+  private panelMouseButton(x: number, y: number, label: string, action: () => void): PanelObject[] {
+    const button = this.add.rectangle(x, y, 116, 28, UI.surfaceRaised)
+      .setStrokeStyle(1, UI.line)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', action);
+    const text = this.add.text(x, y, label, {
+      fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary),
+    }).setOrigin(0.5);
+    return [button, text];
+  }
+
   private buildCraftPanel(): void {
     const { width, height } = this.viewSize();
     const panelW = 460;
@@ -2524,12 +2715,24 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < 4; i++) {
       const rowY = top + 30 + i * CRAFT_ROW_PITCH;
       const band = this.add.rectangle(left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.34).setDepth(PANEL_DEPTH.game.craft + 5);
-      const name = this.add.text(left + 18, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-      const status = this.add.text(left + panelW - 16, rowY + 9, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
-      this.craftRows.push({ band, name, status });
-      this.craftObjects.push(band, name, status);
+      band.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+        if (!this.craftingOpen || !this.craftEntries()[i]) return;
+        this.craftSelected = i;
+        this.refreshCraft();
+      });
+      const name = this.add.text(left + 18, rowY + 11, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      const cost = this.add.text(left + 18, rowY + 35, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      const status = this.add.text(left + panelW - 16, rowY + 11, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+      this.craftRows.push({ band, name, cost, status });
+      this.craftObjects.push(band, name, cost, status);
     }
-    const footer = this.add.text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+    this.craftObjects.push(...this.panelMouseButton(cx - 68, top + 250, '制作 / 净化', () => {
+      if (this.craftingOpen) this.activateCraftEntry();
+    }));
+    this.craftObjects.push(...this.panelMouseButton(cx + 68, top + 250, '关闭', () => {
+      if (this.craftingOpen) this.toggleCrafting();
+    }));
+    const footer = this.add.text(cx, top + panelH - 12, '点击选择 · ↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
     this.craftObjects.push(footer, this.craftMarker);
 
     applyPanelDepth(this.craftObjects, PANEL_DEPTH.game.craft);
@@ -2553,19 +2756,21 @@ export class GameScene extends Phaser.Scene {
       const entry = entries[i];
       if (!entry) {
         row.name.setText('');
+        row.cost.setText('');
         row.status.setText('');
         row.band.setAlpha(0);
         continue;
       }
       const selected = i === this.craftSelected;
-      row.band.setAlpha(selected ? 0.72 : 0.3);
+      row.band.setAlpha(selected ? 0.18 : 0.3);
       row.band.setFillStyle(selected ? UI.accent : UI.surfaceRaised, 1);
       if (entry.kind === 'recipe') {
         const recipe = getRecipe(entry.id!);
         const cost = Object.entries(recipe.cost)
           .map(([id, n]) => `${getItem(id as ItemId).displayName}×${n}`)
           .join(' ');
-        row.name.setText(`${recipe.displayName}  ${cost}`);
+        row.name.setText(recipe.displayName);
+        row.cost.setText(cost);
         row.name.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
         const built = hasUpgrade(state, entry.id!);
         const ok = canCraft(state, entry.id!).ok;
@@ -2573,7 +2778,8 @@ export class GameScene extends Phaser.Scene {
         row.status.setColor(built ? hex(PALETTE.clothHigh) : ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
       } else {
         const can = countItem(state.player.inventory, 'dirty_water') >= 1;
-        row.name.setText('净化  脏水→净水');
+        row.name.setText('净化');
+        row.cost.setText('脏水→净水');
         row.name.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
         row.status.setText(can ? '可净化' : '缺脏水');
         row.status.setColor(can ? hex(PALETTE.clothHigh) : hex(TEXT.dim));
@@ -2771,6 +2977,14 @@ export class GameScene extends Phaser.Scene {
 
     const depth = PANEL_DEPTH.game.dialogue;
     this.dialogueObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
+    const dialogueShield = this.add
+      .zone(cx, cy, width, height)
+      .setInteractive()
+      .setDepth(depth + 1)
+      .setScrollFactor(0)
+      .setVisible(false);
+    dialogueShield.on('pointerdown', () => undefined);
+    this.dialogueInputObjects.push(dialogueShield);
     // OVERHAUL UI: the same header strip every other panel uses, with the NPC's
     // name on it, and the message in an inset well so speech reads as speech
     // rather than as more body text.
@@ -2810,16 +3024,45 @@ export class GameScene extends Phaser.Scene {
       this.dialogueOptionIcons.push(icon);
       this.dialogueOptions.push(t);
       this.dialogueObjects.push(icon, t);
+      const optionHitArea = this.add
+        .zone(cx, rowY + 13, panelW - 24, 26)
+        .setInteractive({ useHandCursor: true })
+        .setDepth(depth + 8)
+        .setScrollFactor(0)
+        .setVisible(false);
+      const selectOption = (): void => {
+        if (!this.dialogueOpen || !this.dialogue) return;
+        if (!this.dialogueOptionsView()[i]) return;
+        this.dialogue.selected = i;
+        this.refreshDialogue();
+      };
+      optionHitArea.on('pointerover', selectOption);
+      optionHitArea.on('pointerdown', () => {
+        selectOption();
+        if (this.dialogueOpen && this.dialogue?.selected === i) this.activateDialogueOption();
+      });
+      this.dialogueInputObjects.push(optionHitArea);
     }
     const footer = this.add
-      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 确定 · ESC 返回', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+      .text(cx, top + panelH - 12, '点击选项执行 · ↑/↓选择 · Enter确定 · 点此/ESC返回', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5)
       .setDepth(depth + 7);
     this.dialogueObjects.push(footer, this.dialogueMarker);
+    const footerHitArea = this.add
+      .zone(cx, top + panelH - 12, panelW - 24, 24)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(depth + 8)
+      .setScrollFactor(0)
+      .setVisible(false);
+    footerHitArea.on('pointerdown', () => {
+      if (this.dialogueOpen) this.dialogueBack();
+    });
+    this.dialogueInputObjects.push(footerHitArea);
 
     applyPanelDepth(this.dialogueObjects, PANEL_DEPTH.game.dialogue);
     this.assertPanelContent('dialogue', this.dialogueObjects);
     for (const o of this.dialogueObjects) o.setVisible(false);
+    this.dialogueInputObjects.forEach((o) => o.setVisible(false));
   }
 
   // Label + icon key per dialogue option. The icon is the item the player
@@ -2931,6 +3174,7 @@ export class GameScene extends Phaser.Scene {
     };
     this.dialogueOpen = true;
     for (const o of this.dialogueObjects) o.setVisible(true);
+    this.dialogueInputObjects.forEach((o) => o.setVisible(true));
     this.refreshDialogue();
     void this.enhanceOpeningLine(npc);
   }
@@ -2939,6 +3183,7 @@ export class GameScene extends Phaser.Scene {
     this.dialogueOpen = false;
     this.dialogue = null;
     for (const o of this.dialogueObjects) o.setVisible(false);
+    this.dialogueInputObjects.forEach((o) => o.setVisible(false));
   }
 
   private dialogueBack(): void {
@@ -3046,6 +3291,7 @@ export class GameScene extends Phaser.Scene {
     this.keyM = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
     this.keyS = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyF = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
+    this.keyQ = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
 
     this.keyE.on('down', () => this.guard('e', this.onInteract), this);
     this.keyEsc.on('down', () => this.guard('esc', this.onEsc), this);
@@ -3059,6 +3305,7 @@ export class GameScene extends Phaser.Scene {
     }, this);
     // OVERHAUL Wave C2: F buys the paid shortcut at the up stairwell.
     this.keyF.on('down', () => this.guard('f', this.tryShortcut), this);
+    this.keyQ.on('down', () => this.guard('q', this.cycleWeaponVisual), this);
     this.cursors.up.on('down', () => this.guard('up', this.onNavUp), this);
     this.cursors.down.on('down', () => this.guard('down', this.onNavDown), this);
   }
@@ -3082,6 +3329,7 @@ export class GameScene extends Phaser.Scene {
       this.dialogueObjects,
       this.encounterObjects,
       this.shelterObjects,
+      this.shelterInputObjects,
     ];
     let found = false;
     for (const group of groups) {
@@ -3102,6 +3350,15 @@ export class GameScene extends Phaser.Scene {
     action.call(this);
   }
 
+  /** Change only the scene-local appearance; never touches GameState or saves. */
+  private cycleWeaponVisual(): void {
+    if (!this.weapon?.active || this.stairClimb || this.pauseOpen) return;
+    this.selectedVisualWeapon = nextWeaponVisual(this.selectedVisualWeapon);
+    this.syncedVisualWeapon = undefined;
+    this.syncWeapon();
+    this.flash(`${weaponVisual(this.selectedVisualWeapon).label}外观（只改变武器显示、挥击和特效）`);
+  }
+
   private unbindInput(): void {
     // removeAllListeners per key rather than off(): the bound handlers above are
     // closures, and Phaser does not re-run field initialisers on a scene restart
@@ -3115,6 +3372,7 @@ export class GameScene extends Phaser.Scene {
     this.keyM?.removeAllListeners();
     this.keyS?.removeAllListeners();
     this.keyF?.removeAllListeners();
+    this.keyQ?.removeAllListeners();
     this.cursors?.up.removeAllListeners();
     this.cursors?.down.removeAllListeners();
   }
@@ -3405,13 +3663,13 @@ export class GameScene extends Phaser.Scene {
   // Returns null when no panel is open, so the world hint can take over.
   private openPanelHint(): string | null {
     const combat = getGame().combat;
-    if (this.encounterOpen && combat) return '↑/↓ 选择 · Enter 出招 · ESC 撤退';
-    if (this.encounterOpen && this.encounter) return '↑/↓ 选择 · Enter 确认 · ESC 离开';
+    if (this.encounterOpen && combat) return '点击选项出招 · ↑/↓ 选择 · Enter 出招 · ESC 撤退';
+    if (this.encounterOpen && this.encounter) return '点击选项执行 · ↑/↓ 选择 · Enter 确认 · ESC 离开';
     if (this.encounterOpen) return '↑/↓ 选择 · Enter 买入 · S 卖出 · ESC 离开';
     if (this.shelterOpen) return getGame().shelterPlan?.resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回';
     if (this.inventoryOpen) return '↑/↓ 选择 · Enter 使用 · I 关闭';
     if (this.craftingOpen) return '↑/↓ 选择 · Enter 制作 · C 关闭';
-    if (this.dialogueOpen) return '↑/↓ 选择 · Enter 确定 · ESC 返回';
+    if (this.dialogueOpen) return '点击选项执行 · ↑/↓ 选择 · Enter 确定 · ESC 返回';
     if (this.pauseOpen) return '↑/↓ 选择 · Enter 确认 · ESC 继续';
     return null;
   }
@@ -3446,7 +3704,9 @@ export class GameScene extends Phaser.Scene {
     for (const object of this.shelterObjects) {
       if (object !== this.shelterMarker) object.destroy();
     }
+    this.shelterInputObjects.forEach((object) => object.destroy());
     this.shelterObjects = [];
+    this.shelterInputObjects = [];
     this.shelterMarker.setVisible(false);
   }
 
@@ -3454,7 +3714,9 @@ export class GameScene extends Phaser.Scene {
     for (const object of this.shelterObjects) {
       if (object !== this.shelterMarker) object.destroy();
     }
+    this.shelterInputObjects.forEach((object) => object.destroy());
     this.shelterObjects = [];
+    this.shelterInputObjects = [];
     const state = getGame();
     const { width, height } = this.viewSize();
     const panelW = 500;
@@ -3467,17 +3729,26 @@ export class GameScene extends Phaser.Scene {
     const resolved = state.shelterPlan?.resolved === true;
 
     this.shelterObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', depth));
+    // The shelter is modal: outside clicks must not reach world interactions.
+    const clickShield = this.add
+      .zone(cx, cy, width, height)
+      .setInteractive()
+      .setDepth(depth + 4)
+      .setScrollFactor(0);
+    clickShield.on('pointerdown', () => undefined);
+    this.shelterInputObjects.push(clickShield);
     this.shelterObjects.push(...buildPanelHeader(this, left, top, panelW, '夜间安排 · 宿舍', UI.good, depth + 5));
     this.shelterObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 44, depth + 5));
     const stress = Math.round(state.player.stress ?? 20);
     const latest = recentDiary(state, 1)[0];
     this.shelterObjects.push(
-      this.add.text(left + 24, top + 40, `压力 ${stress}/100${latest ? ` · 上次：${latest.message}` : ' · 今天还没有记录'}`, {
+      this.add.text(left + 24, top + 30, `压力 ${stress}/100${latest ? ` · 上次：${latest.message}` : ' · 今天还没有记录'}`, {
         fontFamily: FONT_FAMILY,
         fontSize: `${TYPE.caption}px`,
         color: hex(stress >= 70 ? TEXT.warn : TEXT.primary),
         wordWrap: { width: panelW - 48 },
-      }).setOrigin(0, 0.5).setDepth(depth + 6),
+        maxLines: 2,
+      }).setOrigin(0, 0).setDepth(depth + 6),
     );
     const rowsTop = top + 80;
     for (const [index, row] of SHELTER_ROWS.entries()) {
@@ -3493,15 +3764,55 @@ export class GameScene extends Phaser.Scene {
         placeMarker(this.shelterMarker, label);
         this.shelterMarker.setDepth(depth + 8).setVisible(true).setScrollFactor(0);
       }
+      const hitArea = this.add
+        .zone(cx, rowsTop + index * 26 + 13, panelW - 32, 26)
+        .setInteractive({ useHandCursor: true })
+        .setDepth(depth + 9)
+        .setScrollFactor(0);
+      hitArea.on('pointerdown', () => {
+        if (!this.shelterOpen || getGame().shelterPlan?.resolved) return;
+        this.shelterSelected = index;
+        this.activateShelterChoice();
+      });
+      this.shelterInputObjects.push(hitArea);
     }
-    this.shelterObjects.push(
-      this.add.text(cx, top + panelH - 14, resolved ? 'Enter 睡觉 · ESC 返回' : '↑/↓ 选择 · Enter 安排 · ESC 返回', {
+    if (resolved) {
+      const sleepX = left + panelW * 0.28;
+      const returnX = left + panelW * 0.72;
+      this.shelterObjects.push(
+        this.add.text(sleepX, top + panelH - 24, '点击睡觉', {
+          fontFamily: FONT_FAMILY,
+          fontSize: `${TYPE.caption}px`,
+          color: hex(PALETTE.clothHigh),
+        }).setOrigin(0.5).setDepth(depth + 6),
+        this.add.text(returnX, top + panelH - 24, '点击返回', {
+          fontFamily: FONT_FAMILY,
+          fontSize: `${TYPE.caption}px`,
+          color: hex(PALETTE.clothHigh),
+        }).setOrigin(0.5).setDepth(depth + 6),
+      );
+      for (const [x, action] of [[sleepX, () => this.activateShelterChoice()], [returnX, () => this.closeShelter()]] as const) {
+        const hitArea = this.add
+          .zone(x, top + panelH - 24, panelW * 0.36, 28)
+          .setInteractive({ useHandCursor: true })
+          .setDepth(depth + 9)
+          .setScrollFactor(0);
+        hitArea.on('pointerdown', () => {
+          if (this.shelterOpen && getGame().shelterPlan?.resolved) action();
+        });
+        this.shelterInputObjects.push(hitArea);
+      }
+    } else {
+      this.shelterObjects.push(this.add.text(cx, top + panelH - 22, '点击选项安排 · ↑/↓ 选择 · Enter 安排 · ESC 返回', {
         fontFamily: FONT_FAMILY,
         fontSize: `${TYPE.caption}px`,
         color: hex(PALETTE.clothHigh),
-      }).setOrigin(0.5).setDepth(depth + 6),
-    );
+      }).setOrigin(0.5).setDepth(depth + 6));
+    }
     this.shelterObjects.push(this.shelterMarker);
+    // Frame, text, summary, footer and hit areas stay at screen coordinates.
+    lockToScreen(this.shelterObjects);
+    lockToScreen(this.shelterInputObjects);
     this.assertPanelContent('shelter', this.shelterObjects);
   }
 
@@ -3737,7 +4048,10 @@ export class GameScene extends Phaser.Scene {
       this.updateStairClimb(delta);
       return;
     }
-    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
+    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) {
+      this.hintText.setText(this.openPanelHint() ?? '');
+      return;
+    }
     const state = getGame();
 
     // B3-01 D9: a rejected write used to be silent, so a full disk or a private
@@ -3910,13 +4224,11 @@ export class GameScene extends Phaser.Scene {
 
     this.autoPickup();
 
-    // OVERHAUL interaction: the hint used to describe the WORLD even while a
-    // panel covered it, so the bar read "按 E 查看问号点" underneath an open
-    // inventory - it promised an interaction the player could not perform and
-    // said nothing about the one they were in. A panel owns the bar now.
-    const panelHint = this.openPanelHint();
-    if (panelHint !== null) {
-      this.hintText.setText(panelHint);
+    // E handles a nearby encounter before any NPC, bed or container. The hint
+    // must follow the same priority, and the trader is not a question mark.
+    const spot = this.nearestEncounterSpot();
+    if (spot) {
+      this.hintText.setText(spot === 'shop' ? '按 E 与行商交易' : '按 E 查看问号点');
       return;
     }
 
@@ -3938,8 +4250,7 @@ export class GameScene extends Phaser.Scene {
     }
     const container = this.nearestContainer();
     const zone = currentInteractionZone(state);
-    if (this.nearestEncounterSpot()) this.hintText.setText('按 E 查看问号点');
-    else if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
+    if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
     // OVERHAUL Wave C2: the up stairwell advertises the paid shortcut, priced
     // live so the player can decide before spending.
     else if (zone === 'up' && shortcutAvailable(state.currentFloor, Math.max(...PLAYABLE_FLOORS_V01))) {
@@ -4034,6 +4345,8 @@ export class GameScene extends Phaser.Scene {
     const event = state.worldEvents.activeEvent;
     const active =
       event?.type === 'wanderer' &&
+      typeof event.floor === 'number' &&
+      event.floor >= WANDERER_MIN_SPAWN_FLOOR &&
       eventStatus(event) !== 'resolved' &&
       state.currentFloor === event.floor &&
       (isNight(state.gameMinuteOfDay) || event.source === 'dwell');
@@ -4097,6 +4410,7 @@ export class GameScene extends Phaser.Scene {
       this.refreshStats();
       this.playActionAnim(hurtAnimKey('player'), 400);
       playSfx('hurt');
+      this.flashPlayerHurt();
       this.cameras.main.shake(160, 0.008);
       this.cameras.main.flash(140, 230, 109, 99);
       playFx(this, 'ground-slam', state.player.x, PLAYER_FEET_Y - 6, LIGHT_DEPTH);

@@ -958,31 +958,47 @@ export class GameScene extends Phaser.Scene {
           selected,
         }),
       );
-      if (!selected) return;
-      // The selected row also shows what the trade would do, since the only
-      // feedback otherwise arrives after the gold is already spent.
-      const canBuy = state.player.gold >= e.price;
-      this.encounterObjects.push(
-        this.add
-          .text(left + panelW - 20, y + 20, canBuy ? 'Enter 买入' : '金币不足', {
-            fontFamily: FONT_FAMILY,
-            fontSize: `${TYPE.caption}px`,
-            color: canBuy ? hex(PALETTE.clothHigh) : hex(TEXT.warn),
-          })
-          .setOrigin(1, 0.5)
-          .setDepth(depth + 7),
-      );
+      const hitArea = this.add.zone(left + panelW / 2, y + 13, panelW - 16, 26)
+        .setInteractive({ useHandCursor: true }).setDepth(depth + 8);
+      hitArea.on('pointerdown', () => {
+        if (!this.encounterOpen || getGame().combat || this.encounter) return;
+        this.shopSelected = i;
+        this.buildShopPanel();
+      });
+      this.encounterObjects.push(hitArea);
     });
 
-    // The sell hint lives in its own strip at the bottom: the stock list is
-    // what the player is browsing, and the sell mechanics apply to the whole bag
-    // rather than to the highlighted row.
+    // The buy status has its own line below the stock, rather than sitting on
+    // top of the selected row's price and carried count.
+    const selectedEntry = this.shopEntries[this.shopSelected];
+    if (selectedEntry) {
+      const canBuy = state.player.gold >= selectedEntry.price;
+      this.encounterObjects.push(this.add.text(left + 18, top + 135, canBuy ? '选中商品：可买入' : '选中商品：金币不足', {
+        fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: canBuy ? hex(PALETTE.clothHigh) : hex(TEXT.warn),
+      }).setOrigin(0, 0.5).setName('shop-status').setDepth(depth + 7));
+    }
+    const shopButtons: PanelObject[] = [
+      ...this.panelMouseButton(cx - 132, top + 177, '买入', () => {
+        if (this.encounterOpen && !getGame().combat && !this.encounter) this.shopBuy();
+      }),
+      ...this.panelMouseButton(cx, top + 177, '卖出', () => {
+        if (this.encounterOpen && !getGame().combat && !this.encounter) this.shopSell();
+      }),
+      ...this.panelMouseButton(cx + 132, top + 177, '关闭', () => {
+        if (this.encounterOpen && !getGame().combat && !this.encounter) this.closeShop();
+      }),
+    ];
+    shopButtons.forEach((button) => button.setDepth(depth + 8));
+    this.encounterObjects.push(...shopButtons);
+
+    // S sells the selected stock item, not an arbitrary item from the bag.
     const footY = top + panelH - 34;
     this.encounterObjects.push(...buildPanelWell(this, left + 8, footY, panelW - 16, 22, depth + 5));
     this.encounterObjects.push(
       this.add
-        .text(left + 16, footY + 11, 'S 卖出背包里的一件  ·  ESC 离开', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
+        .text(left + 16, footY + 11, '↑/↓ 选 · Enter 买 · S 卖选中 · ESC 关', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
         .setOrigin(0, 0.5)
+        .setName('shop-help')
         .setDepth(depth + 7),
     );
     // This panel is rebuilt on every open, so it never runs applyPanelDepth -
@@ -1000,6 +1016,7 @@ export class GameScene extends Phaser.Scene {
     // The trade, seen. Gold changing hands was a number in the HUD and a line of
     // text; the coin spins over the counter while the deal is open.
     if (r.ok) {
+      saveToStorage(state);
       const coin = startFxLoop(this, 'coin-spin', state.player.x + 26, PLAYER_FEET_Y - 62, LIGHT_DEPTH);
       if (coin) this.encounterObjects.push(coin);
     }
@@ -1016,6 +1033,7 @@ export class GameScene extends Phaser.Scene {
     playSfx(r.ok ? 'chest' : 'pickup');
     this.flash(r.ok ? r.message : r.reason);
     if (r.ok) {
+      saveToStorage(state);
       const coin = startFxLoop(this, 'coin-spin', state.player.x + 26, PLAYER_FEET_Y - 62, LIGHT_DEPTH);
       if (coin) this.encounterObjects.push(coin);
     }
@@ -2386,6 +2404,11 @@ export class GameScene extends Phaser.Scene {
       const x = GRID_X + col * (CELL + GAP);
       const y = GRID_Y + row * (CELL + GAP);
       const cell = this.add.rectangle(x, y, CELL, CELL, 0x080c0f).setOrigin(0, 0).setAlpha(0.6).setDepth(depth + 5);
+      cell.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+        if (!this.inventoryOpen || !getGame().player.inventory.slots[i]) return;
+        this.invSelected = i;
+        this.refreshInventory();
+      });
       const border = this.add.graphics().setDepth(depth + 6);
       border.lineStyle(1, UI.line, 0.85);
       border.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
@@ -2423,8 +2446,14 @@ export class GameScene extends Phaser.Scene {
       .setDepth(depth + 7);
     this.invObjects.push(this.invDetailName, this.invDetailMeta, this.invDetailBody);
 
+    this.invObjects.push(...this.panelMouseButton(cx - 68, top + 186, '使用', () => {
+      if (this.inventoryOpen) this.onUse();
+    }));
+    this.invObjects.push(...this.panelMouseButton(cx + 68, top + 186, '关闭', () => {
+      if (this.inventoryOpen) this.toggleInventory();
+    }));
     const footer = this.add
-      .text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+      .text(cx, top + panelH - 12, '点击选择 · ↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5, 0.5)
       .setDepth(depth + 6);
     this.invObjects.push(footer, this.invMarker);
@@ -2582,6 +2611,18 @@ export class GameScene extends Phaser.Scene {
     this.upgradeBoard.setText(built.length > 0 ? `已建：${built.join('、')}` : '');
   }
 
+  /** A separate action button prevents selecting an item from consuming it. */
+  private panelMouseButton(x: number, y: number, label: string, action: () => void): PanelObject[] {
+    const button = this.add.rectangle(x, y, 116, 28, UI.surfaceRaised)
+      .setStrokeStyle(1, UI.line)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', action);
+    const text = this.add.text(x, y, label, {
+      fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary),
+    }).setOrigin(0.5);
+    return [button, text];
+  }
+
   private buildCraftPanel(): void {
     const { width, height } = this.viewSize();
     const panelW = 460;
@@ -2607,13 +2648,24 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < 4; i++) {
       const rowY = top + 30 + i * CRAFT_ROW_PITCH;
       const band = this.add.rectangle(left + 8, rowY, panelW - 16, CRAFT_ROW_PITCH - 2, UI.surfaceRaised).setOrigin(0, 0).setAlpha(0.34).setDepth(PANEL_DEPTH.game.craft + 5);
+      band.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+        if (!this.craftingOpen || !this.craftEntries()[i]) return;
+        this.craftSelected = i;
+        this.refreshCraft();
+      });
       const name = this.add.text(left + 18, rowY + 11, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
       const cost = this.add.text(left + 18, rowY + 35, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
       const status = this.add.text(left + panelW - 16, rowY + 11, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) }).setOrigin(1, 0.5).setDepth(PANEL_DEPTH.game.craft + 6);
       this.craftRows.push({ band, name, cost, status });
       this.craftObjects.push(band, name, cost, status);
     }
-    const footer = this.add.text(cx, top + panelH - 12, '↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
+    this.craftObjects.push(...this.panelMouseButton(cx - 68, top + 250, '制作 / 净化', () => {
+      if (this.craftingOpen) this.activateCraftEntry();
+    }));
+    this.craftObjects.push(...this.panelMouseButton(cx + 68, top + 250, '关闭', () => {
+      if (this.craftingOpen) this.toggleCrafting();
+    }));
+    const footer = this.add.text(cx, top + panelH - 12, '点击选择 · ↑/↓ 选择 · Enter 制作 · C 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(PANEL_DEPTH.game.craft + 6);
     this.craftObjects.push(footer, this.craftMarker);
 
     applyPanelDepth(this.craftObjects, PANEL_DEPTH.game.craft);
@@ -3836,7 +3888,10 @@ export class GameScene extends Phaser.Scene {
       this.updateStairClimb(delta);
       return;
     }
-    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) return;
+    if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) {
+      this.hintText.setText(this.openPanelHint() ?? '');
+      return;
+    }
     const state = getGame();
 
     // B3-01 D9: a rejected write used to be silent, so a full disk or a private
@@ -4009,13 +4064,11 @@ export class GameScene extends Phaser.Scene {
 
     this.autoPickup();
 
-    // OVERHAUL interaction: the hint used to describe the WORLD even while a
-    // panel covered it, so the bar read "按 E 查看问号点" underneath an open
-    // inventory - it promised an interaction the player could not perform and
-    // said nothing about the one they were in. A panel owns the bar now.
-    const panelHint = this.openPanelHint();
-    if (panelHint !== null) {
-      this.hintText.setText(panelHint);
+    // E handles a nearby encounter before any NPC, bed or container. The hint
+    // must follow the same priority, and the trader is not a question mark.
+    const spot = this.nearestEncounterSpot();
+    if (spot) {
+      this.hintText.setText(spot === 'shop' ? '按 E 与行商交易' : '按 E 查看问号点');
       return;
     }
 
@@ -4037,8 +4090,7 @@ export class GameScene extends Phaser.Scene {
     }
     const container = this.nearestContainer();
     const zone = currentInteractionZone(state);
-    if (this.nearestEncounterSpot()) this.hintText.setText('按 E 查看问号点');
-    else if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
+    if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
     // OVERHAUL Wave C2: the up stairwell advertises the paid shortcut, priced
     // live so the player can decide before spending.
     else if (zone === 'up' && shortcutAvailable(state.currentFloor, Math.max(...PLAYABLE_FLOORS_V01))) {

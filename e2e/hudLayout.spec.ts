@@ -43,6 +43,11 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 1280, height: 800
     await page.setViewportSize(viewport);
     await startGame(page);
     await expect.poll(async () => (await bounds(page)).find((o) => o.name === 'hud-goal')?.text).toContain('目标');
+    await expect.poll(async () => (await bounds(page)).find((o) => o.name === 'hud-feedback')?.text).toBe('');
+    const objective = (await bounds(page)).find((o) => o.name === 'hud-goal')?.text ?? '';
+    expect(objective).toContain('主线：抵达第 100000 层');
+    expect(objective).toContain('今日目标');
+    expect(objective).toContain('压力');
     const hint = (await bounds(page)).find((o) => o.name === 'hud-hint')?.text ?? '';
     expect(hint).toContain('Q 切换武器外观（仅视觉）');
     const playerScreen = async (): Promise<{ top: number; bottom: number }> => page.evaluate(() => {

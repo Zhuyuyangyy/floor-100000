@@ -140,6 +140,7 @@ B2 的世界结构与导航。
 | B3-17 | **首层 TWOM 式生存纵切片**：事件日记、压力、宿舍夜间决策、睡眠结算与刀剑/招架反馈 | [`plans/2026-11-08-twom-survival-slice-design.md`](plans/2026-11-08-twom-survival-slice-design.md) |
 | B3-18 | **宿舍防御后果**：修门抑制夜袭，未修门的夜袭会造成可解释的 HP/压力/日记后果 | [`B3-18_SHELTER_DEFENSE.md`](B3-18_SHELTER_DEFENSE.md) |
 | B3-19 | **自然楼梯攀爬**：普通楼层切换由传送式重置改为同场景可见的连续楼梯移动 | [`B3-19_NATURAL_STAIRS.md`](B3-19_NATURAL_STAIRS.md) |
+| B3-UI-04 | **首五层主线目标常驻**：将第 100000 层主线与每日目标分开显示，缩短开场提示 | HUD 多视口专项回归 5/5，通过记录见 [`M1_INTEGRATION_REVIEW.md`](M1_INTEGRATION_REVIEW.md) |
 | B3-04 | 美术包切片与 UI 接入（物品图标 / 面板框 / 物品槽 / 结束横幅 / 家具） | [`ARTPACK_INTEGRATION.md`](ARTPACK_INTEGRATION.md) |
 
 ### 本轮遗留发现（不阻断旅程，待人工定夺）

@@ -534,7 +534,7 @@ export class GameScene extends Phaser.Scene {
     this.bindInput();
 
     if (getGame().day === 1) {
-      this.flash('目标：从第 1 层一路爬到第 100000 层。A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观（仅视觉）');
+      this.flash('第 1 层：靠近储物柜，按 E 搜刮净水。');
     }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -2362,7 +2362,7 @@ export class GameScene extends Phaser.Scene {
     const key = `${goal?.day ?? 0}|${goal?.kind ?? ''}|${goal?.target ?? 0}|${String(done)}|${stress}`;
     if (key !== this.lastGoalKey) {
       this.lastGoalKey = key;
-      this.goalText.setText(`目标 ${label}${done ? ' ✓' : ''} · 压力 ${stress}`);
+      this.goalText.setText(`主线：抵达第 100000 层 · 今日目标 ${label}${done ? ' ✓' : ''} · 压力 ${stress}`);
       this.goalText.setColor(done ? hex(TEXT.highlight) : hex(PALETTE.lightHigh));
     }
     this.scoreText.setText(`分数 ${runScore(state)}`);

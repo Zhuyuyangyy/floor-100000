@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { playFx, startFxLoop } from '../render/fx';
-import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../core/design';
+import { DESIGN_HEIGHT, DESIGN_WIDTH, isPortraitViewport, portraitViewportFor } from '../core/design';
 import { getGame, startNewGame } from '../core/session';
 import {
   BED_X,
@@ -269,6 +269,13 @@ export class GameScene extends Phaser.Scene {
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private keyI!: Phaser.Input.Keyboard.Key;
   private keyEnter!: Phaser.Input.Keyboard.Key;
+  private portraitMode = false;
+  private portraitWidth = DESIGN_WIDTH;
+  private hudContextBottom: number = HUD_LAYOUT.contextBottom;
+  private statBarLayout: Array<{ x: number; y: number; width: number }> = [];
+  private touchDirectionPointers = new Map<number, 'left' | 'right'>();
+  private clearTouchDirections = (): void => { this.touchDirectionPointers.clear(); };
+  private touchControls: Array<Phaser.GameObjects.GameObject & { setVisible(visible: boolean): unknown }> = [];
 
   private floorView!: GeneratedFloor;
   private containerObjs = new Map<string, { box: Phaser.GameObjects.Graphics | Phaser.GameObjects.Image; label: Phaser.GameObjects.Text }>();
@@ -494,6 +501,16 @@ export class GameScene extends Phaser.Scene {
     this.lastClock = '';
     this.lastStats = '';
 
+    this.portraitMode = isPortraitViewport(window.innerWidth, window.innerHeight);
+    const portraitView = portraitViewportFor(window.innerWidth, window.innerHeight);
+    this.portraitWidth = this.portraitMode ? portraitView.width : DESIGN_WIDTH;
+    this.hudContextBottom = this.portraitMode ? 166 : HUD_LAYOUT.contextBottom;
+    this.cameras.main.setViewport(
+      this.portraitMode ? portraitView.x : 0,
+      0,
+      this.portraitWidth,
+      DESIGN_HEIGHT,
+    );
     this.cameras.main.setBackgroundColor(0x22303a);
     this.cameras.main.setBounds(0, 0, FLOOR_WIDTH, FLOOR_HEIGHT);
     this.nightOverlay = this.add
@@ -568,6 +585,10 @@ export class GameScene extends Phaser.Scene {
     return { width: cam.width * cam.zoom, height: cam.height * cam.zoom };
   }
 
+  private panelWidthFor(desktopWidth: number): number {
+    return this.portraitMode ? Math.min(desktopWidth, this.viewSize().width - 24) : desktopWidth;
+  }
+
   /** Keep the complete stair path visible without changing the resting floor bounds. */
   private setFloorCameraBounds(
     floor: number,
@@ -583,7 +604,7 @@ export class GameScene extends Phaser.Scene {
       const pathBottom = Math.max(traversal.startY, traversal.endY);
       // The camera viewport begins behind the context HUD and ends above the
       // bottom hint strip. Extend only as far as the actor needs during travel.
-      topBound = Math.min(topBound, pathTop - this.player.displayHeight - HUD_LAYOUT.contextBottom - STAIR_CAMERA_HUD_GAP);
+      topBound = Math.min(topBound, pathTop - this.player.displayHeight - this.hudContextBottom - STAIR_CAMERA_HUD_GAP);
       bottomBound = Math.max(bottomBound, pathBottom + HUD_FOOT_H + STAIR_CAMERA_HUD_GAP);
     }
 
@@ -953,7 +974,7 @@ export class GameScene extends Phaser.Scene {
     const { width, height } = this.viewSize();
     const cx = width / 2;
     const cy = height / 2;
-    const panelW = 440;
+    const panelW = this.panelWidthFor(440);
     const panelH = 248;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
@@ -1004,16 +1025,18 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: canBuy ? hex(PALETTE.clothHigh) : hex(TEXT.warn),
       }).setOrigin(0, 0.5).setName('shop-status').setDepth(depth + 7));
     }
+    const buttonPitch = this.portraitMode ? 84 : 132;
+    const buttonWidth = this.portraitMode ? 72 : 116;
     const shopButtons: PanelObject[] = [
-      ...this.panelMouseButton(cx - 132, top + 177, '买入', () => {
+      ...this.panelMouseButton(cx - buttonPitch, top + 177, '买入', () => {
         if (this.encounterOpen && !getGame().combat && !this.encounter) this.shopBuy();
-      }),
+      }, buttonWidth),
       ...this.panelMouseButton(cx, top + 177, '卖出', () => {
         if (this.encounterOpen && !getGame().combat && !this.encounter) this.shopSell();
-      }),
-      ...this.panelMouseButton(cx + 132, top + 177, '关闭', () => {
+      }, buttonWidth),
+      ...this.panelMouseButton(cx + buttonPitch, top + 177, '关闭', () => {
         if (this.encounterOpen && !getGame().combat && !this.encounter) this.closeShop();
-      }),
+      }, buttonWidth),
     ];
     shopButtons.forEach((button) => button.setDepth(depth + 8));
     this.encounterObjects.push(...shopButtons);
@@ -1023,7 +1046,7 @@ export class GameScene extends Phaser.Scene {
     this.encounterObjects.push(...buildPanelWell(this, left + 8, footY, panelW - 16, 22, depth + 5));
     this.encounterObjects.push(
       this.add
-        .text(left + 16, footY + 11, '↑/↓ 选 · Enter 买 · S 卖选中 · ESC 关', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
+        .text(left + 16, footY + 11, this.portraitMode ? '点商品 · 点买入/卖出 · ESC 关' : '↑/↓ 选 · Enter 买 · S 卖选中 · ESC 关', { fontFamily: FONT_FAMILY, fontSize: `${this.portraitMode ? 13 : TYPE.caption}px`, color: hex(TEXT.secondary) })
         .setOrigin(0, 0.5)
         .setName('shop-help')
         .setDepth(depth + 7),
@@ -1211,7 +1234,7 @@ export class GameScene extends Phaser.Scene {
     const { width, height } = this.viewSize();
     const cx = width / 2;
     const cy = height / 2;
-    const panelW = 440;
+    const panelW = this.panelWidthFor(440);
     const panelH = 248;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
@@ -1532,7 +1555,7 @@ export class GameScene extends Phaser.Scene {
     // OVERHAUL UI: the outcome uses the same header strip and log well as the
     // fight itself, so the panel does not change shape when the fight ends.
     const outDepth = PANEL_DEPTH.game.dialogue;
-    const outW = 440;
+    const outW = this.panelWidthFor(440);
     const outH = 170;
     const outLeft = cx - outW / 2;
     const outTop = cy - outH / 2;
@@ -1587,7 +1610,7 @@ export class GameScene extends Phaser.Scene {
     const { width, height } = this.viewSize();
     const cx = width / 2;
     const cy = height / 2;
-    const panelW = 420;
+    const panelW = this.panelWidthFor(420);
     const panelH = 190;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
@@ -1695,7 +1718,7 @@ export class GameScene extends Phaser.Scene {
     const { width, height } = this.viewSize();
     const cx = width / 2;
     const cy = height / 2;
-    const panelW = 420;
+    const panelW = this.panelWidthFor(420);
     const panelH = 170;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
@@ -2236,8 +2259,14 @@ export class GameScene extends Phaser.Scene {
     // run's HUD objects would both double up on screen and throw on the first
     // setText/setColor (a stale Text's glTexture is null). Destroy and reset
     // everything this method owns before rebuilding.
+    for (const object of this.touchControls) object.destroy();
+    this.touchControls = [];
+    this.touchDirectionPointers.clear();
+    this.input.off(Phaser.Input.Events.POINTER_UP, this.releaseTouchDirection, this);
+    this.input.off(Phaser.Input.Events.POINTER_UP_OUTSIDE, this.releaseTouchDirection, this);
     this.statLabels = [];
     this.statValues = [];
+    this.statBarLayout = [];
     this.lastGoalKey = '';
     this.environmentText?.destroy();
     this.environmentText = undefined;
@@ -2256,61 +2285,71 @@ export class GameScene extends Phaser.Scene {
     // The world's existing palette stays intact; generous gutters separate
     // survival, location and money so none of them borrow another field's space.
     const hud = HUD_LAYOUT;
-    this.add.rectangle(0, 0, DESIGN_WIDTH, hud.topHeight, UI.surface).setOrigin(0).setAlpha(0.98).setScrollFactor(0).setDepth(100);
-    this.add.rectangle(0, hud.topHeight, DESIGN_WIDTH, hud.contextBottom - hud.topHeight, UI.surface).setOrigin(0).setAlpha(0.94).setScrollFactor(0).setDepth(100);
+    const mobile = this.portraitMode;
+    const width = mobile ? this.portraitWidth : DESIGN_WIDTH;
+    const topHeight = mobile ? 108 : hud.topHeight;
+    const contextBottom = mobile ? 166 : hud.contextBottom;
+    this.hudContextBottom = contextBottom;
+    this.add.rectangle(0, 0, width, topHeight, UI.surface).setOrigin(0).setAlpha(0.98).setScrollFactor(0).setDepth(100);
+    this.add.rectangle(0, topHeight, width, contextBottom - topHeight, UI.surface).setOrigin(0).setAlpha(0.94).setScrollFactor(0).setDepth(100);
     const chrome = this.add.graphics().setScrollFactor(0).setDepth(101);
     chrome.lineStyle(1, UI.line, 0.85);
-    for (const x of [196, 1000]) chrome.lineBetween(x, 14, x, hud.topHeight - 14);
-    chrome.lineBetween(16, hud.topHeight - 1, DESIGN_WIDTH - 16, hud.topHeight - 1);
-    chrome.lineBetween(16, hud.contextBottom - 1, DESIGN_WIDTH - 16, hud.contextBottom - 1);
+    if (!mobile) for (const x of [196, 1000]) chrome.lineBetween(x, 14, x, hud.topHeight - 14);
+    chrome.lineBetween(mobile ? 8 : 16, topHeight - 1, width - (mobile ? 8 : 16), topHeight - 1);
+    chrome.lineBetween(mobile ? 8 : 16, contextBottom - 1, width - (mobile ? 8 : 16), contextBottom - 1);
     chrome.fillStyle(UI.accent, 1);
-    chrome.fillRect(0, 0, 4, hud.topHeight);
+    chrome.fillRect(0, 0, 4, topHeight);
 
-    this.floorBadge = this.add.text(20, 6, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
+    this.floorBadge = this.add.text(mobile ? 12 : 20, mobile ? 4 : 6, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 18 : TYPE.body}px`, color: hex(PALETTE.lightHigh) })
       .setName('hud-floor').setScrollFactor(0).setDepth(103);
-    this.clockText = this.add.text(20, 38, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+    this.clockText = this.add.text(mobile ? 12 : 20, mobile ? 28 : 38, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 14 : TYPE.caption}px`, color: hex(TEXT.primary) })
       .setName('hud-clock').setScrollFactor(0).setDepth(103);
     this.refreshClock();
 
     this.barsGfx = this.add.graphics().setName('hud-stat-bars').setScrollFactor(0).setDepth(103);
     STAT_BARS.forEach((stat, i) => {
-      const x = hud.statX + i * hud.statPitch;
-      this.statLabels.push(this.add.text(x, 10, stat.label, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+      const mobileColumnWidth = Math.floor((width - 24) / 2);
+      const groupX = mobile ? 12 + (i % 2) * mobileColumnWidth : hud.statX + i * hud.statPitch;
+      const rowY = mobile ? (i < 2 ? 40 : 69) : 10;
+      const valueX = mobile ? groupX + mobileColumnWidth - 4 : groupX + hud.statWidth;
+      const fontSize = mobile ? '14px' : `${TYPE.caption}px`;
+      this.statBarLayout.push({ x: mobile ? groupX + 40 : groupX, y: mobile ? rowY + 18 : 40, width: mobile ? 56 : hud.statWidth });
+      this.statLabels.push(this.add.text(groupX, rowY, stat.label, { fontFamily: FONT_FAMILY, fontSize, color: hex(TEXT.primary) })
         .setName(`hud-stat-${stat.key}`).setScrollFactor(0).setDepth(103));
-      this.statValues.push(this.add.text(x + hud.statWidth, 10, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary) })
+      this.statValues.push(this.add.text(valueX, rowY, '', { fontFamily: FONT_FAMILY, fontSize, color: hex(TEXT.primary) })
         .setOrigin(1, 0).setName(`hud-value-${stat.key}`).setScrollFactor(0).setDepth(103));
     });
     this.refreshStats();
 
-    this.goldText = this.add.text(DESIGN_WIDTH - 20, 6, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
+    this.goldText = this.add.text(width - (mobile ? 12 : 20), mobile ? 4 : 6, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 14 : TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
       .setOrigin(1, 0).setName('hud-gold').setScrollFactor(0).setDepth(103);
-    this.scoreText = this.add.text(DESIGN_WIDTH - 20, 34, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
+    this.scoreText = this.add.text(width - (mobile ? 12 : 20), mobile ? 26 : 34, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 14 : TYPE.caption}px`, color: hex(TEXT.highlight) })
       .setOrigin(1, 0).setName('hud-score').setScrollFactor(0).setDepth(103);
 
-    this.goalText = this.add.text(20, hud.goalY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
+    this.goalText = this.add.text(mobile ? 12 : 20, mobile ? 112 : hud.goalY, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 14 : TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
       .setName('hud-goal').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
-    this.environmentText = this.add.text(20, hud.environmentY, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.secondary) })
+    this.environmentText = this.add.text(mobile ? 12 : 20, mobile ? 137 : hud.environmentY, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 14 : TYPE.caption}px`, color: hex(TEXT.secondary) })
       .setName('hud-environment').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // Feedback has a dedicated lower lane. It remains above modal panels but
     // can never collide with the daily objective or the permanent environment.
     this.feedbackText = this.add.text(20, hud.feedbackY, '', {
       fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh),
-      backgroundColor: '#0b0f12ee', padding: { x: 8, y: 5 }, wordWrap: { width: 1216 },
-    }).setName('hud-feedback').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
-    this.bagFullText = this.add.text(20, hud.bagY,
+      backgroundColor: '#0b0f12ee', padding: { x: 8, y: 5 }, wordWrap: { width: width - (mobile ? 24 : 64) },
+    }).setPosition(mobile ? 12 : 20, mobile ? 510 : hud.feedbackY).setName('hud-feedback').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    this.bagFullText = this.add.text(mobile ? 12 : 20, mobile ? 624 : hud.bagY,
       '背包已满 · 使用、制作或交易腾出格子，否则搜刮会留在原处；能叠进已有堆的物品仍可拾取',
-      { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12ee', padding: { x: 8, y: 3 }, wordWrap: { width: 1216 } },
+      { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 13 : TYPE.caption}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12ee', padding: { x: 8, y: 3 }, wordWrap: { width: width - (mobile ? 24 : 64) } },
     ).setName('hud-bag-full').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
 
     // ── the foot bar ────────────────────────────────────────────────────────
-    this.add.rectangle(0, DESIGN_HEIGHT - HUD_FOOT_H, DESIGN_WIDTH, HUD_FOOT_H, UI.surface).setOrigin(0, 0).setAlpha(0.88).setScrollFactor(0).setDepth(100);
+    this.add.rectangle(0, DESIGN_HEIGHT - HUD_FOOT_H, width, HUD_FOOT_H, UI.surface).setOrigin(0, 0).setAlpha(0.88).setScrollFactor(0).setDepth(100);
     const footLine = this.add.graphics().setScrollFactor(0).setDepth(101);
     footLine.fillStyle(UI.line, 0.9);
-    footLine.fillRect(0, DESIGN_HEIGHT - HUD_FOOT_H, DESIGN_WIDTH, 1);
+    footLine.fillRect(0, DESIGN_HEIGHT - HUD_FOOT_H, width, 1);
     this.hintText = this.add
-      .text(8, DESIGN_HEIGHT - HUD_FOOT_H / 2, 'A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观（仅视觉） · ESC 菜单', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
-      .setOrigin(0, 0.5).setName('hud-hint').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+      .text(mobile ? width / 2 : 8, mobile ? DESIGN_HEIGHT - HUD_FOOT_H + 8 : DESIGN_HEIGHT - HUD_FOOT_H / 2, mobile ? '' : 'A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观（仅视觉） · ESC 菜单', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 13 : TYPE.caption}px`, color: hex(TEXT.highlight) })
+      .setOrigin(mobile ? 0.5 : 0, 0.5).setName('hud-hint').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // The low-HP vignette: pure red wash whose alpha is the pulse function's
     // output. Created invisible; update() drives it every frame.
@@ -2342,10 +2381,79 @@ export class GameScene extends Phaser.Scene {
       band(0, inset, DESIGN_WIDTH, T, weight); // top
       band(0, DESIGN_HEIGHT - inset - T, DESIGN_WIDTH, T, weight); // bottom
       band(inset, 0, T, DESIGN_HEIGHT, weight); // left
-      band(DESIGN_WIDTH - inset - T, 0, T, DESIGN_HEIGHT, weight); // right
+      band(width - inset - T, 0, T, DESIGN_HEIGHT, weight); // right
     }
     this.lastStats = '';
     this.refreshGoalHud();
+    if (mobile) this.buildTouchControls(width);
+  }
+
+  private buildTouchControls(width: number): void {
+    const depth = HUD_FEEDBACK_DEPTH + 5;
+    const buttonY = DESIGN_HEIGHT - 25;
+    const addButton = (
+      x: number,
+      buttonWidth: number,
+      label: string,
+      fontSize: number,
+      onDown: (pointer: Phaser.Input.Pointer) => void,
+    ): void => {
+      const background = this.add.rectangle(x, buttonY, buttonWidth, 42, UI.surfaceRaised)
+        .setStrokeStyle(2, UI.line)
+        .setAlpha(0.96)
+        .setScrollFactor(0)
+        .setDepth(depth)
+        .setInteractive({ useHandCursor: true });
+      background.on('pointerdown', onDown);
+      const text = this.add.text(x, buttonY, label, {
+        fontFamily: FONT_FAMILY,
+        fontSize: `${fontSize}px`,
+        color: hex(PALETTE.lightHigh),
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(depth + 1);
+      this.touchControls.push(background, text);
+    };
+
+    addButton(28, 44, '◀', 22, (pointer) => {
+      if (this.canMoveWithTouchControls()) this.touchDirectionPointers.set(pointer.id, 'left');
+    });
+    addButton(78, 44, '▶', 22, (pointer) => {
+      if (this.canMoveWithTouchControls()) this.touchDirectionPointers.set(pointer.id, 'right');
+    });
+    addButton(128, 44, 'I', 18, () => {
+      if (this.canUseTouchControls()) this.guard('i', this.onToggleInventory);
+    });
+    addButton(178, 44, 'C', 18, () => {
+      if (this.canUseTouchControls()) this.guard('c', this.onToggleCrafting);
+    });
+    addButton(width - 38, 68, 'E', 18, () => {
+      if (this.canUseTouchControls()) this.guard('e', this.onInteract);
+    });
+    this.input.on(Phaser.Input.Events.POINTER_UP, this.releaseTouchDirection, this);
+    this.input.on(Phaser.Input.Events.POINTER_UP_OUTSIDE, this.releaseTouchDirection, this);
+    this.game.canvas.addEventListener('pointercancel', this.clearTouchDirections);
+    window.addEventListener('blur', this.clearTouchDirections);
+    document.addEventListener('visibilitychange', this.clearTouchDirections);
+  }
+
+  private canUseTouchControls(): boolean {
+    return this.portraitMode && !this.stairClimb;
+  }
+
+  private canMoveWithTouchControls(): boolean {
+    return this.canUseTouchControls() &&
+      !this.inventoryOpen && !this.craftingOpen && !this.dialogueOpen && !this.pauseOpen &&
+      !this.encounterOpen && !this.shelterOpen;
+  }
+
+  private releaseTouchDirection(pointer: Phaser.Input.Pointer): void {
+    this.touchDirectionPointers.delete(pointer.id);
+  }
+
+  private refreshTouchControlVisibility(): void {
+    if (this.touchControls.length === 0) return;
+    const visible = this.canUseTouchControls();
+    for (const object of this.touchControls) object.setVisible(visible);
+    if (!this.canMoveWithTouchControls()) this.touchDirectionPointers.clear();
   }
 
   // OVERHAUL: the day's objective (rolled lazily on first read of the day) and
@@ -2366,18 +2474,27 @@ export class GameScene extends Phaser.Scene {
     const key = `${goal?.day ?? 0}|${goal?.kind ?? ''}|${goal?.target ?? 0}|${String(done)}|${stress}`;
     if (key !== this.lastGoalKey) {
       this.lastGoalKey = key;
-      this.goalText.setText(`主线：抵达第 100000 层 · 今日目标 ${label}${done ? ' ✓' : ''} · 压力 ${stress}`);
+      const compactGoal = goal
+        ? goal.kind === 'water' ? `净水×${goal.target}`
+          : goal.kind === 'containers' ? `搜刮×${goal.target}`
+            : goal.kind === 'upgrade' ? `升级×${goal.target}`
+              : `到${goal.target}层`
+        : '';
+      this.goalText.setText(this.portraitMode
+        ? `主线100000层 · 今日${compactGoal}${done ? '✓' : ''} · 压${stress}`
+        : `主线：抵达第 100000 层 · 今日目标 ${label}${done ? ' ✓' : ''} · 压力 ${stress}`);
       this.goalText.setColor(done ? hex(TEXT.highlight) : hex(PALETTE.lightHigh));
     }
     this.scoreText.setText(`分数 ${runScore(state)}`);
     this.goldText?.setText(`金币 ${state.player.gold}`);
-    this.scoreText.setFontSize(TYPE.caption);
-    if (this.scoreText.width > 240) this.scoreText.setFontSize(18);
+    this.scoreText.setFontSize(this.portraitMode ? 14 : TYPE.caption);
+    if (this.scoreText.width > (this.portraitMode ? 120 : 240)) this.scoreText.setFontSize(this.portraitMode ? 12 : 18);
     if (this.goldText) {
-      this.goldText.setFontSize(TYPE.caption);
-      if (this.goldText.width > 240) this.goldText.setFontSize(18);
+      this.goldText.setFontSize(this.portraitMode ? 14 : TYPE.caption);
+      if (this.goldText.width > (this.portraitMode ? 120 : 240)) this.goldText.setFontSize(this.portraitMode ? 12 : 18);
     }
-    this.fitHudLine(this.goalText, 1240);
+    this.goalText.setFontSize(this.portraitMode ? 12 : TYPE.caption);
+    this.fitHudLine(this.goalText, this.portraitMode ? this.portraitWidth - 24 : 1240);
   }
 
   /** Preserve legible type; shorten only exceptional overlong HUD strings. */
@@ -2398,7 +2515,7 @@ export class GameScene extends Phaser.Scene {
       this.clockText.setText(label);
     }
     this.floorBadge?.setText(`第${s.currentFloor}层`);
-    this.fitHudLine(this.clockText, 164);
+    this.fitHudLine(this.clockText, this.portraitMode ? 110 : 164);
   }
 
   private refreshStats(): void {
@@ -2411,9 +2528,9 @@ export class GameScene extends Phaser.Scene {
     this.lastStats = key;
     this.barsGfx.clear();
     values.forEach((v, i) => {
-      const x = HUD_LAYOUT.statX + i * HUD_LAYOUT.statPitch;
+      const layout = this.statBarLayout[i] ?? { x: HUD_LAYOUT.statX + i * HUD_LAYOUT.statPitch, y: 40, width: HUD_LAYOUT.statWidth };
       const color = STAT_COLORS[STAT_BARS[i].key] ?? UI.good;
-      drawStatBar(this.barsGfx, x, 40, HUD_LAYOUT.statWidth, 8, v / 100, color);
+      drawStatBar(this.barsGfx, layout.x, layout.y, layout.width, this.portraitMode ? 6 : 8, v / 100, color);
       this.statValues[i]?.setText(String(Math.round(v)));
     });
     // The most urgent bar's label turns red, so the critical slot is findable
@@ -2446,9 +2563,11 @@ export class GameScene extends Phaser.Scene {
     // being chilly, and this line is the only place either is stated.
     const ill = ailmentLabel(state);
     const envPart = ill ? `${ill} · ${environmentLabel(state.currentFloor)}` : environmentLabel(state.currentFloor);
-    this.environmentText.setText(`${TEMP_LABEL} ${Math.round(temp)} ${mood} · ${envPart}`);
+    this.environmentText.setText(this.portraitMode
+      ? `体温${Math.round(temp)} ${mood} · ${envPart}`
+      : `${TEMP_LABEL} ${Math.round(temp)} ${mood} · ${envPart}`);
     this.environmentText.setColor(temp <= COLD_THRESHOLD || ill !== '' ? hex(TEXT.warn) : hex(TEXT.secondary));
-    this.fitHudLine(this.environmentText, 1240);
+    this.fitHudLine(this.environmentText, this.portraitMode ? this.portraitWidth - 24 : 1240);
   }
 
   private buildInventoryPanel(): void {
@@ -2458,8 +2577,8 @@ export class GameScene extends Phaser.Scene {
     // on the right: the icons carry the identity, the pane carries the words,
     // and neither one is a wall of text.
     const { width, height } = this.viewSize();
-    const panelW = 440;
-    const panelH = 236;
+    const panelW = this.panelWidthFor(440);
+    const panelH = this.portraitMode ? 340 : 236;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -2480,10 +2599,11 @@ export class GameScene extends Phaser.Scene {
     // 4 columns x 3 rows of 40px cells: twelve slots, no scrolling, and each
     // cell is big enough for a 2x icon (pixel art upscales cleanly at integer
     // factors, unlike the old 16px icons in a 20px row).
-    const GRID_X = left + 12;
+    const CELL = this.portraitMode ? 32 : 40;
+    const GAP = this.portraitMode ? 4 : 5;
+    const GRID_W = 4 * CELL + 3 * GAP;
+    const GRID_X = this.portraitMode ? cx - GRID_W / 2 : left + 12;
     const GRID_Y = top + 30;
-    const CELL = 40;
-    const GAP = 5;
     this.invCells = [];
     this.invSlotIcons = [];
     this.invSlotTexts = [];
@@ -2504,7 +2624,7 @@ export class GameScene extends Phaser.Scene {
       const icon = this.add
         .image(x + CELL / 2, y + CELL / 2, 'blank')
         .setOrigin(0.5)
-        .setScale(2)
+        .setScale(this.portraitMode ? 1.5 : 2)
         .setDepth(depth + 6);
       const badge = this.add
         .text(x + CELL - 3, y + CELL - 3, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
@@ -2517,32 +2637,35 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ── the detail pane ─────────────────────────────────────────────────────
-    const DETAIL_X = GRID_X + 4 * (CELL + GAP) + 8;
-    const DETAIL_W = left + panelW - 12 - DETAIL_X;
-    this.invObjects.push(...buildPanelWell(this, DETAIL_X, GRID_Y, DETAIL_W, 3 * (CELL + GAP) - GAP, depth + 5));
+    const DETAIL_X = this.portraitMode ? left + 12 : GRID_X + 4 * (CELL + GAP) + 8;
+    const DETAIL_Y = this.portraitMode ? GRID_Y + 3 * (CELL + GAP) - GAP + 8 : GRID_Y;
+    const DETAIL_W = this.portraitMode ? panelW - 24 : left + panelW - 12 - DETAIL_X;
+    const DETAIL_H = this.portraitMode ? 66 : 3 * (CELL + GAP) - GAP;
+    this.invObjects.push(...buildPanelWell(this, DETAIL_X, DETAIL_Y, DETAIL_W, DETAIL_H, depth + 5));
     // Three rows at 10 / 48 / 76. They used to be at 10 / 28 / 46, which only
     // worked because SimSun's glyphs sit inside a much smaller ink box than the
     // em size; a pixel face fills the whole em, so the 30px name ran straight
     // through the 20px meta line and the body through both.
     this.invDetailName = this.add
-      .text(DETAIL_X + 8, GRID_Y + 10, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(PALETTE.lightHigh) })
+      .text(DETAIL_X + 8, DETAIL_Y + (this.portraitMode ? 5 : 10), '', { fontFamily: FONT_FAMILY, fontSize: `${this.portraitMode ? 16 : TYPE.title}px`, color: hex(PALETTE.lightHigh) })
       .setDepth(depth + 7);
     this.invDetailMeta = this.add
-      .text(DETAIL_X + 8, GRID_Y + 48, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.dim) })
+      .text(DETAIL_X + 8, DETAIL_Y + (this.portraitMode ? 26 : 48), '', { fontFamily: FONT_FAMILY, fontSize: `${this.portraitMode ? 13 : TYPE.caption}px`, color: hex(TEXT.dim) })
       .setDepth(depth + 7);
     this.invDetailBody = this.add
-      .text(DETAIL_X + 8, GRID_Y + 76, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: DETAIL_W - 16 } })
+      .text(DETAIL_X + 8, DETAIL_Y + (this.portraitMode ? 45 : 76), '', { fontFamily: FONT_FAMILY, fontSize: `${this.portraitMode ? 13 : TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: DETAIL_W - 16 } })
       .setDepth(depth + 7);
     this.invObjects.push(this.invDetailName, this.invDetailMeta, this.invDetailBody);
 
-    this.invObjects.push(...this.panelMouseButton(cx - 68, top + 186, '使用', () => {
+    const buttonY = this.portraitMode ? top + panelH - 44 : top + 186;
+    this.invObjects.push(...this.panelMouseButton(cx - 68, buttonY, '使用', () => {
       if (this.inventoryOpen) this.onUse();
     }));
-    this.invObjects.push(...this.panelMouseButton(cx + 68, top + 186, '关闭', () => {
+    this.invObjects.push(...this.panelMouseButton(cx + 68, buttonY, '关闭', () => {
       if (this.inventoryOpen) this.toggleInventory();
     }));
     const footer = this.add
-      .text(cx, top + panelH - 12, '点击选择 · ↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
+      .text(cx, top + panelH - 12, this.portraitMode ? '点选物品 · 点 使用 · I 关闭' : '点击选择 · ↑/↓ 选择 · Enter 使用 · I 关闭', { fontFamily: FONT_FAMILY, fontSize: `${this.portraitMode ? 14 : TYPE.caption}px`, color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5, 0.5)
       .setDepth(depth + 6);
     this.invObjects.push(footer, this.invMarker);
@@ -2716,8 +2839,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** A separate action button prevents selecting an item from consuming it. */
-  private panelMouseButton(x: number, y: number, label: string, action: () => void): PanelObject[] {
-    const button = this.add.rectangle(x, y, 116, 28, UI.surfaceRaised)
+  private panelMouseButton(x: number, y: number, label: string, action: () => void, width = 116): PanelObject[] {
+    const button = this.add.rectangle(x, y, width, 28, UI.surfaceRaised)
       .setStrokeStyle(1, UI.line)
       .setInteractive({ useHandCursor: true })
       .on('pointerdown', action);
@@ -2729,7 +2852,7 @@ export class GameScene extends Phaser.Scene {
 
   private buildCraftPanel(): void {
     const { width, height } = this.viewSize();
-    const panelW = 460;
+    const panelW = this.panelWidthFor(460);
     const panelH = 300;
     const cx = width / 2;
     const cy = height / 2;
@@ -2839,7 +2962,7 @@ export class GameScene extends Phaser.Scene {
 
   private buildPausePanel(): void {
     const { width, height } = this.viewSize();
-    const panelW = 460;
+    const panelW = this.panelWidthFor(460);
     const panelH = 264;
     const cx = width / 2;
     const cy = height / 2;
@@ -3005,7 +3128,7 @@ export class GameScene extends Phaser.Scene {
 
   private buildDialoguePanel(): void {
     const { width, height } = this.viewSize();
-    const panelW = 460;
+    const panelW = this.panelWidthFor(460);
     const panelH = 260;
     const cx = width / 2;
     const cy = height / 2;
@@ -3430,6 +3553,12 @@ export class GameScene extends Phaser.Scene {
     this.keyQ?.removeAllListeners();
     this.cursors?.up.removeAllListeners();
     this.cursors?.down.removeAllListeners();
+    this.input.off(Phaser.Input.Events.POINTER_UP, this.releaseTouchDirection, this);
+    this.input.off(Phaser.Input.Events.POINTER_UP_OUTSIDE, this.releaseTouchDirection, this);
+    this.game.canvas?.removeEventListener('pointercancel', this.clearTouchDirections);
+    window.removeEventListener('blur', this.clearTouchDirections);
+    document.removeEventListener('visibilitychange', this.clearTouchDirections);
+    this.touchDirectionPointers.clear();
   }
 
   private onToggleMap(): void {
@@ -3781,7 +3910,7 @@ export class GameScene extends Phaser.Scene {
     this.shelterInputObjects = [];
     const state = getGame();
     const { width, height } = this.viewSize();
-    const panelW = 500;
+    const panelW = this.panelWidthFor(500);
     const panelH = 300;
     const cx = width / 2;
     const cy = height / 2;
@@ -4100,6 +4229,7 @@ export class GameScene extends Phaser.Scene {
 
   // ── frame ──────────────────────────────────────────────────────────────
   override update(_time: number, delta: number): void {
+    this.refreshTouchControlVisibility();
     this.refreshBagFullWarning();
     // The crowbar is stepped here, above the panel early-return.
     //
@@ -4130,6 +4260,8 @@ export class GameScene extends Phaser.Scene {
     let dir = 0;
     if (this.cursors?.left.isDown || this.wasd?.left.isDown) dir -= 1;
     if (this.cursors?.right.isDown || this.wasd?.right.isDown) dir += 1;
+    for (const direction of this.touchDirectionPointers.values()) dir += direction === 'left' ? -1 : 1;
+    dir = Phaser.Math.Clamp(dir, -1, 1);
     // The speed is ramped rather than switched, so a tap of the key moves a
     // shorter distance than it used to and the run feels like it has weight.
     // OVERHAUL: an empty energy tank slows the walk (0.75x), so "how far can I

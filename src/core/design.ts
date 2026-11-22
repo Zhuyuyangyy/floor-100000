@@ -16,6 +16,21 @@
 export const DESIGN_WIDTH = 1280;
 export const DESIGN_HEIGHT = 720;
 
+/** Portrait devices need a taller, narrower camera window rather than a tiny 16:9 fit. */
+export function isPortraitViewport(viewportWidth: number, viewportHeight: number): boolean {
+  return Number.isFinite(viewportWidth) && Number.isFinite(viewportHeight) && viewportWidth > 0 && viewportHeight > viewportWidth;
+}
+
+/** The design-canvas slice visible when the 16:9 canvas envelops a portrait screen. */
+export function portraitViewportFor(viewportWidth: number, viewportHeight: number): { x: number; width: number } {
+  if (!Number.isFinite(viewportWidth) || !Number.isFinite(viewportHeight) || viewportWidth <= 0 || viewportHeight <= 0) {
+    throw new Error('viewport dimensions must be positive');
+  }
+  if (viewportWidth >= viewportHeight) return { x: 0, width: DESIGN_WIDTH };
+  const width = Math.max(1, Math.min(DESIGN_WIDTH, Math.round(DESIGN_HEIGHT * viewportWidth / viewportHeight)));
+  return { x: Math.floor((DESIGN_WIDTH - width) / 2), width };
+}
+
 export interface IntegerScale {
   scale: number;
   width: number;

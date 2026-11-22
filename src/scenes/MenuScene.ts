@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { FONT_FAMILY } from '../render/uiKit';
+import { isPortraitViewport, portraitViewportFor } from '../core/design';
 
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { startNewGame, tryContinue } from '../core/session';
@@ -52,6 +53,7 @@ export class MenuScene extends Phaser.Scene {
     this.helpOpen = false;
 
     const { width, height } = this.cameras.main;
+    const mobile = isPortraitViewport(window.innerWidth, window.innerHeight);
     // Art pass: this rect used to sit at the default depth 0, which is ABOVE
     // every negative-depth backdrop object — the sky, the moon and the tower
     // were all drawn behind an opaque full-screen rectangle, and the title
@@ -86,13 +88,13 @@ export class MenuScene extends Phaser.Scene {
     const MENU_STEP = 56;
 
     this.titleText = this.add
-      .text(width / 2, TITLE_Y, '第100000层', { fontFamily: FONT_FAMILY, fontSize: '80px', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 6 })
+      .text(width / 2, TITLE_Y, '第100000层', { fontFamily: FONT_FAMILY, fontSize: mobile ? '46px' : '80px', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: mobile ? 4 : 6 })
       .setOrigin(0.5);
     // Every piece of title text carries its own dark stroke: the painted
     // backdrop behind it is bright in places, and a stroke keeps the text
     // legible without a scrim heavy enough to bury the painting.
     this.subtitleText = this.add
-      .text(width / 2, SUBTITLE_Y, '末 日 宿 舍', { fontFamily: FONT_FAMILY, fontSize: '44px', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 4 })
+      .text(width / 2, SUBTITLE_Y, '末 日 宿 舍', { fontFamily: FONT_FAMILY, fontSize: mobile ? '30px' : '44px', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: mobile ? 3 : 4 })
       .setOrigin(0.5);
 
     this.entries = [{ label: '开始新游戏', run: () => this.startNew() }];
@@ -271,23 +273,34 @@ export class MenuScene extends Phaser.Scene {
     // panel with 26px text and a 26px row pitch had long lines running straight
     // through the frame and the rows touching. Wider panel, one size down, and a
     // row pitch that leaves air under the descenders.
-    const panelW = 580;
-    const panelH = 260;
+    const mobile = isPortraitViewport(window.innerWidth, window.innerHeight);
+    const visibleWidth = mobile ? portraitViewportFor(window.innerWidth, window.innerHeight).width : width;
+    const panelW = mobile ? Math.max(240, visibleWidth - 32) : 580;
+    const panelH = mobile ? 320 : 260;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
     this.helpObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', PANEL_DEPTH.menu.help));
-    const title = this.add.text(cx, top + 26, '操作说明', { fontFamily: FONT_FAMILY, fontSize: '30px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
-    const lines = [
-      'A/D 或 ←/→ 移动 · E 交互',
-      'E 交互：开箱 / 对话 / 楼梯 / 睡觉',
-      'I 背包 · C 制作 · M 地图 · ESC 暂停',
-      '目标：爬到第 100000 层',
-    ];
-    const texts = lines.map((line, i) => this.add.text(left + 24, top + 72 + i * 38, line, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }));
-    const footer = this.add.text(cx, top + panelH - 30, '点击关闭 · Enter / ESC', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    const title = this.add.text(cx, top + 24, '操作说明', { fontFamily: FONT_FAMILY, fontSize: mobile ? '22px' : '30px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
+    const lines = mobile
+      ? ['按住 ◀ / ▶ 移动', '点 E 交互：开箱、对话、楼梯、睡觉', '点 I 打开背包；点 C 在宿舍制作', '目标：爬到第 100000 层']
+      : [
+          'A/D 或 ←/→ 移动 · E 交互',
+          'E 交互：开箱 / 对话 / 楼梯 / 睡觉',
+          'I 背包 · C 制作 · M 地图 · ESC 暂停',
+          '目标：爬到第 100000 层',
+        ];
+    const lineTop = mobile ? 66 : 72;
+    const lineStep = mobile ? 42 : 38;
+    const texts = lines.map((line, i) => this.add.text(left + 16, top + lineTop + i * lineStep, line, {
+      fontFamily: FONT_FAMILY,
+      fontSize: mobile ? '14px' : '22px',
+      color: hex(TEXT.primary),
+      wordWrap: { width: panelW - 32 },
+    }));
+    const footer = this.add.text(cx, top + panelH - 24, mobile ? '点按选项 · 点此关闭' : '点击关闭 · Enter / ESC', { fontFamily: FONT_FAMILY, fontSize: mobile ? '14px' : '20px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
     footer.setInteractive({ useHandCursor: true });
     footer.on('pointerup', (_pointer: Phaser.Input.Pointer, _localX: number, _localY: number, event: Phaser.Types.Input.EventData) => {
       event.stopPropagation();

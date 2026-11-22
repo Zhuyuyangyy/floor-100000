@@ -11,6 +11,7 @@ import { buildPanel, createMarker, PANEL_DEPTH, placeMarker } from '../render/pa
 import { buildPanelHeader, FONT_FAMILY, TYPE, UI } from '../render/uiKit';
 import { idleAnimKey, walkSheetKey } from '../render/walkcycle';
 import { TITLE_BG_KEY } from '../render/artpack';
+import { isPortraitViewport, portraitViewportFor } from '../core/design';
 
 // OVERHAUL UI: the character select, rebuilt.
 //
@@ -61,6 +62,8 @@ export class MetaSelectScene extends Phaser.Scene {
   create(): void {
     this.lastInputFrame = { up: -1, down: -1, enter: -1, esc: -1 };
     const { width, height } = this.cameras.main;
+    const mobile = isPortraitViewport(window.innerWidth, window.innerHeight);
+    const visibleWidth = mobile ? portraitViewportFor(window.innerWidth, window.innerHeight).width : width;
 
     // ── the backdrop ────────────────────────────────────────────────────────
     // The same painted render as the title, dimmed hard: the pick screen should
@@ -75,8 +78,8 @@ export class MetaSelectScene extends Phaser.Scene {
     this.add.rectangle(width / 2, height / 2, width, height, UI.surface).setAlpha(0.62).setDepth(-29);
 
     const cx = width / 2;
-    const panelW = 470;
-    const panelH = 300;
+    const panelW = mobile ? Math.max(240, visibleWidth - 24) : 470;
+    const panelH = mobile ? 450 : 300;
     const left = cx - panelW / 2;
     const top = height / 2 - panelH / 2;
     const depth = PANEL_DEPTH.menu.help;
@@ -89,8 +92,8 @@ export class MetaSelectScene extends Phaser.Scene {
     // ── the portrait ────────────────────────────────────────────────────────
     // Left third. The sprite is 88px of figure at native size, which is the
     // whole reason to give it room instead of a 16px thumbnail.
-    const portraitX = left + 62;
-    const portraitFeet = top + panelH - 70;
+    const portraitX = mobile ? left + 48 : left + 62;
+    const portraitFeet = mobile ? top + 188 : top + panelH - 70;
     this.portraitGlow = this.add.graphics().setDepth(depth + 5);
     this.portrait = this.add
       .sprite(portraitX, portraitFeet, walkSheetKey('player'))
@@ -99,14 +102,14 @@ export class MetaSelectScene extends Phaser.Scene {
     this.portrait.play(idleAnimKey('player'));
 
     this.flavourText = this.add
-      .text(portraitX, portraitFeet + 10, '', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(TEXT.secondary), align: 'center', wordWrap: { width: 132 } })
+      .text(portraitX, portraitFeet + 10, '', { fontFamily: FONT_FAMILY, fontSize: mobile ? '12px' : '18px', color: hex(TEXT.secondary), align: 'center', wordWrap: { width: mobile ? 82 : 132 } })
       .setOrigin(0.5, 0)
       .setDepth(depth + 7);
 
     // ── the roster ──────────────────────────────────────────────────────────
     const meta = loadMeta();
-    const listX = left + 128;
-    const listW = 200;
+    const listX = left + (mobile ? 96 : 128);
+    const listW = mobile ? panelW - 108 : 200;
     this.optionTexts = [];
     this.lockTexts = [];
     ROSTER.forEach((id, i) => {
@@ -116,25 +119,25 @@ export class MetaSelectScene extends Phaser.Scene {
       // 20px. At the old 40px pitch with the note at +22, a pixel face (which
       // fills its whole em, unlike SimSun) put the note straight through the
       // name and the whole roster read as one smudge.
-      const y = top + 34 + i * 52;
+      const y = top + (mobile ? 30 : 34) + i * (mobile ? 48 : 52);
       const name = this.add
         .text(listX + 8, y, CHARACTER_NAMES[id] ?? id, {
           fontFamily: FONT_FAMILY,
-          fontSize: `${TYPE.body}px`,
+          fontSize: `${mobile ? 20 : TYPE.body}px`,
           color: unlocked ? hex(TEXT.primary) : hex(TEXT.disabled),
         })
         .setDepth(depth + 7);
       const lock = this.add
         .text(listX + 8, y + 28, unlocked ? '可出战' : `最深第 ${need} 层解锁`, {
           fontFamily: FONT_FAMILY,
-          fontSize: `${TYPE.caption}px`,
+          fontSize: `${mobile ? 13 : TYPE.caption}px`,
           color: unlocked ? hex(PALETTE.clothHigh) : hex(TEXT.disabled),
         })
         .setDepth(depth + 7);
       this.optionTexts.push(name);
       this.lockTexts.push(lock);
       const rowTarget = this.add
-        .zone(listX + listW / 2, y + 22, listW, 48)
+        .zone(listX + listW / 2, y + 22, listW, mobile ? 44 : 48)
         .setDepth(depth + 7)
         .setInteractive({ useHandCursor: true });
       // Selection is click-only: passing over a row while moving to the start button must not change it.
@@ -143,7 +146,7 @@ export class MetaSelectScene extends Phaser.Scene {
         playSfx('click');
       }, this);
     });
-    this.invWell(listX - 6, top + 28, listW, 220, depth + 5);
+    this.invWell(listX - 6, top + 28, listW, mobile ? 202 : 220, depth + 5);
     this.optionTexts.forEach((t) => t.setDepth(depth + 8));
     this.lockTexts.forEach((t) => t.setDepth(depth + 8));
 
@@ -151,15 +154,28 @@ export class MetaSelectScene extends Phaser.Scene {
     this.marker.setDepth(depth + 9);
 
     // ── the mode / relic column ─────────────────────────────────────────────
-    const colX = left + 338;
+    const colX = mobile ? left + 16 : left + 338;
+    const modeY = mobile ? top + 244 : top + 34;
     this.modeText = this.add
-      .text(colX, top + 34, `模式 ${MODE_LABELS[meta.mode]}`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
+      .text(mobile ? cx : colX, modeY, `模式 ${MODE_LABELS[meta.mode]}`, { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 18 : TYPE.body}px`, color: hex(PALETTE.lightHigh), align: mobile ? 'center' : 'left' })
+      .setOrigin(mobile ? 0.5 : 0, 0)
       .setDepth(depth + 7);
     this.modeBlurbText = this.add
-      .text(colX, top + 66, MODE_BLURBS[meta.mode], { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(TEXT.dim), wordWrap: { width: 150 } })
+      .text(mobile ? cx : colX, mobile ? top + 270 : top + 66, MODE_BLURBS[meta.mode], { fontFamily: FONT_FAMILY, fontSize: mobile ? '13px' : '18px', color: hex(TEXT.dim), align: mobile ? 'center' : 'left', wordWrap: { width: mobile ? panelW - 32 : 150 } })
+      .setOrigin(mobile ? 0.5 : 0, 0)
       .setDepth(depth + 7);
     const relics = relicDisplay(meta);
-    relics.forEach((r, i) => {
+    if (mobile) {
+      const unlockedRelics = relics.filter((r) => r.unlocked).map((r) => r.name);
+      this.add.text(cx, top + 350, `已获遗物：${unlockedRelics.join('、') || '无'}`, {
+        fontFamily: FONT_FAMILY, fontSize: '13px', color: hex(PALETTE.clothHigh), align: 'center', wordWrap: { width: panelW - 24 },
+      }).setOrigin(0.5, 0).setDepth(depth + 7);
+      for (const [x, delta, label] of [[left + 42, -1, '‹'], [left + panelW - 42, 1, '›']] as const) {
+        this.add.rectangle(x, modeY + 10, 32, 28, UI.surfaceRaised).setStrokeStyle(1, UI.line).setDepth(depth + 8)
+          .setInteractive({ useHandCursor: true }).on('pointerup', () => this.cycleMode(delta));
+        this.add.text(x, modeY + 10, label, { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5).setDepth(depth + 9);
+      }
+    } else relics.forEach((r, i) => {
       // Down to +140 and onto a 28px pitch: the blurb above it wraps to two or
       // three lines at this width, and the relic column started at +108 where
       // the third line now lands.
@@ -173,7 +189,7 @@ export class MetaSelectScene extends Phaser.Scene {
     });
 
     this.messageText = this.add
-      .text(cx, top + panelH - 12, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn) })
+      .text(cx, mobile ? top + panelH - 82 : top + panelH - 12, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 13 : TYPE.caption}px`, color: hex(TEXT.warn) })
       .setOrigin(0.5)
       .setDepth(depth + 9)
       .setVisible(false);
@@ -185,12 +201,12 @@ export class MetaSelectScene extends Phaser.Scene {
       .setAlpha(0.9)
       .setDepth(depth + 2);
     this.add
-      .text(8, height - 11, '鼠标点击选择 / 开始生存 · ↑/↓ 选择 · ←/→ 模式 · ESC 返回标题', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(PALETTE.clothHigh) })
-      .setOrigin(0, 0.5)
+      .text(mobile ? cx : 8, height - 11, mobile ? '点角色选择 · 点下方开始' : '鼠标点击选择 / 开始生存 · ↑/↓ 选择 · ←/→ 模式 · ESC 返回标题', { fontFamily: FONT_FAMILY, fontSize: mobile ? '13px' : '18px', color: hex(PALETTE.clothHigh) })
+      .setOrigin(mobile ? 0.5 : 0, 0.5)
       .setDepth(depth + 3);
 
-    const startX = listX + listW / 2;
-    const startY = top + panelH - 38;
+    const startX = mobile ? cx : listX + listW / 2;
+    const startY = top + panelH - (mobile ? 45 : 38);
     const startButton = this.add
       .rectangle(startX, startY, 160, 36, UI.good)
       .setAlpha(0.9)

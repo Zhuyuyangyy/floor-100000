@@ -534,7 +534,7 @@ export class GameScene extends Phaser.Scene {
     this.bindInput();
 
     if (getGame().day === 1) {
-      this.flash('目标：从第 1 层一路爬到第 100000 层。A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观');
+      this.flash('目标：从第 1 层一路爬到第 100000 层。A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观（仅视觉）');
     }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -2305,7 +2305,7 @@ export class GameScene extends Phaser.Scene {
     footLine.fillStyle(UI.line, 0.9);
     footLine.fillRect(0, DESIGN_HEIGHT - HUD_FOOT_H, DESIGN_WIDTH, 1);
     this.hintText = this.add
-      .text(8, DESIGN_HEIGHT - HUD_FOOT_H / 2, 'A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
+      .text(8, DESIGN_HEIGHT - HUD_FOOT_H / 2, 'A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观（仅视觉） · ESC 菜单', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.highlight) })
       .setOrigin(0, 0.5).setName('hud-hint').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
 
     // The low-HP vignette: pure red wash whose alpha is the pulse function's
@@ -4297,7 +4297,7 @@ export class GameScene extends Phaser.Scene {
     }
     else if (zone === 'up') this.hintText.setText('按 E 上楼');
     else if (zone === 'down') this.hintText.setText('按 E 下楼');
-    else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互 · I 背包 · C 制作 · M 地图 · ESC 菜单');
+    else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观（仅视觉） · ESC 菜单');
   }
 
   // The wanderer only haunts its own floor; it is slower than the player and

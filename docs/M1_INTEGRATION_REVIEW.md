@@ -115,3 +115,13 @@ CI 另有可移植性风险：[Playwright 配置](https://github.com/Zhuyuyangyy
 - 修复后 `npx vitest run src/tests/save.test.ts`：36/36；`npm run test`：58 个文件、757/757；`npm run typecheck`：通过；`npm run build`：通过，保留既有大型 JS bundle 警告。
 - 修复后 `npx playwright test e2e/saveFailure.spec.ts --workers=1 --repeat-each=3 --reporter=line`：6/6 通过；已保存失败提示可视截图到本地忽略文件 `output/save-failure-warning.png` 并肉眼检查。
 - **本轮没有重跑 93 项全量 E2E**。最近一次全量结果仍是修复前 90/93；其余两项旧失败的当前状态未知。
+
+## 后续复查：前五层 Q 键提示（2026-11-22）
+
+**发现与修复**：底部默认操作提示没有列出 Q 键。开局短提示虽然提到切换武器外观，但没有强调仅视觉；直接修改 HUD 初始化文本也会被每帧的空闲回退文本覆盖。现同步补充初始化、运行时回退和开局短提示，均写明“Q 切换武器外观（仅视觉）”，并在 README 说明不影响伤害、计分、装备或存档。本次不改难度、战斗、存档、怪物或物品规则，也没有生成美术素材。
+
+**验证**：
+- `npm run typecheck`、`npm run build` 均通过；构建保留既有的大型 JS bundle 警告。全量单测 58 个文件、757/757 通过。
+- HUD 及 Q 键专项 Playwright 回归 6/6 通过：包括四种视口的常驻提示与布局检查、HUD 更新以及 Q 键只切换视觉、不改变游戏状态或存档的检查。首轮运行发现旧回退文本覆盖提示，修复后得到上述结果。
+- 真实键盘自动化旅程 1/1 通过（约 4.4 分钟）：从第 1 层探索至第 5 层，返回宿舍，制作升级、自然等待至夜间并睡至第 2 天，保存并重新载入；该测试不是玩家主观试玩。截图写入本地忽略目录 `output/playwright/journey-recheck/`。
+- **本轮未重跑全量 E2E 或远端 CI**。最近一次完整本地 E2E 仍为此前的 90/93，不能把专项通过视作全量通过。

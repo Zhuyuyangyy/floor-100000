@@ -43,6 +43,8 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 1280, height: 800
     await page.setViewportSize(viewport);
     await startGame(page);
     await expect.poll(async () => (await bounds(page)).find((o) => o.name === 'hud-goal')?.text).toContain('目标');
+    const hint = (await bounds(page)).find((o) => o.name === 'hud-hint')?.text ?? '';
+    expect(hint).toContain('Q 切换武器外观（仅视觉）');
     const playerScreen = async (): Promise<{ top: number; bottom: number }> => page.evaluate(() => {
       const scene = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as {
         player: { getBounds(): { y: number; height: number } };

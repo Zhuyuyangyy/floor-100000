@@ -4301,6 +4301,10 @@ export class GameScene extends Phaser.Scene {
       this.hintText.setText(offer ? `按 E 上楼 · F 抄近路（${offer.price} 金）` : '按 E 上楼');
     }
     else if (zone === 'down') this.hintText.setText('按 E 下楼');
+    else if (
+      state.currentFloor === Math.max(...PLAYABLE_FLOORS_V01) &&
+      Math.abs(state.player.x - UP_EXIT_X) <= INTERACT_DISTANCE
+    ) this.hintText.setText(`当前开放范围止于第 ${state.currentFloor} 层；右侧楼梯按 E 下行`);
     else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观（仅视觉） · ESC 菜单');
   }
 

@@ -151,14 +151,15 @@ import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
 import { trade } from '../systems/TradeSystem';
 import { aiNpcConfig, archetypeForNpcId, npcFactFromDef } from '../ai/config';
 import { OllamaBrain } from '../ai/brains/ollamaBrain';
+import { LocalPersonaBrain } from '../ai/brains/localPersonaBrain';
 import { OptionTreeBrain } from '../ai/brains/optionTreeBrain';
 import { createNpcState } from '../data/npcPersonalities';
 import { loadNpcState, recordMemory, saveNpcState } from '../systems/NpcMemory';
 import { decideNpcAction, isDialogueFresh, type DialogueSession, type NpcRuntimeConfig } from '../systems/NpcRuntime';
 import {
+  createWandererDecisionConfig,
   decideWandererIntent,
   WandererAutonomyController,
-  WandererFallbackBrain,
   type WandererIntent,
   type WandererSituation,
 } from '../systems/NpcAutonomy';
@@ -390,9 +391,9 @@ export class GameScene extends Phaser.Scene {
   // sessionId/revision：AI 异步返回的保鲜键。玩家每次开对话 sessionId+1，
   // 每次操作 revision+1；过期 AI 结果不得覆盖新对话（P1-2）。
   private dialogueSessionSeq = 0;
-  private dialogue: { npc: NpcId; level: 'main' | 'trade'; selected: number; message: string; lineToggle: number; sessionId: number; revision: number } | null = null;
-  // feat/ai-npc-spark-integration：每个 NPC 一个运行时（降级脑的台词是该
-  // NPC 自己的问候语）。未配置模型时整个 Map 为空，行为与改造前一致。
+  private dialogue: { npc: NpcId; level: 'main' | 'trade'; selected: number; message: string; messageSource: 'script' | 'offline-ai' | 'ollama' | 'fallback'; lineToggle: number; sessionId: number; revision: number } | null = null;
+  // Offline persona brain is the default. A configured local Ollama opts into
+  // model-generated lines; the original greeting remains the fallback.
   private aiRuntimes = new Map<string, NpcRuntimeConfig>();
   private dialogueObjects: PanelObject[] = [];
   /** Modal click shield and option/footer hit areas; kept separate from panel art. */
@@ -400,6 +401,7 @@ export class GameScene extends Phaser.Scene {
   /** one selection band per dialogue row, toggled in refreshDialogue */
   private dialogueBands: Array<{ band: Phaser.GameObjects.Rectangle; rule: Phaser.GameObjects.Rectangle }> = [];
   private dialogueTitle!: Phaser.GameObjects.Text;
+  private dialogueSource!: Phaser.GameObjects.Text;
   private dialogueMessage!: Phaser.GameObjects.Text;
   private dialogueOptions: Phaser.GameObjects.Text[] = [];
   private dialogueOptionIcons: Phaser.GameObjects.Image[] = [];
@@ -2997,10 +2999,14 @@ export class GameScene extends Phaser.Scene {
       .text(left + 10, top + 10, '对话', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
       .setOrigin(0, 0.5)
       .setDepth(depth + 6);
+    this.dialogueSource = this.add
+      .text(left + panelW - 14, top + 10, '基础对白', { fontFamily: FONT_FAMILY, fontSize: '14px', color: hex(PALETTE.clothHigh), align: 'right' })
+      .setOrigin(1, 0.5)
+      .setDepth(depth + 6);
     this.dialogueObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 34, depth + 5));
     // dialogueTitle MUST be in the list: closeDialogue() hides everything in it,
     // and a name left out of the list stays on screen after the panel closes.
-    this.dialogueObjects.push(this.dialogueTitle);
+    this.dialogueObjects.push(this.dialogueTitle, this.dialogueSource);
     this.dialogueMessage = this.add
       .text(cx, top + 45, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: panelW - 44 } })
       .setOrigin(0.5)
@@ -3084,9 +3090,9 @@ export class GameScene extends Phaser.Scene {
     ];
   }
 
-  // ── AI NPC（feat/ai-npc-spark-integration，默认关闭）─────────────────────
-  // 接线原则：AI 只影响「开场白」这一句话与事后的记忆积累；菜单结构、
-  // 交易执行、数值规则全部走原有路径。未配置模型时以下方法全部空转。
+  // ── NPC AI ──────────────────────────────────────────────────────────────
+  // AI only proposes an opening line and records successful trades as memory;
+  // dialogue options, trades and all survival rules remain owned by the game.
 
   private getAiRuntime(npc: NpcDef): NpcRuntimeConfig | null {
     const cfg = aiNpcConfig();
@@ -3094,7 +3100,9 @@ export class GameScene extends Phaser.Scene {
     let runtime = this.aiRuntimes.get(npc.id);
     if (!runtime) {
       runtime = {
-        brain: new OllamaBrain({ baseUrl: cfg.baseUrl, model: cfg.model, timeoutMs: cfg.timeoutMs }),
+        brain: cfg.mode === 'ollama'
+          ? new OllamaBrain({ baseUrl: cfg.baseUrl, model: cfg.model, timeoutMs: cfg.timeoutMs })
+          : new LocalPersonaBrain(),
         // 降级脑给该 NPC 自己的第一句问候——Spark 不可达时玩家看到的就是
         // 改造前那一句，这是护栏 2 的场景侧落地。
         fallback: new OptionTreeBrain(npc.greetings[0]),
@@ -3136,6 +3144,9 @@ export class GameScene extends Phaser.Scene {
       // 不能覆盖玩家眼前的这场新对话（P1-2）。
       if (line && isDialogueFresh(this.currentDialogueSession(), captured)) {
         this.dialogue!.message = line;
+        this.dialogue!.messageSource = decision.source !== 'brain'
+          ? 'fallback'
+          : runtime.brain.id === 'local-persona' ? 'offline-ai' : 'ollama';
         this.dialogue!.revision += 1; // AI 换行本身也是一次修订，防止两次返回互相覆盖
         this.refreshDialogue();
       }
@@ -3168,6 +3179,7 @@ export class GameScene extends Phaser.Scene {
       level: 'main',
       selected: 0,
       message: npc.greetings[0],
+      messageSource: 'script',
       lineToggle: 0,
       sessionId: this.dialogueSessionSeq,
       revision: 0,
@@ -3193,6 +3205,7 @@ export class GameScene extends Phaser.Scene {
       this.dialogue.level = 'main';
       this.dialogue.selected = 0;
       this.dialogue.message = '';
+      this.dialogue.messageSource = 'script';
       this.refreshDialogue();
     } else {
       this.closeDialogue();
@@ -3204,6 +3217,12 @@ export class GameScene extends Phaser.Scene {
     if (!d) return;
     const npc = getNpc(d.npc);
     this.dialogueTitle.setText(`${npc.name}（${npc.title}）`);
+    this.dialogueSource.setText({
+      script: '基础对白',
+      'offline-ai': '本地行为 AI · 规则驱动',
+      ollama: 'Ollama 本地模型',
+      fallback: '模型未响应 · 基础对白',
+    }[d.messageSource]);
     this.dialogueMessage.setText(d.message || '……');
     const options = this.dialogueOptionsView();
     if (d.selected >= options.length) d.selected = options.length - 1;
@@ -3235,6 +3254,7 @@ export class GameScene extends Phaser.Scene {
     const d = this.dialogue;
     if (!d) return;
     d.revision += 1; // 玩家操作使在途 AI 结果过期
+    d.messageSource = 'script';
     const npc = getNpc(d.npc);
     if (d.level === 'main') {
       switch (d.selected) {
@@ -4308,18 +4328,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private requestWandererIntent(state: GameState, event: ActiveEvent): void {
-    if (!aiNpcConfig().enabled || eventStatus(event) === 'resolved' || !this.wanderer) return;
+    const cfg = aiNpcConfig();
+    if (!cfg.enabled || eventStatus(event) === 'resolved' || !this.wanderer) return;
     const token = this.wandererAutonomy.begin();
     if (token === null) return;
-    const cfg = aiNpcConfig();
     const key = this.wandererEventKey;
     const situation = this.wandererSituation(state, event);
-    void decideWandererIntent(state, this.npcStateForWanderer(), situation, {
-      brain: new OllamaBrain({ baseUrl: cfg.baseUrl, model: cfg.model, timeoutMs: cfg.timeoutMs }),
-      fallback: new WandererFallbackBrain(),
-      timeoutMs: cfg.timeoutMs,
-      memoryRecallK: cfg.recallK,
-    }).then((decision) => {
+    void decideWandererIntent(state, this.npcStateForWanderer(), situation, createWandererDecisionConfig(cfg)).then((decision) => {
       const current = getGame().worldEvents.activeEvent;
       if (!this.wandererAutonomy.isCurrent(token) || !this.wanderer || !current || current.type !== 'wanderer') return;
       if (this.wandererEventKey !== key || getGame().currentFloor !== current.floor || eventStatus(current) === 'resolved') return;

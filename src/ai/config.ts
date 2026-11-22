@@ -1,10 +1,7 @@
 // AI NPC 配置（RFC §4 护栏 4：地址与模型名走配置，不入库）。
 //
-// 优先级：Vite 环境变量（VITE_OLLAMA_URL / VITE_NPC_MODEL / VITE_NPC_TIMEOUT_MS）
-// 提供默认值；查询参数 ?ainpc=1 可强制开启（模型名仍需配置）。
-//
-// 安全默认：模型名为空 → enabled=false。也就是说没有任何配置时，
-// 游戏行为与改造前逐字节一致——AI 是显式 opt-in 的增量。
+// 无模型配置时使用离线规则人格脑；显式配置 VITE_NPC_MODEL 后才请求
+// 项目自有的本地 Ollama。VITE_NPC_ENABLED=false 或 ?ainpc=0 可关闭两者。
 
 import { ARCHETYPES } from '../data/npcPersonalities';
 import type { NpcFact } from './rulesExecutor';
@@ -14,6 +11,7 @@ import type { NpcDef } from '../data/npcs';
 
 export interface AiNpcConfig {
   enabled: boolean;
+  mode: 'off' | 'offline' | 'ollama';
   baseUrl: string;
   model: string;
   timeoutMs: number;
@@ -38,13 +36,15 @@ function queryValue(key: string): string | null {
 }
 
 export function aiNpcConfig(): AiNpcConfig {
-  const model = envValue('VITE_NPC_MODEL') ?? '';
+  const model = (envValue('VITE_NPC_MODEL') ?? '').trim();
   const baseUrl = envValue('VITE_OLLAMA_URL') ?? 'http://127.0.0.1:11434';
   const timeoutRaw = Number(envValue('VITE_NPC_TIMEOUT_MS') ?? '');
   const forced = queryValue('ainpc') === '1';
+  const disabled = queryValue('ainpc') === '0';
+  const enabled = !disabled && (forced || envValue('VITE_NPC_ENABLED') !== 'false');
   return {
-    // 显式 opt-in：配了模型，或带了 ?ainpc=1 且配了模型
-    enabled: model.length > 0 && (forced || envValue('VITE_NPC_MODEL') !== undefined),
+    enabled,
+    mode: !enabled ? 'off' : model.length > 0 ? 'ollama' : 'offline',
     baseUrl,
     model,
     // 45s：Spark 实测 npc-qwen(17G) 冷启 ~33s、热推理 21-32s（RFC §8）。

@@ -6,6 +6,8 @@
 import { buildObservation } from './NpcRuntime';
 import { ARCHETYPES, createNpcState } from '../data/npcPersonalities';
 import { validateProposal, type NpcEventFact, type NpcFact } from '../ai/rulesExecutor';
+import { OllamaBrain } from '../ai/brains/ollamaBrain';
+import type { AiNpcConfig } from '../ai/config';
 import type { NpcActionProposal, NpcBrain, NpcObservation, NpcPersistedState } from '../ai/types';
 import type { GameState } from '../core/gameTypes';
 
@@ -102,6 +104,25 @@ export class WandererFallbackBrain implements NpcBrain {
   async decide(_observation: NpcObservation): Promise<NpcActionProposal | null> {
     return { action: { type: 'attack' }, confidence: 1 };
   }
+}
+
+/**
+ * Only an explicit Ollama configuration may construct the network-backed brain.
+ * Offline mode uses the existing deterministic chase behavior as its primary
+ * brain, so even health checks cannot probe the local Ollama endpoint.
+ */
+export function createWandererDecisionConfig(
+  config: Pick<AiNpcConfig, 'mode' | 'baseUrl' | 'model' | 'timeoutMs' | 'recallK'>,
+): WandererDecisionConfig {
+  const fallback = new WandererFallbackBrain();
+  return {
+    brain: config.mode === 'ollama'
+      ? new OllamaBrain({ baseUrl: config.baseUrl, model: config.model, timeoutMs: config.timeoutMs })
+      : fallback,
+    fallback,
+    timeoutMs: config.timeoutMs,
+    memoryRecallK: config.recallK,
+  };
 }
 
 export async function decideWandererIntent(

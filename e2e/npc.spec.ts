@@ -242,3 +242,23 @@ test('back and exit do not get stuck', async ({ page }) => {
   await page.keyboard.press('E');
   expect(await hasVisibleText(page, '阿林（维修工）')).toBe(true);
 });
+
+test('offline persona AI is visible and responds without a model service', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  await startGame(page, 42);
+  await goToNeighborFloor(page);
+  await setX(page, 480);
+  await pressEUntil(page, async () => hasVisibleText(page, '阿林（维修工）'));
+
+  await page.waitForFunction(() => {
+    const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean }> } } | null } } }).__PHASER_GAME__;
+    const list = g?.scene.getScene('Game')?.children.list ?? [];
+    return list.some((o) => o.type === 'Text' && o.visible && (o.text ?? '').includes('本地行为 AI · 规则驱动'));
+  }, undefined, { timeout: 5000 });
+
+  expect(await hasVisibleText(page, '我是阿林，守着这层线路；电池和废金属都用得上。')).toBe(true);
+  await page.screenshot({ path: 'test-results/local-ai-dialogue.png' });
+  expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+});

@@ -86,7 +86,7 @@ import { buy, sell, shopStock, type ShopEntry } from '../systems/shop';
 import { charge, recordShortcut, shortcutAvailable, shortcutPrice, shortcutSkip, timesTaken } from '../systems/shortcut';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
-import { clearSave, saveFailureCount, saveToStorage } from '../systems/SaveSystem';
+import { clearSave, saveFailureEpisodeCount, saveToStorage } from '../systems/SaveSystem';
 import { playSfx } from '../render/audio';
 import { applyPanelDepth, buildPanel, createMarker, lockToScreen, HUD_FEEDBACK_DEPTH, PANEL_DEPTH, placeMarker, placeMarkerLeftOf, type PanelObject } from '../render/panels';
 import {
@@ -415,10 +415,10 @@ export class GameScene extends Phaser.Scene {
   private pauseMarker!: Phaser.GameObjects.Image;
   private pauseSelected = 0;
   private lastSavedAbsoluteMinute = Number.NEGATIVE_INFINITY;
-  // B3-01 D9: last save-failure count we already warned about. Survives a scene
-  // restart on purpose — the page's storage is still broken after 重新开始, so
-  // warning again would be right, and the counter has not moved.
-  private lastSaveFailures = 0;
+  // B3-01 D9: last uninterrupted save-failure episode we already warned about.
+  // Survives a scene restart on purpose — storage is still broken after 重新开始,
+  // so there is no reason to re-flash on every failed autosave attempt.
+  private lastSaveFailureEpisodes = 0;
   private lastActiveEvent: ActiveEvent | null = null;
   // Per-frame input guard (GHI-03 m9). Phaser can deliver one DOM keydown
   // several times inside a single frame when several keys land in the same queue
@@ -4092,13 +4092,12 @@ export class GameScene extends Phaser.Scene {
     }
     const state = getGame();
 
-    // B3-01 D9: a rejected write used to be silent, so a full disk or a private
-    // window lost the run without a word. The count only grows, so comparing it
-    // against what we last saw turns any failed save — autosave, craft, trade,
-    // sleep, floor change — into exactly one warning.
-    const failures = saveFailureCount();
-    if (failures > this.lastSaveFailures) {
-      this.lastSaveFailures = failures;
+    // B3-01 D9: a rejected write used to be silent. Autosave retries every few
+    // frames, so warn once per uninterrupted failure period rather than letting
+    // each rejected retry restart the same flash indefinitely.
+    const failureEpisodes = saveFailureEpisodeCount();
+    if (failureEpisodes > this.lastSaveFailureEpisodes) {
+      this.lastSaveFailureEpisodes = failureEpisodes;
       this.flash('存档失败：进度不会被保留（浏览器存储不可用）');
     }
 

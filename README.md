@@ -125,7 +125,7 @@
 
 三条刻意的技术决定：
 
-1. **规则与渲染彻底分开**：`systems/` 不 import Phaser，756 个单测用例无需浏览器也能独立运行。
+1. **规则与渲染彻底分开**：`systems/` 不 import Phaser，757 个单测用例无需浏览器也能独立运行。
 2. **随机必须可复现**：全项目禁用 `Math.random()`，一律用 `deriveSeed(seed, day, 用途)` 派生。同种子必然同结果。
 3. **不用物理引擎**：连 Phaser 自带的 Arcade Physics 都没开。移动是手写的速度斜坡（`stepHorizontalSpeed`），2D 横版不需要刚体。
 
@@ -134,7 +134,7 @@
 | 关卡 | 规模 | 命令 |
 | --- | --- | --- |
 | 类型检查 | TypeScript strict，零 `any` 滥用 | `npm run typecheck` |
-| 单元测试 | 58 个文件 / **756 个用例**；当前全套通过 | `npm run test` |
+| 单元测试 | 58 个文件 / **757 个用例**；当前全套通过 | `npm run test` |
 | 浏览器测试 | 28 个 Playwright 文件 / 93 个用例，含夹具回归与真实输入旅程 | `npm run test:e2e` |
 | CI | push / PR 运行 typecheck、单测、build、浏览器安装及 E2E | `.github/workflows/ci.yml` |
 

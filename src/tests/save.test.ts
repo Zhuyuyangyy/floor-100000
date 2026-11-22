@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { SCHEMA_VERSION } from '../core/constants';
 import { GAME_CONFIG } from '../core/config';
-import { deserialize, saveFailureCount, saveToStorage, serialize, validateGameState } from '../systems/SaveSystem';
+import { deserialize, saveFailureCount, saveFailureEpisodeCount, saveToStorage, serialize, validateGameState } from '../systems/SaveSystem';
 import { getFloorView } from '../systems/LootSystem';
 import { tryContinue } from '../core/session';
 import type { GameState } from '../core/gameTypes';
@@ -333,6 +333,25 @@ describe('a rejected write is counted, not just returned (B3-01 D9)', () => {
     expect(saveFailureCount()).toBe(before + 2);
   });
 
+  it('starts a new warning episode only after a save succeeds', () => {
+    const state = createNewGame(1);
+    // Ensure the test starts outside a prior failure episode.
+    expect(saveToStorage(state, fakeStorage(false))).toBe(true);
+    const failuresBefore = saveFailureCount();
+    const episodesBefore = saveFailureEpisodeCount();
+
+    expect(saveToStorage(state, fakeStorage(true))).toBe(false);
+    expect(saveFailureEpisodeCount()).toBe(episodesBefore + 1);
+    expect(saveToStorage(state, fakeStorage(true))).toBe(false);
+    expect(saveFailureEpisodeCount()).toBe(episodesBefore + 1);
+    expect(saveFailureCount()).toBe(failuresBefore + 2);
+
+    expect(saveToStorage(state, fakeStorage(false))).toBe(true);
+    expect(saveToStorage(state, fakeStorage(true))).toBe(false);
+    expect(saveFailureEpisodeCount()).toBe(episodesBefore + 2);
+    expect(saveFailureCount()).toBe(failuresBefore + 3);
+  });
+
   it('starts at zero for a fresh page, so a clean run never warns', () => {
     // The count is per page load: it exists to notice a *new* failure, not to
     // nag about one the player has already been told about.
@@ -373,4 +392,3 @@ describe('tryContinue reports why a save is unusable (GHI-03 M4)', () => {
     if (r.ok) expect(r.state.runSeed).toBe(7);
   });
 });
-

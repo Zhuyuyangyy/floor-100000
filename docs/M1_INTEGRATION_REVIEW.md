@@ -134,7 +134,17 @@ CI 另有可移植性风险：[Playwright 配置](https://github.com/Zhuyuyangyy
 - 新增 HUD E2E 断言先在旧实现上按预期失败：开场提示消失后，文本只有「目标 搜刮 3 个容器 · 压力 20」，没有长期目标；改完后 `npx playwright test e2e/hudLayout.spec.ts --workers=1 --reporter=line` **5/5 通过**，覆盖四种视口与地图返回，检查主线目标、每日目标和压力同时存在。
 - `npm run test`：58 个文件、757/757 通过；`npm run typecheck` 通过；`npm run build` 通过，仍有既有的大型 JS bundle 警告。
 - 1280×720 画面经目视复核，截图保存在本地忽略目录 `output/playwright/hud/1280x720-day.png`；主线目标完整可读，环境行与顶部 HUD 未重叠，底部操作提示仍保留 Q 的「仅视觉」限定。
-- **本轮未运行全量 E2E 或远端 CI**；专项通过不代表完整 E2E 已全绿。
+- **本轮未重跑全量 E2E 或远端 CI**；专项通过不代表完整 E2E 已全绿。
+
+## 后续复查：第 5 层上行边界静默（2026-11-22）
+
+**发现与修复**：使用鼠标开始新游戏、再以真实键盘走楼梯并探索第 1 至第 5 层；没有跳层或修改游戏状态。到达第 5 层左侧上行口后按 E，因为此处没有开放的第 6 层楼梯，游戏没有任何反馈；这与 HUD 仍显示的「抵达第 100000 层」长期主线目标形成反差，新玩家无法判断按键是否生效。只在第 5 层上行边界补一条提示：「当前开放范围止于第 5 层；右侧楼梯可下行」。没有开放第 6 层，也没有改楼梯、难度、伤害、计分、存档或其他玩法规则。
+
+**验证**：
+- 新增 `e2e/topFloorBoundary.spec.ts`：从新游戏使用真实键盘逐层走到第 5 层，再在上行口按 E；修复前断言读到空反馈、按预期失败，修复后专项 E2E **1/1 通过**。测试不注入楼层或位置状态。
+- `npm run typecheck` 通过；`VITE_NPC_MODEL= npm test -- --reporter=dot` **58 个文件、759/759 通过**；`npm run build` 通过，只有既有的大型 JS chunk 警告。
+- 成功态截图 `test-results/topFloorBoundary-E-at-the--603d3-hat-no-higher-route-is-open-chromium/top-floor-boundary.png` 已重新生成并目视检查；提示清晰，未遮挡顶部 HUD。
+- 单 worker 全量 E2E：**96 项中 95 通过、1 失败，用时 25.1 分钟**；失败为 `e2e/npc.spec.ts:177` 小周交易用例在前置楼层移动 helper 未观察到 E 生效。新增边界专项在全量中通过。对该 NPC 用例定向重复 3 次，**2 通过、1 失败**，同样失败在楼层移动 helper，说明该失败间歇出现；本轮不扩大修复范围。
 
 ## 后续复查：第 4 层近路报价一致性（2026-11-22）
 

@@ -3640,6 +3640,12 @@ export class GameScene extends Phaser.Scene {
     const zone = currentInteractionZone(state);
     if (zone === 'up') this.changeFloor(1);
     else if (zone === 'down') this.changeFloor(-1);
+    else if (
+      state.currentFloor === Math.max(...PLAYABLE_FLOORS_V01) &&
+      Math.abs(state.player.x - UP_EXIT_X) <= INTERACT_DISTANCE
+    ) {
+      this.flash(`当前开放范围止于第 ${state.currentFloor} 层；右侧楼梯可下行`);
+    }
   }
 
   // ── the paid shortcut (OVERHAUL Wave C2) ─────────────────────────────────

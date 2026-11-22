@@ -65,6 +65,14 @@ test('E at the fifth-floor upper boundary explains that no higher route is open'
   for (const floor of [2, 3, 4, 5]) await climbTo(page, floor);
   expect((await readState(page)).currentFloor).toBe(5);
 
+  await walkToUpStairs(page);
+  await expect.poll(() => page.evaluate(() => {
+    const scene = window.__PHASER_GAME__?.scene.getScene('Game') as unknown as {
+      children: { list: Array<{ name?: string; text?: string }> };
+    } | null;
+    return scene?.children.list.find((object) => object.name === 'hud-hint')?.text ?? '';
+  })).toContain('当前开放范围止于第 5 层');
+
   // Clear the landing flash so the assertion can only be satisfied by feedback
   // from the boundary press itself.
   await page.waitForFunction(() => {

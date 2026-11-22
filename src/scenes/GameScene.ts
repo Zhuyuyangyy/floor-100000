@@ -3648,6 +3648,10 @@ export class GameScene extends Phaser.Scene {
   // fast-travel. The charge happens before the jump, so a broke player never
   // moves.
   private tryShortcut(): void {
+    if (this.stairClimb) {
+      this.flash('楼梯攀爬中，落地后再用近路');
+      return;
+    }
     const state = getGame();
     if (state.status !== 'playing') return;
     const top = Math.max(...PLAYABLE_FLOORS_V01);

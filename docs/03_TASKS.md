@@ -102,7 +102,7 @@
 | B3-16 | **第一天压力前移**（产品经理评审 P0）：饥渴起始 80→65，让生存槽第一天就有可见跌幅；满包 flash/常驻警告补上「可合并堆才能进包」规则说明 | ✅ 见 [`B3-16_DAY1_PRESSURE.md`](B3-16_DAY1_PRESSURE.md) |
 | B3-17 | **首层 TWOM 式生存纵切片**：日记与压力、宿舍夜间决策（休息/治疗/修理/照顾）、睡眠结算与次日后果；战斗接入刀光/招架/受击反馈 | ✅ 见 [`plans/2026-11-08-twom-survival-slice-design.md`](plans/2026-11-08-twom-survival-slice-design.md) 与 [`first-floor-survival-slice-report.md`](first-floor-survival-slice-report.md) |
 | B3-18 | **宿舍防御后果**：未加固宿舍按 seed 可能遭夜袭，修门稳定阻止袭击；HP、压力和日记都留下真实结果 | ✅ 见 [`B3-18_SHELTER_DEFENSE.md`](B3-18_SHELTER_DEFENSE.md) |
-| B3-19 | **自然楼梯攀爬**：普通楼层切换改为同场景连续移动，攀爬中不改楼层状态，落地后才提交访问与存档 | ✅ 见 [`B3-19_NATURAL_STAIRS.md`](B3-19_NATURAL_STAIRS.md) 与 [`plans/2026-11-10-natural-stair-traversal-design.md`](plans/2026-11-10-natural-stair-traversal-design.md) |
+| B3-19 | **自然楼梯攀爬**：普通楼层切换改为同场景连续移动，攀爬中不改楼层状态，落地后才提交访问与存档；2026-11-22 补修首层/顶层端点相机裁切，并验证落地恢复常规 bounds | ✅ 专项回归通过，见 [`B3-19_NATURAL_STAIRS.md`](B3-19_NATURAL_STAIRS.md) 与 [`plans/2026-11-10-natural-stair-traversal-design.md`](plans/2026-11-10-natural-stair-traversal-design.md) |
 | B3-UI-01 | **角色选择鼠标可用性**：鼠标经过幸存者行不会擅自改选；只有点击行才选择 | ✅ 见 [`B3-UI-01_MOUSE_SELECTION.md`](B3-UI-01_MOUSE_SELECTION.md) |
 | HUD-01 | **M1 HUD 视觉收口**：生存数值、楼层时间、目标环境、消息与操作提示分区；四种窗口截图及边界验收，不修改玩法 | 🔵 独立分支实现与专项验收，完整回归见 [`M1_HUD_VISUAL_CLOSEOUT.md`](M1_HUD_VISUAL_CLOSEOUT.md) |
 | **M1 暴改** | 五 agent 并行（作战书 [`OVERHAUL_M1.md`](OVERHAUL_M1.md)）：问号点遭遇+守门人（抄 ALTACIMA）、巡游体 lunge 状态机+dwell scout（抄 CENTUM）、每日目标+深度计分、低血红晕+精力减速+三音效、attack/hurt/search 新手摆姿态（逆向 CENTUM 精灵表结构） | ✅ 见 [`OVERHAUL_M1_REPORT.md`](OVERHAUL_M1_REPORT.md) |

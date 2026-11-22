@@ -177,6 +177,8 @@ const CRAFT_ROW_PITCH = 48;
 // resampled and blur the pixel look.
 const TYPE_BODY = 26;
 const TYPE_AUX = 22;
+// Keep a little breathing room between the moving actor and the fixed HUD bands.
+const STAIR_CAMERA_HUD_GAP = 12;
 
 const WANDERER_FLEE_SAFE_DISTANCE = 280;
 const WANDERER_FLEE_EXIT_MARGIN = 24;
@@ -562,6 +564,29 @@ export class GameScene extends Phaser.Scene {
     return { width: cam.width * cam.zoom, height: cam.height * cam.zoom };
   }
 
+  /** Keep the complete stair path visible without changing the resting floor bounds. */
+  private setFloorCameraBounds(
+    floor: number,
+    traversal?: NonNullable<ReturnType<typeof stairTraversalFor>>,
+  ): { topBound: number; bottomBound: number } {
+    const lowest = PLAYABLE_FLOORS_V01[0];
+    const highest = PLAYABLE_FLOORS_V01[PLAYABLE_FLOORS_V01.length - 1];
+    let topBound = floor <= lowest ? -FLOOR_BAND : -FLOOR_HEIGHT * (STACK_ABOVE + 1);
+    let bottomBound = floor >= highest ? FLOOR_HEIGHT + FLOOR_BAND : FLOOR_HEIGHT * (STACK_BELOW + 2);
+
+    if (traversal) {
+      const pathTop = Math.min(traversal.startY, traversal.endY);
+      const pathBottom = Math.max(traversal.startY, traversal.endY);
+      // The camera viewport begins behind the context HUD and ends above the
+      // bottom hint strip. Extend only as far as the actor needs during travel.
+      topBound = Math.min(topBound, pathTop - this.player.displayHeight - HUD_LAYOUT.contextBottom - STAIR_CAMERA_HUD_GAP);
+      bottomBound = Math.max(bottomBound, pathBottom + HUD_FOOT_H + STAIR_CAMERA_HUD_GAP);
+    }
+
+    this.cameras.main.setBounds(0, topBound, FLOOR_WIDTH, bottomBound - topBound);
+    return { topBound, bottomBound };
+  }
+
   private drawFloor(): void {
     const state = getGame();
     const floor = state.currentFloor;
@@ -651,19 +676,10 @@ export class GameScene extends Phaser.Scene {
     // 1 following x only, which could never show more than the floor you were
     // standing on.
     const cam = this.cameras.main;
-    cam.setZoom(FLOOR_VIEW_ZOOM);    // The bounds are per-floor, not global. On the bottom floor there is nothing
-    // above it, so the camera must not be allowed to scroll up into the void —
-    // a global bound let it, and the bottom floor showed 200px of empty black
-    // over the dorm. Same at the top of the tower looking down.
-    const topBound = floor <= PLAYABLE_FLOORS_V01[0] ? -FLOOR_BAND : -FLOOR_HEIGHT * (STACK_ABOVE + 1);
-    const bottomBound =
-      floor >= PLAYABLE_FLOORS_V01[PLAYABLE_FLOORS_V01.length - 1]
-        ? FLOOR_HEIGHT + FLOOR_BAND
-        : FLOOR_HEIGHT * (STACK_BELOW + 2);
-    // The world width equals the design viewport width. Locking the horizontal
-    // bounds to one floor keeps the full corridor visible when the player lands
-    // at x=40 or x=1240; only the tower's vertical cross-section may scroll.
-    cam.setBounds(0, topBound, FLOOR_WIDTH, bottomBound - topBound);
+    cam.setZoom(FLOOR_VIEW_ZOOM);
+    // Per-floor bounds avoid showing void at the tower's ends. Horizontal bounds
+    // remain locked to one floor; only vertical space expands while on the stairs.
+    const { topBound, bottomBound } = this.setFloorCameraBounds(floor);
     cam.startFollow(this.player, true, 0.15, 0.15);
     // Centred on the player the moment the floor is drawn: a follow with
     // lerp 0.15 takes a third of a second to catch up, and during that time the
@@ -3959,6 +3975,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.speedX = 0;
     this.stairClimb = { ...traversal, elapsedMs: 0 };
+    this.setFloorCameraBounds(getGame().currentFloor, this.stairClimb);
     this.player.setFlipX(direction < 0);
     this.player.play(walkAnimKey(this.metaSelectedCharacter()), true);
     this.player.anims.timeScale = 1.25;
@@ -3988,6 +4005,7 @@ export class GameScene extends Phaser.Scene {
     const result = completeStairTraversal(state, climb);
     this.stairClimb = undefined;
     if (!result.ok) {
+      this.setFloorCameraBounds(state.currentFloor);
       this.player.setPosition(state.player.x, PLAYER_FEET_Y);
       this.flash(result.reason === 'top' ? '已到顶层' : '已到尽头');
       return;

@@ -135,7 +135,7 @@
 | --- | --- | --- |
 | 类型检查 | TypeScript strict，零 `any` 滥用 | `npm run typecheck` |
 | 单元测试 | 58 个文件 / **756 个用例**；当前全套通过 | `npm run test` |
-| 浏览器测试 | 27 个 Playwright 文件 / 90 个用例，含夹具回归与真实输入旅程 | `npm run test:e2e` |
+| 浏览器测试 | 28 个 Playwright 文件 / 93 个用例，含夹具回归与真实输入旅程 | `npm run test:e2e` |
 | CI | push / PR 运行 typecheck、单测、build、浏览器安装及 E2E | `.github/workflows/ci.yml` |
 
 浏览器测试能读到真实的游戏状态，靠的是 `src/main.ts` 里一个只在开发模式挂载的 `window.__PHASER_GAME__`——生产构建里没有。

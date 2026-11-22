@@ -355,6 +355,7 @@ export class GameScene extends Phaser.Scene {
   private shelterInputObjects: Phaser.GameObjects.Zone[] = [];
   private shelterMarker!: Phaser.GameObjects.Image;
   private feedbackTimer?: Phaser.Time.TimerEvent;
+  private introFeedbackTimeout?: number;
   private lastClock = '';
   private lastStats = '';
 
@@ -534,13 +535,16 @@ export class GameScene extends Phaser.Scene {
     this.bindInput();
 
     if (getGame().day === 1) {
-      this.flash('第 1 层：靠近储物柜，按 E 搜刮净水。');
+      this.flashOnWallClock('第 1 层：靠近储物柜，按 E 搜刮净水。');
     }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       // cameras.main can be null during teardown (Phaser 4 shutdown gotcha).
       this.cameras.main?.stopFollow();
       this.feedbackTimer?.remove(false);
+      this.feedbackTimer = undefined;
+      if (this.introFeedbackTimeout !== undefined) window.clearTimeout(this.introFeedbackTimeout);
+      this.introFeedbackTimeout = undefined;
       this.unbindInput();
     });
   }
@@ -2604,8 +2608,23 @@ export class GameScene extends Phaser.Scene {
 
   private flash(msg: string): void {
     this.feedbackText.setText(msg);
+    if (this.introFeedbackTimeout !== undefined) window.clearTimeout(this.introFeedbackTimeout);
+    this.introFeedbackTimeout = undefined;
     this.feedbackTimer?.remove(false);
     this.feedbackTimer = this.time.delayedCall(1600, () => this.feedbackText.setText(''));
+  }
+
+  private flashOnWallClock(msg: string): void {
+    this.feedbackTimer?.remove(false);
+    this.feedbackTimer = undefined;
+    if (this.introFeedbackTimeout !== undefined) window.clearTimeout(this.introFeedbackTimeout);
+    this.feedbackText.setText(msg);
+    // The first-floor tutorial is real-time guidance; Phaser's fixed-step timer
+    // stretches under a throttled renderer because it advances one frame per update.
+    this.introFeedbackTimeout = window.setTimeout(() => {
+      this.introFeedbackTimeout = undefined;
+      this.feedbackText.setText('');
+    }, 1600);
   }
 
   private applyNightLighting(): void {

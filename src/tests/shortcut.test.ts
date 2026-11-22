@@ -5,6 +5,7 @@ import {
   charge,
   recordShortcut,
   shortcutAvailable,
+  shortcutOffer,
   shortcutPrice,
   shortcutSkip,
   timesTaken,
@@ -56,6 +57,26 @@ describe('shortcut pricing', () => {
 
   it('gets more expensive with depth', () => {
     expect(shortcutPrice(4, 2, 0, 0)).toBeGreaterThan(shortcutPrice(2, 2, 0, 0));
+  });
+
+  it('quotes the same capped skip and price that can actually be purchased near the top', () => {
+    const state = createNewGame(42);
+    state.currentFloor = 4;
+    const salt = (state.runSeed ^ (state.day * 7919) ^ (state.currentFloor * 104729)) >>> 0;
+    const offer = shortcutOffer(state, 5);
+    expect(offer).toEqual({
+      skip: 1,
+      targetFloor: 5,
+      price: shortcutPrice(4, 1, timesTaken(state), salt),
+    });
+    expect(offer?.price).toBeLessThan(shortcutPrice(4, shortcutSkip(salt), timesTaken(state), salt));
+  });
+
+  it('offers no shortcut at the dorm or on the top floor', () => {
+    const state = createNewGame(42);
+    expect(shortcutOffer(state, 5)).toBeNull();
+    state.currentFloor = 5;
+    expect(shortcutOffer(state, 5)).toBeNull();
   });
 });
 

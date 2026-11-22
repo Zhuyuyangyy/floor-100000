@@ -107,6 +107,7 @@
 | B3-UI-02 | **存档失败提示去重**：连续存档失败只提醒一次，成功恢复后再次失败重新提醒；不改存档内容与规则 | ✅ 专项单测与 E2E 通过，见 [`M1_INTEGRATION_REVIEW.md`](M1_INTEGRATION_REVIEW.md) |
 | B3-UI-03 | **常驻操作提示补充 Q 武器外观切换（仅视觉）**：修正运行时回退文案覆盖；不改伤害、计分、装备、存档或战斗规则 | ✅ 多视口 HUD 与 Q 隔离回归 6/6 通过，见 [`M1_INTEGRATION_REVIEW.md`](M1_INTEGRATION_REVIEW.md) |
 | B3-UI-04 | **首五层主线目标常驻**：长期攀登目标始终与每日目标并列可见，开场提示聚焦第 1 层第一步 | ✅ HUD 多视口专项回归 5/5，通过记录见 [`M1_INTEGRATION_REVIEW.md`](M1_INTEGRATION_REVIEW.md) |
+| B3-UI-05 | **付费近路报价一致**：楼梯口提示与 F 购买共用顶层截断后的目标和金额；不改收费公式 | ✅ 真实键盘专项及单 worker 全量 E2E 94/94、单测通过，见 [`M1_INTEGRATION_REVIEW.md`](M1_INTEGRATION_REVIEW.md) |
 | HUD-01 | **M1 HUD 视觉收口**：生存数值、楼层时间、目标环境、消息与操作提示分区；四种窗口截图及边界验收，不修改玩法 | 🔵 独立分支实现与专项验收，完整回归见 [`M1_HUD_VISUAL_CLOSEOUT.md`](M1_HUD_VISUAL_CLOSEOUT.md) |
 | **M1 暴改** | 五 agent 并行（作战书 [`OVERHAUL_M1.md`](OVERHAUL_M1.md)）：问号点遭遇+守门人（抄 ALTACIMA）、巡游体 lunge 状态机+dwell scout（抄 CENTUM）、每日目标+深度计分、低血红晕+精力减速+三音效、attack/hurt/search 新手摆姿态（逆向 CENTUM 精灵表结构） | ✅ 见 [`OVERHAUL_M1_REPORT.md`](OVERHAUL_M1_REPORT.md) |
 | **通宵作战** | 打到竞品品度（作战书 [`OVERNIGHT_PLAN.md`](OVERNIGHT_PLAN.md)）：Wave A 真回合制战斗（15 怪 7 行为）· Wave B 可解锁 4 幸存者 + 三档模式 + 5 遗物 · Wave C 行商经济 + CENTUM 公式付费跳层 · Wave D 对账 | ✅ 见 [`OVERNIGHT_FINAL.md`](OVERNIGHT_FINAL.md) |

@@ -135,3 +135,14 @@ CI 另有可移植性风险：[Playwright 配置](https://github.com/Zhuyuyangyy
 - `npm run test`：58 个文件、757/757 通过；`npm run typecheck` 通过；`npm run build` 通过，仍有既有的大型 JS bundle 警告。
 - 1280×720 画面经目视复核，截图保存在本地忽略目录 `output/playwright/hud/1280x720-day.png`；主线目标完整可读，环境行与顶部 HUD 未重叠，底部操作提示仍保留 Q 的「仅视觉」限定。
 - **本轮未运行全量 E2E 或远端 CI**；专项通过不代表完整 E2E 已全绿。
+
+## 后续复查：第 4 层近路报价一致性（2026-11-22）
+
+**发现与修复**：Seed 42、第一天第 4 层上楼口，HUD 原显示近路 **128 金**，实际按 F 时系统按剩余楼层截断后只要求 **108 金**。玩家据 HUD 判断是否负担得起，会得到错误信息。新增纯逻辑 `shortcutOffer()`，统一计算可跳层数、目标楼层和价格；HUD 提示与 F 购买共用同一报价。保留原有实际收费公式与现有扣款结果（该场景仍是 108 金），没有改变近路可用楼层、奖励、计分、伤害或存档规则。
+
+**验证**：
+- 修复前新增的真实键盘 Playwright 回归先按预期失败：玩家从第 1 层真实走楼梯到第 4 层，HUD 显示 128 金，按 F 的反馈为「抄近路要 108 金」。
+- 修复后 `npx playwright test e2e/shortcutHint.spec.ts --workers=1 --reporter=line`：**1/1 通过**。测试真实按键走到第 4 层并验证余额不足时楼层/金币/使用次数不变；成功路径只为近路交易 fixture 注入精确报价的测试金币，随后真实按 F、落到第 5 层且金币正好扣除报价。该测试不是完整生存旅程或真人试玩。
+- `npx vitest run src/tests/shortcut.test.ts`：**11/11 通过**；`npm test`：**58 个文件、759/759 通过**；`npm run typecheck`：通过；`npm run build`：通过，保留既有的 500KB chunk 警告。
+- HUD 截图 `output/playwright/shortcut-floor-four-hint.png`（1280×800）已目视复核：第 4 层楼梯提示为 108 金，处于 HUD 底栏内，未遮挡角色或状态区。
+- 完整浏览器回归 `npx playwright test --workers=1 --reporter=line`：**94/94 通过，用时 23.2 分钟**（单 worker 全套 E2E，含本次近路测试）；本次运行未观察到全套失败。未运行远端 CI。

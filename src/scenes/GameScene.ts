@@ -83,7 +83,7 @@ import { MONSTERS, applyBehavior, behaviorModifiers, rollMonster, shouldCowardBr
 import { relicDamageMultForCombat, lootBonus, moveSpeedMult } from '../systems/relics';
 import { modeGuardianDamageMult } from '../systems/modes';
 import { buy, sell, shopStock, type ShopEntry } from '../systems/shop';
-import { charge, recordShortcut, shortcutAvailable, shortcutPrice, shortcutSkip, timesTaken } from '../systems/shortcut';
+import { charge, recordShortcut, shortcutOffer } from '../systems/shortcut';
 import { deriveSeed, makeRng } from '../core/rng';
 import { addItem } from '../systems/InventorySystem';
 import { clearSave, saveFailureEpisodeCount, saveToStorage } from '../systems/SaveSystem';
@@ -3651,7 +3651,8 @@ export class GameScene extends Phaser.Scene {
     const state = getGame();
     if (state.status !== 'playing') return;
     const top = Math.max(...PLAYABLE_FLOORS_V01);
-    if (!shortcutAvailable(state.currentFloor, top)) {
+    const offer = shortcutOffer(state, top);
+    if (!offer) {
       this.flash('这里没有可抄的近路');
       return;
     }
@@ -3660,17 +3661,13 @@ export class GameScene extends Phaser.Scene {
       this.flash('要走上楼口才能抄近路');
       return;
     }
-    const salt = (state.runSeed ^ (state.day * 7919) ^ (state.currentFloor * 104729)) >>> 0;
-    const skip = Math.min(shortcutSkip(salt), top - state.currentFloor);
-    const price = shortcutPrice(state.currentFloor, skip, timesTaken(state), salt);
-    if (!charge(state, price)) {
-      this.flash(`抄近路要 ${price} 金，你只有 ${state.player.gold}`);
+    if (!charge(state, offer.price)) {
+      this.flash(`抄近路要 ${offer.price} 金，你只有 ${state.player.gold}`);
       return;
     }
     recordShortcut(state);
     // Apply the jump through the same path a stair uses, then walk the rest.
-    const target = Math.min(top, state.currentFloor + skip);
-    while (state.currentFloor < target) {
+    while (state.currentFloor < offer.targetFloor) {
       const r = tryChangeFloor(state, 1);
       if (!r.ok) break;
     }
@@ -3679,7 +3676,7 @@ export class GameScene extends Phaser.Scene {
     this.drawFloor();
     saveToStorage(state);
     this.cameras.main.flash(180, 0, 0, 0);
-    this.flash(`你抄近路跳到了第 ${state.currentFloor} 层（-${price} 金）`);
+    this.flash(`你抄近路跳到了第 ${state.currentFloor} 层（-${offer.price} 金）`);
     playSfx('goal');
   }
 
@@ -4288,14 +4285,11 @@ export class GameScene extends Phaser.Scene {
     const container = this.nearestContainer();
     const zone = currentInteractionZone(state);
     if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
-    // OVERHAUL Wave C2: the up stairwell advertises the paid shortcut, priced
-    // live so the player can decide before spending.
-    else if (zone === 'up' && shortcutAvailable(state.currentFloor, Math.max(...PLAYABLE_FLOORS_V01))) {
-      const salt = (state.runSeed ^ (state.day * 7919) ^ (state.currentFloor * 104729)) >>> 0;
-      const price = shortcutPrice(state.currentFloor, shortcutSkip(salt), timesTaken(state), salt);
-      this.hintText.setText(`按 E 上楼 · F 抄近路（${price} 金）`);
+    // OVERHAUL Wave C2: advertise the same capped offer that F will purchase.
+    else if (zone === 'up') {
+      const offer = shortcutOffer(state, Math.max(...PLAYABLE_FLOORS_V01));
+      this.hintText.setText(offer ? `按 E 上楼 · F 抄近路（${offer.price} 金）` : '按 E 上楼');
     }
-    else if (zone === 'up') this.hintText.setText('按 E 上楼');
     else if (zone === 'down') this.hintText.setText('按 E 下楼');
     else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观（仅视觉） · ESC 菜单');
   }

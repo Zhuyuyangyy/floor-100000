@@ -31,6 +31,26 @@ export function shortcutSkip(salt: number): number {
   return 2 + (salt % 3);
 }
 
+export interface ShortcutOffer {
+  skip: number;
+  targetFloor: number;
+  price: number;
+}
+
+// The UI and the purchase path must quote the same capped destination. Near
+// the top, fewer floors may remain than the seeded 2–4 floor skip requests.
+export function shortcutOffer(state: GameState, top: number): ShortcutOffer | null {
+  const floor = state.currentFloor;
+  if (!shortcutAvailable(floor, top)) return null;
+  const salt = (state.runSeed ^ (state.day * 7919) ^ (floor * 104729)) >>> 0;
+  const skip = Math.min(shortcutSkip(salt), top - floor);
+  return {
+    skip,
+    targetFloor: floor + skip,
+    price: shortcutPrice(floor, skip, timesTaken(state), salt),
+  };
+}
+
 // Whether the player can afford it right now.
 export function canAfford(state: GameState, price: number): boolean {
   return state.player.gold >= price;

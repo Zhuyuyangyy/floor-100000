@@ -74,6 +74,25 @@ async function clickMenuText(page: Page, label: string): Promise<void> {
   await page.mouse.click(canvas.x + point.x * canvas.width, canvas.y + point.y * canvas.height);
 }
 
+async function clickTextInScene(page: Page, sceneKey: string, label: string): Promise<void> {
+  const point = await page.evaluate(({ wantedScene, wantedText }) => {
+    const game = (window as unknown as {
+      __PHASER_GAME__?: {
+        canvas: { width: number; height: number };
+        scene: { getScene: (key: string) => { children: { list: Array<{ type: string; text?: string; x: number; y: number; visible: boolean }> } } | null };
+      };
+    }).__PHASER_GAME__;
+    const matches = game?.scene.getScene(wantedScene)?.children.list.filter((entry) =>
+      entry.type === 'Text' && entry.visible && entry.text === wantedText) ?? [];
+    const object = matches[matches.length - 1];
+    if (!game || !object) throw new Error(`${wantedScene} text not found: ${wantedText}`);
+    return { x: object.x / game.canvas.width, y: object.y / game.canvas.height };
+  }, { wantedScene: sceneKey, wantedText: label });
+  const canvas = await page.locator('canvas').first().boundingBox();
+  if (!canvas) throw new Error('Phaser canvas is not visible');
+  await page.mouse.click(canvas.x + point.x * canvas.width, canvas.y + point.y * canvas.height);
+}
+
 const VALID_SAVE = JSON.stringify({
   schemaVersion: 2,
   runSeed: 42,
@@ -139,4 +158,21 @@ test('title menu mouse click continues an existing save', async ({ page }) => {
   await expect.poll(() => selectedMenuOption(page)).toBe('继续游戏');
   await clickMenuText(page, '继续游戏');
   await waitForScene(page, 'Game');
+});
+
+test('a first-time player can finish character selection with the mouse', async ({ page }) => {
+  await page.goto('/?seed=42');
+  await waitForScene(page, 'Menu');
+  await clickMenuText(page, '开始新游戏');
+  await waitForScene(page, 'MetaSelect');
+
+  await clickTextInScene(page, 'MetaSelect', '阿林');
+  await clickTextInScene(page, 'MetaSelect', '开始生存');
+  await expect.poll(() => hasVisibleText(page, '「阿林」还未相遇')).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__PHASER_GAME__?.scene.getScenes(true).some((scene) => scene.scene.key === 'MetaSelect'))).toBe(true);
+
+  await clickTextInScene(page, 'MetaSelect', '幸存者');
+  await clickTextInScene(page, 'MetaSelect', '开始生存');
+  await waitForScene(page, 'Game');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('floor100000.meta.v1') ?? '{}').selectedCharacter)).toBe('player');
 });

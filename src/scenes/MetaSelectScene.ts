@@ -133,6 +133,15 @@ export class MetaSelectScene extends Phaser.Scene {
         .setDepth(depth + 7);
       this.optionTexts.push(name);
       this.lockTexts.push(lock);
+      const rowTarget = this.add
+        .zone(listX + listW / 2, y + 22, listW, 48)
+        .setDepth(depth + 7)
+        .setInteractive({ useHandCursor: true });
+      rowTarget.on('pointerover', () => this.selectCharacter(i), this);
+      rowTarget.on('pointerup', () => {
+        this.selectCharacter(i);
+        playSfx('click');
+      }, this);
     });
     this.invWell(listX - 6, top + 28, listW, 220, depth + 5);
     this.optionTexts.forEach((t) => t.setDepth(depth + 8));
@@ -176,9 +185,24 @@ export class MetaSelectScene extends Phaser.Scene {
       .setAlpha(0.9)
       .setDepth(depth + 2);
     this.add
-      .text(8, height - 11, '↑/↓ 选择 · ←/→ 模式 · Enter 出发 · ESC 返回标题', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(PALETTE.clothHigh) })
+      .text(8, height - 11, '鼠标点击选择 / 开始生存 · ↑/↓ 选择 · ←/→ 模式 · ESC 返回标题', { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(PALETTE.clothHigh) })
       .setOrigin(0, 0.5)
       .setDepth(depth + 3);
+
+    const startX = listX + listW / 2;
+    const startY = top + panelH - 38;
+    const startButton = this.add
+      .rectangle(startX, startY, 160, 36, UI.good)
+      .setAlpha(0.9)
+      .setDepth(depth + 7)
+      .setInteractive({ useHandCursor: true });
+    startButton.on('pointerover', () => startButton.setAlpha(1), this);
+    startButton.on('pointerout', () => startButton.setAlpha(0.9), this);
+    startButton.on('pointerup', () => this.onConfirm('enter'), this);
+    this.add
+      .text(startX, startY, '开始生存', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
+      .setOrigin(0.5)
+      .setDepth(depth + 8);
 
     this.refreshOptions();
 
@@ -229,6 +253,11 @@ export class MetaSelectScene extends Phaser.Scene {
     this.selected = Phaser.Math.Clamp(this.selected + delta, 0, ROSTER.length - 1);
     this.refreshOptions();
     playSfx('click');
+  }
+
+  private selectCharacter(index: number): void {
+    this.selected = Phaser.Math.Clamp(index, 0, ROSTER.length - 1);
+    this.refreshOptions();
   }
 
   private onConfirm(slot: 'enter' | 'esc'): void {

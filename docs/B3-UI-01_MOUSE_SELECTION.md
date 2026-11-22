@@ -25,7 +25,7 @@
 
 ## PR 状态
 
-[Draft PR #21](https://github.com/Zhuyuyangyy/floor-100000/pull/21) 仍为 OPEN / Draft，head 为 `fix/wanderer-floor5-gate-20261120`，base 为 `feat/tower-zoom-b2`。核对时该 PR head 与本地 `7e89f39e9eac26d7fc73a9d46b270515ed07b476` 一致；本轮将只追加提交到该分支，不合并。
+[Draft PR #21](https://github.com/Zhuyuyangyy/floor-100000/pull/21) 保持 OPEN / Draft，head 为 `fix/wanderer-floor5-gate-20261120`，base 为 `feat/tower-zoom-b2`。本轮修复已以提交 `71ce743` 追加到该分支；未合并，也未强推。
 
 ## 范围外发现
 

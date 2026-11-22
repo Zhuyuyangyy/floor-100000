@@ -137,7 +137,7 @@ export class MetaSelectScene extends Phaser.Scene {
         .zone(listX + listW / 2, y + 22, listW, 48)
         .setDepth(depth + 7)
         .setInteractive({ useHandCursor: true });
-      rowTarget.on('pointerover', () => this.selectCharacter(i), this);
+      // Selection is click-only: passing over a row while moving to the start button must not change it.
       rowTarget.on('pointerup', () => {
         this.selectCharacter(i);
         playSfx('click');

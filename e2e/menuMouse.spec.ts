@@ -74,7 +74,7 @@ async function clickMenuText(page: Page, label: string): Promise<void> {
   await page.mouse.click(canvas.x + point.x * canvas.width, canvas.y + point.y * canvas.height);
 }
 
-async function clickTextInScene(page: Page, sceneKey: string, label: string): Promise<void> {
+async function sceneTextScreenPoint(page: Page, sceneKey: string, label: string): Promise<{ x: number; y: number }> {
   const point = await page.evaluate(({ wantedScene, wantedText }) => {
     const game = (window as unknown as {
       __PHASER_GAME__?: {
@@ -90,7 +90,12 @@ async function clickTextInScene(page: Page, sceneKey: string, label: string): Pr
   }, { wantedScene: sceneKey, wantedText: label });
   const canvas = await page.locator('canvas').first().boundingBox();
   if (!canvas) throw new Error('Phaser canvas is not visible');
-  await page.mouse.click(canvas.x + point.x * canvas.width, canvas.y + point.y * canvas.height);
+  return { x: canvas.x + point.x * canvas.width, y: canvas.y + point.y * canvas.height };
+}
+
+async function clickTextInScene(page: Page, sceneKey: string, label: string): Promise<void> {
+  const point = await sceneTextScreenPoint(page, sceneKey, label);
+  await page.mouse.click(point.x, point.y);
 }
 
 const VALID_SAVE = JSON.stringify({
@@ -174,5 +179,22 @@ test('a first-time player can finish character selection with the mouse', async 
   await clickTextInScene(page, 'MetaSelect', '幸存者');
   await clickTextInScene(page, 'MetaSelect', '开始生存');
   await waitForScene(page, 'Game');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('floor100000.meta.v1') ?? '{}').selectedCharacter)).toBe('player');
+});
+
+test('moving from the selected survivor to start does not select locked rows on the way', async ({ page }) => {
+  await page.goto('/?seed=42');
+  await waitForScene(page, 'Menu');
+  await clickMenuText(page, '开始新游戏');
+  await waitForScene(page, 'MetaSelect');
+
+  const survivor = await sceneTextScreenPoint(page, 'MetaSelect', '幸存者');
+  await page.mouse.click(survivor.x, survivor.y);
+  const start = await sceneTextScreenPoint(page, 'MetaSelect', '开始生存');
+  await page.mouse.move(start.x, start.y, { steps: 20 });
+  await page.screenshot({ path: 'output/b3-ui-01-mouse-selection.png' });
+  await page.mouse.click(start.x, start.y);
+
+  await expect.poll(() => page.evaluate(() => window.__PHASER_GAME__?.scene.getScenes(true).some((scene) => scene.scene.key === 'Game'))).toBe(true);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('floor100000.meta.v1') ?? '{}').selectedCharacter)).toBe('player');
 });

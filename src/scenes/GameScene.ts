@@ -2309,7 +2309,16 @@ export class GameScene extends Phaser.Scene {
       chrome.fillRect(left + plateWidth - 5, top + 4, 2, 2);
       chrome.fillRect(left + 4, top + plateHeight - 6, 2, 2);
     };
-    if (!mobile) {
+    if (mobile) {
+      instrumentPlate(8, 2, 140, 34, UI.accent);
+      instrumentPlate(width - 116, 2, 108, 34, UI.good);
+      const columnWidth = Math.floor((width - 24) / 2);
+      STAT_BARS.forEach((stat, i) => {
+        const groupX = 12 + (i % 2) * columnWidth;
+        const rowY = i < 2 ? 40 : 69;
+        instrumentPlate(groupX - 4, rowY - 2, columnWidth - 2, 28, STAT_COLORS[stat.key] ?? UI.good);
+      });
+    } else {
       instrumentPlate(12, 8, 168, 48, UI.accent);
       STAT_BARS.forEach((stat, i) => {
         instrumentPlate(hud.statX + i * hud.statPitch - 8, 8, hud.statWidth + 20, 48, STAT_COLORS[stat.key] ?? UI.good);
@@ -2322,12 +2331,10 @@ export class GameScene extends Phaser.Scene {
     chrome.lineBetween(mobile ? 8 : 16, contextBottom - 1, width - (mobile ? 8 : 16), contextBottom - 1);
     chrome.fillStyle(UI.accent, 1);
     chrome.fillRect(0, 0, 4, topHeight);
-    if (!mobile) {
-      chrome.fillStyle(UI.accent, 0.9);
-      chrome.fillRect(10, hud.goalY + 3, 2, 18);
-      chrome.fillStyle(UI.good, 0.9);
-      chrome.fillRect(10, hud.environmentY + 3, 2, 18);
-    }
+    chrome.fillStyle(UI.accent, 0.9);
+    chrome.fillRect(mobile ? 5 : 10, mobile ? 114 : hud.goalY + 3, 2, mobile ? 14 : 18);
+    chrome.fillStyle(UI.good, 0.9);
+    chrome.fillRect(mobile ? 5 : 10, mobile ? 139 : hud.environmentY + 3, 2, mobile ? 14 : 18);
 
     this.floorBadge = this.add.text(mobile ? 12 : 20, mobile ? 8 : 6, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 14 : TYPE.body}px`, color: hex(PALETTE.lightHigh) })
       .setName('hud-floor').setScrollFactor(0).setDepth(103);
@@ -2364,11 +2371,11 @@ export class GameScene extends Phaser.Scene {
     // can never collide with the daily objective or the permanent environment.
     this.feedbackText = this.add.text(20, hud.feedbackY, '', {
       fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh),
-      backgroundColor: '#0b0f12ee', padding: { x: 8, y: 5 }, wordWrap: { width: width - (mobile ? 40 : 64), useAdvancedWrap: mobile },
+      backgroundColor: '#0b0f12ee', padding: { x: 8, y: 5 }, wordWrap: { width: width - (mobile ? 24 : 64) },
     }).setPosition(mobile ? 12 : 20, mobile ? 510 : hud.feedbackY).setName('hud-feedback').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
     this.bagFullText = this.add.text(mobile ? 12 : 20, mobile ? 624 : hud.bagY,
       '背包已满 · 使用、制作或交易腾出格子，否则搜刮会留在原处；能叠进已有堆的物品仍可拾取',
-      { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 13 : TYPE.caption}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12ee', padding: { x: 8, y: 3 }, wordWrap: { width: width - (mobile ? 40 : 64), useAdvancedWrap: mobile } },
+      { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 13 : TYPE.caption}px`, color: hex(TEXT.warn), backgroundColor: '#0b0f12ee', padding: { x: 8, y: 3 }, wordWrap: { width: width - (mobile ? 24 : 64) } },
     ).setName('hud-bag-full').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH).setVisible(false);
 
     // ── the foot bar ────────────────────────────────────────────────────────
@@ -2776,14 +2783,10 @@ export class GameScene extends Phaser.Scene {
 
   private flash(msg: string): void {
     this.feedbackText.setText(msg);
-    this.layoutPortraitHudPrompts();
     if (this.introFeedbackTimeout !== undefined) window.clearTimeout(this.introFeedbackTimeout);
     this.introFeedbackTimeout = undefined;
     this.feedbackTimer?.remove(false);
-    this.feedbackTimer = this.time.delayedCall(1600, () => {
-      this.feedbackText.setText('');
-      this.layoutPortraitHudPrompts();
-    });
+    this.feedbackTimer = this.time.delayedCall(1600, () => this.feedbackText.setText(''));
   }
 
   private flashOnWallClock(msg: string): void {
@@ -2791,32 +2794,12 @@ export class GameScene extends Phaser.Scene {
     this.feedbackTimer = undefined;
     if (this.introFeedbackTimeout !== undefined) window.clearTimeout(this.introFeedbackTimeout);
     this.feedbackText.setText(msg);
-    this.layoutPortraitHudPrompts();
     // The first-floor tutorial is real-time guidance; Phaser's fixed-step timer
     // stretches under a throttled renderer because it advances one frame per update.
     this.introFeedbackTimeout = window.setTimeout(() => {
       this.introFeedbackTimeout = undefined;
       this.feedbackText.setText('');
-      this.layoutPortraitHudPrompts();
     }, 1600);
-  }
-
-  /** Keep portrait feedback and the standing bag warning legible above touch controls. */
-  private layoutPortraitHudPrompts(): void {
-    if (!this.portraitMode || !this.feedbackText || !this.bagFullText) return;
-
-    const touchButtonTop = DESIGN_HEIGHT - 25 - 21;
-    const safeBottom = touchButtonTop - 8;
-    const bagY = this.bagFullShown
-      ? Math.min(624, safeBottom - this.bagFullText.height)
-      : 624;
-    this.bagFullText.setY(bagY);
-
-    const feedbackBottom = this.bagFullShown ? bagY - 8 : safeBottom;
-    const feedbackY = this.feedbackText.text.length > 0
-      ? Math.min(510, feedbackBottom - this.feedbackText.height)
-      : 510;
-    this.feedbackText.setY(feedbackY);
   }
 
   private applyNightLighting(): void {
@@ -4294,7 +4277,6 @@ export class GameScene extends Phaser.Scene {
     if (full === this.bagFullShown) return;
     this.bagFullShown = full;
     this.bagFullText.setVisible(full);
-    this.layoutPortraitHudPrompts();
   }
 
   // ── frame ──────────────────────────────────────────────────────────────

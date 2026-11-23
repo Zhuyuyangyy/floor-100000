@@ -187,15 +187,15 @@ export function buildPanelHeader(
   titleX?: number,
 ): UiObject[] {
   const out: UiObject[] = [];
-  const h = 20;
+  const h = 24;
   // The strip itself.
   out.push(scene.add.rectangle(left, top, w, h, UI.surfaceRaised).setOrigin(0, 0).setScrollFactor(0).setAlpha(0.96).setDepth(depth));
-  // A 2px accent edge on the left, so the header has a leading mark.
-  out.push(scene.add.rectangle(left, top, 2, h, accent).setOrigin(0, 0).setScrollFactor(0).setDepth(depth + 1));
+  // A 3px accent edge on the left, so the header has a clear leading mark.
+  out.push(scene.add.rectangle(left, top, 3, h, accent).setOrigin(0, 0).setScrollFactor(0).setDepth(depth + 1));
   // The title.
   out.push(
     scene.add
-      .text(titleX ?? left + 10, top + h / 2, title, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.title}px`, color: hex(TEXT.primary) })
+      .text(titleX ?? left + 10, top + h / 2, title, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary) })
       .setOrigin(0, 0.5)
       .setScrollFactor(0)
       .setDepth(depth + 1),

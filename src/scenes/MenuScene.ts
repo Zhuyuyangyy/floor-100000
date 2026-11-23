@@ -149,17 +149,16 @@ export class MenuScene extends Phaser.Scene {
       t.setAlpha(0);
       this.tweens.add({ targets: t, alpha: 1, duration: 300, delay: 350 + i * 140, ease: 'Cubic.out' });
     });
-    if (!mobile) {
-      this.menuFocusWidth = 460;
-      this.menuFocusPlate = this.add
-        .rectangle(width / 2, MENU_TOP, this.menuFocusWidth, 48, UI.surfaceRaised)
-        .setAlpha(0.42)
-        .setStrokeStyle(1, UI.line, 0.62)
-        .setDepth(-27);
-      this.menuFocusRail = this.add
-        .rectangle(width / 2 - this.menuFocusWidth / 2 + 10, MENU_TOP, 3, 22, UI.accent)
-        .setDepth(-26);
-    }
+    const visibleWidth = mobile ? portraitViewportFor(window.innerWidth, window.innerHeight).width : width;
+    this.menuFocusWidth = mobile ? Math.max(220, visibleWidth - 32) : 460;
+    this.menuFocusPlate = this.add
+      .rectangle(width / 2, MENU_TOP, this.menuFocusWidth, 48, UI.surfaceRaised)
+      .setAlpha(0.42)
+      .setStrokeStyle(1, UI.line, 0.62)
+      .setDepth(-27);
+    this.menuFocusRail = this.add
+      .rectangle(width / 2 - this.menuFocusWidth / 2 + 10, MENU_TOP, 3, 22, UI.accent)
+      .setDepth(-26);
     this.marker = createMarker(this);
     this.marker.setDepth(2);
     // The marker breathes once visible so the selection reads as alive. Scale

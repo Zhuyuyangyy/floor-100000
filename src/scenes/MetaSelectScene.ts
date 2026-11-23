@@ -150,7 +150,7 @@ export class MetaSelectScene extends Phaser.Scene {
       }, this);
     });
     this.invWell(listX - 6, top + 28, listW, mobile ? 202 : 220, depth + 5);
-    this.selectionBands = mobile ? [] : ROSTER.map((_, i) => {
+    this.selectionBands = ROSTER.map((_, i) => {
       const rowY = top + (mobile ? 30 : 34) + i * (mobile ? 48 : 52);
       return this.add.rectangle(listX + listW / 2, rowY + 22, listW, mobile ? 44 : 48, UI.surfaceRaised)
         .setAlpha(0.24)

@@ -1,16 +1,16 @@
 # B3-UI-08：Gimble 暗金属视觉收口
 
-日期：2026-11-23。基线分支：`fix/wanderer-floor5-gate-20261120`。本轮沿用已认可的 Gimble 暗金属方向，打磨现有浏览器界面；没有新增图片素材，也没有改变 Phaser 架构。
+日期：2026-11-23。基线提交：`15bc0cb`；分支：`fix/wanderer-floor5-gate-20261120`。本轮优先以 360×800 与 320×800 手机竖屏评估，桌面保留为兼容布局；继续使用现有 Phaser 与资源，没有新增美术或改变核心玩法。
 
-## 改动
+## 最终视觉选择
 
-HUD 的楼层/时钟、四项生存状态、金币/分数现在各有明确仪表区；状态条仍显示原有数值，最紧急状态会同时强调标签和数字。主线目标、每日目标与环境信息继续分行，消息、满包警告与操作提示保持各自职责。
+手机 HUD 减少了额外仪表底板与目标/环境信息旁的强调竖条，让背景继续可见；状态数值、状态条、标题与必要警示仍然保留。桌面仪表与兼容布局未受影响。弹窗标题条收至 20px、强调边减至 2px，标题仍保持清晰层级。
 
-竖屏下楼层和时间并排、四条状态分成两列，金币和分数放进窄面板。闲置时不显示桌面键盘说明；靠近交互点时，提示出现在触控按钮上方。满包警告会优先显示，避免与底部情境提示重叠。
+手机标题菜单不再用整块选项底板和侧边饰条，改以文字颜色和箭头识别焦点；手机角色选择也不铺整行选中底板。桌面焦点底板和角色选中带保留，鼠标悬停不会擅自改变角色选择。
 
-标题菜单的当前选项增加克制的金属底板、强调边和文字高亮；角色选择页为当前行增加细描边。鼠标悬停仍不会擅自改变角色选择。弹窗标题条则略增高度与强调边宽度，字号回归正文层级。
+窄屏操作反馈和满包警告扣除了文字内边距后再换行，并启用适合无空格中文的逐字换行。两条提示同时出现时会在底部触控按钮上方纵向避让；文案与提示状态不变。竖屏长提示回归测试覆盖了横向边界、相互遮挡和触控区安全距离。
 
-所有改动仅涉及显示组件、场景界面和回归截图。没有改动难度、伤害、评分、物品经济、存档规则、楼层机制或触控行为，也没有生成或加入新的美术图。
+所有改动仅涉及界面呈现和测试。没有改变题材、背景、核心循环、AI/NPC、数值规则、伤害、评分、物品经济、存档、楼层机制或触控行为。
 
 ## 验收
 
@@ -18,12 +18,15 @@ HUD 的楼层/时钟、四项生存状态、金币/分数现在各有明确仪�
 |---|---|
 | `npm run typecheck` | 通过 |
 | `npm test` | 58 个测试文件、762 项测试通过 |
-| `npm run build` | 通过；保留原有单个 JS chunk 大于 500 kB 的 Vite 提示 |
-| `npx playwright test e2e/hudLayout.spec.ts e2e/portraitTouch.spec.ts --workers=1` | 9/9 通过：四种桌面窗口、HUD 边界、360×800/320×800 竖屏、触控移动与交互、桌面键盘和旋转后重新载入 |
-| `npx playwright test e2e/menuMouse.spec.ts --grep "title menu mouse hover|first-time player can finish character selection" --workers=1` | 2/2 通过；角色选择截图位置调整后，该测试另行复跑 1/1 通过 |
+| `npm run build` | 通过；Vite 仍提示单个 JS chunk 大于 500 kB |
+| `npx playwright test e2e/hudLayout.spec.ts e2e/portraitTouch.spec.ts --workers=1` | 10/10 通过：桌面 HUD、360×800/320×800 竖屏、触控移动与交互、键盘/桌面兼容、旋转重载及长提示边界 |
+| `npx playwright test e2e/menuMouse.spec.ts --grep 'title menu mouse hover|first-time player can finish character selection' --workers=1` | 2/2 通过 |
+| `git diff --check` | 通过（推送前再次核验） |
 
 ## 截图
 
-回归生成的画面保存在本地 `output` 目录：桌面 HUD 为 `output/playwright/hud/1280x720-day.png`，手机竖屏 HUD 为 `output/playwright/hud/360x800-day.png`；菜单与角色选择焦点态分别为 `output/playwright/ui/title-focus.png` 和 `output/playwright/ui/character-focus.png`。`output/playwright/hud/1280x720-critical.png` 展示低生命、长消息和满包排版夹具，数值仅用于视觉验收，不代表真实游玩记录。
+竖屏常态与背包界面：`output/portrait-ui-compare/after-mobile-lighten-360x800.png`、`after-mobile-lighten-320x800.png`、`after-mobile-lighten-inventory-360x800.png`。菜单与选人界面：`after-mobile-lighten-menu-360x800.png`、`after-mobile-lighten-select-360x800.png`。
 
-本轮只更新既有 Draft PR #21，保持 Open/Draft，不合并，也不重新发布 ModelScope Space。
+长提示边界夹具：`after-mobile-lighten-critical-360x800.png`、`after-mobile-lighten-critical-320x800.png`。这两张是在暂停的真实游戏场景中注入一条刻意加长的测试反馈，并显示满包警告，用于验证最窄画面排版；并非真实游玩记录，也不改变存档或游戏规则。
+
+本轮只更新既有 PR #21，保持 Open/Draft，不合并，也不重新部署 ModelScope Space。

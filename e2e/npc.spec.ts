@@ -132,18 +132,31 @@ async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 4,
   throw new Error('interact (E) did not take effect');
 }
 
-/** True while the visible stair traversal is still running. */
-async function isClimbing(page: Page): Promise<boolean> {
-  return page.evaluate(() => {
-    const sc = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { stairClimb?: unknown } | null } } }).__PHASER_GAME__?.scene.getScene('Game');
-    return !!sc?.stairClimb;
-  });
-}
-
 async function goToNeighborFloor(page: Page): Promise<void> {
   await setX(page, 40); // UP_EXIT_X: floor 1 -> 2
-  // Landed, not merely "floor is 2": a second climb in flight also reports 2.
-  await pressEUntil(page, async () => (await readState(page)).currentFloor === 2 && !(await isClimbing(page)));
+  // setX edits the dev session state, so wait until a Phaser frame has moved the
+  // sprite to the stair mouth before sending input. Then send E exactly once:
+  // retrying a side-effectful key near the landing frame can start a second climb.
+  await page.waitForFunction(() => {
+    const w = window as unknown as {
+      __PHASER_GAME__?: { scene: { getScene: (key: string) => { player?: { x: number }; stairClimb?: unknown } | null } };
+      __PHASER_SESSION__?: { getState: () => State | null };
+    };
+    const state = w.__PHASER_SESSION__?.getState();
+    const scene = w.__PHASER_GAME__?.scene.getScene('Game');
+    return state?.currentFloor === 1 && state.player.x === 40 && scene?.player?.x === 40 && !scene.stairClimb;
+  }, undefined, { timeout: 5000 });
+
+  await page.keyboard.press('E');
+  // Read the floor and climb state in one browser evaluation to observe a stable
+  // landing, not the intermediate state where the target floor has just committed.
+  await page.waitForFunction(() => {
+    const w = window as unknown as {
+      __PHASER_GAME__?: { scene: { getScene: (key: string) => { stairClimb?: unknown } | null } };
+      __PHASER_SESSION__?: { getState: () => State | null };
+    };
+    return w.__PHASER_SESSION__?.getState()?.currentFloor === 2 && !w.__PHASER_GAME__?.scene.getScene('Game')?.stairClimb;
+  }, undefined, { timeout: 5000 });
 }
 
 test('trade with 阿林 changes the bag (电线 for 废金属)', async ({ page }) => {
@@ -241,4 +254,24 @@ test('back and exit do not get stuck', async ({ page }) => {
   // Not stuck: pressing E re-opens the dialogue.
   await page.keyboard.press('E');
   expect(await hasVisibleText(page, '阿林（维修工）')).toBe(true);
+});
+
+test('offline persona AI is visible and responds without a model service', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  await startGame(page, 42);
+  await goToNeighborFloor(page);
+  await setX(page, 480);
+  await pressEUntil(page, async () => hasVisibleText(page, '阿林（维修工）'));
+
+  await page.waitForFunction(() => {
+    const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean }> } } | null } } }).__PHASER_GAME__;
+    const list = g?.scene.getScene('Game')?.children.list ?? [];
+    return list.some((o) => o.type === 'Text' && o.visible && (o.text ?? '').includes('本地行为 AI · 规则驱动'));
+  }, undefined, { timeout: 5000 });
+
+  expect(await hasVisibleText(page, '我是阿林，守着这层线路；电池和废金属都用得上。')).toBe(true);
+  await page.screenshot({ path: 'test-results/local-ai-dialogue.png' });
+  expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });

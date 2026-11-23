@@ -102,10 +102,17 @@ test('a rejected save warns the player instead of losing the run silently', asyn
   // The warning must appear on its own — the player did nothing wrong.
   await waitForFlag(page, '存档失败', true);
   expect(await hasVisibleText(page, '存档失败')).toBe(true);
+  await page.screenshot({ path: 'output/save-failure-warning.png' });
 
-  // And it must not repeat every frame: the flash clears itself, and the counter
-  // comparison means one warning per new failure rather than one per frame.
+  // The autosave retries every few real seconds. After the brief notice clears,
+  // keep observing through several rejected retries and ensure it does not flash
+  // repeatedly while storage remains unavailable.
   await waitForFlag(page, '存档失败', false, 10_000);
+  const quietUntil = Date.now() + 5000;
+  while (Date.now() < quietUntil) {
+    expect(await hasVisibleText(page, '存档失败')).toBe(false);
+    await page.waitForTimeout(120);
+  }
 
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
 });

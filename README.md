@@ -105,6 +105,12 @@
 | **存档** | 自动存到 LocalStorage，坏档可恢复 | `SaveSystem` |
 | **世界标记** | 「这事发生过吗」统一走一张 flag 表 | `WorldFlags` |
 
+## NPC AI 试玩
+
+无需账号、模型下载或网络服务：新游戏到第 2 层后，靠近阿林或小周并按 **E**，对话框会标明“本地行为 AI · 规则驱动”。它依据角色类型、昼夜、玩家关系和已记录的交易记忆，选择一条短回应；这是确定性的本地规则脑，**不是大模型自由生成**。交易、战斗与生存数值仍完全由游戏规则执行。
+
+如开发时已运行项目自有的 Ollama，可设置 `VITE_NPC_MODEL`（及可选的 `VITE_OLLAMA_URL`）切到本地大模型对白；不设置时完全离线可玩。用 `VITE_NPC_ENABLED=false` 或 URL 参数 `?ainpc=0` 可关闭 NPC AI。试玩说明见 [`docs/COMPETITION_AI_DEMO.md`](docs/COMPETITION_AI_DEMO.md)。
+
 ## 技术架构
 
 四层，越往下越不认识 Phaser：
@@ -119,7 +125,7 @@
 
 三条刻意的技术决定：
 
-1. **规则与渲染彻底分开**：`systems/` 不 import Phaser，651 个单测用例无需浏览器也能独立运行。
+1. **规则与渲染彻底分开**：`systems/` 不 import Phaser，757 个单测用例无需浏览器也能独立运行。
 2. **随机必须可复现**：全项目禁用 `Math.random()`，一律用 `deriveSeed(seed, day, 用途)` 派生。同种子必然同结果。
 3. **不用物理引擎**：连 Phaser 自带的 Arcade Physics 都没开。移动是手写的速度斜坡（`stepHorizontalSpeed`），2D 横版不需要刚体。
 
@@ -128,8 +134,8 @@
 | 关卡 | 规模 | 命令 |
 | --- | --- | --- |
 | 类型检查 | TypeScript strict，零 `any` 滥用 | `npm run typecheck` |
-| 单元测试 | 47 个文件 / **651 个用例**；本轮实际全部通过 | `npm run test` |
-| 浏览器测试 | 21 个 Playwright spec / 67 个用例，含夹具回归与真实输入旅程 | `npm run test:e2e` |
+| 单元测试 | 58 个文件 / **757 个用例**；当前全套通过 | `npm run test` |
+| 浏览器测试 | 28 个 Playwright 文件 / 93 个用例，含夹具回归与真实输入旅程 | `npm run test:e2e` |
 | CI | push / PR 运行 typecheck、单测、build、浏览器安装及 E2E | `.github/workflows/ci.yml` |
 
 浏览器测试能读到真实的游戏状态，靠的是 `src/main.ts` 里一个只在开发模式挂载的 `window.__PHASER_GAME__`——生产构建里没有。
@@ -165,6 +171,7 @@ npm run dev
 - **A / D** 或 **← / →**：左右移动
 - **E**：交互（开容器、对话、上下楼、在宿舍床边睡觉）
 - **I**：背包（← → 选择，Enter 使用消耗品）
+- **Q**：切换武器外观（仅视觉；不影响伤害、计分、装备或存档）
 - **C**：制作台（在宿舍工作台旁）
 - **ESC**：暂停菜单（继续 / 重新开始 / 返回标题）
 

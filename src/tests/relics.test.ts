@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   RELICS,
   guardianDamageMult,
+  relicDamageMultForCombat,
   hungerLossMult,
   lootBonus,
   relicsForDepth,
@@ -82,6 +83,12 @@ describe('relic multipliers', () => {
     expect(moveSpeedMult(['swift_feet'])).toBe(1.15);
     expect(lootBonus(['lucky_charm'])).toBe(1);
     expect(guardianDamageMult(['guardian_totem'])).toBe(0.7);
+  });
+
+  it('守护图腾只降低守门人伤害，不降低普通遭遇伤害', () => {
+    const relics = ['guardian_totem'];
+    expect(relicDamageMultForCombat('ambush', relics)).toBe(1);
+    expect(relicDamageMultForCombat('boss', relics)).toBe(0.7);
   });
 
   it('does not cross the wires', () => {

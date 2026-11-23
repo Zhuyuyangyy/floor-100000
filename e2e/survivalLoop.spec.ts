@@ -174,6 +174,9 @@ async function selectInMenu(page: Page, options: string[], target: string): Prom
 const MAIN_OPTIONS = ['问候', '询问', '交易', '退出'];
 
 test('a player can gather every upgrade material and build all three upgrades', async ({ page }) => {
+  // This full game-driven floor/loot/crafting loop takes ~34s even with one worker;
+  // keep the real path intact and allow headroom without raising the suite default.
+  test.setTimeout(90_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
 

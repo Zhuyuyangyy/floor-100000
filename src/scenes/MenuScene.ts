@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { FONT_FAMILY } from '../render/uiKit';
+import { FONT_FAMILY, UI } from '../render/uiKit';
+import { isPortraitViewport, portraitViewportFor } from '../core/design';
 
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { startNewGame, tryContinue } from '../core/session';
@@ -31,6 +32,9 @@ export class MenuScene extends Phaser.Scene {
   private helpOpen = false;
   private helpObjects: PanelObject[] = [];
   private marker!: Phaser.GameObjects.Image;
+  private menuFocusPlate?: Phaser.GameObjects.Rectangle;
+  private menuFocusRail?: Phaser.GameObjects.Rectangle;
+  private menuFocusWidth = 0;
   private messageText!: Phaser.GameObjects.Text;
   private messageTimer?: Phaser.Time.TimerEvent;
   private lastInputFrame: Record<InputSlot, number> = { up: -1, down: -1, enter: -1, esc: -1 };
@@ -50,8 +54,13 @@ export class MenuScene extends Phaser.Scene {
     // Survives a scene restart; left true, the help panel would still swallow
     // navigation on the fresh title screen.
     this.helpOpen = false;
+    this.menuFocusPlate?.destroy();
+    this.menuFocusPlate = undefined;
+    this.menuFocusRail?.destroy();
+    this.menuFocusRail = undefined;
 
     const { width, height } = this.cameras.main;
+    const mobile = isPortraitViewport(window.innerWidth, window.innerHeight);
     // Art pass: this rect used to sit at the default depth 0, which is ABOVE
     // every negative-depth backdrop object — the sky, the moon and the tower
     // were all drawn behind an opaque full-screen rectangle, and the title
@@ -86,13 +95,13 @@ export class MenuScene extends Phaser.Scene {
     const MENU_STEP = 56;
 
     this.titleText = this.add
-      .text(width / 2, TITLE_Y, '第100000层', { fontFamily: FONT_FAMILY, fontSize: '80px', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 6 })
+      .text(width / 2, TITLE_Y, '第100000层', { fontFamily: FONT_FAMILY, fontSize: mobile ? '46px' : '80px', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: mobile ? 4 : 6 })
       .setOrigin(0.5);
     // Every piece of title text carries its own dark stroke: the painted
     // backdrop behind it is bright in places, and a stroke keeps the text
     // legible without a scrim heavy enough to bury the painting.
     this.subtitleText = this.add
-      .text(width / 2, SUBTITLE_Y, '末 日 宿 舍', { fontFamily: FONT_FAMILY, fontSize: '44px', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 4 })
+      .text(width / 2, SUBTITLE_Y, '末 日 宿 舍', { fontFamily: FONT_FAMILY, fontSize: mobile ? '30px' : '44px', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: mobile ? 3 : 4 })
       .setOrigin(0.5);
 
     this.entries = [{ label: '开始新游戏', run: () => this.startNew() }];
@@ -124,6 +133,14 @@ export class MenuScene extends Phaser.Scene {
         .text(width / 2, MENU_TOP + i * MENU_STEP, entry.label, { fontFamily: FONT_FAMILY, fontSize: '36px', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: 3 })
         .setOrigin(0.5);
       this.optionTexts.push(t);
+      // The title menu is also a pointer-driven list: hovering updates the same
+      // selection marker as the keyboard, and releasing on an entry activates it.
+      t.setInteractive({ useHandCursor: true });
+      t.on('pointerover', () => this.select(i));
+      t.on('pointerup', () => {
+        this.select(i);
+        this.activate();
+      });
       // Entrance: a fade-in only. An earlier version also settled each entry
       // down 8px, which broke the e2e selection probe — it finds the
       // highlighted entry by comparing the marker's y to the entries' y, and a
@@ -132,7 +149,18 @@ export class MenuScene extends Phaser.Scene {
       t.setAlpha(0);
       this.tweens.add({ targets: t, alpha: 1, duration: 300, delay: 350 + i * 140, ease: 'Cubic.out' });
     });
+    const visibleWidth = mobile ? portraitViewportFor(window.innerWidth, window.innerHeight).width : width;
+    this.menuFocusWidth = mobile ? Math.max(220, visibleWidth - 32) : 460;
+    this.menuFocusPlate = this.add
+      .rectangle(width / 2, MENU_TOP, this.menuFocusWidth, 48, UI.surfaceRaised)
+      .setAlpha(0.42)
+      .setStrokeStyle(1, UI.line, 0.62)
+      .setDepth(-27);
+    this.menuFocusRail = this.add
+      .rectangle(width / 2 - this.menuFocusWidth / 2 + 10, MENU_TOP, 3, 22, UI.accent)
+      .setDepth(-26);
     this.marker = createMarker(this);
+    this.marker.setDepth(2);
     // The marker breathes once visible so the selection reads as alive. Scale
     // only: refreshOptions() repositions this marker by x/y every time the
     // selection moves, so a positional tween would fight it (and the e2e probe
@@ -192,14 +220,26 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private refreshOptions(): void {
-    this.optionTexts.forEach((t, i) => t.setText(this.entries[i].label));
+    this.optionTexts.forEach((t, i) => t
+      .setText(this.entries[i].label)
+      .setColor(i === this.selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary)));
     const selected = this.optionTexts[this.selected];
     this.marker.setVisible(selected !== undefined);
-    if (selected) placeMarker(this.marker, selected);
+    this.menuFocusPlate?.setVisible(selected !== undefined);
+    this.menuFocusRail?.setVisible(selected !== undefined);
+    if (selected) {
+      placeMarker(this.marker, selected);
+      this.menuFocusPlate?.setPosition(selected.x, selected.y);
+      this.menuFocusRail?.setPosition(selected.x - this.menuFocusWidth / 2 + 10, selected.y);
+    }
   }
 
   private move(delta: number): void {
-    this.selected = Phaser.Math.Clamp(this.selected + delta, 0, this.entries.length - 1);
+    this.select(Phaser.Math.Clamp(this.selected + delta, 0, this.entries.length - 1));
+  }
+
+  private select(index: number): void {
+    this.selected = index;
     this.refreshOptions();
     this.hideMessage();
   }
@@ -259,23 +299,39 @@ export class MenuScene extends Phaser.Scene {
     // panel with 26px text and a 26px row pitch had long lines running straight
     // through the frame and the rows touching. Wider panel, one size down, and a
     // row pitch that leaves air under the descenders.
-    const panelW = 580;
-    const panelH = 260;
+    const mobile = isPortraitViewport(window.innerWidth, window.innerHeight);
+    const visibleWidth = mobile ? portraitViewportFor(window.innerWidth, window.innerHeight).width : width;
+    const panelW = mobile ? Math.max(240, visibleWidth - 32) : 580;
+    const panelH = mobile ? 320 : 260;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
     this.helpObjects.push(...buildPanel(this, cx, cy, panelW, panelH, 'green', PANEL_DEPTH.menu.help));
-    const title = this.add.text(cx, top + 26, '操作说明', { fontFamily: FONT_FAMILY, fontSize: '30px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
-    const lines = [
-      'A/D 或 ←/→ 移动 · E 交互',
-      'E 交互：开箱 / 对话 / 楼梯 / 睡觉',
-      'I 背包 · C 制作 · M 地图 · ESC 暂停',
-      '目标：爬到第 100000 层',
-    ];
-    const texts = lines.map((line, i) => this.add.text(left + 24, top + 72 + i * 38, line, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }));
-    const footer = this.add.text(cx, top + panelH - 30, '按 Enter / ESC 关闭', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    const title = this.add.text(cx, top + 24, '操作说明', { fontFamily: FONT_FAMILY, fontSize: mobile ? '22px' : '30px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5);
+    const lines = mobile
+      ? ['按住 ◀ / ▶ 移动', '点 E 交互：开箱、对话、楼梯、睡觉', '点 I 打开背包；点 C 在宿舍制作', '目标：爬到第 100000 层']
+      : [
+          'A/D 或 ←/→ 移动 · E 交互',
+          'E 交互：开箱 / 对话 / 楼梯 / 睡觉',
+          'I 背包 · C 制作 · M 地图 · ESC 暂停',
+          '目标：爬到第 100000 层',
+        ];
+    const lineTop = mobile ? 66 : 72;
+    const lineStep = mobile ? 42 : 38;
+    const texts = lines.map((line, i) => this.add.text(left + 16, top + lineTop + i * lineStep, line, {
+      fontFamily: FONT_FAMILY,
+      fontSize: mobile ? '14px' : '22px',
+      color: hex(TEXT.primary),
+      wordWrap: { width: panelW - 32 },
+    }));
+    const footer = this.add.text(cx, top + panelH - 24, mobile ? '点按选项 · 点此关闭' : '点击关闭 · Enter / ESC', { fontFamily: FONT_FAMILY, fontSize: mobile ? '14px' : '20px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    footer.setInteractive({ useHandCursor: true });
+    footer.on('pointerup', (_pointer: Phaser.Input.Pointer, _localX: number, _localY: number, event: Phaser.Types.Input.EventData) => {
+      event.stopPropagation();
+      if (this.helpOpen) this.toggleHelp();
+    });
     this.helpObjects.push(title, ...texts, footer);
     applyPanelDepth(this.helpObjects, PANEL_DEPTH.menu.help);
     for (const o of this.helpObjects) o.setVisible(false);

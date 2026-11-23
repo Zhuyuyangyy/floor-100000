@@ -56,6 +56,22 @@ async function startGame(page: Page, seed: number): Promise<void> {
   await waitForScene(page, 'Game');
 }
 
+async function hudFeedbackText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const g = (window as unknown as {
+      __PHASER_GAME__?: { scene: { getScene: (key: string) => { children: { list: Array<{ name?: string; text?: string }> } } | null } };
+    }).__PHASER_GAME__;
+    return g?.scene.getScene('Game')?.children.list.find((o) => o.name === 'hud-feedback')?.text ?? '';
+  });
+}
+
+test('the first-floor onboarding hint clears on its real-time deadline', async ({ page }) => {
+  await startGame(page, 42);
+  const hint = '第 1 层：靠近储物柜，按 E 搜刮净水。';
+  await expect.poll(() => hudFeedbackText(page), { timeout: 1000, intervals: [50, 100] }).toBe(hint);
+  await expect.poll(() => hudFeedbackText(page), { timeout: 2500, intervals: [50, 100, 250] }).toBe('');
+});
+
 test('the flash renders on top of an open panel', async ({ page }) => {
   test.setTimeout(90_000);
   const errors: string[] = [];

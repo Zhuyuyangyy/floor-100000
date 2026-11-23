@@ -102,8 +102,16 @@
 | B3-16 | **第一天压力前移**（产品经理评审 P0）：饥渴起始 80→65，让生存槽第一天就有可见跌幅；满包 flash/常驻警告补上「可合并堆才能进包」规则说明 | ✅ 见 [`B3-16_DAY1_PRESSURE.md`](B3-16_DAY1_PRESSURE.md) |
 | B3-17 | **首层 TWOM 式生存纵切片**：日记与压力、宿舍夜间决策（休息/治疗/修理/照顾）、睡眠结算与次日后果；战斗接入刀光/招架/受击反馈 | ✅ 见 [`plans/2026-11-08-twom-survival-slice-design.md`](plans/2026-11-08-twom-survival-slice-design.md) 与 [`first-floor-survival-slice-report.md`](first-floor-survival-slice-report.md) |
 | B3-18 | **宿舍防御后果**：未加固宿舍按 seed 可能遭夜袭，修门稳定阻止袭击；HP、压力和日记都留下真实结果 | ✅ 见 [`B3-18_SHELTER_DEFENSE.md`](B3-18_SHELTER_DEFENSE.md) |
-| B3-19 | **自然楼梯攀爬**：普通楼层切换改为同场景连续移动，攀爬中不改楼层状态，落地后才提交访问与存档 | ✅ 见 [`B3-19_NATURAL_STAIRS.md`](B3-19_NATURAL_STAIRS.md) 与 [`plans/2026-11-10-natural-stair-traversal-design.md`](plans/2026-11-10-natural-stair-traversal-design.md) |
-| HUD-01 | **M1 HUD 视觉收口**：生存数值、楼层时间、目标环境、消息与操作提示分区；四种窗口截图及边界验收，不修改玩法 | 🔵 独立分支实现与专项验收，完整回归见 [`M1_HUD_VISUAL_CLOSEOUT.md`](M1_HUD_VISUAL_CLOSEOUT.md) |
+| B3-19 | **自然楼梯攀爬**：普通楼层切换改为同场景连续移动，攀爬中不改楼层状态，落地后才提交访问与存档；2026-11-22 补修首层/顶层端点相机裁切，并验证落地恢复常规 bounds | ✅ 专项回归通过，见 [`B3-19_NATURAL_STAIRS.md`](B3-19_NATURAL_STAIRS.md) 与 [`plans/2026-11-10-natural-stair-traversal-design.md`](plans/2026-11-10-natural-stair-traversal-design.md) |
+| B3-UI-01 | **角色选择鼠标可用性**：鼠标经过幸存者行不会擅自改选；只有点击行才选择 | ✅ 见 [`B3-UI-01_MOUSE_SELECTION.md`](B3-UI-01_MOUSE_SELECTION.md) |
+| B3-UI-02 | **存档失败提示去重**：连续存档失败只提醒一次，成功恢复后再次失败重新提醒；不改存档内容与规则 | ✅ 专项单测与 E2E 通过，见 [`M1_INTEGRATION_REVIEW.md`](M1_INTEGRATION_REVIEW.md) |
+| B3-UI-03 | **常驻操作提示补充 Q 武器外观切换（仅视觉）**：修正运行时回退文案覆盖；不改伤害、计分、装备、存档或战斗规则 | ✅ 多视口 HUD 与 Q 隔离回归 6/6 通过，见 [`M1_INTEGRATION_REVIEW.md`](M1_INTEGRATION_REVIEW.md) |
+| B3-UI-04 | **首五层主线目标常驻**：长期攀登目标始终与每日目标并列可见，开场提示聚焦第 1 层第一步 | ✅ HUD 多视口专项回归 5/5，通过记录见 [`M1_INTEGRATION_REVIEW.md`](M1_INTEGRATION_REVIEW.md) |
+| B3-UI-05 | **付费近路报价一致**：楼梯口提示与 F 购买共用顶层截断后的目标和金额；不改收费公式 | ✅ 真实键盘专项及单 worker 全量 E2E 94/94、单测通过，见 [`M1_INTEGRATION_REVIEW.md`](M1_INTEGRATION_REVIEW.md) |
+| B3-UI-06 | **第 5 层上行边界反馈**：没有第 6 层楼梯时，按 E 明确说明开放范围与可下行方向；不开放新楼层、不改玩法规则 | ✅ 真实键盘回归通过；类型检查、759 项单测、生产构建通过，单 worker 全量 E2E 结果见 [`M1_INTEGRATION_REVIEW.md`](M1_INTEGRATION_REVIEW.md) |
+| B3-UI-07 | **手机竖屏可玩性与完成度**：自适应窄视口 HUD、菜单/角色选择及触控移动/E/I/C；保持桌面布局和既有玩法规则 | ✅ 360×800 触控、320×800 边界、桌面 UI、首五层真实旅程通过；明细见 [`B3-UI-07_MOBILE_PORTRAIT.md`](B3-UI-07_MOBILE_PORTRAIT.md)。旋转后需重新载入；地图暂不提供触控入口 |
+| B3-UI-08 | **Gimble 暗金属视觉收口**：状态仪表、紧急值、主线/环境分区、标题/角色焦点与竖屏提示；不改玩法、存档或美术资源 | ✅ 完成；实施与验收见 [`B3-UI-08_GIMBLE_FINISH.md`](B3-UI-08_GIMBLE_FINISH.md) |
+| HUD-01 | **M1 HUD 视觉收口**：生存数值、楼层时间、目标环境、消息与操作提示分区；四种窗口截图及边界验收，不修改玩法 | ✅ 初版 HUD 收口及专项验收见 [`M1_HUD_VISUAL_CLOSEOUT.md`](M1_HUD_VISUAL_CLOSEOUT.md)；后续 Gimble 全界面精修见 [`B3-UI-08_GIMBLE_FINISH.md`](B3-UI-08_GIMBLE_FINISH.md) |
 | **M1 暴改** | 五 agent 并行（作战书 [`OVERHAUL_M1.md`](OVERHAUL_M1.md)）：问号点遭遇+守门人（抄 ALTACIMA）、巡游体 lunge 状态机+dwell scout（抄 CENTUM）、每日目标+深度计分、低血红晕+精力减速+三音效、attack/hurt/search 新手摆姿态（逆向 CENTUM 精灵表结构） | ✅ 见 [`OVERHAUL_M1_REPORT.md`](OVERHAUL_M1_REPORT.md) |
 | **通宵作战** | 打到竞品品度（作战书 [`OVERNIGHT_PLAN.md`](OVERNIGHT_PLAN.md)）：Wave A 真回合制战斗（15 怪 7 行为）· Wave B 可解锁 4 幸存者 + 三档模式 + 5 遗物 · Wave C 行商经济 + CENTUM 公式付费跳层 · Wave D 对账 | ✅ 见 [`OVERNIGHT_FINAL.md`](OVERNIGHT_FINAL.md) |
 | **下一步** | 人工试玩（白天出门/回家、夜间 shelter 决策、问号点/战斗/金币三密度）→ 通过则 B3 验收 → 再定 B4 | ⬜ |
@@ -140,12 +148,13 @@
 | B6-AI-01 | 接口契约 + 规则执行器（交易守恒/背包容量/攻击窗口门控） | ✅ 已完成，16 单测 |
 | B6-AI-02 | 人格原型（ALLY/NEUTRAL/HOSTILE）+ 有界记忆/关系系统 + 存档桥接 | ✅ 已完成，13 单测 |
 | B6-AI-03 | 决策运行时：Ollama 大脑、prompt 契约、3s 超时降级链 | ✅ 已完成，24 单测 |
-| B6-AI-04 | 场景接线：AI 开场白 + 交易记忆积累；默认关闭（未配模型即改造前行为） | ✅ 已完成，7 单测 |
+| B6-AI-04 | 场景接线：AI 开场白 + 交易记忆积累；初版默认关闭（未配模型即改造前行为） | ✅ 已完成，7 单测；默认试玩入口后由 B6-AI-10 补齐 |
 | B6-AI-05 | Spark 实测：Ollama 拉模型、跑通一次真实推理、测首 token 延迟 | ✅ 已完成：npc-qwen(17G) 端到端通过，记忆→行为差异可观察；延迟 21-32s，默认超时校准为 45s |
 | B6-AI-06 | 三个原型的行为差异人工试玩记录 | ✅ 已完成：控制变量实验报告见 docs/plans/2026-11-11-b6-ai-personality-playtest.md，行为分叉在行动类型层面可观察 |
 | B6-AI-07 | 存量 E2E 红灯定性（`a266d04922` 上 Playwright smoke 失败） | ✅ 已定性并大部修复：真因是测试 helper「按 E → 睡 220–250ms → 再按」与 1000ms 楼梯动画抢帧（按键落在提交帧会启动第二段楼梯，`currentFloor===2` 已为真导致半空返回）。已改为「按一次 → 轮询真实条件 → 超时才重按」，13 红 → 2~3 红 |
 | B6-AI-08 | 流浪者（HOSTILE）与夜间事件系统对接；NPC 自主行动循环 | ⬜ 后续阶段 |
 | B6-AI-09 | 剩余 E2E 时序抖动（`npc.spec` 交易 4 例、`events.spec` 流浪者逃脱） | ⬜ 待修：同一 commit 连续跑在 69–72/72 之间波动（上一轮 4 例全绿、下一轮全红）。非产品回归（`verify` 恒绿）。E2E 已降为 `continue-on-error` 观测项，不再作为合并门禁。下一步：把 `hasVisibleText` 的轮询换成面板状态断言（`dialogueOpen && dialogue.npc`），不再依赖文本可见性 |
+| B6-AI-10 | 评委免配置 NPC AI 体验：默认离线规则人格脑、对话来源标注、基于昼夜/关系/记忆的短回应；Ollama 仍为可选项 | ✅ 完成；无云 API、无玩法数值改动。实现与验收记录见 [`COMPETITION_AI_DEMO.md`](COMPETITION_AI_DEMO.md) |
 
 ## E2E 现状（2026-11-13）
 
@@ -212,3 +221,12 @@
 **已知**：
 - 字号并非全部是 10 的整数倍（22/24/30/36/44/80），靠 OTF 矢量轮廓缩放，实测无可见模糊；仍以 20/30/40 这类整十值最锐。
 - `.env.local` 里的 `VITE_NPC_MODEL=npc-qwen:latest` 会让 `src/ai/config.test.ts` 的「生产默认关闭」断言变红。这是该测试对本地环境文件的脆弱性（`config.ts` 优先读 `process.env`），与本轮无关；跑测试时用 `VITE_NPC_MODEL= npx vitest run` 可隔离。
+
+## P8-MANUAL-WEAPONS 手动武器外观与挥击差异（2026-11-20）
+**目标**：在不改战斗规则、装备、掉落、制作和旧存档的前提下，让玩家手动挑选视觉武器，并在挥击时看到对应姿势与特效。
+**实现**：
+- `src/render/weapon.ts` 增加固定目录：撬棍、消防斧、砍刀、短剑、匕首；各有独立贴图锚点、尺寸和三帧挥击角度，五种在每一帧的轨迹均不同。
+- `GameScene` 用 Q 循环切换，只存在场景临时字段；帧级去重、场景关闭时解绑。不会进入 `GameState`、装备栏或存档。重建楼层时仅按当前场景选择恢复显示。
+- 攻击时沿用原动画帧与战斗结算；武器贴图跟随同一只手的骨骼锚点，左右朝向镜像；消防斧/砍刀用既有提供的重劈图集，其余用剑光；各自采用独立缩放与播放速度。
+- 复用游戏已有武器源图及用户提供的重劈特效，不生成新图。修正旧受击闪光对 Phaser 4 已移除 `setTintFill(color)` 的调用，改用等效的 fill tint API。
+**验证**：`npm run typecheck` 通过；`npm test` 56 个测试文件、749 项通过；`npm run build` 通过；`npm run test:e2e -- e2e/combat.spec.ts` 4/4 通过（含 Q 切换后 `GameState` 与 localStorage 完全相同的隔离验证）。另在 Chromium 固定攻击第 2 帧检查消防斧左右挥击：前伸方向正确，握点贴合手部。生产构建只有现有大型 JS chunk 提示。

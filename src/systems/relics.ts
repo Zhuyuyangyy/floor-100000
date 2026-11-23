@@ -59,6 +59,13 @@ export function guardianDamageMult(relics: readonly string[]): number {
   return relics.includes('guardian_totem') ? 0.7 : 1;
 }
 
+// The guardian totem protects against the floor guardian only, not ordinary
+// ambushes. Keep the encounter gate next to the relic rule so combat callers
+// cannot accidentally apply its multiplier to every monster.
+export function relicDamageMultForCombat(kind: 'ambush' | 'boss', relics: readonly string[]): number {
+  return kind === 'boss' ? guardianDamageMult(relics) : 1;
+}
+
 // The select screen's relic list: earned ones bright, locked ones showing the
 // depth that opens them.
 export function relicDisplay(meta: MetaProgress): Array<{ name: string; blurb: string; unlocked: boolean; need: number }> {

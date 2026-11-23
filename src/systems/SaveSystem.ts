@@ -324,16 +324,24 @@ export function deserialize(json: string): SaveResult {
 //
 // The boolean alone was not enough: every call site ignored it, so a rejected
 // write was completely silent and the player lost the run without ever being
-// told (B3-01 D9). The count below is what makes the failure visible — the scene
-// polls it and warns when it grows, which covers every call site at once.
+// told (B3-01 D9). Keep both the total failures and uninterrupted failure
+// episodes: autosave retries frequently, but one outage should produce one HUD
+// warning until a write succeeds and storage recovers.
 let saveFailures = 0;
+let saveFailureEpisodes = 0;
+let saveUnavailable = false;
 
 export function saveToStorage(state: GameState, storage: Storage = localStorage): boolean {
   try {
     storage.setItem(SAVE_KEY, serialize(state));
+    saveUnavailable = false;
     return true;
   } catch {
     saveFailures += 1;
+    if (!saveUnavailable) {
+      saveUnavailable = true;
+      saveFailureEpisodes += 1;
+    }
     return false;
   }
 }
@@ -344,6 +352,13 @@ export function saveToStorage(state: GameState, storage: Storage = localStorage)
 // instead of one per frame.
 export function saveFailureCount(): number {
   return saveFailures;
+}
+
+// Number of distinct periods in which writes became unavailable. This stays
+// flat across repeated quota failures, then advances again after a successful
+// write restores storage.
+export function saveFailureEpisodeCount(): number {
+  return saveFailureEpisodes;
 }
 
 export function loadFromStorage(storage: Storage = localStorage): SaveResult {

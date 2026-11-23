@@ -2292,17 +2292,53 @@ export class GameScene extends Phaser.Scene {
     this.hudContextBottom = contextBottom;
     this.add.rectangle(0, 0, width, topHeight, UI.surface).setOrigin(0).setAlpha(0.98).setScrollFactor(0).setDepth(100);
     this.add.rectangle(0, topHeight, width, contextBottom - topHeight, UI.surface).setOrigin(0).setAlpha(0.94).setScrollFactor(0).setDepth(100);
-    const chrome = this.add.graphics().setScrollFactor(0).setDepth(101);
+    const chrome = this.add.graphics().setName('hud-chrome').setScrollFactor(0).setDepth(101);
+    const instrumentPlate = (x: number, y: number, w: number, h: number, signal: number): void => {
+      const left = Math.round(x);
+      const top = Math.round(y);
+      const plateWidth = Math.round(w);
+      const plateHeight = Math.round(h);
+      chrome.fillStyle(UI.surfaceRaised, mobile ? 0.24 : 0.18);
+      chrome.fillRect(left, top, plateWidth, plateHeight);
+      chrome.lineStyle(1, UI.line, 0.46);
+      chrome.strokeRect(left + 0.5, top + 0.5, plateWidth - 1, plateHeight - 1);
+      chrome.fillStyle(signal, 0.9);
+      chrome.fillRect(left + 1, top + 1, Math.min(20, plateWidth - 2), 2);
+      chrome.fillRect(left + 1, top + 1, 2, Math.max(6, plateHeight - 2));
+      chrome.fillStyle(UI.line, 0.65);
+      chrome.fillRect(left + plateWidth - 5, top + 4, 2, 2);
+      chrome.fillRect(left + 4, top + plateHeight - 6, 2, 2);
+    };
+    if (mobile) {
+      instrumentPlate(8, 2, 140, 34, UI.accent);
+      instrumentPlate(width - 116, 2, 108, 34, UI.good);
+      const columnWidth = Math.floor((width - 24) / 2);
+      STAT_BARS.forEach((stat, i) => {
+        const groupX = 12 + (i % 2) * columnWidth;
+        const rowY = i < 2 ? 40 : 69;
+        instrumentPlate(groupX - 4, rowY - 2, columnWidth - 2, 28, STAT_COLORS[stat.key] ?? UI.good);
+      });
+    } else {
+      instrumentPlate(12, 8, 168, 48, UI.accent);
+      STAT_BARS.forEach((stat, i) => {
+        instrumentPlate(hud.statX + i * hud.statPitch - 8, 8, hud.statWidth + 20, 48, STAT_COLORS[stat.key] ?? UI.good);
+      });
+      instrumentPlate(1012, 8, width - 1024, 48, UI.good);
+    }
     chrome.lineStyle(1, UI.line, 0.85);
     if (!mobile) for (const x of [196, 1000]) chrome.lineBetween(x, 14, x, hud.topHeight - 14);
     chrome.lineBetween(mobile ? 8 : 16, topHeight - 1, width - (mobile ? 8 : 16), topHeight - 1);
     chrome.lineBetween(mobile ? 8 : 16, contextBottom - 1, width - (mobile ? 8 : 16), contextBottom - 1);
     chrome.fillStyle(UI.accent, 1);
     chrome.fillRect(0, 0, 4, topHeight);
+    chrome.fillStyle(UI.accent, 0.9);
+    chrome.fillRect(mobile ? 5 : 10, mobile ? 114 : hud.goalY + 3, 2, mobile ? 14 : 18);
+    chrome.fillStyle(UI.good, 0.9);
+    chrome.fillRect(mobile ? 5 : 10, mobile ? 139 : hud.environmentY + 3, 2, mobile ? 14 : 18);
 
-    this.floorBadge = this.add.text(mobile ? 12 : 20, mobile ? 4 : 6, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 18 : TYPE.body}px`, color: hex(PALETTE.lightHigh) })
+    this.floorBadge = this.add.text(mobile ? 12 : 20, mobile ? 8 : 6, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 14 : TYPE.body}px`, color: hex(PALETTE.lightHigh) })
       .setName('hud-floor').setScrollFactor(0).setDepth(103);
-    this.clockText = this.add.text(mobile ? 12 : 20, mobile ? 28 : 38, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 14 : TYPE.caption}px`, color: hex(TEXT.primary) })
+    this.clockText = this.add.text(mobile ? 72 : 20, mobile ? 9 : 38, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 12 : TYPE.caption}px`, color: hex(TEXT.primary) })
       .setName('hud-clock').setScrollFactor(0).setDepth(103);
     this.refreshClock();
 
@@ -2321,9 +2357,9 @@ export class GameScene extends Phaser.Scene {
     });
     this.refreshStats();
 
-    this.goldText = this.add.text(width - (mobile ? 12 : 20), mobile ? 4 : 6, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 14 : TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
+    this.goldText = this.add.text(width - (mobile ? 12 : 20), mobile ? 2 : 6, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 14 : TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
       .setOrigin(1, 0).setName('hud-gold').setScrollFactor(0).setDepth(103);
-    this.scoreText = this.add.text(width - (mobile ? 12 : 20), mobile ? 26 : 34, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 14 : TYPE.caption}px`, color: hex(TEXT.highlight) })
+    this.scoreText = this.add.text(width - (mobile ? 12 : 20), mobile ? 19 : 34, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 14 : TYPE.caption}px`, color: hex(TEXT.highlight) })
       .setOrigin(1, 0).setName('hud-score').setScrollFactor(0).setDepth(103);
 
     this.goalText = this.add.text(mobile ? 12 : 20, mobile ? 112 : hud.goalY, '', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 14 : TYPE.caption}px`, color: hex(PALETTE.lightHigh) })
@@ -2348,8 +2384,12 @@ export class GameScene extends Phaser.Scene {
     footLine.fillStyle(UI.line, 0.9);
     footLine.fillRect(0, DESIGN_HEIGHT - HUD_FOOT_H, width, 1);
     this.hintText = this.add
-      .text(mobile ? width / 2 : 8, mobile ? DESIGN_HEIGHT - HUD_FOOT_H + 8 : DESIGN_HEIGHT - HUD_FOOT_H / 2, mobile ? '' : 'A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观（仅视觉） · ESC 菜单', { fontFamily: FONT_FAMILY, fontSize: `${mobile ? 13 : TYPE.caption}px`, color: hex(TEXT.highlight) })
+      .text(mobile ? width / 2 : 8, mobile ? DESIGN_HEIGHT - HUD_FOOT_H - 14 : DESIGN_HEIGHT - HUD_FOOT_H / 2, mobile ? '' : 'A/D 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观（仅视觉） · ESC 菜单', {
+        fontFamily: FONT_FAMILY, fontSize: `${mobile ? 12 : TYPE.caption}px`, color: hex(TEXT.highlight),
+        ...(mobile ? { backgroundColor: '#0b0f12dd', padding: { x: 6, y: 3 }, wordWrap: { width: width - 24 } } : {}),
+      })
       .setOrigin(mobile ? 0.5 : 0, 0.5).setName('hud-hint').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    if (mobile) this.hintText.setVisible(false);
 
     // The low-HP vignette: pure red wash whose alpha is the pulse function's
     // output. Created invisible; update() drives it every frame.
@@ -2507,6 +2547,17 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Keep touch-mode context above the buttons, and omit desktop-only key legends. */
+  private setInteractionHint(message: string): void {
+    const genericControls = message.startsWith('A/D 或 ←/→');
+    if (this.portraitMode && (genericControls || this.bagFullShown)) {
+      this.hintText.setText('').setVisible(false);
+      return;
+    }
+    this.hintText.setText(message).setVisible(true);
+    if (this.portraitMode) this.fitHudLine(this.hintText, this.portraitWidth - 24);
+  }
+
   private refreshClock(): void {
     const s = getGame();
     const label = hudClockLabel(s.day, s.gameMinuteOfDay);
@@ -2515,7 +2566,7 @@ export class GameScene extends Phaser.Scene {
       this.clockText.setText(label);
     }
     this.floorBadge?.setText(`第${s.currentFloor}层`);
-    this.fitHudLine(this.clockText, this.portraitMode ? 110 : 164);
+    this.fitHudLine(this.clockText, this.portraitMode ? 64 : 164);
   }
 
   private refreshStats(): void {
@@ -2537,6 +2588,7 @@ export class GameScene extends Phaser.Scene {
     // without reading four numbers.
     const urgent = mostUrgentStat(getGame().player);
     this.statLabels.forEach((t, i) => t.setColor(STAT_BARS[i].key === urgent ? hex(TEXT.warn) : hex(TEXT.secondary)));
+    this.statValues.forEach((t, i) => t.setColor(STAT_BARS[i].key === urgent ? hex(TEXT.warn) : hex(TEXT.primary)));
   }
 
   /**
@@ -4243,7 +4295,9 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (this.inventoryOpen || this.craftingOpen || this.dialogueOpen || this.pauseOpen || this.encounterOpen || this.shelterOpen) {
-      this.hintText.setText(this.openPanelHint() ?? '');
+      const panelHint = this.openPanelHint() ?? '';
+      this.hintText.setText(panelHint).setVisible(panelHint.length > 0 && !(this.portraitMode && this.bagFullShown));
+      if (this.portraitMode) this.fitHudLine(this.hintText, this.portraitWidth - 24);
       return;
     }
     const state = getGame();
@@ -4423,40 +4477,40 @@ export class GameScene extends Phaser.Scene {
     // must follow the same priority, and the trader is not a question mark.
     const spot = this.nearestEncounterSpot();
     if (spot) {
-      this.hintText.setText(spot === 'shop' ? '按 E 与行商交易' : '按 E 查看问号点');
+      this.setInteractionHint(spot === 'shop' ? '按 E 与行商交易' : '按 E 查看问号点');
       return;
     }
 
     if (this.nearBed(state)) {
-      this.hintText.setText(isNight(state.gameMinuteOfDay) ? '按 E 安排夜间行动' : '床位 · 20:00 后可安排夜间行动');
+      this.setInteractionHint(isNight(state.gameMinuteOfDay) ? '按 E 安排夜间行动' : '床位 · 20:00 后可安排夜间行动');
       return;
     }
     if (this.nearCraftStation(state)) {
-      this.hintText.setText('按 C 制作');
+      this.setInteractionHint('按 C 制作');
       return;
     }
     if (this.nearestNpc(state)) {
-      this.hintText.setText('按 E 对话');
+      this.setInteractionHint('按 E 对话');
       return;
     }
     if (event?.type === 'leak' && state.currentFloor === event.floor) {
-      this.hintText.setText('此地漏水，地面物资受潮');
+      this.setInteractionHint('此地漏水，地面物资受潮');
       return;
     }
     const container = this.nearestContainer();
     const zone = currentInteractionZone(state);
-    if (container) this.hintText.setText(`按 E 打开 ${container.label}`);
+    if (container) this.setInteractionHint(`按 E 打开 ${container.label}`);
     // OVERHAUL Wave C2: advertise the same capped offer that F will purchase.
     else if (zone === 'up') {
       const offer = shortcutOffer(state, Math.max(...PLAYABLE_FLOORS_V01));
-      this.hintText.setText(offer ? `按 E 上楼 · F 抄近路（${offer.price} 金）` : '按 E 上楼');
+      this.setInteractionHint(offer ? `按 E 上楼 · F 抄近路（${offer.price} 金）` : '按 E 上楼');
     }
-    else if (zone === 'down') this.hintText.setText('按 E 下楼');
+    else if (zone === 'down') this.setInteractionHint('按 E 下楼');
     else if (
       state.currentFloor === Math.max(...PLAYABLE_FLOORS_V01) &&
       Math.abs(state.player.x - UP_EXIT_X) <= INTERACT_DISTANCE
-    ) this.hintText.setText(`当前开放范围止于第 ${state.currentFloor} 层；右侧楼梯按 E 下行`);
-    else this.hintText.setText('A/D 或 ←/→ 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观（仅视觉） · ESC 菜单');
+    ) this.setInteractionHint(`当前开放范围止于第 ${state.currentFloor} 层；右侧楼梯按 E 下行`);
+    else this.setInteractionHint('A/D 或 ←/→ 移动 · E 交互 · I 背包 · C 制作 · M 地图 · Q 切换武器外观（仅视觉） · ESC 菜单');
   }
 
   // The wanderer only haunts its own floor; it is slower than the player and

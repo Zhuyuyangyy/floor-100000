@@ -40,6 +40,7 @@ const FLAVOUR: Record<string, string> = {
 export class MetaSelectScene extends Phaser.Scene {
   private optionTexts: Phaser.GameObjects.Text[] = [];
   private lockTexts: Phaser.GameObjects.Text[] = [];
+  private selectionBands: Phaser.GameObjects.Rectangle[] = [];
   private selected = 0;
   private marker!: Phaser.GameObjects.Image;
   private messageText!: Phaser.GameObjects.Text;
@@ -61,6 +62,8 @@ export class MetaSelectScene extends Phaser.Scene {
 
   create(): void {
     this.lastInputFrame = { up: -1, down: -1, enter: -1, esc: -1 };
+    for (const band of this.selectionBands) band.destroy();
+    this.selectionBands = [];
     const { width, height } = this.cameras.main;
     const mobile = isPortraitViewport(window.innerWidth, window.innerHeight);
     const visibleWidth = mobile ? portraitViewportFor(window.innerWidth, window.innerHeight).width : width;
@@ -147,6 +150,14 @@ export class MetaSelectScene extends Phaser.Scene {
       }, this);
     });
     this.invWell(listX - 6, top + 28, listW, mobile ? 202 : 220, depth + 5);
+    this.selectionBands = ROSTER.map((_, i) => {
+      const rowY = top + (mobile ? 30 : 34) + i * (mobile ? 48 : 52);
+      return this.add.rectangle(listX + listW / 2, rowY + 22, listW, mobile ? 44 : 48, UI.surfaceRaised)
+        .setAlpha(0.24)
+        .setStrokeStyle(1, UI.accent, 0.7)
+        .setDepth(depth + 6)
+        .setVisible(false);
+    });
     this.optionTexts.forEach((t) => t.setDepth(depth + 8));
     this.lockTexts.forEach((t) => t.setDepth(depth + 8));
 
@@ -304,6 +315,7 @@ export class MetaSelectScene extends Phaser.Scene {
     this.optionTexts.forEach((t, i) => {
       const unlocked = canSelect(meta, ROSTER[i]);
       const isSelected = i === this.selected;
+      this.selectionBands[i]?.setVisible(isSelected);
       t.setColor(unlocked ? (isSelected ? hex(PALETTE.lightHigh) : hex(TEXT.primary)) : hex(TEXT.disabled));
       // The selected row gets a band, same language as every other list.
       if (isSelected) {

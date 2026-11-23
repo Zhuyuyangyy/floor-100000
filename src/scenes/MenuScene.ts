@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { FONT_FAMILY } from '../render/uiKit';
+import { FONT_FAMILY, UI } from '../render/uiKit';
 import { isPortraitViewport, portraitViewportFor } from '../core/design';
 
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
@@ -32,6 +32,9 @@ export class MenuScene extends Phaser.Scene {
   private helpOpen = false;
   private helpObjects: PanelObject[] = [];
   private marker!: Phaser.GameObjects.Image;
+  private menuFocusPlate?: Phaser.GameObjects.Rectangle;
+  private menuFocusRail?: Phaser.GameObjects.Rectangle;
+  private menuFocusWidth = 0;
   private messageText!: Phaser.GameObjects.Text;
   private messageTimer?: Phaser.Time.TimerEvent;
   private lastInputFrame: Record<InputSlot, number> = { up: -1, down: -1, enter: -1, esc: -1 };
@@ -51,6 +54,10 @@ export class MenuScene extends Phaser.Scene {
     // Survives a scene restart; left true, the help panel would still swallow
     // navigation on the fresh title screen.
     this.helpOpen = false;
+    this.menuFocusPlate?.destroy();
+    this.menuFocusPlate = undefined;
+    this.menuFocusRail?.destroy();
+    this.menuFocusRail = undefined;
 
     const { width, height } = this.cameras.main;
     const mobile = isPortraitViewport(window.innerWidth, window.innerHeight);
@@ -142,7 +149,18 @@ export class MenuScene extends Phaser.Scene {
       t.setAlpha(0);
       this.tweens.add({ targets: t, alpha: 1, duration: 300, delay: 350 + i * 140, ease: 'Cubic.out' });
     });
+    const visibleWidth = mobile ? portraitViewportFor(window.innerWidth, window.innerHeight).width : width;
+    this.menuFocusWidth = mobile ? Math.max(220, visibleWidth - 32) : 460;
+    this.menuFocusPlate = this.add
+      .rectangle(width / 2, MENU_TOP, this.menuFocusWidth, 48, UI.surfaceRaised)
+      .setAlpha(0.42)
+      .setStrokeStyle(1, UI.line, 0.62)
+      .setDepth(-27);
+    this.menuFocusRail = this.add
+      .rectangle(width / 2 - this.menuFocusWidth / 2 + 10, MENU_TOP, 3, 22, UI.accent)
+      .setDepth(-26);
     this.marker = createMarker(this);
+    this.marker.setDepth(2);
     // The marker breathes once visible so the selection reads as alive. Scale
     // only: refreshOptions() repositions this marker by x/y every time the
     // selection moves, so a positional tween would fight it (and the e2e probe
@@ -202,10 +220,18 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private refreshOptions(): void {
-    this.optionTexts.forEach((t, i) => t.setText(this.entries[i].label));
+    this.optionTexts.forEach((t, i) => t
+      .setText(this.entries[i].label)
+      .setColor(i === this.selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary)));
     const selected = this.optionTexts[this.selected];
     this.marker.setVisible(selected !== undefined);
-    if (selected) placeMarker(this.marker, selected);
+    this.menuFocusPlate?.setVisible(selected !== undefined);
+    this.menuFocusRail?.setVisible(selected !== undefined);
+    if (selected) {
+      placeMarker(this.marker, selected);
+      this.menuFocusPlate?.setPosition(selected.x, selected.y);
+      this.menuFocusRail?.setPosition(selected.x - this.menuFocusWidth / 2 + 10, selected.y);
+    }
   }
 
   private move(delta: number): void {

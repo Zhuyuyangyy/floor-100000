@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { mkdirSync } from 'node:fs';
 
 async function waitForScene(page: Page, key: string): Promise<void> {
   await page.waitForFunction(
@@ -129,6 +130,8 @@ test('title menu mouse hover and clicks work with no save', async ({ page }) => 
 
   await moveMouseToMenuText(page, '操作说明');
   await expect.poll(() => selectedMenuOption(page)).toBe('操作说明');
+  mkdirSync('output/playwright/ui', { recursive: true });
+  await page.screenshot({ path: 'output/playwright/ui/title-focus.png' });
   await clickMenuText(page, '操作说明');
   await expect.poll(() => hasVisibleText(page, 'A/D 或 ←/→ 移动')).toBe(true);
   expect(await hasVisibleText(page, '点击关闭 · Enter / ESC')).toBe(true);
@@ -170,6 +173,9 @@ test('a first-time player can finish character selection with the mouse', async 
   await waitForScene(page, 'Menu');
   await clickMenuText(page, '开始新游戏');
   await waitForScene(page, 'MetaSelect');
+  await page.waitForTimeout(250);
+  mkdirSync('output/playwright/ui', { recursive: true });
+  await page.screenshot({ path: 'output/playwright/ui/character-focus.png' });
 
   await clickTextInScene(page, 'MetaSelect', '阿林');
   await clickTextInScene(page, 'MetaSelect', '开始生存');

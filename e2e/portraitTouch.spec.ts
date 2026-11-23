@@ -93,6 +93,7 @@ test('portrait touch: start a fresh run, walk to a real container, interact, and
   });
   expect(hudLines).toHaveLength(2);
   expect(hudLines.every((line) => line.x >= 0 && line.x + line.width <= 324 && line.y + line.height <= 166)).toBe(true);
+  await page.screenshot({ path: 'output/playwright/hud/360x800-day.png' });
 
   // Every new Playwright page has a fresh browser context; no user save or profile is reused.
   const start = await activeState(page);

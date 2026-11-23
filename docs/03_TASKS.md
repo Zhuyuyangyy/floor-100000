@@ -110,7 +110,8 @@
 | B3-UI-05 | **付费近路报价一致**：楼梯口提示与 F 购买共用顶层截断后的目标和金额；不改收费公式 | ✅ 真实键盘专项及单 worker 全量 E2E 94/94、单测通过，见 [`M1_INTEGRATION_REVIEW.md`](M1_INTEGRATION_REVIEW.md) |
 | B3-UI-06 | **第 5 层上行边界反馈**：没有第 6 层楼梯时，按 E 明确说明开放范围与可下行方向；不开放新楼层、不改玩法规则 | ✅ 真实键盘回归通过；类型检查、759 项单测、生产构建通过，单 worker 全量 E2E 结果见 [`M1_INTEGRATION_REVIEW.md`](M1_INTEGRATION_REVIEW.md) |
 | B3-UI-07 | **手机竖屏可玩性与完成度**：自适应窄视口 HUD、菜单/角色选择及触控移动/E/I/C；保持桌面布局和既有玩法规则 | ✅ 360×800 触控、320×800 边界、桌面 UI、首五层真实旅程通过；明细见 [`B3-UI-07_MOBILE_PORTRAIT.md`](B3-UI-07_MOBILE_PORTRAIT.md)。旋转后需重新载入；地图暂不提供触控入口 |
-| HUD-01 | **M1 HUD 视觉收口**：生存数值、楼层时间、目标环境、消息与操作提示分区；四种窗口截图及边界验收，不修改玩法 | 🔵 独立分支实现与专项验收，完整回归见 [`M1_HUD_VISUAL_CLOSEOUT.md`](M1_HUD_VISUAL_CLOSEOUT.md) |
+| B3-UI-08 | **Gimble 暗金属视觉收口**：状态仪表、紧急值、主线/环境分区、标题/角色焦点与竖屏提示；不改玩法、存档或美术资源 | ✅ 完成；实施与验收见 [`B3-UI-08_GIMBLE_FINISH.md`](B3-UI-08_GIMBLE_FINISH.md) |
+| HUD-01 | **M1 HUD 视觉收口**：生存数值、楼层时间、目标环境、消息与操作提示分区；四种窗口截图及边界验收，不修改玩法 | ✅ 初版 HUD 收口及专项验收见 [`M1_HUD_VISUAL_CLOSEOUT.md`](M1_HUD_VISUAL_CLOSEOUT.md)；后续 Gimble 全界面精修见 [`B3-UI-08_GIMBLE_FINISH.md`](B3-UI-08_GIMBLE_FINISH.md) |
 | **M1 暴改** | 五 agent 并行（作战书 [`OVERHAUL_M1.md`](OVERHAUL_M1.md)）：问号点遭遇+守门人（抄 ALTACIMA）、巡游体 lunge 状态机+dwell scout（抄 CENTUM）、每日目标+深度计分、低血红晕+精力减速+三音效、attack/hurt/search 新手摆姿态（逆向 CENTUM 精灵表结构） | ✅ 见 [`OVERHAUL_M1_REPORT.md`](OVERHAUL_M1_REPORT.md) |
 | **通宵作战** | 打到竞品品度（作战书 [`OVERNIGHT_PLAN.md`](OVERNIGHT_PLAN.md)）：Wave A 真回合制战斗（15 怪 7 行为）· Wave B 可解锁 4 幸存者 + 三档模式 + 5 遗物 · Wave C 行商经济 + CENTUM 公式付费跳层 · Wave D 对账 | ✅ 见 [`OVERNIGHT_FINAL.md`](OVERNIGHT_FINAL.md) |
 | **下一步** | 人工试玩（白天出门/回家、夜间 shelter 决策、问号点/战斗/金币三密度）→ 通过则 B3 验收 → 再定 B4 | ⬜ |

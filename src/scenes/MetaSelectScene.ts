@@ -9,6 +9,41 @@ import { playSfx } from '../render/audio';
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { buildPanel, createMarker, PANEL_DEPTH, placeMarker } from '../render/panels';
 import { buildPanelHeader, FONT_FAMILY, TYPE, UI } from '../render/uiKit';
+import {
+  META_BLURB_FONT,
+  META_BLURB_TOP,
+  META_BLURB_W,
+  META_BTN_H,
+  META_BTN_TOP,
+  META_BTN_W,
+  META_COL_X,
+  META_FLAVOUR_FONT,
+  META_FLAVOUR_TOP,
+  META_FLAVOUR_W,
+  META_FLAVOUR_X,
+  META_MSG_FONT,
+  META_MSG_TOP,
+  META_NOTE_DY,
+  META_NOTE_FONT,
+  META_PANEL_H,
+  META_PANEL_W,
+  META_PORTRAIT_CY,
+  META_PORTRAIT_X,
+  META_RELIC_FONT,
+  META_RELIC_ROWS,
+  META_ROSTER_ROWS,
+  META_ROSTER_TOP,
+  META_ROSTER_W,
+  META_ROSTER_X,
+  META_ROW_H,
+  META_TITLE_DY,
+  META_TITLE_FONT,
+  META_WELL_H,
+  META_WELL_TOP,
+  META_WELL_X,
+  metaRelicY,
+  metaRowY,
+} from '../render/metaSelectLayout';
 import { TITLE_BG_KEY, portraitKey } from '../render/artpack';
 import { framedButton, hitRect, textClickable } from '../render/pointer';
 
@@ -34,27 +69,24 @@ type InputSlot = 'up' | 'down' | 'enter' | 'esc';
 
 const ROSTER = ['player', 'npc_alin', 'npc_xiaozhou', 'npc_zhouhe', 'wanderer'] as const;
 
-// The caption's wrap width, under the portrait column. 108 keeps it clear of the
-// roster well (which starts at left + 122) with 6px to spare, and the longest
-// flavour string (21 characters) wraps to four lines at 18px — 80px of text,
-// which fits between the bust's bottom (top+164) and the message line
-// (top+288) with room over.
-const FLAVOUR_W = 108;
-/** Where the caption's first line opens, measured from the panel top. */
-const FLAVOUR_TOP = 176;
+// The caption's wrap width and opening line now live in render/metaSelectLayout.ts
+// with every other lane on this screen — see that file's header for the four
+// overlaps the 2026-11-23 sweep measured here.
 
-// Two lines each, broken by hand at a punctuation mark.
+// 每行手工断好，且每行都装得进左列的带（META_FLAVOUR_W）。
 //
-// The line break is in the data, not in a wordWrap box, because Phaser breaks on
-// spaces and these strings have none: a 132px-wide box rendered each of them as a
-// single 700px line straight across the roster, and a full-panel-width line ran
-// into the relic column instead (the 5th relic row sits at top+252, the caption
-// at top+248). The left 318px of the panel is the only strip this text can own.
+// 断行放在数据里而不是交给 wordWrap：Phaser 的基础断行器按空格断，中文串没有
+// 空格，一个 132px 的框会把整句渲染成 700px 一行横穿名单。useAdvancedWrap 能断
+// 中文，但它按字数硬切、不认标点 —— 2026-11-23 实测 148px 框下「从底层醒来的那个
+// 人。」被切成「从底层醒来的那个 / 人。」，单字成行。
+//
+// 所以这里把每个分句再按语义断到 ≤ 8 字（8 × 18px = 144 ≤ 148），一行一个意群，
+// 自动断行永不触发。文案含义逐字保留，只挪断点。
 const FLAVOUR: Record<string, string> = {
-  player: '从底层醒来的那个人。\n没有特长，只有背包。',
-  npc_alin: '宿舍区的老邻居。\n交易时总能多聊出点门道。',
-  npc_xiaozhou: '跑得快的孩子。\n撤退总是更容易一些。',
-  wanderer: '在黑暗里游荡的东西。\n现在它为你引路。',
+  player: '从底层醒来的\n那个人。\n没有特长，\n只有背包。',
+  npc_alin: '宿舍区的\n老邻居。\n交易时总能多\n聊出点门道。',
+  npc_xiaozhou: '跑得快的孩子。\n撤退总是\n更容易一些。',
+  wanderer: '在黑暗里\n游荡的东西。\n现在它\n为你引路。',
 };
 
 export class MetaSelectScene extends Phaser.Scene {
@@ -96,13 +128,13 @@ export class MetaSelectScene extends Phaser.Scene {
     this.add.rectangle(width / 2, height / 2, width, height, UI.surface).setAlpha(0.62).setDepth(-29);
 
     const cx = width / 2;
-    const panelW = 470;
-    const panelH = 300;
+    const panelW = META_PANEL_W;
+    const panelH = META_PANEL_H;
     const left = cx - panelW / 2;
     const top = height / 2 - panelH / 2;
     const depth = PANEL_DEPTH.menu.help;
 
-    this.add.text(cx, top - 18, '出发之前', { fontFamily: FONT_FAMILY, fontSize: '36px', color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 4 }).setOrigin(0.5).setDepth(depth + 1);
+    this.add.text(cx, top + META_TITLE_DY, '出发之前', { fontFamily: FONT_FAMILY, fontSize: `${META_TITLE_FONT}px`, color: hex(PALETTE.lightHigh), stroke: hex(PALETTE.ink), strokeThickness: 4 }).setOrigin(0.5).setDepth(depth + 1);
 
     for (const o of buildPanel(this, cx, height / 2, panelW, panelH, 'green', depth)) o.setDepth(o.depth);
     for (const o of buildPanelHeader(this, left, top, panelW, '幸存者', UI.good, depth + 5)) this.add.existing(o as Phaser.GameObjects.GameObject);
@@ -112,8 +144,8 @@ export class MetaSelectScene extends Phaser.Scene {
     // the panel edge with 18px of air before the roster. Centred rather than
     // bottom-anchored: a head-and-shoulders crop anchored to the floor reads as
     // a head on a shelf, which is what the old full-body sprite looked like.
-    const portraitX = left + 62;
-    const portraitCy = top + 116;
+    const portraitX = left + META_PORTRAIT_X;
+    const portraitCy = top + META_PORTRAIT_CY;
     this.portraitGlow = this.add.graphics().setDepth(depth + 5);
     this.portrait = this.add
       .image(portraitX, portraitCy, portraitKey('player'))
@@ -129,30 +161,35 @@ export class MetaSelectScene extends Phaser.Scene {
     // strings have no spaces, so Phaser's basic wrapper never breaks them and
     // each would render as one 700px line.
     this.flavourText = this.add
-      .text(portraitX, top + FLAVOUR_TOP, '', {
+      .text(left + META_FLAVOUR_X, top + META_FLAVOUR_TOP, '', {
         fontFamily: FONT_FAMILY,
-        fontSize: '18px',
+        fontSize: `${META_FLAVOUR_FONT}px`,
         color: hex(TEXT.secondary),
         align: 'center',
-        wordWrap: { width: FLAVOUR_W, useAdvancedWrap: true },
+        wordWrap: { width: META_FLAVOUR_W, useAdvancedWrap: true },
       })
       .setOrigin(0.5, 0)
       .setDepth(depth + 7);
 
     // ── the roster ──────────────────────────────────────────────────────────
     const meta = loadMeta();
-    const listX = left + 128;
-    const listW = 200;
+    // 版面按 5 行名单 / 5 行遗物算出来的。加了角色或遗物而没重算泳道，就会像
+    // 2026-11-23 那样静默溢出到装饰条上 —— 这里让它响。
+    if (ROSTER.length !== META_ROSTER_ROWS) {
+      throw new Error(`MetaSelect: ROSTER ${ROSTER.length} 行与 META_ROSTER_ROWS ${META_ROSTER_ROWS} 不符，请重算 metaSelectLayout 泳道`);
+    }
+    const listX = left + META_ROSTER_X;
+    const listW = META_ROSTER_W;
     this.optionTexts = [];
     this.lockTexts = [];
     ROSTER.forEach((id, i) => {
       const unlocked = canSelect(meta, id);
       const need = CHARACTER_UNLOCKS[id];
-      // 52px pitch, name on the first 24px and its unlock note on the next
-      // 20px. At the old 40px pitch with the note at +22, a pixel face (which
-      // fills its whole em, unlike SimSun) put the note straight through the
-      // name and the whole roster read as one smudge.
-      const y = top + 34 + i * 52;
+      // 行距与注释偏移都从字体真实线盒推出来（metaSelectLayout）：名字 24px 是
+      // 30px 线盒、注释 20px 是 25px，一行 55px，行距 58。旧值 pitch 52 / note
+      // +28 是按 ~1.0em 的像素字体量的，两行本身就交叠 2px，第 5 行还整条掉到
+      // 井外、印在面板底部装饰条上（2026-11-23 巡检实测）。
+      const y = top + metaRowY(i);
       const name = this.add
         .text(listX + 8, y, CHARACTER_NAMES[id] ?? id, {
           fontFamily: FONT_FAMILY,
@@ -161,9 +198,9 @@ export class MetaSelectScene extends Phaser.Scene {
         })
         .setDepth(depth + 7);
       const lock = this.add
-        .text(listX + 8, y + 28, unlocked ? '可出战' : `最深第 ${need} 层解锁`, {
+        .text(listX + 8, y + META_NOTE_DY, unlocked ? '可出战' : `最深第 ${need} 层解锁`, {
           fontFamily: FONT_FAMILY,
-          fontSize: `${TYPE.caption}px`,
+          fontSize: `${META_NOTE_FONT}px`,
           color: unlocked ? hex(PALETTE.clothHigh) : hex(TEXT.disabled),
         })
         .setDepth(depth + 7);
@@ -173,7 +210,8 @@ export class MetaSelectScene extends Phaser.Scene {
       // only. Starting the run is the 出发 button's job — an earlier version also
       // started on a second click of the selected row, and because row 0 is
       // selected by default a single stray click on 幸存者 launched the game.
-      hitRect(this, listX - 6, y - 6, listW, 48, depth + 9, {
+      // 命中框跟着真实行高走（旧值 48 < 行高 55，行尾 7px 点不到）。
+      hitRect(this, listX - 6, y - 2, listW, META_ROW_H + 4, depth + 9, {
         onOver: () => {
           if (this.selected === i) return;
           this.selected = i;
@@ -186,7 +224,8 @@ export class MetaSelectScene extends Phaser.Scene {
         },
       });
     });
-    this.invWell(listX - 6, top + 28, listW, 220, depth + 5);
+    // 井高按行数算，末行下方留内边距 —— 旧的写死 220 装不下 5 行 55px。
+    this.invWell(left + META_WELL_X, top + META_WELL_TOP, listW, META_WELL_H, depth + 5);
     this.optionTexts.forEach((t) => t.setDepth(depth + 8));
     this.lockTexts.forEach((t) => t.setDepth(depth + 8));
 
@@ -194,22 +233,32 @@ export class MetaSelectScene extends Phaser.Scene {
     this.marker.setDepth(depth + 9);
 
     // ── the mode / relic column ─────────────────────────────────────────────
-    const colX = left + 338;
+    const colX = left + META_COL_X;
     this.modeText = this.add
-      .text(colX, top + 34, `模式 ${MODE_LABELS[meta.mode]}`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
+      .text(colX, top + META_ROSTER_TOP, `模式 ${MODE_LABELS[meta.mode]}`, { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh) })
       .setDepth(depth + 7);
+    // useAdvancedWrap 是承重的：这些串没有空格，Phaser 的基础断行器一个字都
+    // 断不开中文。旧实现只给了 width:150，实测整句渲染成 x=743..1031 的一行，
+    // 而面板右界 875 —— 冲出面板 156px 印在背景上（2026-11-23 巡检）。
     this.modeBlurbText = this.add
-      .text(colX, top + 66, MODE_BLURBS[meta.mode], { fontFamily: FONT_FAMILY, fontSize: '18px', color: hex(TEXT.dim), wordWrap: { width: 150 } })
+      .text(colX, top + META_BLURB_TOP, MODE_BLURBS[meta.mode], {
+        fontFamily: FONT_FAMILY,
+        fontSize: `${META_BLURB_FONT}px`,
+        color: hex(TEXT.dim),
+        wordWrap: { width: META_BLURB_W, useAdvancedWrap: true },
+      })
       .setDepth(depth + 7);
     const relics = relicDisplay(meta);
+    if (relics.length !== META_RELIC_ROWS) {
+      throw new Error(`MetaSelect: 遗物 ${relics.length} 行与 META_RELIC_ROWS ${META_RELIC_ROWS} 不符，请重算 metaSelectLayout 泳道`);
+    }
     relics.forEach((r, i) => {
-      // Down to +140 and onto a 28px pitch: the blurb above it wraps to two or
-      // three lines at this width, and the relic column started at +108 where
-      // the third line now lands.
+      // 首行让开简介的**最坏**高度（easy 模式 4 行 = 88px，实测），不是按当前
+      // 模式的行数摆 —— 否则 ←/→ 切模式时整列会上下跳。
       this.add
-        .text(colX, top + 140 + i * 28, r.unlocked ? `◆ ${r.name}` : `◇ 第 ${r.need} 层`, {
+        .text(colX, top + metaRelicY(i), r.unlocked ? `◆ ${r.name}` : `◇ 第 ${r.need} 层`, {
           fontFamily: FONT_FAMILY,
-          fontSize: '18px',
+          fontSize: `${META_RELIC_FONT}px`,
           color: r.unlocked ? hex(PALETTE.clothHigh) : hex(TEXT.disabledDeep),
         })
         .setDepth(depth + 7);
@@ -219,14 +268,14 @@ export class MetaSelectScene extends Phaser.Scene {
     // Mode: clicking the label cycles it, matching → on the keyboard. A pair of
     // arrows either side would have been more obvious but the relic column starts
     // at colX and there is no room above it.
-    const modeHit = hitRect(this, colX - 6, top + 26, 156, 30, depth + 8, {
+    const modeHit = hitRect(this, colX - 6, top + META_ROSTER_TOP - 6, META_BTN_W + 6, 36, depth + 8, {
       onOver: () => this.modeText.setColor(hex(PALETTE.lightHot)),
       onClick: () => this.cycleMode(1),
     });
     modeHit.on('pointerout', () => this.modeText.setColor(hex(PALETTE.lightHigh)));
 
     // 出发 / 返回标题: the two things Enter and ESC did.
-    framedButton(this, left + 336, top + 258, 118, 28, '出发', depth + 9, () => this.onConfirm('enter'), {
+    framedButton(this, colX, top + META_BTN_TOP, META_BTN_W, META_BTN_H, '出发', depth + 9, () => this.onConfirm('enter'), {
       fill: UI.accent,
       line: PALETTE.clothHigh,
       text: hex(PALETTE.ink),
@@ -242,9 +291,11 @@ export class MetaSelectScene extends Phaser.Scene {
       { onClick: () => this.onConfirm('esc') },
     );
 
+    // 提示行独占一条泳道（出发按钮下方），不再挂在「面板底 -12」上 —— 那个位置
+    // 正落在底部装饰条里。origin(0.5, 0) 让它从泳道顶开始长，高度可预测。
     this.messageText = this.add
-      .text(cx, top + panelH - 12, '', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.caption}px`, color: hex(TEXT.warn) })
-      .setOrigin(0.5)
+      .text(cx, top + META_MSG_TOP, '', { fontFamily: FONT_FAMILY, fontSize: `${META_MSG_FONT}px`, color: hex(TEXT.warn) })
+      .setOrigin(0.5, 0)
       .setDepth(depth + 9)
       .setVisible(false);
 

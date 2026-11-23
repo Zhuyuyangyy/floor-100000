@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 
 import { PALETTE, TEXT, hex } from '../render/palette.ts';
 import { FloatTextPool, playFx, setFxDegraded, startFxLoop } from '../render/fx';
+import { floorBoundsX } from '../render/cameraBounds';
 import { DESIGN_HEIGHT } from '../core/design';
 import { getGame, hasGame, startNewGame } from '../core/session';
 import {
@@ -283,6 +284,14 @@ const CRAFT_TREE_BUTTON_H = 34;
 // resampled and blur the pixel look.
 const TYPE_BODY = 26;
 const TYPE_AUX = 22;
+
+/**
+ * 反馈行（hud-feedback）的底板色。与文字同生共死：flash 有字才上底，
+ * 清空时一并撤掉。Phaser 的 Text 只要 backgroundColor 非空就画那块底，
+ * 哪怕 text='' —— 2026-11-23 巡检在左下量到一块 16×40 的常驻黑方块，
+ * 就是「空字的底」。色值与原实现逐字相同，只是不再无条件挂着。
+ */
+const FEEDBACK_BG = '#0b0f12ee';
 
 // ── 家区剖面（2026-11-20 用户裁决：「前 5 层是自己家，下面要能看见」）──────
 // 1-5 层是基础发育区（塔图 TOWER_MAP.baseFloors 同口径）。站在 2-5 层时把
@@ -1477,7 +1486,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // The world width equals the design viewport width. Locking the horizontal
     // bounds to one floor keeps the full corridor visible when the player lands
     // at x=40 or x=1240; only the tower's vertical cross-section may scroll.
-    cam.setBounds(0, topBound, this.floorW, bottomBound - topBound);
+    this.setWorldBounds(topBound, bottomBound - topBound);
     this.standingCamBounds = { top: topBound, bottom: bottomBound };
     // AG-50 原本在这里补一个 centreY（落地静止位取玩家居中而不是楼层带中心，
     // 修「爬梯末尾先冲过去再荡回来」的那一下卡）。AG-52 的 standScrollY 重写
@@ -1496,7 +1505,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
       const fromY = climbEndScrollY + FLOOR_HEIGHT * dir;
       const toY = standScrollY;
       cam.stopFollow();
-      cam.setBounds(0, Math.min(fromY, toY), this.floorW, viewH + FLOOR_HEIGHT);
+      this.setWorldBounds(Math.min(fromY, toY), viewH + FLOOR_HEIGHT);
       cam.setScroll(cam.scrollX, fromY);
       this.tweens.add({
         targets: cam,
@@ -1506,7 +1515,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
         onComplete: () => {
           // 收回站立 bounds：非家区一层（虚空永远滚不到）；家区含楼下剖面
           // 一层（2026-11-20），与 drawFloor 的 bottomBound 同口径。
-          cam.setBounds(0, standScrollY, this.floorW, bottomBound - topBound);
+          this.setWorldBounds(standScrollY, bottomBound - topBound);
           cam.startFollow(this.player, true, 0.15, 0.15);
         },
       });
@@ -1555,7 +1564,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     const hi = Math.max(nearScroll, farScroll);
     const top = Math.min(standing.top, lo);
     const bottom = Math.max(standing.bottom, hi + camH);
-    cam.setBounds(0, top, this.floorW, bottom - top);
+    this.setWorldBounds(top, bottom - top);
     cam.startFollow(this.player, true, 0.15, 0.15);
     void direction;
   }
@@ -1565,7 +1574,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     const cam = this.cameras.main;
     const standing = this.standingCamBounds;
     if (!standing) return;
-    cam.setBounds(0, standing.top, this.floorW, standing.bottom - standing.top);
+    this.setWorldBounds(standing.top, standing.bottom - standing.top);
     // The climb stopped the follow; a refused landing must hand it back or the
     // camera stays parked where the climb began.
     cam.startFollow(this.player, true, 0.15, 0.15);
@@ -1630,6 +1639,21 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     return FLOOR_VIEW_ZOOM * this.viewZoom;
   }
 
+  /**
+   * 设相机 bounds 的唯一入口（横向 zoom 感知，纵向照传）。
+   *
+   * 横向不能直接写 `0, this.floorW`：bounds 比视口世界宽窄时 Phaser 把 bounds
+   * 左沿对齐视口左沿（clampX + preRender），楼层贴左、右边一大片空白 ——
+   * 2026-11-23 巡检在 zoom 0.5 实测 F2 只占屏幕左 62.5%。floorBoundsX 把 bounds
+   * 扩到视口宽并让楼层居中；zoom ≥ 1 时返回值与 `0, floorW` 逐位相同。
+   */
+  private setWorldBounds(top: number, height: number): void {
+    const cam = this.cameras.main;
+    const viewW = cam.width / this.effectiveZoom();
+    const x = floorBoundsX(this.floorW, viewW);
+    cam.setBounds(x.start, top, x.size, height);
+  }
+
   // 把当前 viewZoom 落到世界相机，并按新 zoom 重算站立 bounds（视口世界高随
   // zoom 变：cam.height/zoom）。HUD 相机恒 1 不动。bounds 顶沿按「脚线屏幕
   // 位置」反推，与 drawFloor 同一公式；调用方负责随后定位 scroll（锚点或居中）。
@@ -1645,7 +1669,7 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     const standScrollY = homeBelow ? PLAYER_FEET_Y - viewH * HOME_SECTION_FEET_FRAC : PLAYER_FEET_Y - viewH / 2;
     const bottomBound = standScrollY + (homeBelow ? viewH : FLOOR_HEIGHT);
     this.standingCamBounds = { top: standScrollY, bottom: bottomBound };
-    cam.setBounds(0, standScrollY, this.floorW, bottomBound - standScrollY);
+    this.setWorldBounds(standScrollY, bottomBound - standScrollY);
   }
 
   // 滚轮/+- 键的统一入口：以指针（或视口中心）为锚点缩放，锚点下的世界点在
@@ -2687,9 +2711,19 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   private drawNeighbourFloor(floor: number, yOffset: number, isAbove: boolean, distance: number, landingX: number): void {
     const wallH = FLOOR_HEIGHT - FLOOR_BAND;
     const tint = corridorTint(floor);
-    // A neighbour is drawn at ITS length, not the player's: tiers differ, and a
-    // 1600-wide floor seen from a 1280 one would otherwise end in black.
+    // 邻居层「有家具的那段」按它自己的长度：tiers 不同，房数/床/工作台/人群
+    // 都得落在它真实的房间里。
     const nbW = floorWidthFor(floor);
+    // 但「壳」——墙/地板/天花缝/色调/ambient/管线/距离雾/顶灯——必须铺到
+    // 相机能看到的最右，也就是 max(邻居层宽, 本层宽)。
+    //
+    // 2026-11-23 界面巡检实证（now-05-f2-right.png）：站在 F2(1600) 往右走，
+    // 楼下 F1(1280) 在世界 x=1280 处一根垂直硬边断到底，右侧一大片纯色。
+    // 原注释只论证了「宽邻居看窄本层」那一向（nbW ≥ 本层宽，天然盖满），
+    // 反向——本层比邻居宽——没人处理。相机 bounds 按本层宽给，所以壳取
+    // 两者的大值就够；房间道具仍只画 nbW 那一段，多出来的壳是同一面墙的
+    // 延续（tileSprite 平铺 + seeded 管线/顶灯接着排），不是一堵假房间。
+    const shellW = Math.max(nbW, this.floorW);
     // A container in floor-local coordinates: the shared renderers build the
     // floor unchanged and one depth keeps all of it behind the playable floor.
     const preexisting = new Set<Phaser.GameObjects.GameObject>(this.children.list);
@@ -2699,12 +2733,12 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     };
 
     // Base art. Same wall and floor band as every other floor of the tower.
-    add(this.add.tileSprite(0, 8, nbW, 128, wallKeyFor(floor)).setOrigin(0, 0));
-    add(this.add.tileSprite(0, wallH, nbW, 64, floorKeyFor(floor)).setOrigin(0, 0));
-    if (tint) add(this.add.rectangle(nbW / 2, 8 + (wallH - 8) / 2, nbW, wallH - 8, tint.color, tint.alpha));
+    add(this.add.tileSprite(0, 8, shellW, 128, wallKeyFor(floor)).setOrigin(0, 0));
+    add(this.add.tileSprite(0, wallH, shellW, 64, floorKeyFor(floor)).setOrigin(0, 0));
+    if (tint) add(this.add.rectangle(shellW / 2, 8 + (wallH - 8) / 2, shellW, wallH - 8, tint.color, tint.alpha));
     const ceilingSeam = this.add.graphics();
     ceilingSeam.fillStyle(0x0b0f12, 1);
-    ceilingSeam.fillRect(0, 0, nbW, 8);
+    ceilingSeam.fillRect(0, 0, shellW, 8);
     add(ceilingSeam);
 
     // The same two-band ambient wash the live floor's light layer lays down,
@@ -2718,12 +2752,12 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     const floorTop = FLOOR_HEIGHT * 0.62;
     add(
       this.add
-        .rectangle(nbW / 2, (clearY + floorTop) / 2, nbW, floorTop - clearY, amb.color)
+        .rectangle(shellW / 2, (clearY + floorTop) / 2, shellW, floorTop - clearY, amb.color)
         .setAlpha(Math.min(0.55, amb.wallAlpha * 1.45)),
     );
     add(
       this.add
-        .rectangle(nbW / 2, (floorTop + FLOOR_HEIGHT) / 2, nbW, FLOOR_HEIGHT - floorTop, amb.color)
+        .rectangle(shellW / 2, (floorTop + FLOOR_HEIGHT) / 2, shellW, FLOOR_HEIGHT - floorTop, amb.color)
         .setAlpha(Math.min(0.62, amb.floorAlpha * 1.45)),
     );
 
@@ -2736,12 +2770,12 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // purpose: two floors down they are two pixels of noise, and they were 120 of
     // the neighbour's ~250 objects. What survives is what carries meaning at this
     // distance — the room's furniture, its doors, its lights.
-    add(...buildRoomDepth(this, { width: nbW, wallBottom: wallH, height: FLOOR_HEIGHT, lightXs: [40, nbW - 40] }));
-    add(...buildWallDressing(this, { width: nbW, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, downExitXFor(floor)] }));
+    add(...buildRoomDepth(this, { width: shellW, wallBottom: wallH, height: FLOOR_HEIGHT, lightXs: [40, shellW - 40] }));
+    add(...buildWallDressing(this, { width: shellW, wallBottom: wallH, seed: floor * 19, keepClear: [UP_EXIT_X, downExitXFor(floor)] }));
 
     // Haze sits behind the props, as it does on the live floor (depth 2), and is
     // the thing that still separates "next floor down" from "the floor after".
-    add(...buildAerialHaze(this, { width: nbW, wallBottom: wallH, hazeColor: ambienceFor(floor).color, strength: 0.2 }));
+    add(...buildAerialHaze(this, { width: shellW, wallBottom: wallH, hazeColor: ambienceFor(floor).color, strength: 0.2 }));
 
     // Room props, by the same theme renderer. Floor 2 is worker housing and floor
     // 3 a store room whether the player is standing on them or looking at them.
@@ -2811,11 +2845,11 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // The ceiling strip lights belong on top of the props: they are the room's
     // light source, and they are what tells the eye these floors are habitable
     // at all rather than sealed. Tinted for the same reason as the props.
-    // AG-65/AG-103：顶灯带是楼层几何，铺满本邻居层自己的长度（nbW =
-    // floorWidthFor(floor)）——写死 FLOOR_WIDTH 时宽邻居层右半没有顶灯，
-    // 爬梯态从梯上往下看，灯带在楼宽中段凭空断掉。与墙体/地板带/ambient
-    // 双色带/haze 同一口径；窄楼（tier1 恒 1280）数值不变。
-    const strips = buildCeilingLights(this, { width: nbW, seed: floor * 13, top: 16 });
+    // AG-65/AG-103：顶灯带是楼层几何，铺满壳宽（shellW = max(邻居层宽, 本层宽)）
+    // ——写死 FLOOR_WIDTH 时宽邻居层右半没有顶灯，爬梯态从梯上往下看，灯带在
+    // 楼宽中段凭空断掉。与墙体/地板带/ambient 双色带/haze 同一口径；
+    // 2026-11-23 起反向（本层比邻居宽）也铺满，右段不再无灯。
+    const strips = buildCeilingLights(this, { width: shellW, seed: floor * 13, top: 16 });
     for (const o of strips) dimObject(o);
     add(...strips);
 
@@ -2856,10 +2890,10 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
     // haze that strengthens with distance is what recedes. It goes on top of the
     // whole floor, props included, so the second neighbour reads as further
     // away even though it is now fully detailed.
-    // AG-65/AG-103：距离雾（aerial perspective）同样铺满邻居层自己的宽度
-    // ——FLOOR_WIDTH 时宽楼右半没有距离雾，下半截楼比左半「近」，剖面
-    // 的纵深读不出来。窄楼数值不变。
-    add(this.add.rectangle(nbW / 2, FLOOR_HEIGHT / 2, nbW, FLOOR_HEIGHT, 0x1b2836, 0.2 * distance));
+    // AG-65/AG-103：距离雾（aerial perspective）同样铺满壳宽——FLOOR_WIDTH 时
+    // 宽楼右半没有距离雾，下半截楼比左半「近」，剖面的纵深读不出来。
+    // 2026-11-23：本层比邻居宽时右段也要有雾，否则硬边处纵深突变。
+    add(this.add.rectangle(shellW / 2, FLOOR_HEIGHT / 2, shellW, FLOOR_HEIGHT, 0x1b2836, 0.2 * distance));
 
     // And the whole floor is set back a step. Detail alone was not enough: once
     // the neighbours were properly furnished, a warm canteen one floor down was
@@ -3491,8 +3525,12 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
   createFeedbackText(): Phaser.GameObjects.Text {
     this.feedbackText = this.add.text(20, HUD_LAYOUT.feedbackY, '', {
       fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(PALETTE.lightHigh),
-      backgroundColor: '#0b0f12ee', padding: { x: 8, y: 5 }, wordWrap: { width: 1216 },
+      backgroundColor: FEEDBACK_BG, padding: { x: 8, y: 5 }, wordWrap: { width: 1216 },
     }).setName('hud-feedback').setScrollFactor(0).setDepth(HUD_FEEDBACK_DEPTH);
+    // 出生即空：底板也一起收掉。Phaser 的 Text 只要 backgroundColor 非空就
+    // 画那块底，哪怕 text='' ——2026-11-23 巡检在左下 (20,556) 量到一个
+    // 16×40 的纯黑小方块，就是这块「空字的底」。
+    this.feedbackText.setBackgroundColor('');
     return this.feedbackText;
   }
 
@@ -3505,10 +3543,16 @@ export class GameScene extends Phaser.Scene implements StatsPanelHost, Monologue
 
   // public：TutorialHost 面之一——教程的跳过语/收尾语走场景这一条反馈行
   // （与其余 ~30 处 this.flash 同一出口；控制器不碰 feedbackText 本体）。
+  // 底板与文字同生共死：有字才有底，清空时把 backgroundColor 也清掉，
+  // 否则空字仍留一块 16×40 的黑底（2026-11-23 巡检实证）。
   flash(msg: string): void {
     this.feedbackText.setText(msg);
+    this.feedbackText.setBackgroundColor(msg ? FEEDBACK_BG : '');
     this.feedbackTimer?.remove(false);
-    this.feedbackTimer = this.time.delayedCall(1600, () => this.feedbackText.setText(''));
+    this.feedbackTimer = this.time.delayedCall(1600, () => {
+      this.feedbackText.setText('');
+      this.feedbackText.setBackgroundColor('');
+    });
   }
 
   // ── AG-77: 成就解锁 toast ───────────────────────────────────────────────

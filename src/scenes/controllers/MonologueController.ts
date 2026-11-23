@@ -62,7 +62,18 @@ export interface MonologueHost {
   metaSelectedCharacter(): CharacterKey;
   /** 任何面板开着时为真——气泡不在模态背后说话。 */
   anyPanelOpen(): boolean;
+  /**
+   * 当前层宽（floorWidthFor 的结果，每层重建时更新）。气泡靠它把 x 钳进层内
+   * ——与 CombatController.host.floorWidth() 同一个面。
+   */
+  floorWidth(): number;
 }
+
+/**
+ * 气泡与楼层左右沿的最小间距（世界像素）。角色自己是被钳在 [8, floorW-8] 的，
+ * 气泡比角色宽得多，所以另给一份边距 —— 8 会让底板紧贴墙沿，读起来像裁切。
+ */
+const BUBBLE_MARGIN = 12;
 
 export class MonologueController {
   // ── 自言自语 ticker ─────────────────────────────────────────────────────
@@ -271,6 +282,19 @@ export class MonologueController {
       .setName('hud-status-bubble')
       .setOrigin(0.5, 1)
       .setDepth(105); // the furniture-label tier: over the world, under panels
+    // 气泡以角色为中心（origin 0.5），但角色能走到 x=8 —— 半宽 100+ 的泡此时
+    // 左半整个落在世界负坐标里，被楼层左沿裁掉（2026-11-23 巡检实证：站在
+    // 楼梯口 x≈40 飘字，气泡左边缺一截）。按**实际渲染宽度**把中心钳进层内，
+    // 左右各留 BUBBLE_MARGIN。宽度读 width（已含 padding），不估字号。
+    //
+    // 只钳 x、不动 y：纵向由 PLAYER_FEET_Y - FRAME_H - 14 定，本来就贴着
+    // 头顶，且 ag67-status e2e 钉着 y ≥ 0。层宽比气泡还窄的极端情况下取层
+    // 中点（Math.max 的下界可能超过上界，此时居中比贴边好）。
+    const half = bubble.width / 2;
+    const floorW = this.host.floorWidth();
+    const lo = BUBBLE_MARGIN + half;
+    const hi = floorW - BUBBLE_MARGIN - half;
+    bubble.setX(lo > hi ? floorW / 2 : Math.min(Math.max(state.player.x, lo), hi));
     this.bubble = bubble;
     this.spoken += 1;
     const life = STATUS_PANEL_BALANCE.monologue.bubbleMs;

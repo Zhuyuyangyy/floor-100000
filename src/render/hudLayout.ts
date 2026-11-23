@@ -187,6 +187,15 @@ export const COMBAT_BAR = {
   turnY: 588,
 } as const;
 
+/**
+ * caption 20px 的线盒是 25px。左下回合日志用 24 行距「首尾相接」（半透明小字、
+ * 无底板，1px 交叠读起来仍是分行）；结局面板是不透明井里的三行实心字，1px
+ * 交叠就糊边——2026-11-23 巡检实测（crop-victory.png）曾写 `i * 17`，三行
+ * 彻底叠死。这里给井内日志留 26（线盒 +1 呼吸），行距只在这一处定，
+ * 谁画日志谁读它，不再各写各的魔数。
+ */
+export const LOG_LINE_PITCH = COMBAT_BAR.logPitch + 2;
+
 /** 三个按钮横排的居中左缘 x。 */
 export function combatBarX(): number {
   return (DESIGN_WIDTH - (3 * COMBAT_BAR.btnW + 2 * COMBAT_BAR.gap)) / 2;

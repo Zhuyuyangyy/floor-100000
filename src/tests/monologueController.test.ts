@@ -64,8 +64,21 @@ class FakeText {
   alpha = 1;
   active = true;
   destroyed = false;
-  constructor(text: string) {
+  /** 出生坐标与渲染宽度——气泡 clamp 的断言读它们（2026-11-23 左裁修复）。 */
+  x: number;
+  y: number;
+  width: number;
+  constructor(text: string, x = 0, y = 0) {
     this.text = text;
+    this.x = x;
+    this.y = y;
+    // 18px GameSans：汉字约 18px/字，加 padding.x=10 两侧。真实宽度由 Phaser
+    // 量，这里给一个与实测同量级的确定值，让 clamp 算式可断言。
+    this.width = text.length * 18 + 20;
+  }
+  setX(x: number): this {
+    this.x = x;
+    return this;
   }
   setOrigin(): this {
     return this;
@@ -129,8 +142,8 @@ class FakeFactory {
   graphics(): FakeGraphics {
     return new FakeGraphics();
   }
-  text(_x: number, _y: number, text: string): FakeText {
-    const t = new FakeText(text);
+  text(x: number, y: number, text: string): FakeText {
+    const t = new FakeText(text, x, y);
     this.texts.push(t);
     return t;
   }
@@ -169,6 +182,8 @@ class FakeHost {
   readonly clock = new FakeClock();
   readonly tweens = new FakeTweens();
   panelOpen = false;
+  /** 层宽，默认起始层 1280；气泡 clamp 的窄层用例改它。 */
+  floorW = 1280;
 
   /** 收窄成控制器的结构面（假件不实现 Phaser.Manager 的全体成员）。 */
   asHost(): MonologueHost {
@@ -178,6 +193,7 @@ class FakeHost {
       time: this.clock as unknown as Phaser.Time.Clock,
       metaSelectedCharacter: (): CharacterKey => 'player',
       anyPanelOpen: () => this.panelOpen,
+      floorWidth: () => this.floorW,
     };
   }
 }
@@ -360,5 +376,67 @@ describe('AG-67 MonologueController（RC-03 拆分第 2 步）', () => {
     } finally {
       Math.random = original;
     }
+  });
+});
+
+// 2026-11-23 界面巡检：气泡以角色为中心（origin 0.5），而角色能走到 x=8。
+// 半宽 100+ 的泡此时左半落在世界负坐标里，被楼层左沿裁掉 —— 站在楼梯口飘字
+// 缺一截。修复是按实际渲染宽度把中心钳进 [margin+half, floorW-margin-half]。
+describe('独白气泡横向 clamp（2026-11-23 左裁修复）', () => {
+  const MARGIN = 12;
+
+  /** 摆一个必出句的残血剧本，角色站在 px。 */
+  const speakAt = (px: number, floorW = 1280): FakeText => {
+    startNewGame(4242);
+    const s = getGame();
+    s.player.hp = 20;
+    s.player.x = px;
+    const host = new FakeHost();
+    host.floorW = floorW;
+    boot(host).tick();
+    const b = bubbleOf(host);
+    expect(b, '残血首 tick 应飘出一句').toBeTruthy();
+    return b!;
+  };
+
+  it('站在最左沿时气泡整体仍在层内', () => {
+    const b = speakAt(8);
+    expect(b.x - b.width / 2).toBeGreaterThanOrEqual(MARGIN);
+    expect(b.x + b.width / 2).toBeLessThanOrEqual(1280 - MARGIN);
+  });
+
+  it('站在最右沿时气泡整体仍在层内', () => {
+    const b = speakAt(1272);
+    expect(b.x - b.width / 2).toBeGreaterThanOrEqual(MARGIN);
+    expect(b.x + b.width / 2).toBeLessThanOrEqual(1280 - MARGIN);
+  });
+
+  it('层中间不挪位 —— clamp 只在贴边时生效', () => {
+    for (const px of [400, 640, 900]) {
+      const b = speakAt(px);
+      expect(b.x, `px=${px} 不该被挪动`).toBe(px);
+    }
+  });
+
+  it('每种真实层宽 × 两端站位都不越界', () => {
+    for (const w of [1280, 1600, 1920]) {
+      for (const px of [8, w - 8]) {
+        const b = speakAt(px, w);
+        expect(b.x - b.width / 2, `w=${w} px=${px} 左`).toBeGreaterThanOrEqual(MARGIN);
+        expect(b.x + b.width / 2, `w=${w} px=${px} 右`).toBeLessThanOrEqual(w - MARGIN);
+      }
+    }
+  });
+
+  it('层比气泡还窄时退化为居中，而不是贴一边', () => {
+    const b = speakAt(8, 100);
+    expect(b.width).toBeGreaterThan(100);
+    expect(b.x).toBe(50);
+  });
+
+  it('纵向不动 —— 仍贴着头顶（ag67-status 钉着 y ≥ 0）', () => {
+    const b = speakAt(8);
+    expect(b.y).toBeGreaterThan(0);
+    expect(b.y).toBe(speakAt(640).y);
   });
 });

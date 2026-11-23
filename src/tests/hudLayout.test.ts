@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
+
+// 反馈行的底板契约只能读源：GameScene 的模块图里有 Phaser，Node 下不实例化
+// 场景（与 combatHud.test.ts 的源码断言同款）。
+const SCENE_SRC = readFileSync(join(process.cwd(), 'src/scenes/GameScene.ts'), 'utf8');
 
 describe('HUD presentation boundaries', () => {
   it('keeps minute display on the existing floor rule at minute boundaries', () => {
@@ -26,5 +32,23 @@ describe('HUD presentation boundaries', () => {
     // 与 FPS 同行（fpsY=108，右端、默认隐藏）但提示靠左——垂直同带无妨，
     // 关键是与反馈行（556）隔开整段世界画面，不挡角色（脚线屏幕 y≈360）。
     expect(c).toBeLessThan(HUD_LAYOUT.feedbackY - 200);
+  });
+
+  // 2026-11-23 界面巡检：hud-feedback 的 backgroundColor 无条件挂着，
+  // flash 1.6s 后 setText('') 只清字不清底 —— 左下 (20,556) 常驻一块
+  // 16×40 的纯黑方块（Phaser 只要 backgroundColor 非空就画底，空字也画）。
+  // 契约：底板与文字同生共死，三个写入点（出生/有字/清空）都要撤底。
+  it('反馈行底板与文字同生共死：空字不留黑底', () => {
+    // 出生即空 → 立刻撤底
+    expect(SCENE_SRC).toContain("this.feedbackText.setBackgroundColor('');");
+    // flash 有字才上底，无字撤底
+    expect(SCENE_SRC).toContain('this.feedbackText.setBackgroundColor(msg ? FEEDBACK_BG : \'\');');
+    // 定时清空那条也要撤底（不能只 setText('')）
+    const clearBlock = SCENE_SRC.slice(SCENE_SRC.indexOf('this.feedbackTimer = this.time.delayedCall(1600'));
+    expect(clearBlock).toContain("this.feedbackText.setText('');");
+    expect(clearBlock.slice(0, 220)).toContain("this.feedbackText.setBackgroundColor('');");
+    // 底色只有一处定义，不再是散落的字面量
+    expect(SCENE_SRC).toContain("const FEEDBACK_BG = '#0b0f12ee';");
+    expect(SCENE_SRC).toContain('backgroundColor: FEEDBACK_BG');
   });
 });

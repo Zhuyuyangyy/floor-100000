@@ -84,7 +84,7 @@ import {
   walkAnimKey,
 } from '../../render/walkcycle';
 import { DUST_DEPTH, LIGHT_DEPTH } from '../../render/lighting';
-import { COMBAT_BAR, combatBarX } from '../../render/hudLayout';
+import { COMBAT_BAR, LOG_LINE_PITCH, combatBarX } from '../../render/hudLayout';
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../../core/design';
 import { FONT_FAMILY, TYPE, UI, buildPanelHeader, buildPanelWell } from '../../render/uiKit';
 import { PALETTE, TEXT, hex } from '../../render/palette';
@@ -1036,18 +1036,26 @@ export class CombatController {
     // fight itself, so the panel does not change shape when the fight ends.
     const outDepth = PANEL_DEPTH.game.dialogue;
     const outW = 440;
-    const outH = 170;
+    // 2026-11-23 界面巡检：170 高的板装不下三行 25px 线盒的日志——第三行
+    // 落在「Enter / ESC 继续」上，而井只有 62px（两行）。井高按行数算，板高
+    // 由井高反推，行距读 LOG_LINE_PITCH（与左下回合日志同一口径）。
+    const LOG_ROWS = 3;
+    const wellTop = 26;
+    const wellPad = 10;
+    const wellH = wellPad * 2 + LOG_ROWS * LOG_LINE_PITCH;
+    const footerH = 34;
+    const outH = wellTop + wellH + footerH;
     const outLeft = cx - outW / 2;
     const outTop = cy - outH / 2;
     const headline = outcome === 'win' ? (isBoss ? '守门人倒下了' : '战斗胜利') : '敌人逃走了';
     this.panelObjects.push(...buildPanel(this.sharedScene, cx, cy, outW, outH, 'yellow', outDepth));
     this.panelObjects.push(...buildPanelHeader(this.sharedScene, outLeft, outTop, outW, headline, UI.good, outDepth + 5));
-    this.panelObjects.push(...buildPanelWell(this.sharedScene, outLeft + 12, outTop + 26, outW - 24, 62, outDepth + 5));
+    this.panelObjects.push(...buildPanelWell(this.sharedScene, outLeft + 12, outTop + wellTop, outW - 24, wellH, outDepth + 5));
     const tail = combat.log.slice(-3);
     tail.forEach((line, i) => {
       this.panelObjects.push(
         this.host.add
-          .text(outLeft + 20, outTop + 38 + i * 17, line, {
+          .text(outLeft + 20, outTop + wellTop + wellPad + i * LOG_LINE_PITCH, line, {
             fontFamily: FONT_FAMILY,
             fontSize: `${TYPE.caption}px`,
             color: i === tail.length - 1 ? hex(TEXT.primary) : hex(TEXT.dim),

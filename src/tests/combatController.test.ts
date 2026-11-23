@@ -740,6 +740,42 @@ describe('CombatController 回合推进（start/enter/move/finish 状态机）',
     expect(host.headTag.stopped).toBe(true);
     expect(host.refreshCount).toBe(refreshBefore); // close 不再刷 HUD（finish 已刷过）
   });
+
+  // 2026-11-23 界面巡检（crop-victory.png）：结局面板三行日志曾以 i*17 排，
+  // 而 caption 20px 的线盒是 25px —— 行压行糊成一团；井只有 62px 装两行，
+  // 第三行还落在「Enter / ESC 继续」上。行距改读 LOG_LINE_PITCH、井高按行数
+  // 算之后，这三条断言把「行距 ≥ 线盒」「三行都在井内」「末行不压 footer」
+  // 钉住，防再有人写回魔数。
+  it('结局面板日志行距 ≥ caption 线盒，三行都在井内且不压「Enter / ESC 继续」', () => {
+    startNewGame(42);
+    const host = makeHost();
+    const combat = openFight(host, 'spot-1');
+    sandbagCombat({ spotId: 'spot-1' });
+    playUntilOver(combat);
+
+    const LINE_BOX = 25; // TYPE.caption=20px 的实际线盒（combatStage.test 同口径）
+    const logLines = host.add.texts.filter((t) => (getGame().combat?.log ?? []).includes(t.text));
+    expect(logLines.length).toBeGreaterThanOrEqual(2);
+    const ys = logLines.map((t) => t.y).sort((a, b) => a - b);
+    for (let i = 1; i < ys.length; i++) {
+      expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(LINE_BOX);
+    }
+
+    // 井：buildPanelWell 的第一件是 0x080c0f 底板矩形（origin 0,0）
+    const well = host.add.rects.find((r) => r.color === 0x080c0f);
+    expect(well).toBeDefined();
+    const wellTop = well!.y;
+    const wellBottom = well!.y + well!.h;
+    expect(ys[0]).toBeGreaterThanOrEqual(wellTop);
+    // 末行的线盒整体落在井内
+    expect(ys[ys.length - 1] + LINE_BOX).toBeLessThanOrEqual(wellBottom);
+
+    // footer 在井下方，且末行线盒不碰它
+    const footer = host.add.texts.find((t) => t.text === 'Enter / ESC 继续');
+    expect(footer).toBeDefined();
+    expect(footer!.y).toBeGreaterThan(wellBottom);
+    expect(ys[ys.length - 1] + LINE_BOX).toBeLessThanOrEqual(footer!.y);
+  });
 });
 
 describe('CombatController 胜负回写（finish 的战利品 + 记录）', () => {

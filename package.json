@@ -9,6 +9,7 @@
     "dev": "vite",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "competition:benchmark": "node tools/competition-replay-benchmark.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test:e2e": "playwright test",

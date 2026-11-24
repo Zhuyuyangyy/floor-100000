@@ -1,5 +1,6 @@
 import { SECTOR_COUNT, SECTOR_SIZE, TOTAL_FLOORS, canEnter, sectorOf, sectorRange, type Access } from '../core/tower';
 import type { GameState } from '../core/gameTypes';
+import { ALIN_REPAIR_GATE, isAlinRepairGateOpen } from '../data/floorGates';
 
 // Three-level tower navigation (docs/B2_TOWER_ARCHITECTURE.md): the whole tower
 // (100 sectors) -> one sector (1000 floors) -> one floor. Pure so the rules can
@@ -70,14 +71,18 @@ export function sectorHeight(): number {
 }
 
 // What the player may legitimately enter: everything up to the highest floor
-// they have actually reached, plus the floor they are standing on.
+// they have actually reached, plus the floor they are standing on, subject to
+// progression gates that have not yet been opened.
 export function accessOf(state: GameState): Access {
   let highest = state.currentFloor;
   for (const key of Object.keys(state.visitedFloors)) {
     const f = Number(key);
     if (Number.isInteger(f) && f > highest) highest = f;
   }
-  return { highestUnlocked: highest, currentFloor: state.currentFloor };
+  const highestUnlocked = isAlinRepairGateOpen(state)
+    ? Math.max(highest, ALIN_REPAIR_GATE.toFloor)
+    : Math.min(highest, ALIN_REPAIR_GATE.toFloor - 1);
+  return { highestUnlocked, currentFloor: state.currentFloor };
 }
 
 const clamp = (v: number, min: number, max: number): number => Math.max(min, Math.min(max, v));

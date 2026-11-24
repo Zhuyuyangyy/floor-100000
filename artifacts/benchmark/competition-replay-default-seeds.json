@@ -1,0 +1,125 @@
+{
+  "executionMode": "offline-fallback",
+  "scope": "offline-fallback 场景行为可复现性与结果；不衡量模型质量、延迟或任务成功率。",
+  "seeds": [
+    17,
+    73,
+    2048
+  ],
+  "sampleCount": 9,
+  "replayMatchCount": 9,
+  "replayMatchRate": 1,
+  "scenarioResultCounts": {
+    "alin-gift-success": {
+      "executed": 3
+    },
+    "alin-gift-missing-item": {
+      "blocked": 3
+    },
+    "alin-repair-missing-materials": {
+      "blocked": 3
+    }
+  },
+  "samples": [
+    {
+      "seed": 17,
+      "scenario": "alin-gift-success",
+      "resultStatus": "executed",
+      "validationCode": "ok",
+      "replayIdentical": true,
+      "snapshotHashesVerified": true,
+      "gateStayedClosed": null,
+      "repairMaterialsUnchanged": true,
+      "outputSha256": "9f257452222fa0aee7112856caa13b3e88a20e0e4d479adbe74f954134908018"
+    },
+    {
+      "seed": 17,
+      "scenario": "alin-gift-missing-item",
+      "resultStatus": "blocked",
+      "validationCode": "missing_item",
+      "replayIdentical": true,
+      "snapshotHashesVerified": true,
+      "gateStayedClosed": null,
+      "repairMaterialsUnchanged": null,
+      "outputSha256": "767c38b1abd2f02f9ff58dde30457c9d32a9f96e7ffd85b168ecfb6c06996b0b"
+    },
+    {
+      "seed": 17,
+      "scenario": "alin-repair-missing-materials",
+      "resultStatus": "blocked",
+      "validationCode": "missing_item",
+      "replayIdentical": true,
+      "snapshotHashesVerified": true,
+      "gateStayedClosed": true,
+      "repairMaterialsUnchanged": null,
+      "outputSha256": "7bff7596b2f90f04dc47566a3b9a4e951e1524f8160019d99ddd02cdc70e7f20"
+    },
+    {
+      "seed": 73,
+      "scenario": "alin-gift-success",
+      "resultStatus": "executed",
+      "validationCode": "ok",
+      "replayIdentical": true,
+      "snapshotHashesVerified": true,
+      "gateStayedClosed": null,
+      "repairMaterialsUnchanged": true,
+      "outputSha256": "9bed7a4ba8425d1a4288836ff4cb308e051766c03d211623db3a741e0bbff695"
+    },
+    {
+      "seed": 73,
+      "scenario": "alin-gift-missing-item",
+      "resultStatus": "blocked",
+      "validationCode": "missing_item",
+      "replayIdentical": true,
+      "snapshotHashesVerified": true,
+      "gateStayedClosed": null,
+      "repairMaterialsUnchanged": null,
+      "outputSha256": "4b2e60430e76a6217109e964e0c55bfaf9754e2710389df6d9ec23f934242a8d"
+    },
+    {
+      "seed": 73,
+      "scenario": "alin-repair-missing-materials",
+      "resultStatus": "blocked",
+      "validationCode": "missing_item",
+      "replayIdentical": true,
+      "snapshotHashesVerified": true,
+      "gateStayedClosed": true,
+      "repairMaterialsUnchanged": null,
+      "outputSha256": "0ca4f176ac49634b5a77c17bc1c921ce51cd3aacf4bef409eeb9bdd928351b15"
+    },
+    {
+      "seed": 2048,
+      "scenario": "alin-gift-success",
+      "resultStatus": "executed",
+      "validationCode": "ok",
+      "replayIdentical": true,
+      "snapshotHashesVerified": true,
+      "gateStayedClosed": null,
+      "repairMaterialsUnchanged": true,
+      "outputSha256": "6dbcaec52d182e04d8d6566103bb46775e5d22f8d1b65c99926d0358eff85d65"
+    },
+    {
+      "seed": 2048,
+      "scenario": "alin-gift-missing-item",
+      "resultStatus": "blocked",
+      "validationCode": "missing_item",
+      "replayIdentical": true,
+      "snapshotHashesVerified": true,
+      "gateStayedClosed": null,
+      "repairMaterialsUnchanged": null,
+      "outputSha256": "d9fba6dc8d8cecac218c35c9cbf3200c684ef4a2e356b7bbb3c3ba6938fd9af0"
+    },
+    {
+      "seed": 2048,
+      "scenario": "alin-repair-missing-materials",
+      "resultStatus": "blocked",
+      "validationCode": "missing_item",
+      "replayIdentical": true,
+      "snapshotHashesVerified": true,
+      "gateStayedClosed": true,
+      "repairMaterialsUnchanged": null,
+      "outputSha256": "2e5db0e49b794a2f410b48e09a728e74d2a39ee57cc546a4d8baf383a94d1b63"
+    }
+  ],
+  "contentSha256": "2d652fa8d6b612b9b565fdc52112dcb5097ca753db2f4127e950c002d34061b3"
+}

@@ -94,7 +94,7 @@ test('mouse selects a recipe without crafting; explicit action deducts materials
   await startGame(page);
   await page.evaluate(() => {
     const state = window.__PHASER_SESSION__!.getState() as unknown as State;
-    state.player.inventory.slots.push({ itemId: 'wood', quantity: 2 }, { itemId: 'tape', quantity: 1 });
+    state.player.inventory.slots.push({ itemId: 'wood', quantity: 4 }, { itemId: 'tape', quantity: 2 });
   });
   await page.keyboard.press('c');
   await expect.poll(async () => (await sceneState(page)).craft).toBe(true);
@@ -102,13 +102,13 @@ test('mouse selects a recipe without crafting; explicit action deducts materials
   await expect.poll(async () => (await sceneState(page)).craftSelected).toBe(1);
   let state = await gameState(page);
   expect(state.player.homeUpgrades).not.toContain('reinforced_door');
-  expect(count(state, 'wood')).toBe(2);
+  expect(count(state, 'wood')).toBe(4);
 
   await clickGameObject(page, { kind: 'text', label: '制作 / 净化' });
   await expect.poll(async () => (await gameState(page)).player.homeUpgrades.includes('reinforced_door')).toBe(true);
   state = await gameState(page);
-  expect(count(state, 'wood')).toBe(0);
-  expect(count(state, 'tape')).toBe(0);
+  expect(count(state, 'wood')).toBe(2);
+  expect(count(state, 'tape')).toBe(1);
   await clickGameObject(page, { kind: 'text', label: '关闭' });
   await expect.poll(async () => (await sceneState(page)).craft).toBe(false);
 });

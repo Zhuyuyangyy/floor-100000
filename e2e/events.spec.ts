@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { markAlinGateOpenForUnrelatedTraversal } from './alinGateFixture';
 
 // P0-07 browser tests: the night event is seed-reproducible, a blackout darkens
 // the screen but never fully blacks it (and a flashlight helps), and the wanderer
@@ -12,6 +13,8 @@ interface State {
   player: { x: number; hp: number; inventory: { slots: Array<{ itemId: string; quantity: number }> } };
   worldEvents: { activeEvent: { type: string; floor?: number; message?: string } | null };
 }
+
+type GameSceneProbe = { player?: { x: number }; stairClimb?: unknown };
 
 const GET_STATE = `(window).__PHASER_SESSION__?.getState() ?? null`;
 const NIGHT_ALPHA = `(() => { const g = (window).__PHASER_GAME__; const o = g?.scene?.getScene('Game')?.children.list.find((x) => x.name === 'night-overlay'); return o ? o.alpha : -1; })()`;
@@ -48,6 +51,7 @@ async function startGame(page: Page, seed: number): Promise<void> {
     if (started) break;
   }
   await waitForScene(page, 'Game');
+  await markAlinGateOpenForUnrelatedTraversal(page);
 }
 
 async function readState(page: Page): Promise<State> {
@@ -93,7 +97,24 @@ async function pressEUntil(page: Page, check: () => Promise<boolean>, tries = 4,
 async function goUp(page: Page): Promise<void> {
   await setX(page, 40); // UP_EXIT_X
   const before = (await readState(page)).currentFloor;
-  await pressEUntil(page, async () => (await readState(page)).currentFloor > before);
+  await page.waitForFunction((floor) => {
+    const w = window as unknown as {
+      __PHASER_SESSION__?: { getState: () => State | null };
+      __PHASER_GAME__?: { scene: { getScene: (key: string) => GameSceneProbe | null } };
+    };
+    return w.__PHASER_SESSION__?.getState()?.currentFloor === floor &&
+      w.__PHASER_GAME__?.scene.getScene('Game')?.player?.x === 40 &&
+      !w.__PHASER_GAME__?.scene.getScene('Game')?.stairClimb;
+  }, before, { timeout: 5000 });
+  await page.keyboard.press('E');
+  await page.waitForFunction((floor) => {
+    const w = window as unknown as {
+      __PHASER_SESSION__?: { getState: () => State | null };
+      __PHASER_GAME__?: { scene: { getScene: (key: string) => GameSceneProbe | null } };
+    };
+    return (w.__PHASER_SESSION__?.getState()?.currentFloor ?? floor) > floor &&
+      !w.__PHASER_GAME__?.scene.getScene('Game')?.stairClimb;
+  }, before, { timeout: 6000 });
 }
 
 test('the night event is reproducible for a given seed', async ({ page }) => {

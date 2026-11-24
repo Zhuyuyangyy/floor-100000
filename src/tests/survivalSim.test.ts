@@ -20,8 +20,9 @@ function advanceGameMinutes(state: GameState, minutes: number): void {
   for (let i = 0; i < steps; i++) advanceTime(state, stepMs);
 }
 
-// Loot water/food + purifier materials first so the 12-slot bag keeps them.
-const LOOT_ORDER = [5, 4, 1, 3, 2];
+// Prioritize food, water and purifier materials before optional cloth; after the
+// loot-table version bump, seed 42 can roll cloth in the dorm and fill the bag.
+const LOOT_ORDER = [5, 4, 3, 1, 2];
 
 function simulate(seed: number, gather: boolean) {
   const state = createNewGame(seed);

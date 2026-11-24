@@ -8,6 +8,7 @@ interface State {
   status: string;
   currentFloor: number;
   gameMinuteOfDay: number;
+  flags?: Record<string, number>;
   player: { x: number; homeUpgrades: string[]; inventory: { slots: Array<{ itemId: string; quantity: number }> } };
 }
 
@@ -85,15 +86,15 @@ async function navTo(page: import('@playwright/test').Page, prefix: string): Pro
   throw new Error(`could not nav to ${prefix}`);
 }
 
-test('crafting deducts materials and the upgrade persists across reload', async ({ page }) => {
+test('crafting spends surplus above the gate reserve and the upgrade persists across reload', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
 
   await startGame(page, 42);
-  // Give the exact materials for 加固门 (wood x2, tape x1).
+  // Give the recipe cost plus the exact wood x2 / tape x1 gate reserve.
   await page.evaluate(() => {
     const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
-    s?.player.inventory.slots.push({ itemId: 'wood', quantity: 2 }, { itemId: 'tape', quantity: 1 });
+    s?.player.inventory.slots.push({ itemId: 'wood', quantity: 4 }, { itemId: 'tape', quantity: 2 });
   });
 
   // Open the workbench (C), select 加固门, craft (Enter).
@@ -111,8 +112,9 @@ test('crafting deducts materials and the upgrade persists across reload', async 
     undefined,
     { timeout: 5000 },
   );
-  expect(await count(page, 'wood')).toBe(0);
-  expect(await count(page, 'tape')).toBe(0);
+  expect(await count(page, 'wood')).toBe(2);
+  expect(await count(page, 'tape')).toBe(1);
+  expect((await readState(page)).flags?.['story:alin-repair-gate'] ?? 0).toBe(0);
 
   // Reload: the title menu appears; choose 继续游戏 to resume the saved run.
   await page.reload();
@@ -124,7 +126,36 @@ test('crafting deducts materials and the upgrade persists across reload', async 
   await waitForScene(page, 'Game');
   const s = await readState(page);
   expect(s.player.homeUpgrades).toContain('reinforced_door');
+  expect(await count(page, 'wood')).toBe(2);
+  expect(await count(page, 'tape')).toBe(1);
   expect(errors, `page errors: ${errors.join(' | ')}`).toEqual([]);
+});
+
+test('workbench clearly refuses to spend the exact closed-gate reserve', async ({ page }) => {
+  await startGame(page, 43);
+  await page.evaluate(() => {
+    const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
+    s?.player.inventory.slots.push({ itemId: 'wood', quantity: 2 }, { itemId: 'tape', quantity: 1 });
+  });
+  await page.keyboard.press('C');
+  await page.waitForTimeout(200);
+  await navTo(page, '加固门');
+
+  await expect.poll(() => page.evaluate(() => {
+    const w = window as unknown as {
+      __PHASER_GAME__?: {
+        scene: { getScene: (key: string) => { children: { list: Array<{ type: string; text?: string; visible: boolean }> } } | null };
+      };
+    };
+    return w.__PHASER_GAME__?.scene.getScene('Game')?.children.list.some(
+      (object) => object.type === 'Text' && object.visible && object.text === '预留通行材料',
+    ) ?? false;
+  })).toBe(true);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(200);
+  expect(await count(page, 'wood')).toBe(2);
+  expect(await count(page, 'tape')).toBe(1);
+  expect((await readState(page)).player.homeUpgrades).not.toContain('reinforced_door');
 });
 
 test('insufficient materials are refused with no deduction', async ({ page }) => {

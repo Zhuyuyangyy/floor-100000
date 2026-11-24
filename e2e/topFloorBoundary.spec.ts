@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { E2EGameState } from './globals';
+import { markAlinGateOpenForUnrelatedTraversal } from './alinGateFixture';
 
 // A real player can reach the current fifth-floor cap, but there is no up stair
 // there. Pressing E at the left edge used to disappear silently while the HUD
@@ -59,6 +60,7 @@ async function climbTo(page: Page, floor: number): Promise<void> {
 test('E at the fifth-floor upper boundary explains that no higher route is open', async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   await startGame(page);
+  await markAlinGateOpenForUnrelatedTraversal(page);
 
   // Successful path: reach the top of the currently playable range with real
   // movement and E presses, without devfloor or direct state changes.

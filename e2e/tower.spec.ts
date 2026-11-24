@@ -239,13 +239,11 @@ test('the overview drills down to a sector and a floor, and ESC walks back up', 
   // B3-01: the detail panel now says what is actually on the floor, so a trip is
   // a plan rather than a guess.
   //
-  // B3-08: it must say what is ACTUALLY there. This used to assert
-  // 「储物柜：净水·布料」, which locked in a bug — the panel read the loot table, so
-  // it advertised the cabinet's 60% cloth roll on every seed including seed 42,
-  // where the roll fails and the cloth is never in the world. The panel now reads
-  // the resolved view, so only 净水 is promised.
+  // B3-08: it must say what is ACTUALLY there. In loot version 2, seed 42's
+  // resolved optional cloth stack is present, so the floor detail should reflect
+  // that realized state rather than suppressing the pickup as merely possible.
   expect(await hasVisibleText(page, '储物柜：净水')).toBe(true);
-  expect(await hasVisibleText(page, '布料')).toBe(false);
+  expect(await hasVisibleText(page, '布料')).toBe(true);
   await page.screenshot({ path: 'e2e/screenshots/22-tower-floor.png' });
 
   // ESC walks back up one level at a time, keeping the sector in view.

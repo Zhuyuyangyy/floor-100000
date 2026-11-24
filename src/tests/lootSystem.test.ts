@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
-import { FLOOR_TEMPLATES, groundItemKey } from '../data/floorTemplates';
+import { FLOOR_TEMPLATES, generateFloor, groundItemKey } from '../data/floorTemplates';
 import { describeFloorContents, getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
 import { countItem } from '../systems/InventorySystem';
 import { deserialize, serialize } from '../systems/SaveSystem';
+
+function seedWithoutContainerItem(floor: number, containerId: string, itemId: string): number {
+  const seed = Array.from({ length: 1024 }, (_, index) => index).find((candidate) => {
+    const container = generateFloor(candidate, floor).containers.find((entry) => entry.id === containerId);
+    return !container?.items.some((item) => item.itemId === itemId);
+  });
+  if (seed === undefined) throw new Error(`could not find a seed without ${containerId}:${itemId}`);
+  return seed;
+}
 
 // The tower map names what a floor holds so a trip can be planned ("go and get the
 // filter" rather than "go and look"). It used to read the loot TABLE, which lists
@@ -13,11 +22,12 @@ import { deserialize, serialize } from '../systems/SaveSystem';
 // contents after the player emptied it.
 describe('describeFloorContents', () => {
   it('names only the loot that actually rolled for this seed', () => {
-    const s = createNewGame(42);
+    const seed = seedWithoutContainerItem(1, 'cabinet', 'cloth');
+    const s = createNewGame(seed);
     const text = describeFloorContents(s, 1);
     expect(text).toContain('储物柜');
     expect(text).toContain('净水');
-    expect(text, 'seed 42 fails the cabinet cloth roll, so the map must not promise it').not.toContain('布料');
+    expect(text, 'the map must not promise cloth when this seed did not roll it').not.toContain('布料');
   });
 
   it('lists every guaranteed entry, so planning still works', () => {
@@ -38,7 +48,8 @@ describe('describeFloorContents', () => {
   });
 
   it('names ground supplies, and stops once they are picked up', () => {
-    const s = createNewGame(42);
+    const seed = seedWithoutContainerItem(3, 'crate_metal', 'battery');
+    const s = createNewGame(seed);
     expect(describeFloorContents(s, 3)).toContain('地面');
     lootGround(s, 3, groundItemKey('battery', 160));
     expect(describeFloorContents(s, 3)).not.toContain('电池');

@@ -37,7 +37,7 @@ export interface FloorTemplate {
 // bump this whenever the loot tables change so a tuned table produces a
 // deliberately different world instead of silently reshuffling an existing one
 // (GHI-03 M2). Old saves keep their runSeed and simply roll fresh contents.
-export const LOOT_DATA_VERSION = 1;
+export const LOOT_DATA_VERSION = 2;
 
 // Stable identity for one loot entry. Keys must name the item, never its slot
 // in the template array: index-based keys made a saved run's "already looted"
@@ -75,6 +75,17 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
     description: '2 名可交易 NPC',
     containers: [
       {
+        // A new stable ID keeps this guaranteed progression cache reachable in
+        // saves that already marked the old neighbour shelf as looted.
+        id: 'alin_repair_cache',
+        label: '维修材料箱',
+        x: 160,
+        loot: [
+          { itemId: 'wood', min: 2, max: 2, probability: 1, guaranteed: true },
+          { itemId: 'tape', min: 1, max: 1, probability: 1, guaranteed: true },
+        ],
+      },
+      {
         id: 'shelf',
         label: '邻居货架',
         x: 1120,
@@ -93,10 +104,9 @@ export const FLOOR_TEMPLATES: Record<number, FloorTemplate> = {
         label: '木箱',
         x: 480,
         loot: [
-          // Guaranteed: 加固门 needs wood x2 and tape x1, and this crate is the
-          // only source of either. When both were probability rolls the upgrade
-          // was unbuildable on roughly 73% of seeds, which breaks the frozen
-          // design's "no soft-lock" rule (GAME_DESIGN_LOCK.md §5).
+          // Keep the storage floor's own recipe materials guaranteed as well;
+          // the progression-safe cache on floor 2 is the earlier source that
+          // prevents the Alin gate from soft-locking this route.
           { itemId: 'wood', min: 2, max: 2, probability: 1, guaranteed: true },
           { itemId: 'tape', min: 1, max: 1, probability: 1, guaranteed: true },
         ],

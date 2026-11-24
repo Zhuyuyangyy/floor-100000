@@ -30,6 +30,7 @@ export function containerTextureKey(containerId: string): FurnitureKey | null {
     // crate and a military crate look nothing alike, and telling them apart is
     // half of what makes floor 3 read as a place.
     case 'crate_wood':
+    case 'alin_repair_cache': // 维修材料箱复用木箱贴图
       return 'furn_crate_wood';
     case 'crate_metal':
       return 'furn_crate_metal';

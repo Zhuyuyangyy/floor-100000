@@ -11,6 +11,7 @@ import {
   timesTaken,
 } from '../systems/shortcut';
 import { createNewGame } from '../core/gameState';
+import { ALIN_REPAIR_GATE_FLAG } from '../data/floorGates';
 
 // Wave C2: the shortcut's economics, pinned against Centum's formula. The two
 // properties that matter: the price climbs with use, and a failed charge never
@@ -77,6 +78,36 @@ describe('shortcut pricing', () => {
     expect(shortcutOffer(state, 5)).toBeNull();
     state.currentFloor = 5;
     expect(shortcutOffer(state, 5)).toBeNull();
+  });
+
+  it('does not quote a shortcut whose upward path crosses the closed repair gate', () => {
+    const state = createNewGame(42);
+    state.currentFloor = 2;
+    state.shortcuts = 0;
+
+    expect(shortcutOffer(state, 4)).toBeNull();
+    expect(state.shortcuts).toBe(0);
+  });
+
+  it('quotes a path through the repair gate after its story flag is open', () => {
+    const state = createNewGame(42);
+    state.currentFloor = 2;
+    state.flags = { [ALIN_REPAIR_GATE_FLAG]: 1 };
+
+    expect(shortcutOffer(state, 4)).toMatchObject({ skip: 2, targetFloor: 4 });
+  });
+
+  it('preserves access for a legacy save that has already visited floor 3', () => {
+    const state = createNewGame(42);
+    state.currentFloor = 2;
+    state.visitedFloors[3] = {
+      openedContainers: [],
+      lootedItems: [],
+      unlockedDoors: [],
+      localEvents: [],
+    };
+
+    expect(shortcutOffer(state, 4)).toMatchObject({ skip: 2, targetFloor: 4 });
   });
 });
 

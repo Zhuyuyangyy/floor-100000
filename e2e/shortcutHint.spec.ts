@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import type { GameState } from '../src/core/gameTypes';
+import { markAlinGateOpenForUnrelatedTraversal } from './alinGateFixture';
 
 async function startGame(page: Page): Promise<void> {
   await page.goto('/?seed=42');
@@ -33,6 +34,7 @@ async function reachFloorFourStairs(page: Page): Promise<void> {
 
 test('floor-four shortcut hint matches the real charge on failure and success', async ({ page }) => {
   await startGame(page);
+  await markAlinGateOpenForUnrelatedTraversal(page);
   await reachFloorFourStairs(page);
   const before = await page.evaluate(() => {
     const state = window.__PHASER_SESSION__?.getState() as unknown as GameState | null;

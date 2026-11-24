@@ -3,6 +3,7 @@ import { addItem, countItem, removeItem } from './InventorySystem';
 import { isNight } from './SurvivalSystem';
 import { STARTING_FLOOR } from '../core/constants';
 import { getItem } from '../data/items';
+import { ALIN_REPAIR_MATERIALS, isAlinRepairGateOpen } from '../data/floorGates';
 import type { GameState, ItemId } from '../core/gameTypes';
 
 // Dorm crafting & upgrades (docs/03_TASKS.md#p0-05). Pure rules; Phaser only
@@ -18,7 +19,7 @@ export interface MissingMaterial {
   have: number;
 }
 
-export type CanCraftResult = { ok: true } | { ok: false; missing: MissingMaterial[] };
+export type CanCraftResult = { ok: true } | { ok: false; missing: MissingMaterial[]; reason?: string };
 
 export function canCraft(state: GameState, id: UpgradeId): CanCraftResult {
   const missing: MissingMaterial[] = [];
@@ -26,7 +27,27 @@ export function canCraft(state: GameState, id: UpgradeId): CanCraftResult {
     const have = countItem(state.player.inventory, itemId);
     if (have < need) missing.push({ itemId, need, have });
   }
-  return missing.length === 0 ? { ok: true } : { ok: false, missing };
+  if (missing.length > 0) return { ok: false, missing };
+
+  // The same recipe powers the optional dorm repair and the mandatory Alin
+  // passage repair. Keep the latter reachable: any recipe may spend only stock
+  // above the exact gate reserve until this run has opened the gate.
+  if (!isAlinRepairGateOpen(state)) {
+    const recipeCost = getRecipe(id).cost;
+    const wouldSpendGateReserve = ALIN_REPAIR_MATERIALS.some(({ itemId, quantity }) => {
+      const consumed = recipeCost[itemId] ?? 0;
+      if (consumed === 0) return false;
+      return countItem(state.player.inventory, itemId) - consumed < quantity;
+    });
+    if (wouldSpendGateReserve) {
+      return {
+        ok: false,
+        missing: [],
+        reason: '门禁关闭期间，木材×2和胶带×1已预留给阿林维修通道。请先修复门禁，再维修宿舍门。',
+      };
+    }
+  }
+  return { ok: true };
 }
 
 export type CraftResult = { ok: true; id: UpgradeId } | { ok: false; reason: string };
@@ -38,6 +59,7 @@ export function craft(state: GameState, id: UpgradeId): CraftResult {
   if (hasUpgrade(state, id)) return { ok: false, reason: `${recipe.displayName} 已建造` };
   const check = canCraft(state, id);
   if (!check.ok) {
+    if (check.reason) return { ok: false, reason: check.reason };
     const detail = check.missing.map((m) => `${getItem(m.itemId).displayName} ${m.have}/${m.need}`).join('，');
     return { ok: false, reason: `材料不足：${detail}` };
   }

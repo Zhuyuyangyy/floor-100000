@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { markAlinGateOpenForUnrelatedTraversal } from './alinGateFixture';
 
 // Visual baseline for the five playable floors (docs/05_ART_GUIDE.md §3).
 //
@@ -92,6 +93,7 @@ test('every playable floor has a distinct, readable room', async ({ page }) => {
     if (started) break;
   }
   await waitForScene(page, 'Game');
+  await markAlinGateOpenForUnrelatedTraversal(page);
 
   for (const floor of [1, 2, 3, 4, 5]) {
     if (floor > 1) await climbTo(page, floor);

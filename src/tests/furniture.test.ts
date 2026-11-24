@@ -26,6 +26,7 @@ describe('container furniture mapping', () => {
     expect(containerTextureKey('shelf')).toBe('furn_shelf');
     expect(containerTextureKey('pantry')).toBe('furn_shelf'); // 补给架 is a shelf
     expect(containerTextureKey('crate_wood')).toBe('furn_crate_wood');
+    expect(containerTextureKey('alin_repair_cache')).toBe('furn_crate_wood'); // 维修材料箱复用木箱贴图
     expect(containerTextureKey('crate_metal')).toBe('furn_crate_metal');
     expect(containerTextureKey('fuse_box')).toBe('furn_fusebox');
     expect(containerTextureKey('water_tank')).toBe('furn_watertank');
@@ -38,7 +39,8 @@ describe('container furniture mapping', () => {
 
   it('never maps two different containers to the same texture by accident', () => {
     // Crates no longer share one texture — a wooden crate and a military crate
-    // look nothing alike. Shelves still do: 邻居货架 and 补给架 are both shelves.
+    // look nothing alike. The repair cache deliberately shares wooden-crate art;
+    // shelves also share art because 邻居货架 and 补给架 are both shelves.
     // Compared order-independently — Object.values iterates integer-like keys in
     // ascending numeric order, not insertion order.
     const mapped = allContainers.map((id) => [id, containerTextureKey(id)] as const).sort();
@@ -47,6 +49,7 @@ describe('container furniture mapping', () => {
         ['cabinet', 'furn_cabinet'],
         ['counter', 'furn_counter'],
         ['crate_metal', 'furn_crate_metal'],
+        ['alin_repair_cache', 'furn_crate_wood'],
         ['crate_wood', 'furn_crate_wood'],
         ['fuse_box', 'furn_fusebox'],
         ['pantry', 'furn_shelf'],

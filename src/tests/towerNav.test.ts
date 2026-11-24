@@ -30,6 +30,7 @@ import {
 } from '../systems/TowerNav';
 import { SECTOR_COUNT, TOTAL_FLOORS, sectorRange } from '../core/tower';
 import type { GameState } from '../core/gameTypes';
+import { ALIN_REPAIR_GATE_FLAG } from '../data/floorGates';
 
 function stateAt(floor: number, visited: number[] = []): GameState {
   const s = createNewGame(1);
@@ -46,6 +47,25 @@ describe('accessOf', () => {
   it('unlocks up to the highest floor ever visited, not the current one', () => {
     // Climbing to 5 then coming back down to 1 must not relock 2..5.
     expect(accessOf(stateAt(1, [1, 2, 3, 4, 5]))).toEqual({ highestUnlocked: 5, currentFloor: 1 });
+  });
+
+  it('caps inconsistent visited floors below Alin’s unopened upward gate', () => {
+    // An unrelated/corrupt higher visit must not stand in for reaching floor 3.
+    expect(accessOf(stateAt(1, [1, 2, 4, 10]))).toEqual({ highestUnlocked: 2, currentFloor: 1 });
+  });
+
+  it('uses the visited frontier after the repair-gate story flag is set', () => {
+    const state = stateAt(1, [1, 2, 4]);
+    state.flags = { [ALIN_REPAIR_GATE_FLAG]: 1 };
+    expect(accessOf(state)).toEqual({ highestUnlocked: 4, currentFloor: 1 });
+  });
+
+  it('keeps legacy progression when floor 3 was already visited', () => {
+    expect(accessOf(stateAt(2, [1, 2, 3, 4]))).toEqual({ highestUnlocked: 4, currentFloor: 2 });
+  });
+
+  it('keeps legacy progression when the player is already on floor 3', () => {
+    expect(accessOf(stateAt(3, [1, 2]))).toEqual({ highestUnlocked: 3, currentFloor: 3 });
   });
 });
 
@@ -374,6 +394,29 @@ describe('entering a selected floor', () => {
     let nav = enterSector(99);
     nav = enterFloor(nav, TOTAL_FLOORS);
     expect(tryEnterSelected(nav, access).ok).toBe(false);
+  });
+
+  it('does not let inconsistent higher visits bypass Alin’s unopened gate', () => {
+    const access = accessOf(stateAt(1, [1, 2, 4, 10]));
+    const nav = enterFloor(enterSector(0), 3);
+    expect(tryEnterSelected(nav, access).ok).toBe(false);
+  });
+
+  it('allows entering floor 3 after the repair-gate flag is open', () => {
+    const state = stateAt(2, [1, 2]);
+    state.flags = { [ALIN_REPAIR_GATE_FLAG]: 1 };
+    const nav = enterFloor(enterSector(0), 3);
+    expect(tryEnterSelected(nav, accessOf(state))).toEqual({ ok: true, floor: 3 });
+  });
+
+  it('preserves forward and return access for legacy saves across the gate', () => {
+    const afterGate = accessOf(stateAt(2, [1, 2, 3, 4]));
+    expect(tryEnterSelected(enterFloor(enterSector(0), 4), afterGate)).toEqual({ ok: true, floor: 4 });
+    expect(tryEnterSelected(enterFloor(enterSector(0), 2), afterGate)).toEqual({ ok: true, floor: 2 });
+
+    const onFloorThree = accessOf(stateAt(3, [1, 2]));
+    expect(tryEnterSelected(enterFloor(enterSector(0), 3), onFloorThree)).toEqual({ ok: true, floor: 3 });
+    expect(tryEnterSelected(enterFloor(enterSector(0), 2), onFloorThree)).toEqual({ ok: true, floor: 2 });
   });
 
   it('refuses when no floor is selected (failure/boundary)', () => {

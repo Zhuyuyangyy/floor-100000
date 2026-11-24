@@ -68,16 +68,16 @@
 
 ## 当前状态（2026-11-18，对应集成线 tip `cc3059c`）
 
-本仓库的权威状态以集成线 `integrate/sprint-01-merge` 的 tip **`cc3059c`** 为准；本文所有数字均在文档分支 `rc/2026-11-18-docs-status`（tip 同为 `cc3059c`）上**实跑取得**。项目纪律：**代码实现 / 场景接线 / 实际验收是三个不同的状态**——「代码里有」不等于「接进场景」，更不等于「验收通过」。B4–B6 的三态拆解见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
+本仓库的权威状态以集成线 `integrate/sprint-01-merge` 的 tip **`b443e9f`** 为准；本文数字于 2026-11-24 在该 tip 上**实跑取得**（历史数字保留在各轮报告里）。项目纪律：**代码实现 / 场景接线 / 实际验收是三个不同的状态**——「代码里有」不等于「接进场景」，更不等于「验收通过」。B4–B6 的三态拆解见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
 
-### 质量门禁实况（2026-11-18 实跑）
+### 质量门禁实况（2026-11-24 实跑，tip `b443e9f`）
 
 | 关卡 | 实况 |
 | --- | --- |
 | 类型检查 | `tsc --noEmit` **0 错** |
-| 单元测试 | **116 个文件 / 2128 个用例全部通过**（`VITE_NPC_MODEL= npx vitest run`） |
-| 生产构建 | **通过**（`tsc && vite build` → `dist/`） |
-| 浏览器 E2E | **观测项，非合并门禁**：磁盘上 56 个 Playwright spec；RC-01 复判实跑全量 213 test（38.3m 单 worker）：**177 通过 / 33 失败 / 3 跳过**；33 失败已全部分诊（探针缺陷 30 / 帧时序 1 / 真产品缺陷 1 / 复合 1，详情 docs/03_TASKS.md RC-01 节）；12 个核心冒烟 spec 3 轮稳定性 **37/38 个 test 3/3 全绿**（阻断门禁提案，见 RC-01 节） |
+| 单元测试 | **129 个文件 / 2336 个用例全部通过**（`npx vitest run`） |
+| 生产构建 | **通过**（`tsc && vite build` → `dist/`，2.22s） |
+| 浏览器 E2E | **两级门禁**：12 个核心冒烟 spec 为 CI 阻断门禁，2026-11-24 本地串行实跑 **38/38 全绿（13.1m）**；全量 224 test（磁盘 63 个 spec）为观测项，通过数字待回填，此处不写死。历史分诊见 docs/03_TASKS.md RC-01 节 |
 
 > E2E 套件驱动真实 Phaser 帧循环，剩余抖动是帧时序而非逻辑错误，已降为观测项；确定性门禁是 typecheck + 全部单测 + build。
 
@@ -154,7 +154,7 @@
 
 三条刻意的技术决定：
 
-1. **规则与渲染彻底分开**：`systems/` 不 import Phaser，2096 个单测用例无需浏览器也能独立运行。
+1. **规则与渲染彻底分开**：`systems/` 不 import Phaser，2336 个单测用例无需浏览器也能独立运行。
 2. **随机必须可复现**：全项目禁用 `Math.random()`，一律用 `deriveSeed(seed, day, 用途)` 派生。同种子必然同结果。
 3. **不用物理引擎**：连 Phaser 自带的 Arcade Physics 都没开。移动是手写的速度斜坡（`stepHorizontalSpeed`），2D 横版不需要刚体。
 
@@ -162,9 +162,9 @@
 
 | 关卡 | 规模 | 命令 |
 | --- | --- | --- |
-| 类型检查 | TypeScript strict，零 `any` 滥用；集成线 tip `cc3059c` 实跑 0 错 | `npm run typecheck` |
-| 单元测试 | **116 个文件 / 2128 个用例，全部通过**（2026-11-18 中午实跑 `VITE_NPC_MODEL= npx vitest run`，非手抄） | `npm run test` |
-| 浏览器测试 | 磁盘上 56 个 Playwright spec（夹具回归 + 真实输入旅程）；**状态为观测项**：RC-01 重新验收进行中，通过数字由 E2E 工作线回填，此处不写死 | `npm run test:e2e` |
+| 类型检查 | TypeScript strict，零 `any` 滥用；集成线 tip `b443e9f` 实跑 0 错（2026-11-24） | `npm run typecheck` |
+| 单元测试 | **129 个文件 / 2336 个用例，全部通过**（2026-11-24 实跑 `npx vitest run`，非手抄） | `npm run test` |
+| 浏览器测试 | 磁盘上 63 个 Playwright spec（夹具回归 + 真实输入旅程）；12 核心冒烟 spec 为 CI 阻断门禁（2026-11-24 实跑 38/38），全量为观测项，通过数字待回填 | `npm run test:e2e` |
 | CI | push / PR 运行 typecheck、单测、build、浏览器安装及 E2E | `.github/workflows/ci.yml` |
 
 浏览器测试能读到真实的游戏状态，靠的是 `src/main.ts` 里一个只在开发模式挂载的 `window.__PHASER_GAME__`——生产构建里没有。

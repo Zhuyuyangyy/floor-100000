@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { markAlinGateOpenForUnrelatedTraversal } from './alinGateFixture';
 
 // B3-03: actions cost game time, so a day is a budget. Before this, one full
 // sweep of five floors cost 4.5 game hours and the player idled through the
@@ -52,6 +53,7 @@ async function startGame(page: Page, seed: number): Promise<void> {
     if (started) break;
   }
   await waitForScene(page, 'Game');
+  await markAlinGateOpenForUnrelatedTraversal(page);
 }
 
 async function walkLeftTo(page: Page, x: number): Promise<void> {

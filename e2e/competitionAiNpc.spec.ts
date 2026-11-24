@@ -9,6 +9,7 @@ interface State {
   player: { x: number; inventory: { slots: GameInventoryStack[] } };
   npcStates: Record<string, string>;
   flags?: Record<string, number>;
+  visitedFloors?: Record<string, { openedContainers: string[] }>;
 }
 interface PhaserSceneProbe {
   dialogueOpen?: boolean;
@@ -22,6 +23,15 @@ interface PhaserSceneProbe {
     afterHash: string;
     before: { player: { inventory: GameInventoryStack[] }; npcs: Array<{ trust: number; memory: unknown[]; inventory: unknown[] }>; gates: Array<{ status: string }> };
     after: { player: { inventory: GameInventoryStack[] }; npcs: Array<{ trust: number; memory: unknown[]; inventory: unknown[] }>; gates: Array<{ status: string }> };
+  };
+  lastAlinGiftResult?: {
+    status: string;
+    attempts: number;
+    validation: { accepted: boolean; reason?: string; detailCode?: string } | null;
+    proposal: unknown;
+    execution: unknown;
+    feedback: ReadonlyArray<unknown>;
+    reason: string;
   };
   player?: { x: number };
   stairClimb?: unknown;
@@ -63,6 +73,14 @@ async function setPlayerX(page: Page, x: number): Promise<void> {
     (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState()?.player &&
       ((window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__!.getState()!.player.x = value);
   }, x);
+  await page.waitForFunction((value) => {
+    const w = window as unknown as {
+      __PHASER_SESSION__?: { getState: () => State | null };
+      __PHASER_GAME__?: { scene: { getScene: (key: string) => PhaserSceneProbe | null } };
+    };
+    return w.__PHASER_SESSION__?.getState()?.player.x === value &&
+      w.__PHASER_GAME__?.scene.getScene('Game')?.player?.x === value;
+  }, x, { timeout: 5000 });
 }
 
 async function goToAlinFloor(page: Page): Promise<void> {
@@ -118,6 +136,54 @@ async function readSceneResult(page: Page): Promise<PhaserSceneProbe['lastAlinRe
   return page.evaluate(() => (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => PhaserSceneProbe | null } } }).__PHASER_GAME__?.scene.getScene('Game')?.lastAlinRepairResult);
 }
 
+async function readGiftResult(page: Page): Promise<PhaserSceneProbe['lastAlinGiftResult']> {
+  return page.evaluate(() => (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => PhaserSceneProbe | null } } }).__PHASER_GAME__?.scene.getScene('Game')?.lastAlinGiftResult);
+}
+
+test('玩家赠礼通过游戏对话改变双方库存、信任和 NPC 记忆', async ({ page }) => {
+  const errors: string[] = [];
+  await page.setViewportSize({ width: 390, height: 844 });
+  page.on('pageerror', (error) => errors.push(error.message));
+  await startGame(page, 64212);
+  await goToAlinFloor(page);
+  await setPlayerX(page, 480);
+  await page.keyboard.press('E');
+  await expect.poll(() => hasVisibleText(page, '阿林（维修工）')).toBe(true);
+  await selectOption(page, '赠礼');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => hasVisibleText(page, '赠送 净水×1（持有3）')).toBe(true);
+  await page.keyboard.press('Enter');
+
+  await expect.poll(async () => (await readGiftResult(page))?.status).not.toBeUndefined();
+  const giftResult = await readGiftResult(page);
+  const giftDiagnostic = giftResult && {
+    status: giftResult.status,
+    attempts: giftResult.attempts,
+    validation: giftResult.validation,
+    proposal: giftResult.proposal,
+    execution: giftResult.execution,
+    feedback: giftResult.feedback,
+    reason: giftResult.reason,
+  };
+  expect(giftDiagnostic, `赠礼运行时诊断：${JSON.stringify(giftDiagnostic, null, 2)}`).toMatchObject({ status: 'executed' });
+
+  await page.waitForFunction(() => {
+    const state = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
+    if (!state?.npcStates.alin) return false;
+    const npc = JSON.parse(state.npcStates.alin) as {
+      competitionInventory?: GameInventoryStack[];
+      relationship?: Record<string, number>;
+      memory?: Array<{ kind: string; actor: string }>;
+    };
+    return state.player.inventory.slots.find((stack) => stack.itemId === 'clean_water')?.quantity === 2 &&
+      npc.competitionInventory?.some((stack) => stack.itemId === 'clean_water' && stack.quantity === 1) &&
+      (npc.relationship?.player ?? 0) > 35 &&
+      npc.memory?.some((entry) => entry.kind === 'gift' && entry.actor === 'player');
+  }, undefined, { timeout: 5000 });
+
+  expect(errors).toEqual([]);
+});
+
 test('阿林维修门交互使用 offline-fallback，经校验安全拒绝低信任提案并可核验真实状态', async ({ page }) => {
   const errors: string[] = [];
   await page.setViewportSize({ width: 390, height: 844 });
@@ -126,7 +192,7 @@ test('阿林维修门交互使用 offline-fallback，经校验安全拒绝低信
   await goToAlinFloor(page);
   await page.evaluate(() => {
     const state = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
-    if (state) state.player.inventory.slots.push({ itemId: 'wood', quantity: 2 });
+    if (state) state.player.inventory.slots.push({ itemId: 'wood', quantity: 2 }, { itemId: 'tape', quantity: 1 });
   });
   await setPlayerX(page, 480);
   await page.keyboard.press('E');
@@ -138,7 +204,6 @@ test('阿林维修门交互使用 offline-fallback，经校验安全拒绝低信
   await expect.poll(async () => hasVisibleText(page, '信任35/70｜拒绝')).toBe(true);
 
   const state = await getState(page);
-  const rawNpc = JSON.parse(state.npcStates.alin!) as { relationship: Record<string, number>; memory: unknown[] };
   const result = await readSceneResult(page);
   expect(result?.decisionSource).toBe('offline-fallback');
   expect(result?.attempts).toBe(2);
@@ -147,9 +212,92 @@ test('阿林维修门交互使用 offline-fallback，经校验安全拒绝低信
   expect(result?.before.gates[0]?.status).toBe('closed');
   expect(result?.after.gates[0]?.status).toBe('closed');
   expect(result?.before.player.inventory).toEqual(result?.after.player.inventory);
+  expect(result?.before.npcs[0]).toMatchObject({ trust: 35, memory: [] });
+  expect(result?.after.npcs[0]).toMatchObject({ trust: 35, memory: [] });
+  expect(state.npcStates?.alin).toBeUndefined();
   expect(state.player.inventory.slots.find((stack) => stack.itemId === 'wood')?.quantity).toBe(2);
-  expect(rawNpc.relationship.player).toBe(35);
-  expect(rawNpc.memory).toEqual([]);
   expect(state.flags?.['story:alin-repair-gate']).toBeUndefined();
+  expect(errors).toEqual([]);
+});
+
+test('第2层保底材料可实际拾取，赠礼不消耗预留物资，维修后实际进入第3层', async ({ page }) => {
+  const errors: string[] = [];
+  await page.setViewportSize({ width: 390, height: 844 });
+  page.on('pageerror', (error) => errors.push(error.message));
+  await startGame(page, 64213);
+  await goToAlinFloor(page);
+
+  // The player opens the real floor container; only the position is set by the
+  // browser fixture, not the inventory or the loot result.
+  await setPlayerX(page, 160);
+  await page.keyboard.press('E');
+  await page.waitForFunction(() => {
+    const state = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
+    return state?.visitedFloors?.['2']?.openedContainers.includes('alin_repair_cache') === true &&
+      state.player.inventory.slots.some((stack) => stack.itemId === 'wood' && stack.quantity === 2) &&
+      state.player.inventory.slots.some((stack) => stack.itemId === 'tape' && stack.quantity === 1);
+  }, undefined, { timeout: 5000 });
+
+  await setPlayerX(page, 480);
+  await page.keyboard.press('E');
+  await expect.poll(() => hasVisibleText(page, '阿林（维修工）')).toBe(true);
+  await selectOption(page, '赠礼');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => hasVisibleText(page, '赠送 净水×1（持有3）')).toBe(true);
+  expect(await hasVisibleText(page, '赠送 木材×1')).toBe(false);
+  expect(await hasVisibleText(page, '赠送 胶带×1')).toBe(false);
+
+  // Three ordinary gifts raise trust above 70 under the existing game rule.
+  // Each one uses the visible dialogue option and the actual gift executor.
+  for (const remaining of [2, 1, 0]) {
+    await page.keyboard.press('Enter');
+    await page.waitForFunction((expectedWater) => {
+      const w = window as unknown as {
+        __PHASER_SESSION__?: { getState: () => State | null };
+        __PHASER_GAME__?: { scene: { getScene: (key: string) => PhaserSceneProbe | null } };
+      };
+      const state = w.__PHASER_SESSION__?.getState();
+      const result = w.__PHASER_GAME__?.scene.getScene('Game')?.lastAlinGiftResult;
+      const water = state?.player.inventory.slots.find((stack) => stack.itemId === 'clean_water')?.quantity ?? 0;
+      return result?.status === 'executed' && water === expectedWater;
+    }, remaining, { timeout: 5000 });
+  }
+  expect(await hasVisibleText(page, '赠送 木材×1')).toBe(false);
+  expect(await hasVisibleText(page, '赠送 胶带×1')).toBe(false);
+
+  await selectOption(page, '返回');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => hasVisibleText(page, '阿林（维修工）')).toBe(true);
+  await selectOption(page, '维修门计划');
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await readSceneResult(page))?.status).toBe('executed');
+
+  const repair = await readSceneResult(page);
+  const stateAfterRepair = await getState(page);
+  expect(repair?.before.gates[0]?.status).toBe('closed');
+  expect(repair?.after.gates[0]?.status).toBe('open');
+  expect(stateAfterRepair.flags?.['story:alin-repair-gate']).toBe(1);
+  expect(stateAfterRepair.player.inventory.slots.some((stack) => stack.itemId === 'wood')).toBe(false);
+  expect(stateAfterRepair.player.inventory.slots.some((stack) => stack.itemId === 'tape')).toBe(false);
+
+  // The game leaves the NPC dialogue open after showing the repair result; close
+  // it through the real interact key before the player can walk to the stairs.
+  await page.keyboard.press('E');
+  await page.waitForFunction(() => {
+    const g = (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (key: string) => PhaserSceneProbe | null } } }).__PHASER_GAME__;
+    return g?.scene.getScene('Game')?.dialogueOpen !== true;
+  }, undefined, { timeout: 5000 });
+
+  // A real E press at the stair performs the now-authorized transition.
+  await setPlayerX(page, 40);
+  await page.keyboard.press('E');
+  await page.waitForFunction(() => {
+    const w = window as unknown as {
+      __PHASER_SESSION__?: { getState: () => State | null };
+      __PHASER_GAME__?: { scene: { getScene: (key: string) => PhaserSceneProbe | null } };
+    };
+    return w.__PHASER_SESSION__?.getState()?.currentFloor === 3 &&
+      !w.__PHASER_GAME__?.scene.getScene('Game')?.stairClimb;
+  }, undefined, { timeout: 7000 });
   expect(errors).toEqual([]);
 });

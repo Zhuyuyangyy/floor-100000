@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
+import { ALIN_REPAIR_GATE_FLAG } from '../data/floorGates';
 import { FLOOR_TEMPLATES } from '../data/floorTemplates';
 import { ITEM_IDS } from '../data/items';
 import { NPCS } from '../data/npcs';
@@ -10,6 +11,7 @@ import { getFloorView, lootContainer, lootGround } from '../systems/LootSystem';
 import { addItem, countItem } from '../systems/InventorySystem';
 import { craft, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
 import { advanceTime, isNight, NIGHT_START_MINUTE, REST_METABOLISM, sleep, sleepNightMinutes } from '../systems/SurvivalSystem';
+import { setFlag } from '../systems/WorldFlags';
 import { PLAYABLE_FLOORS_V01 } from '../core/constants';
 import type { GameState, ItemId } from '../core/gameTypes';
 
@@ -208,6 +210,7 @@ describe('every upgrade changes the game (audit D3)', () => {
     const before = nightOverlayAlpha(plain);
     expect(before).toBeGreaterThan(0);
     give(plain, [['wood', 2], ['tape', 1]]);
+    setFlag(plain, ALIN_REPAIR_GATE_FLAG);
     expect(craft(plain, 'reinforced_door').ok).toBe(true);
     const after = nightOverlayAlpha(plain);
     expect(after).toBeLessThan(before);
@@ -217,6 +220,7 @@ describe('every upgrade changes the game (audit D3)', () => {
     const s = createNewGame(1);
     s.gameMinuteOfDay = NIGHT_START_MINUTE + 1;
     give(s, [['wood', 2], ['tape', 1], ['battery', 1], ['wire', 1], ['scrap_metal', 1]]);
+    setFlag(s, ALIN_REPAIR_GATE_FLAG);
     expect(craft(s, 'reinforced_door').ok).toBe(true);
     const doorOnly = nightOverlayAlpha(s);
     expect(craft(s, 'lamp').ok).toBe(true);

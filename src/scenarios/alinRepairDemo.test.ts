@@ -6,6 +6,7 @@ import { NPC_FLOOR } from '../data/npcs';
 import { loadCompetitionNpcMemory } from '../systems/CompetitionNpcMemoryStore';
 import { loadNpcState, saveNpcState } from '../systems/NpcMemory';
 import { flagCount } from '../systems/WorldFlags';
+import { tryChangeFloor } from '../systems/FloorSystem';
 import {
   ALIN_REPAIR_GATE_FLAG,
   ALIN_REPAIR_GATE_ID,
@@ -39,7 +40,8 @@ describe('阿林维修门场景适配', () => {
 
     expect(result.decisionSource).toBe('offline-fallback');
     expect(result.observation.world.npcs[0]?.trust).toBe(35);
-    expect(loadNpcState(game, 'alin')?.relationship.player).toBe(35);
+    expect(loadNpcState(game, 'alin')).toBeNull();
+    expect(game.npcStates.alin).toBeUndefined();
     expect(result.status).toBe('blocked');
     expect(result.validation).toMatchObject({ accepted: false, reason: 'low_trust' });
     expect(result.feedback[0]?.outcome).toBe('validation_rejected');
@@ -54,17 +56,16 @@ describe('阿林维修门场景适配', () => {
     expect(result.beforeHash).toBe(result.afterHash);
   });
 
-  it('trust 70 still cannot repair when no exact recipe is configured; inventory, memory, trust, gate and flags stay unchanged', async () => {
+  it('trust 70 cannot repair without the required wood and tape; state stays unchanged', async () => {
     const game = atAlin();
     trust(game, 70);
-    game.player.inventory.slots.push({ itemId: 'wood', quantity: 2 });
     const inventoryBefore = structuredClone(game.player.inventory.slots);
     const result = await runAlinRepairScenario(game);
 
     expect(result.observation.world.npcs[0]?.trust).toBe(70);
     expect(result.status).toBe('blocked');
-    expect(result.validation).toMatchObject({ accepted: false, detailCode: 'repair_materials_unconfigured' });
-    expect(result.reason).toContain('配方未配置');
+    expect(result.validation).toMatchObject({ accepted: false, reason: 'missing_item' });
+    expect(result.reason).toContain('材料不足');
     expect(game.player.inventory.slots).toEqual(inventoryBefore);
     expect(loadNpcState(game, 'alin')?.relationship.player).toBe(70);
     expect(loadCompetitionNpcMemory(game, 'alin')).toEqual([]);
@@ -73,15 +74,14 @@ describe('阿林维修门场景适配', () => {
     expect(result.beforeHash).toBe(result.afterHash);
   });
 
-  it('with an explicit test-supplied exact recipe and trust 70, executor consumes only configured materials, opens the scenario gate flag and preserves memory/trust', async () => {
+  it('with the approved default recipe and trust 70, executor consumes wood and tape, opens the gate, and preserves memory/trust', async () => {
     const game = atAlin(21);
     trust(game, 70);
     game.player.inventory.slots.push({ itemId: 'wood', quantity: 2 });
+    game.player.inventory.slots.push({ itemId: 'tape', quantity: 1 });
     const woodBefore = count(game, 'wood');
-    const result = await runAlinRepairScenario(game, {
-      // Test fixture only; the game scene deliberately supplies no recipe.
-      policy: { repairMaterials: [{ itemId: 'wood', quantity: 2 }] },
-    });
+    const tapeBefore = count(game, 'tape');
+    const result = await runAlinRepairScenario(game);
 
     expect(result.status).toBe('executed');
     expect(result.validation).toMatchObject({ accepted: true, reason: 'ok' });
@@ -92,14 +92,16 @@ describe('阿林维修门场景适配', () => {
       ]);
     }
     expect(count(game, 'wood')).toBe(woodBefore - 2);
+    expect(count(game, 'tape')).toBe(tapeBefore - 1);
     expect(result.after.gates[0]?.status).toBe('open');
     expect(flagCount(game, ALIN_REPAIR_GATE_FLAG)).toBe(1);
     expect(loadNpcState(game, 'alin')?.relationship.player).toBe(70);
     expect(result.after.npcs[0]?.inventory).toEqual([]);
     expect(loadCompetitionNpcMemory(game, 'alin')).toEqual([]);
     expect(result.beforeHash).not.toBe(result.afterHash);
-    // This demonstration flag records the door status; it deliberately does not unlock TowerNav.
     expect(game.currentFloor).toBe(NPC_FLOOR);
+    // The test-only configured recipe opens the actual adjacent floor transition.
+    expect(tryChangeFloor(game, 1)).toEqual({ ok: true, from: NPC_FLOOR, to: NPC_FLOOR + 1 });
   });
 
   it('reads old saves with no flags or NPC record without adding mandatory schema fields', async () => {
@@ -113,8 +115,7 @@ describe('阿林维修门场景适配', () => {
     expect(result.observation.world.npcs[0]?.trust).toBe(35);
     expect(result.status).toBe('blocked');
     expect(game.flags).toBeUndefined();
-    const initializedNpcStates = (game as unknown as { npcStates?: Record<string, string> }).npcStates;
-    expect(initializedNpcStates?.alin).toBeDefined();
+    expect(game.npcStates).toBeUndefined();
     expect(game.schemaVersion).toBe(2);
   });
 });

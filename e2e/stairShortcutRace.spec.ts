@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { markAlinGateOpenForUnrelatedTraversal } from './alinGateFixture';
 
 interface RaceState {
   currentFloor: number;
@@ -69,6 +70,7 @@ async function climbOneFloor(page: Page, floor: number): Promise<void> {
 
 test('F during the second-floor stair climb cannot charge or race the landing', async ({ page }) => {
   await startGame(page);
+  await markAlinGateOpenForUnrelatedTraversal(page);
   await climbOneFloor(page, 2);
 
   // Seed enough test funds to make the race consequential. The shortcut itself

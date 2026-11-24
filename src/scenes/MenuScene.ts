@@ -104,7 +104,8 @@ export class MenuScene extends Phaser.Scene {
       .text(width / 2, SUBTITLE_Y, '末 日 宿 舍', { fontFamily: FONT_FAMILY, fontSize: mobile ? '30px' : '44px', color: hex(TEXT.primary), stroke: hex(PALETTE.ink), strokeThickness: mobile ? 3 : 4 })
       .setOrigin(0.5);
 
-    this.entries = [{ label: '开始新游戏', run: () => this.startNew() }];
+    const judgeDemo = new URLSearchParams(window.location.search).get('demo') === 'ai-npc';
+    this.entries = [{ label: judgeDemo ? '开始 AI NPC 试玩' : '开始新游戏', run: () => this.startNew() }];
     if (hasSave()) this.entries.push({ label: '继续游戏', run: () => this.continueRun() });
     this.entries.push({ label: '操作说明', run: () => this.toggleHelp() });
     this.selected = 0;

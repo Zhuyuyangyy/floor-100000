@@ -30,8 +30,8 @@
 
 ### 完成度（20）
 
-- [x] 仓库状态：当前已验证可玩范围为第 1–5 层；项目代码/测试覆盖生存、探索、搜刮、背包、NPC 交易、宿舍制作、睡眠和本地存档。
-- [x] 现有记录：`npm run typecheck` 通过；`npm run test` 为 58 个测试文件、762 项通过；构建通过；相关 E2E 结果见 [`B3-UI-07_MOBILE_PORTRAIT.md`](B3-UI-07_MOBILE_PORTRAIT.md)。构建有约 1.61 MB 主 JS 超过 500 KB 建议值的提示。
+- [x] 仓库状态：此前阶段记录的可玩范围为第 1–5 层；项目代码/测试覆盖生存、探索、搜刮、背包、NPC 交易、宿舍制作、睡眠和本地存档。
+- [x] 历史验证记录（非当前赛事整改分支的最终验收）：当时 `npm run typecheck` 通过；`npm run test` 为 58 个测试文件、762 项通过；构建通过；相关 E2E 记录见 [`B3-UI-07_MOBILE_PORTRAIT.md`](B3-UI-07_MOBILE_PORTRAIT.md)。构建有约 1.61 MB 主 JS 超过 500 KB 建议值的提示；当前分支最新结果见 [`docs/competition/IMPLEMENTATION_STATUS.md`](competition/IMPLEMENTATION_STATUS.md)。
 - [ ] 公开构建验证与失败恢复：在魔搭创空间按发布构建实际检查资源路径、刷新/重载、存档、桌面和目标手机。
 - [ ] 范围表述：十万层设定是远期目标，不应称十万层内容/完整结局已经实现。
 

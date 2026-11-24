@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { addToInventory, createNewGame } from '../core/gameState';
+import { ALIN_REPAIR_GATE_FLAG } from '../data/floorGates';
+import { countItem } from '../systems/InventorySystem';
 import { inflict } from '../systems/SicknessSystem';
 import { availableShelterActions, finishNight, resolveShelterAction, shouldShelterBeAttacked } from '../systems/ShelterSystem';
+import { setFlag } from '../systems/WorldFlags';
 
 describe('ShelterSystem', () => {
   it('offers the four shelter actions on the starting floor', () => {
@@ -49,8 +52,24 @@ describe('ShelterSystem', () => {
     const repairState = createNewGame(42);
     addToInventory(repairState.player.inventory, 'wood', 2);
     addToInventory(repairState.player.inventory, 'tape', 1);
+    setFlag(repairState, ALIN_REPAIR_GATE_FLAG);
     expect(resolveShelterAction(repairState, 'repair').ok).toBe(true);
     expect(repairState.player.homeUpgrades).toContain('reinforced_door');
+  });
+
+  it('does not let shelter repair consume the closed gate reserve', () => {
+    const state = createNewGame(43);
+    addToInventory(state.player.inventory, 'wood', 2);
+    addToInventory(state.player.inventory, 'tape', 1);
+
+    const result = resolveShelterAction(state, 'repair');
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('预留给阿林维修通道');
+    expect(countItem(state.player.inventory, 'wood')).toBe(2);
+    expect(countItem(state.player.inventory, 'tape')).toBe(1);
+    expect(state.player.homeUpgrades).not.toContain('reinforced_door');
+    expect(state.shelterPlan).toBeUndefined();
   });
 
   it('requires a resolved shelter action before sleep and advances to next day', () => {

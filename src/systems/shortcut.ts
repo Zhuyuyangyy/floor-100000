@@ -1,4 +1,5 @@
 import type { GameState } from '../core/gameTypes';
+import { closedFloorGateForTransition } from '../data/floorGates';
 
 // OVERHAUL Wave C2: the paid shortcut — Centum's signature economy move.
 // Its source (docs/RE_COMPETITIVE.md) prices a 2-4 floor skip as
@@ -44,9 +45,13 @@ export function shortcutOffer(state: GameState, top: number): ShortcutOffer | nu
   if (!shortcutAvailable(floor, top)) return null;
   const salt = (state.runSeed ^ (state.day * 7919) ^ (floor * 104729)) >>> 0;
   const skip = Math.min(shortcutSkip(salt), top - floor);
+  const targetFloor = floor + skip;
+  for (let fromFloor = floor; fromFloor < targetFloor; fromFloor++) {
+    if (closedFloorGateForTransition(state, fromFloor, fromFloor + 1)) return null;
+  }
   return {
     skip,
-    targetFloor: floor + skip,
+    targetFloor,
     price: shortcutPrice(floor, skip, timesTaken(state), salt),
   };
 }

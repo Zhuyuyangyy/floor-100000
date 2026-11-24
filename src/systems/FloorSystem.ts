@@ -13,6 +13,7 @@ import {
   PLAYABLE_FLOORS_V01,
 } from '../core/constants';
 import { getFloorTemplate } from '../data/floorTemplates';
+import { closedFloorGateForTransition } from '../data/floorGates';
 import type { GameState } from '../core/gameTypes';
 
 // Pure floor/movement rules (docs/02_TECH_SPEC.md §3: core rules are testable,
@@ -21,7 +22,7 @@ import type { GameState } from '../core/gameTypes';
 
 export type FloorChangeResult =
   | { ok: true; from: number; to: number }
-  | { ok: false; reason: 'top' | 'bottom' };
+  | { ok: false; reason: 'top' | 'bottom' | 'gate_locked' };
 
 export interface StairTraversal {
   direction: 1 | -1;
@@ -74,6 +75,7 @@ export function stairTraversalFor(state: GameState, direction: 1 | -1): StairTra
   const to = state.currentFloor + direction;
   const allowed = direction === 1 ? hasUpExit(state.currentFloor) : hasDownExit(state.currentFloor);
   if (!allowed) return null;
+  if (closedFloorGateForTransition(state, state.currentFloor, to)) return null;
   const style = stairStyleFor(state.currentFloor, direction);
   return {
     direction,
@@ -110,14 +112,17 @@ export function completeStairTraversal(state: GameState, traversal: StairTravers
 }
 
 // Applies a floor change to state on success (moving the player to the entry
-// point). Returns a typed failure instead of throwing for out-of-range moves.
-// `direction` is ±1, so the target is always adjacent — the range check below is
-// the only way this can fail.
+// point). Returns a typed failure instead of throwing for out-of-range or gated
+// moves. The gate is checked here as well as when traversal starts, so a gate
+// that closes mid-animation cannot be bypassed at the landing.
 export function tryChangeFloor(state: GameState, direction: 1 | -1): FloorChangeResult {
   const from = state.currentFloor;
   const to = from + direction;
   if (!PLAYABLE_FLOORS_V01.includes(to)) {
     return { ok: false, reason: direction === 1 ? 'top' : 'bottom' };
+  }
+  if (closedFloorGateForTransition(state, from, to)) {
+    return { ok: false, reason: 'gate_locked' };
   }
   state.currentFloor = to;
   state.player.x = ENTRY_X;

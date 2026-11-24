@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { markAlinGateOpenForUnrelatedTraversal } from './alinGateFixture';
 
 // B3-02 §4.2: a full bag used to be a 1.6-second flash.
 //
@@ -170,6 +171,7 @@ test.describe('B3-02.1 bag-full feedback', () => {
       if (started) break;
     }
     await waitForScene(page, 'Game');
+    await markAlinGateOpenForUnrelatedTraversal(page);
 
     // The starting kit is three of twelve slots: nothing to warn about.
     await page.waitForTimeout(400);
@@ -225,9 +227,9 @@ test.describe('B3-02.1 bag-full feedback', () => {
     expect(await hasVisibleText(page, BAG_FULL)).toBe(true);
     await page.keyboard.press('I');
 
-    // The route the game actually offers is the workbench: crafting spends whole
-    // stacks, which is what frees slots. The lamp's battery, wire and scrap are
-    // all in the bag, so walk home and build it.
+    // The route the game actually offers is the workbench. The lamp spends one
+    // from multi-unit stacks, so it does not free a slot yet; the purifier then
+    // consumes the remaining scrap, wire and filter, which must clear the warning.
     await takeStairs(page, 'down', 3);
     await takeStairs(page, 'down', 2);
     await takeStairs(page, 'down', 1);
@@ -238,17 +240,45 @@ test.describe('B3-02.1 bag-full feedback', () => {
     await page.waitForTimeout(400);
     await page.keyboard.press('C');
     await page.waitForTimeout(200);
+    await page.keyboard.press('C');
+    await page.waitForTimeout(320);
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(150);
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(150);
+    await page.keyboard.press('Enter'); // 简易净水器 is entry 2
+    await page.waitForTimeout(400);
+    await page.keyboard.press('C');
+    await page.waitForTimeout(200);
+    await page.keyboard.press('C');
+    await page.waitForTimeout(320);
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(150);
+    await page.keyboard.press('Enter'); // 加固门 is entry 1
+    await page.waitForTimeout(400);
+    await page.keyboard.press('C');
+    await page.waitForTimeout(200);
 
     const spent = await readState(page);
-    expect(spent.player.homeUpgrades).toContain('lamp');
+    expect(spent.player.homeUpgrades).toEqual(expect.arrayContaining(['lamp', 'purifier', 'reinforced_door']));
     expect(spent.player.inventory.slots.length).toBeLessThan(full.player.inventory.slots.length);
     await waitForFlag(page, BAG_FULL, false);
 
-    // And it is not a one-shot latch: the physical stair route may already have
-    // picked up floor 3's cloth while returning to the down stair. Use the
-    // guaranteed bread stack on floor 5 to refill the freed slot deterministically.
+    // Refill the spent recipe stacks from the guaranteed second-floor cache,
+    // then continue through the real stair route and refill the remaining space
+    // with the canteen's guaranteed floor-5 food.
     await takeStairs(page, 'up', 2);
+    await openContainer(page, 2, 'alin_repair_cache', 160);
+    expect(await count(page, 'wood')).toBe(2);
+    expect(await count(page, 'tape')).toBe(1);
     await takeStairs(page, 'up', 3);
+    // The floor-3 cloth is a guaranteed, distinct stack. Walk across it rather
+    // than injecting inventory, so the refill reaches twelve slots through play.
+    await walkTo(page, 1120);
+    await page.waitForFunction(() => {
+      const s = window.__PHASER_SESSION__?.getState();
+      return (s?.player.inventory.slots ?? []).some((slot) => slot.itemId === 'cloth');
+    });
     await takeStairs(page, 'up', 4);
     await takeStairs(page, 'up', 5);
     await openContainer(page, 5, 'pantry', 1120);

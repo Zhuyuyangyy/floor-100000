@@ -148,6 +148,7 @@ import { getItem } from '../data/items';
 import { HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
 import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
+import { ALIN_REPAIR_MATERIALS, closedFloorGateForTransition, isAlinRepairGateOpen } from '../data/floorGates';
 import { trade } from '../systems/TradeSystem';
 import { aiNpcConfig, archetypeForNpcId, npcFactFromDef } from '../ai/config';
 import { OllamaBrain } from '../ai/brains/ollamaBrain';
@@ -157,6 +158,8 @@ import { createNpcState } from '../data/npcPersonalities';
 import { loadNpcState, recordMemory, saveNpcState } from '../systems/NpcMemory';
 import { decideNpcAction, isDialogueFresh, type DialogueSession, type NpcRuntimeConfig } from '../systems/NpcRuntime';
 import { runAlinRepairScenario, type AlinRepairScenarioResult } from '../scenarios/alinRepairDemo';
+import { runAlinGiftScenario, type AlinGiftScenarioResult } from '../scenarios/alinGiftDemo';
+import { serializeAlinGiftRun, serializeAlinRepairRun } from '../ai/competitionRunExport';
 import {
   createWandererDecisionConfig,
   decideWandererIntent,
@@ -402,9 +405,18 @@ export class GameScene extends Phaser.Scene {
   // sessionId/revision：AI 异步返回的保鲜键。玩家每次开对话 sessionId+1，
   // 每次操作 revision+1；过期 AI 结果不得覆盖新对话（P1-2）。
   private dialogueSessionSeq = 0;
-  private dialogue: { npc: NpcId; level: 'main' | 'trade'; selected: number; message: string; messageSource: 'script' | 'offline-ai' | 'ollama' | 'fallback' | 'competition-offline'; lineToggle: number; sessionId: number; revision: number } | null = null;
+  private dialogue: { npc: NpcId; level: 'main' | 'trade' | 'gift'; selected: number; message: string; messageSource: 'script' | 'offline-ai' | 'ollama' | 'fallback' | 'competition-offline'; lineToggle: number; sessionId: number; revision: number } | null = null;
+  private dialogueGiftPage = 0;
+  private dialogueGiftPending = false;
   /** Last deterministic competition result, available to Phaser integration tests. */
   private lastAlinRepairResult?: AlinRepairScenarioResult;
+  /** Last gift result, exposed like the repair result for browser integration diagnostics. */
+  lastAlinGiftResult?: AlinGiftScenarioResult;
+  private judgePanel?: HTMLElement;
+  private judgePanelContent?: HTMLPreElement;
+  private judgeExportButton?: HTMLButtonElement;
+  private judgeExpanded = false;
+  private judgeLatestResult?: AlinGiftScenarioResult | AlinRepairScenarioResult;
   // Offline persona brain is the default. A configured local Ollama opts into
   // model-generated lines; the original greeting remains the fallback.
   private aiRuntimes = new Map<string, NpcRuntimeConfig>();
@@ -491,6 +503,8 @@ export class GameScene extends Phaser.Scene {
     this.dialogueOpen = false;
     this.dialogue = null;
     this.lastAlinRepairResult = undefined;
+    this.lastAlinGiftResult = undefined;
+    this.judgeLatestResult = undefined;
     this.shelterOpen = false;
     this.shelterSelected = 0;
     this.pauseOpen = false;
@@ -554,6 +568,7 @@ export class GameScene extends Phaser.Scene {
     this.buildDialoguePanel();
     this.buildPausePanel();
     this.bindInput();
+    if (new URLSearchParams(window.location.search).get('demo') === 'ai-npc') this.buildJudgeModePanel();
 
     if (getGame().day === 1) {
       this.flashOnWallClock('第 1 层：靠近储物柜，按 E 搜刮净水。');
@@ -566,6 +581,10 @@ export class GameScene extends Phaser.Scene {
       this.feedbackTimer = undefined;
       if (this.introFeedbackTimeout !== undefined) window.clearTimeout(this.introFeedbackTimeout);
       this.introFeedbackTimeout = undefined;
+      this.judgePanel?.remove();
+      this.judgePanel = undefined;
+      this.judgePanelContent = undefined;
+      this.judgeExportButton = undefined;
       this.unbindInput();
     });
   }
@@ -2989,9 +3008,9 @@ export class GameScene extends Phaser.Scene {
         row.cost.setText(cost);
         row.name.setColor(selected ? hex(PALETTE.lightHigh) : hex(TEXT.primary));
         const built = hasUpgrade(state, entry.id!);
-        const ok = canCraft(state, entry.id!).ok;
-        row.status.setText(built ? '已建' : ok ? '可制作' : '材料不足');
-        row.status.setColor(built ? hex(PALETTE.clothHigh) : ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
+        const check = canCraft(state, entry.id!);
+        row.status.setText(built ? '已建' : check.ok ? '可制作' : check.reason ? '预留通行材料' : '材料不足');
+        row.status.setColor(built ? hex(PALETTE.clothHigh) : check.ok ? hex(PALETTE.lightHigh) : hex(TEXT.dim));
       } else {
         const can = countItem(state.player.inventory, 'dirty_water') >= 1;
         row.name.setText('净化');
@@ -3285,15 +3304,196 @@ export class GameScene extends Phaser.Scene {
     this.dialogueInputObjects.forEach((o) => o.setVisible(false));
   }
 
+  /** A small DOM companion keeps the trace readable on narrow, scrolling viewports. */
+  private buildJudgeModePanel(): void {
+    const mobile = window.matchMedia('(max-width: 600px)').matches;
+    this.judgeExpanded = false;
+    const panel = document.createElement('section');
+    panel.dataset.testid = 'judge-mode-panel';
+    Object.assign(panel.style, {
+      position: 'fixed', right: '10px', top: mobile ? 'auto' : '10px', bottom: mobile ? '58px' : 'auto',
+      zIndex: '10000', width: 'min(360px, calc(100vw - 20px))', color: '#f5f1df',
+      background: 'rgba(18, 29, 34, 0.97)', border: '2px solid #80c7a1', borderRadius: '8px',
+      boxShadow: '0 4px 18px rgba(0,0,0,.45)', font: '14px/1.45 system-ui, sans-serif', pointerEvents: 'auto',
+    });
+    const header = document.createElement('div');
+    Object.assign(header.style, { display: 'flex', gap: '6px', padding: '6px', alignItems: 'stretch' });
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.dataset.testid = 'judge-mode-toggle';
+    toggle.setAttribute('aria-expanded', 'false');
+    Object.assign(toggle.style, {
+      flex: '1', minWidth: '0', textAlign: 'left', border: '0', borderRadius: '5px', padding: '8px',
+      color: '#f5f1df', background: '#294a42', font: '600 13px/1.35 system-ui, sans-serif', cursor: 'pointer',
+    });
+    const download = document.createElement('button');
+    download.type = 'button';
+    download.dataset.testid = 'judge-export';
+    download.textContent = '下载 JSON';
+    download.disabled = true;
+    Object.assign(download.style, {
+      border: '1px solid #8fa99d', borderRadius: '5px', padding: '6px 9px', color: '#f5f1df',
+      background: '#263b3b', font: '13px system-ui, sans-serif', cursor: 'pointer', whiteSpace: 'nowrap',
+    });
+    const content = document.createElement('pre');
+    content.dataset.testid = 'judge-trace';
+    Object.assign(content.style, {
+      display: 'none', margin: '0 6px 6px', padding: '10px', maxHeight: mobile ? '38vh' : '48vh',
+      overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', background: '#10191c',
+      borderRadius: '5px', font: '12px/1.5 ui-monospace, SFMono-Regular, monospace',
+    });
+    const updateToggle = (): void => {
+      toggle.textContent = `Judge Mode · offline-fallback · seed ${getGame().runSeed} · 阿林${this.judgeExpanded ? ' ▾' : ' ▸'}`;
+      toggle.setAttribute('aria-expanded', String(this.judgeExpanded));
+      content.style.display = this.judgeExpanded ? 'block' : 'none';
+    };
+    toggle.addEventListener('click', () => {
+      this.judgeExpanded = !this.judgeExpanded;
+      updateToggle();
+      toggle.blur();
+    });
+    download.addEventListener('click', () => {
+      this.downloadJudgeRun();
+      download.blur();
+    });
+    header.append(toggle, download);
+    panel.append(header, content);
+    document.body.append(panel);
+    this.judgePanel = panel;
+    this.judgePanelContent = content;
+    this.judgeExportButton = download;
+    updateToggle();
+    this.refreshJudgeModePanel();
+  }
+
+  private refreshJudgeModePanel(): void {
+    if (!this.judgePanelContent) return;
+    const result = this.judgeLatestResult;
+    if (!result) {
+      this.judgePanelContent.textContent = JSON.stringify({
+        mode: 'offline-fallback', seed: getGame().runSeed, npc: '阿林', target: 'alin-repair-gate',
+        status: '等待真实 scenario result',
+        instructions: '与阿林交互：赠礼会运行赠礼 scenario；维修门计划会运行只读校验。未出现 scenario 结果前，没有状态提交。',
+      }, null, 2);
+      if (this.judgeExportButton) this.judgeExportButton.disabled = true;
+      return;
+    }
+    const feedback = result.feedback.map((event) => ({
+      attempt: event.attempt,
+      event: event.outcome,
+      validation: event.validation ? {
+        accepted: event.validation.accepted,
+        reason: event.validation.reason,
+        detailCode: event.validation.accepted ? undefined : event.validation.detailCode,
+      } : null,
+      execution: event.execution?.status ?? 'not-executed',
+    }));
+    const repair = 'decisionSource' in result;
+    const actualStateDelta = result.execution?.status === 'completed' ? result.execution.actualStateDelta : null;
+    const replan = result.feedback.some((event) => event.outcome === 'executed' &&
+      result.feedback.some((prior) => prior.attempt < event.attempt &&
+        (prior.outcome === 'validation_rejected' || prior.outcome === 'execution_failed') &&
+        prior.proposal !== undefined && JSON.stringify(prior.proposal) !== JSON.stringify(event.proposal)));
+    const evidence = {
+      mode: repair ? result.decisionSource : 'offline-fallback',
+      seed: result.before.seed,
+      npc: '阿林',
+      target: result.observation.world.npcs.find((npc) => npc.npcId === 'alin')?.goal ?? null,
+      status: result.status,
+      attempts: result.attempts,
+      observation: result.observation,
+      proposal: result.proposal,
+      validator: result.validation ? {
+        decision: result.validation.accepted ? 'accepted' : 'rejected',
+        reason: result.validation.reason,
+        detailCode: result.validation.accepted ? undefined : result.validation.detailCode,
+      } : { decision: 'no validation result', reason: null, detailCode: null },
+      actualState: actualStateDelta === null
+        ? '未提交：没有已完成的 execution / actual state delta'
+        : { committed: true, delta: actualStateDelta, after: result.after },
+      memoryAndEventFeedback: {
+        before: result.before.npcs.find((npc) => npc.npcId === 'alin')?.memory ?? [],
+        after: result.after.npcs.find((npc) => npc.npcId === 'alin')?.memory ?? [],
+        events: feedback,
+      },
+      replan,
+      replanEvidence: replan ? '失败反馈后执行了不同的替代动作' : '没有失败反馈后执行不同的替代动作',
+      attemptSequence: feedback.map((event) => event.attempt),
+      reason: result.reason,
+      stateHashes: { before: result.beforeHash, after: result.afterHash },
+    };
+    this.judgePanelContent.textContent = JSON.stringify(evidence, null, 2);
+    if (this.judgeExportButton) this.judgeExportButton.disabled = false;
+  }
+
+  private downloadJudgeRun(): void {
+    const result = this.judgeLatestResult;
+    if (!result) return;
+    // Export only the scenario's redacted, allow-listed projection, never GameState.
+    const serialized = 'decisionSource' in result ? serializeAlinRepairRun(result) : serializeAlinGiftRun(result);
+    const safeRun = JSON.parse(serialized) as {
+      world?: { stateBefore?: unknown; stateAfter?: unknown };
+      hashes?: unknown;
+      actualStateDelta?: unknown;
+      [key: string]: unknown;
+    };
+    const json = JSON.stringify({
+      ...safeRun,
+      // Derived exclusively from the exporter's redacted/allow-listed output.
+      evidence: {
+        stateBefore: safeRun.world?.stateBefore ?? null,
+        stateAfter: safeRun.world?.stateAfter ?? null,
+        hashes: safeRun.hashes ?? null,
+        actualStateDelta: safeRun.actualStateDelta ?? null,
+      },
+    });
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `alin-${'decisionSource' in result ? 'repair' : 'gift'}-seed-${result.before.seed}.json`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   // Label + icon key per dialogue option. The icon is the item the player
   // RECEIVES (the trade's output), matching how the crafting list shows outputs;
   // 问候/询问/退出/返回 are not items and get no icon.
+  private giftableAlinStacks() {
+    const game = getGame();
+    const slots = game.player.inventory.slots;
+    const giftable = slots.filter((stack) => stack.meta === undefined);
+    if (isAlinRepairGateOpen(game)) return giftable;
+
+    const required = new Map(ALIN_REPAIR_MATERIALS.map((stack) => [stack.itemId, stack.quantity]));
+    const owned = new Map<string, number>();
+    for (const stack of slots) owned.set(stack.itemId, (owned.get(stack.itemId) ?? 0) + stack.quantity);
+    return giftable.filter((stack) => {
+      const reserve = required.get(stack.itemId);
+      if (reserve === undefined) return true;
+      const total = owned.get(stack.itemId) ?? 0;
+      return total > Math.min(total, reserve);
+    });
+  }
+
   private dialogueOptionsView(): Array<{ label: string; icon?: ItemId }> {
     const d = this.dialogue;
     if (!d) return [];
     if (d.level === 'main') {
-      const labels = d.npc === 'alin' ? ['问候', '维修门计划', '交易', '退出'] : ['问候', '询问', '交易', '退出'];
+      const labels = d.npc === 'alin' ? ['赠礼', '维修门计划', '交易', '退出'] : ['问候', '询问', '交易', '退出'];
       return labels.map((label) => ({ label }));
+    }
+    if (d.level === 'gift') {
+      const stacks = this.giftableAlinStacks();
+      if (stacks.length === 0) return [{ label: '背包没有可赠送物品' }, { label: '返回' }];
+      const start = this.dialogueGiftPage * 3;
+      const visible = stacks.slice(start, start + 3);
+      const options: Array<{ label: string; icon?: ItemId }> = visible.map((stack) => ({
+        label: `赠送 ${getItem(stack.itemId).displayName}×1（持有${stack.quantity}）`,
+        icon: stack.itemId,
+      }));
+      options.push({ label: start + 3 < stacks.length ? '下一页' : '返回' });
+      return options;
     }
     const npc = getNpc(d.npc);
     return [
@@ -3389,6 +3589,7 @@ export class GameScene extends Phaser.Scene {
 
   private openDialogue(npc: NpcDef): void {
     this.dialogueSessionSeq += 1;
+    this.dialogueGiftPage = 0;
     this.dialogue = {
       npc: npc.id,
       level: 'main',
@@ -3416,8 +3617,9 @@ export class GameScene extends Phaser.Scene {
   private dialogueBack(): void {
     if (!this.dialogue) return;
     this.dialogue.revision += 1; // 玩家操作使在途 AI 结果过期
-    if (this.dialogue.level === 'trade') {
+    if (this.dialogue.level === 'trade' || this.dialogue.level === 'gift') {
       this.dialogue.level = 'main';
+      this.dialogueGiftPage = 0;
       this.dialogue.selected = 0;
       this.dialogue.message = '';
       this.dialogue.messageSource = 'script';
@@ -3469,14 +3671,58 @@ export class GameScene extends Phaser.Scene {
   private activateDialogueOption(): void {
     const d = this.dialogue;
     if (!d) return;
+    // Ignore repeated confirms without invalidating the in-flight gift result.
+    if (d.level === 'gift' && this.dialogueGiftPending) return;
     d.revision += 1; // 玩家操作使在途 AI 结果过期
     d.messageSource = 'script';
     const npc = getNpc(d.npc);
+    if (d.level === 'gift') {
+      const stacks = this.giftableAlinStacks();
+      if (stacks.length === 0) {
+        if (d.selected === 1) {
+          d.level = 'main';
+          this.dialogueGiftPage = 0;
+          d.selected = 0;
+          d.message = '';
+        }
+        this.refreshDialogue();
+        return;
+      }
+      const start = this.dialogueGiftPage * 3;
+      const visibleCount = Math.min(3, Math.max(0, stacks.length - start));
+      if (d.selected < visibleCount) {
+        const stack = stacks[start + d.selected];
+        if (stack) {
+          void this.runAlinGiftPlan(npc, { sessionId: d.sessionId, revision: d.revision }, stack.itemId);
+          return;
+        }
+      } else if (d.selected === visibleCount) {
+        if (start + 3 < stacks.length) {
+          this.dialogueGiftPage += 1;
+          d.selected = 0;
+          d.message = '选择一件赠送给阿林的物品';
+        } else {
+          d.level = 'main';
+          this.dialogueGiftPage = 0;
+          d.selected = 0;
+          d.message = '';
+        }
+      }
+      this.refreshDialogue();
+      return;
+    }
     if (d.level === 'main') {
       switch (d.selected) {
         case 0:
-          d.message = npc.greetings[d.lineToggle % npc.greetings.length];
-          d.lineToggle++;
+          if (npc.id === 'alin') {
+            d.level = 'gift';
+            this.dialogueGiftPage = 0;
+            d.selected = 0;
+            d.message = '选择一件赠送给阿林的物品';
+          } else {
+            d.message = npc.greetings[d.lineToggle % npc.greetings.length];
+            d.lineToggle++;
+          }
           break;
         case 1:
           if (npc.id === 'alin') {
@@ -3517,6 +3763,39 @@ export class GameScene extends Phaser.Scene {
     this.refreshDialogue();
   }
 
+  private async runAlinGiftPlan(npc: NpcDef, captured: DialogueSession, itemId: ItemId): Promise<void> {
+    const current = this.dialogue;
+    if (!current || current.npc !== npc.id || npc.id !== 'alin' || this.dialogueGiftPending) return;
+    this.dialogueGiftPending = true;
+    current.messageSource = 'competition-offline';
+    current.message = '赠礼提案 → 规则校验 → 状态提交…';
+    this.refreshDialogue();
+    try {
+      const result = await runAlinGiftScenario(getGame(), itemId, 1);
+      this.lastAlinGiftResult = result;
+      this.judgeLatestResult = result;
+      this.refreshJudgeModePanel();
+      // Persist the committed state even if the player closed the dialogue while
+      // the deterministic action was resolving; freshness only guards the UI.
+      saveToStorage(getGame());
+      this.refreshInventory();
+      if (!isDialogueFresh(this.currentDialogueSession(), captured)) return;
+      const trust = result.after.npcs[0]?.trust ?? 35;
+      current.message = result.status === 'executed'
+        ? `赠送${getItem(itemId).displayName}×1成功｜信任${trust}`
+        : result.reason;
+      current.revision += 1;
+      this.refreshDialogue();
+    } catch {
+      if (!isDialogueFresh(this.currentDialogueSession(), captured)) return;
+      current.message = 'offline-fallback｜赠礼未执行｜游戏状态未改变';
+      current.revision += 1;
+      this.refreshDialogue();
+    } finally {
+      this.dialogueGiftPending = false;
+    }
+  }
+
   /** Run the A6 observe/plan/validate/executor loop without inventing costs. */
   private async runAlinRepairPlan(npc: NpcDef, captured: DialogueSession): Promise<void> {
     const current = this.dialogue;
@@ -3526,8 +3805,15 @@ export class GameScene extends Phaser.Scene {
     this.refreshDialogue();
     try {
       const previousResult = this.lastAlinRepairResult;
-      const result = await runAlinRepairScenario(getGame());
+      const game = getGame();
+      const result = await runAlinRepairScenario(game);
       this.lastAlinRepairResult = result;
+      this.judgeLatestResult = result;
+      this.refreshJudgeModePanel();
+      // A committed gate or its compatibility initialization must persist even
+      // when the player closed the dialogue before the deterministic step ended.
+      saveToStorage(game);
+      this.refreshInventory();
       if (!isDialogueFresh(this.currentDialogueSession(), captured)) return;
       const trust = result.after.npcs[0]?.trust ?? 35;
       const alreadyCommitted = previousResult?.status === 'executed' && result.status === 'already_open';
@@ -3542,8 +3828,6 @@ export class GameScene extends Phaser.Scene {
               : '校验拒绝｜未改变';
       current.message = label;
       current.revision += 1;
-      saveToStorage(getGame());
-      this.refreshInventory();
       this.refreshDialogue();
     } catch {
       if (!isDialogueFresh(this.currentDialogueSession(), captured)) return;
@@ -3906,13 +4190,17 @@ export class GameScene extends Phaser.Scene {
     }
     const state = getGame();
     if (state.status !== 'playing') return;
+    const zone = currentInteractionZone(state);
+    if (zone === 'up' && closedFloorGateForTransition(state, state.currentFloor, state.currentFloor + 1)) {
+      this.flash('上层维修通道封锁：先完成阿林的维修门计划');
+      return;
+    }
     const top = Math.max(...PLAYABLE_FLOORS_V01);
     const offer = shortcutOffer(state, top);
     if (!offer) {
       this.flash('这里没有可抄的近路');
       return;
     }
-    const zone = currentInteractionZone(state);
     if (zone !== 'up') {
       this.flash('要走上楼口才能抄近路');
       return;
@@ -4221,14 +4509,16 @@ export class GameScene extends Phaser.Scene {
 
   private changeFloor(direction: 1 | -1): void {
     if (this.stairClimb) return;
-    const traversal = stairTraversalFor(getGame(), direction);
+    const state = getGame();
+    const traversal = stairTraversalFor(state, direction);
     if (!traversal) {
-      this.flash(direction === 1 ? '已到顶层' : '已到尽头');
+      const gate = closedFloorGateForTransition(state, state.currentFloor, state.currentFloor + direction);
+      this.flash(gate ? `上层维修通道封锁：先协助阿林修复门禁（第 ${gate.toFloor} 层未开放）` : direction === 1 ? '已到顶层' : '已到尽头');
       return;
     }
     this.speedX = 0;
     this.stairClimb = { ...traversal, elapsedMs: 0 };
-    this.setFloorCameraBounds(getGame().currentFloor, this.stairClimb);
+    this.setFloorCameraBounds(state.currentFloor, this.stairClimb);
     this.player.setFlipX(direction < 0);
     this.player.play(walkAnimKey(this.metaSelectedCharacter()), true);
     this.player.anims.timeScale = 1.25;
@@ -4260,7 +4550,7 @@ export class GameScene extends Phaser.Scene {
     if (!result.ok) {
       this.setFloorCameraBounds(state.currentFloor);
       this.player.setPosition(state.player.x, PLAYER_FEET_Y);
-      this.flash(result.reason === 'top' ? '已到顶层' : '已到尽头');
+      this.flash(result.reason === 'top' ? '已到顶层' : result.reason === 'gate_locked' ? '上层维修通道已封锁：请先修复门禁' : '已到尽头');
       return;
     }
 
@@ -4547,6 +4837,9 @@ export class GameScene extends Phaser.Scene {
     const zone = currentInteractionZone(state);
     if (container) this.setInteractionHint(`按 E 打开 ${container.label}`);
     // OVERHAUL Wave C2: advertise the same capped offer that F will purchase.
+    else if (zone === 'up' && closedFloorGateForTransition(state, state.currentFloor, state.currentFloor + 1)) {
+      this.setInteractionHint('上层维修通道封锁 · 先协助阿林修复门禁');
+    }
     else if (zone === 'up') {
       const offer = shortcutOffer(state, Math.max(...PLAYABLE_FLOORS_V01));
       this.setInteractionHint(offer ? `按 E 上楼 · F 抄近路（${offer.price} 金）` : '按 E 上楼');

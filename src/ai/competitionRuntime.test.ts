@@ -153,6 +153,67 @@ describe('runCompetitionStep', () => {
     expect(executeCount).toBe(2);
   });
 
+  it('执行期间道路封锁后用失败反馈重规划为撤退，并在新观察下校验和执行', async () => {
+    let eventInjected = false;
+    let observationCount = 0;
+    let executeCount = 0;
+    const observed: CompetitionObservationSnapshot[] = [];
+    const plannedActions: string[] = [];
+    const validatedActions: string[] = [];
+    const feedbacks: CompetitionAttemptFeedback[] = [];
+    const runtime = ports({
+      observe: async () => {
+        const base = observation(`blocked-route-${++observationCount}`, ['repair_gate', 'retreat', 'observe']);
+        const snapshot = {
+          ...base,
+          world: {
+            ...base.world,
+            gates: [{ gateId: 'alin-repair-gate', floor: 1, status: eventInjected ? 'blocked' as const : 'closed' as const }],
+          },
+          recentFacts: eventInjected ? ['event:road_blocked'] : [],
+        };
+        observed.push(snapshot);
+        return snapshot;
+      },
+      plan: async (snapshot, _goal, previous) => {
+        const nextAction = previous?.outcome === 'execution_failed' && snapshot.recentFacts.includes('event:road_blocked')
+          ? 'retreat' as const
+          : 'repair_gate' as const;
+        plannedActions.push(nextAction);
+        return { nextAction };
+      },
+      propose: async (_snapshot, _goal, plan) => plan.nextAction === 'repair_gate'
+        ? { kind: 'repair_gate', gateId: 'alin-repair-gate', materials: [] }
+        : { kind: 'retreat', destination: { floor: 1, x: 12 } },
+      validate: async (_snapshot, candidate) => {
+        validatedActions.push(candidate.kind);
+        return accepted;
+      },
+      execute: async (_snapshot, candidate) => {
+        executeCount += 1;
+        if (executeCount === 1) {
+          eventInjected = true;
+          return { status: 'failed', actualStateDelta: null };
+        }
+        return candidate.kind === 'retreat' && eventInjected
+          ? { status: 'completed', actualStateDelta: delta }
+          : { status: 'failed', actualStateDelta: null };
+      },
+      feedback: async (result) => { feedbacks.push(result); },
+    });
+
+    const result = await runCompetitionStep(runtime, { maxAttempts: 2 });
+
+    expect(result).toMatchObject({ status: 'executed', attempts: 2, proposal: { kind: 'retreat' } });
+    expect(observed).toHaveLength(2);
+    expect(observed[1]?.recentFacts).toContain('event:road_blocked');
+    expect(observed[1]?.world.gates[0]?.status).toBe('blocked');
+    expect(plannedActions).toEqual(['repair_gate', 'retreat']);
+    expect(validatedActions).toEqual(['repair_gate', 'retreat']);
+    expect(executeCount).toBe(2);
+    expect(feedbacks.map(({ outcome }) => outcome)).toEqual(['execution_failed', 'executed']);
+  });
+
   it('将重试次数封顶，且不修改只读观察/存档形状或接触状态写入端口', async () => {
     const legacySaveLike = deepFreeze({ version: 1, gameState: { hp: 77, flags: { old: 1 } } });
     const before = JSON.stringify(legacySaveLike);

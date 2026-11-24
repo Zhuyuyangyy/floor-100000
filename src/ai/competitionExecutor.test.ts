@@ -46,7 +46,13 @@ describe('competitionRules: sealed NPC demo domain validation', () => {
   });
   it('validates directions, trust threshold, item possession, and exact repair recipe', () => {
     expect(validateCompetitionProposal(state(), give).accepted).toBe(true);
-    expect(validateCompetitionProposal(state({ npcs: [{ ...state().npcs[0]!, trust: 39 }] }), give).reason).toBe('low_trust');
+    const trust39 = state({ npcs: [{ ...state().npcs[0]!, trust: 39 }] });
+    expect(validateCompetitionProposal(trust39, give).accepted).toBe(true); // trust does not prevent accepting a voluntary player gift
+    const npcGift: CompetitionActionProposal = {
+      kind: 'give', transfer: { from: { kind: 'npc', npcId: 'alin' }, to: 'player', itemId: 'battery', quantity: 1 },
+    };
+    expect(validateCompetitionProposal(trust39, npcGift).reason).toBe('low_trust');
+    expect(validateCompetitionProposal(state({ npcs: [{ ...state().npcs[0]!, trust: 40 }] }), npcGift).accepted).toBe(true);
     expect(validateCompetitionProposal(state(), {
       kind: 'give', transfer: { from: 'player', to: 'player', itemId: 'wire', quantity: 1 },
     }).accepted).toBe(false);
@@ -76,6 +82,24 @@ describe('competitionRules: sealed NPC demo domain validation', () => {
   it('supports too_far only when an explicit interaction radius is configured', () => {
     const far = state({ player: { position: { floor: 8, x: 0 }, inventory: [{ itemId: 'wire', quantity: 1 }] } });
     expect(validateCompetitionProposal(far, give, { maxInteractionDistance: 10 }).reason).toBe('too_far');
+  });
+  it('reserves the minimum repair stock from voluntary gifts until the gate opens', () => {
+    const giveWood: CompetitionActionProposal = {
+      kind: 'give', transfer: { from: 'player', to: { kind: 'npc', npcId: 'alin' }, itemId: 'wood', quantity: 2 },
+    };
+    const policy = { reservedPlayerMaterials: [{ itemId: 'wood' as const, quantity: 2 }, { itemId: 'tape' as const, quantity: 1 }] };
+    const rejected = validateCompetitionProposal(state(), giveWood, policy);
+    expect(rejected).toMatchObject({ accepted: false, reason: 'invalid_target', detailCode: 'reserved_player_materials' });
+
+    const oneWood = state({ player: { ...state().player, inventory: [{ itemId: 'wood', quantity: 1 }] } });
+    const oneGift = { ...giveWood, transfer: { ...giveWood.transfer, quantity: 1 } };
+    expect(validateCompetitionProposal(oneWood, oneGift, policy)).toMatchObject({
+      accepted: false, detailCode: 'reserved_player_materials',
+    });
+
+    const surplusGift = { ...oneGift, transfer: { ...oneGift.transfer, quantity: 1 } };
+    const surplus = state({ player: { ...state().player, inventory: [{ itemId: 'wood', quantity: 3 }] } });
+    expect(validateCompetitionProposal(surplus, surplusGift, policy).accepted).toBe(true);
   });
   it('rejects an exchange that exceeds explicitly configured inventory slots before execution', () => {
     const demo = state();

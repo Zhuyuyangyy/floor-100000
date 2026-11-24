@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { markAlinGateOpenForUnrelatedTraversal } from './alinGateFixture';
 
 // B3-01: the survival chapter's fixed systems, verified in a real browser.
 //
@@ -200,6 +201,7 @@ test('a player can gather every upgrade material and build all three upgrades', 
     if (started) break;
   }
   await waitForScene(page, 'Game');
+  await markAlinGateOpenForUnrelatedTraversal(page);
 
   // Drink and eat the starting kit first. This is not test convenience — the
   // 12-slot bag cannot hold the starting consumables AND the material haul, so a
@@ -277,6 +279,7 @@ test('barter converts resources and never creates them', async ({ page }) => {
   }
   await waitForScene(page, 'Game');
 
+  await markAlinGateOpenForUnrelatedTraversal(page);
   await climbTo(page, 2);
   // 阿林 trades 1 scrap_metal for 1 wire. Give him the scrap by looting floor 3.
   await climbTo(page, 3);

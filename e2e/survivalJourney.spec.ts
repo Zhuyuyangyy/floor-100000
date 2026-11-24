@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { E2EGameState } from './globals';
+import { markAlinGateOpenForUnrelatedTraversal } from './alinGateFixture';
 
 // The balance file is the single source of truth for starting values, and this
 // spec asserts against them at boot. Read it here rather than copying numbers:
@@ -178,6 +179,7 @@ test.describe('B3-02 full survival journey', () => {
       if (started) break;
     }
     await waitForScene(page, 'Game');
+    await markAlinGateOpenForUnrelatedTraversal(page);
 
     // ── 1. wake on floor 1 ──────────────────────────────────────────────
     const start = await readState(page);
@@ -288,13 +290,15 @@ test.describe('B3-02 full survival journey', () => {
     // ── 3b. turn the haul into upgrades at the workbench ─────────────────
     // This is the step that makes the trip mean something: the scrap, wire,
     // filter, wood and tape came off floors 3 and 4, and they only become an
-    // upgrade here, at home. It also empties six stacks, which is what makes
-    // room for the cabinet below — a full bag makes lootContainer leave the
+    // upgrade here, at home. The lamp spends exactly one battery; any surplus
+    // battery pickup remains in the bag. Crafting empties required stacks, which
+    // makes room for the cabinet below — a full bag makes lootContainer leave the
     // stack untouched and report `full`, so nothing is gained and nothing lost.
     expect(home.player.homeUpgrades).toEqual([]);
     await walkTo(page, 480); // CRAFT_X
     await page.keyboard.press('C');
     await page.waitForTimeout(300);
+    const batteriesBeforeCraft = await count(page, 'battery');
     // The panel lists 照明灯 / 加固门 / 简易净水器 / 净水. The cursor does not
     // advance on its own, so each entry needs its own Enter plus a step down.
     for (let i = 0; i < 4; i++) {
@@ -308,12 +312,13 @@ test.describe('B3-02 full survival journey', () => {
 
     const crafted = await readState(page);
     expect(crafted.player.homeUpgrades.sort()).toEqual(['lamp', 'purifier', 'reinforced_door']);
-    // The materials are gone — spent, not duplicated.
+    // Every recipe cost is spent exactly once; excess batteries remain because
+    // the lamp recipe needs only one and a loot crate can supply more.
     expect(await count(page, 'scrap_metal')).toBe(0);
     expect(await count(page, 'wood')).toBe(0);
     expect(await count(page, 'wire')).toBe(0);
     expect(await count(page, 'filter')).toBe(0);
-    expect(await count(page, 'battery')).toBe(0);
+    expect(await count(page, 'battery')).toBe(batteriesBeforeCraft - 1);
     expect(await count(page, 'tape')).toBe(0);
     await page.screenshot({ path: 'e2e/screenshots/45b-journey-crafted.png' });
 

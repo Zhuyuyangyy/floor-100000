@@ -21,15 +21,15 @@ import { hashCompetitionWorldState, serializeCompetitionWorldState } from '../ai
 import type { CompetitionWorldStateSnapshot } from '../ai/competition-contract';
 import type { GameState, InventoryStack } from '../core/gameTypes';
 import { NPC_FLOOR, getNpc } from '../data/npcs';
+import { ALIN_REPAIR_GATE_FLAG, ALIN_REPAIR_GATE_ID, ALIN_REPAIR_MATERIALS, isAlinRepairGateOpen } from '../data/floorGates';
 import { createNpcState } from '../data/npcPersonalities';
 import { loadNpcState, saveNpcState } from '../systems/NpcMemory';
 import { loadCompetitionNpcMemory } from '../systems/CompetitionNpcMemoryStore';
-import { flagCount, flagKey, setFlag } from '../systems/WorldFlags';
+import { setFlag } from '../systems/WorldFlags';
 import { INTERACT_DISTANCE } from '../core/constants';
 
-/** This slice is intentionally a story/status flag, not a TowerNav route gate. */
-export const ALIN_REPAIR_GATE_ID = 'alin-repair-gate';
-export const ALIN_REPAIR_GATE_FLAG = flagKey.story(ALIN_REPAIR_GATE_ID);
+/** Re-export the shared gate identity for the gift scenario and existing callers. */
+export { ALIN_REPAIR_GATE_ID, ALIN_REPAIR_GATE_FLAG } from '../data/floorGates';
 export const ALIN_REPAIR_MAX_ATTEMPTS = 2;
 
 export type AlinRepairScenarioStatus = 'executed' | 'blocked' | 'already_open' | 'exhausted' | 'planning_failed';
@@ -52,7 +52,7 @@ export interface AlinRepairScenarioResult {
 }
 
 export interface AlinRepairScenarioOptions {
-  /** Only explicit external configuration may supply an exact repair recipe. */
+  /** Optional scenario overrides; the user-approved exact recipe is the default. */
   readonly policy?: CompetitionRulesPolicy;
 }
 
@@ -74,18 +74,8 @@ function trustOf(game: GameState): number {
   return value === undefined ? COMPETITION_TRUST_BASE : value;
 }
 
-/** Seed the existing optional NPC state, without adding a required save field. */
-function ensureInitialTrust(game: GameState): void {
-  if (!game.npcStates) game.npcStates = {};
-  const raw = game.npcStates?.alin;
-  if (raw !== undefined) return;
-  const npcState = createNpcState('ally');
-  npcState.relationship.player = COMPETITION_TRUST_BASE;
-  saveNpcState(game, 'alin', npcState);
-}
-
 function gateStatus(game: GameState): 'open' | 'closed' {
-  return flagCount(game, ALIN_REPAIR_GATE_FLAG) > 0 ? 'open' : 'closed';
+  return isAlinRepairGateOpen(game) ? 'open' : 'closed';
 }
 
 function gameWorldSnapshot(game: GameState): CompetitionWorldStateSnapshot {
@@ -220,7 +210,7 @@ function reasonText(validation: CompetitionValidationResult | null, status: Alin
   if (!validation) return status === 'planning_failed' ? '规划未完成；游戏状态未改变。' : '没有可提交的动作；游戏状态未改变。';
   if (validation.accepted) return '动作已通过校验。';
   switch (validation.detailCode) {
-    case 'repair_materials_unconfigured': return '待确认：维修材料配方未配置，安全拒绝。';
+    case 'repair_materials_unconfigured': return '维修材料配方未配置，安全拒绝。';
     case 'repair_npc_unconfigured': return '待确认：维修责任 NPC 未配置，安全拒绝。';
     case 'gate_not_repairable': return '维修门当前状态不允许修理，安全拒绝。';
     case 'npc_out_of_reach': return '阿林不在可交互距离，安全拒绝。';
@@ -243,10 +233,9 @@ export async function runAlinRepairScenario(
   game: GameState,
   options: AlinRepairScenarioOptions = {},
 ): Promise<AlinRepairScenarioResult> {
-  ensureInitialTrust(game);
   const policy: CompetitionRulesPolicy = {
-    // The NPC identity and interaction distance are existing scenario facts.
-    // Repair materials and trust deltas remain absent until explicitly supplied.
+    // The NPC identity, interaction distance and repair recipe are shared facts.
+    repairMaterials: cloneInventory(ALIN_REPAIR_MATERIALS),
     maxInteractionDistance: INTERACT_DISTANCE,
     repairNpcByGate: { [ALIN_REPAIR_GATE_ID]: 'alin' },
     ...options.policy,
@@ -290,8 +279,8 @@ export async function runAlinRepairScenario(
       return {
         kind: 'repair_gate',
         gateId: ALIN_REPAIR_GATE_ID,
-        // Empty is a proposal placeholder, not a recipe assertion. The validator
-        // rejects because policy.repairMaterials is deliberately unconfigured.
+        // The proposal carries the approved default recipe. The validator still
+        // independently verifies the exact material identities and quantities.
         materials: policy.repairMaterials ? cloneInventory(policy.repairMaterials) : [],
       };
     },

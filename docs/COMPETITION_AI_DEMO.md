@@ -12,7 +12,9 @@
 
 开发者若已经运行项目自有的本地 Ollama，可以显式设置 `VITE_NPC_MODEL`（以及可选的 `VITE_OLLAMA_URL`）切到本地大模型回应。未设置时不会发起任何模型请求。`VITE_NPC_ENABLED=false` 或试玩链接添加 `?ainpc=0` 可关闭 NPC AI。没有云端模型 API、账号、密钥或联网要求。
 
-## 验收记录
+## 历史阶段验收记录
+
+> 以下测试数字、失败记录和临时截图属于此前阶段的版本，不是当前赛事整改分支的验收结果。当前分支验证以 [`docs/competition/IMPLEMENTATION_STATUS.md`](competition/IMPLEMENTATION_STATUS.md) 为准。
 
 - `npm run typecheck`：通过。
 - `VITE_NPC_MODEL= VITE_NPC_ENABLED= npm test`：58 个测试文件、756 个用例全部通过。

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { markAlinGateOpenForUnrelatedTraversal } from './alinGateFixture';
 
 test.setTimeout(90_000);
 
@@ -117,6 +118,7 @@ test('keeps the full survivor visible at the first and fifth floor stair endpoin
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await startGame(page);
+  await markAlinGateOpenForUnrelatedTraversal(page);
   const samples: Array<{ label: string; sample: CameraSample }> = [];
 
   await moveToStair(page, 'up');

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { markAlinGateOpenForUnrelatedTraversal } from './alinGateFixture';
 
 // P0-04 browser tests: real-time decay while standing still, sleeping to pass
 // the night, and the death / victory end screens. State is read (and, for test
@@ -44,6 +45,7 @@ async function startGame(page: Page, seed: number): Promise<void> {
     if (started) break;
   }
   await waitForScene(page, 'Game');
+  await markAlinGateOpenForUnrelatedTraversal(page);
 }
 
 async function readState(page: Page): Promise<State> {

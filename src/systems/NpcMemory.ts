@@ -192,11 +192,12 @@ export function isValidNpcState(v: unknown): v is NpcPersistedState {
 }
 
 export function saveNpcState(state: GameState, npcId: string, npc: NpcPersistedState): void {
+  if (!state.npcStates) state.npcStates = {};
   state.npcStates[npcId] = JSON.stringify(npc);
 }
 
 export function loadNpcState(state: GameState, npcId: string): NpcPersistedState | null {
-  const raw = state.npcStates[npcId];
+  const raw = state.npcStates?.[npcId];
   if (typeof raw !== 'string' || raw.length === 0) return null;
   try {
     const parsed: unknown = JSON.parse(raw);

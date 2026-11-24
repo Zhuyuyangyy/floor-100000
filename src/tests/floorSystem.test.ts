@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
+import { ALIN_REPAIR_GATE_FLAG } from '../data/floorGates';
+import { clearFlag, setFlag } from '../systems/WorldFlags';
 import {
   DOWN_EXIT_X,
   ENTRY_X,
@@ -43,8 +45,49 @@ describe('tryChangeFloor', () => {
     expect(s.currentFloor).toBe(4);
   });
 
+  it('keeps the 2-to-3 connection locked without moving the player or changing floors', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 2;
+    s.player.x = 456;
+    expect(tryChangeFloor(s, 1)).toEqual({ ok: false, reason: 'gate_locked' });
+    expect(s.currentFloor).toBe(2);
+    expect(s.player.x).toBe(456);
+  });
+
+  it('allows the gated ascent after the story flag is set', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 2;
+    setFlag(s, ALIN_REPAIR_GATE_FLAG);
+    expect(tryChangeFloor(s, 1)).toEqual({ ok: true, from: 2, to: 3 });
+    expect(s.currentFloor).toBe(3);
+    expect(s.player.x).toBe(ENTRY_X);
+  });
+
+  it('allows descent through the one-way gate connection while its flag is unset', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 3;
+    expect(tryChangeFloor(s, -1)).toEqual({ ok: true, from: 3, to: 2 });
+    expect(s.currentFloor).toBe(2);
+  });
+
+  it('preserves return access for a legacy save that has visited floor 3', () => {
+    const s = createNewGame(1);
+    s.currentFloor = 3;
+    s.visitedFloors[3] = {
+      openedContainers: [],
+      lootedItems: [],
+      unlockedDoors: [],
+      localEvents: [],
+    };
+    expect(s.flags?.[ALIN_REPAIR_GATE_FLAG]).toBeUndefined();
+    expect(tryChangeFloor(s, -1)).toEqual({ ok: true, from: 3, to: 2 });
+    expect(tryChangeFloor(s, 1)).toEqual({ ok: true, from: 2, to: 3 });
+    expect(s.currentFloor).toBe(3);
+  });
+
   it('can traverse the whole range up to 5 and back to 1', () => {
     const s = createNewGame(1);
+    setFlag(s, ALIN_REPAIR_GATE_FLAG);
     for (let f = 1; f < 5; f++) expect(tryChangeFloor(s, 1).ok).toBe(true);
     expect(s.currentFloor).toBe(5);
     for (let f = 5; f > 1; f--) expect(tryChangeFloor(s, -1).ok).toBe(true);
@@ -69,6 +112,7 @@ describe('exit availability', () => {
   it('the bottom floor has no down exit; the top has no up exit', () => {
     expect(hasDownExit(1)).toBe(false);
     expect(hasUpExit(1)).toBe(true);
+    expect(hasUpExit(2)).toBe(true);
     expect(hasUpExit(5)).toBe(false);
     expect(hasDownExit(5)).toBe(true);
   });
@@ -94,6 +138,29 @@ describe('natural stair traversal', () => {
     expect(end).toMatchObject({ x: UP_EXIT_X, y: STAIR_START_Y - STAIR_RISE });
     const result = completeStairTraversal(state, traversal!);
     expect(result).toEqual({ ok: true, from: 1, to: 2 });
+    expect(state.currentFloor).toBe(2);
+    expect(state.player.x).toBe(UP_EXIT_X);
+  });
+
+  it('does not start a stair traversal for a closed gate, though the physical exit exists', () => {
+    const state = createNewGame(1);
+    state.currentFloor = 2;
+    state.player.x = UP_EXIT_X;
+    expect(hasUpExit(2)).toBe(true);
+    expect(currentInteractionZone(state)).toBe('up');
+    expect(stairTraversalFor(state, 1)).toBeNull();
+  });
+
+  it('rechecks a gate at landing if it closes after traversal starts', () => {
+    const state = createNewGame(1);
+    state.currentFloor = 2;
+    state.player.x = UP_EXIT_X;
+    setFlag(state, ALIN_REPAIR_GATE_FLAG);
+    const traversal = stairTraversalFor(state, 1);
+    expect(traversal).not.toBeNull();
+
+    clearFlag(state, ALIN_REPAIR_GATE_FLAG);
+    expect(completeStairTraversal(state, traversal!)).toEqual({ ok: false, reason: 'gate_locked' });
     expect(state.currentFloor).toBe(2);
     expect(state.player.x).toBe(UP_EXIT_X);
   });

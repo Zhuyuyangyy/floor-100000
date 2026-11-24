@@ -73,6 +73,17 @@ describe('floor templates', () => {
     }
   });
 
+  it('guarantees an independently keyed repair cache on floor 2 for every seed', () => {
+    for (let seed = 0; seed < 128; seed += 1) {
+      const floor = generateFloor(seed, 2);
+      const cache = floor.containers.find((container) => container.id === 'alin_repair_cache');
+      expect(cache?.label).toBe('维修材料箱');
+      expect(cache?.x).toBe(160);
+      expect(cache?.items).toContainEqual({ itemId: 'wood', quantity: 2 });
+      expect(cache?.items).toContainEqual({ itemId: 'tape', quantity: 1 });
+    }
+  });
+
   it('an unknown floor throws', () => {
     expect(() => generateFloor(1, 12345)).toThrow();
   });
@@ -159,7 +170,7 @@ describe('guaranteed loot entries (GHI-03 m2)', () => {
 describe('the loot data version folds into every derived seed (GHI-03 M2)', () => {
   it('is a positive integer', () => {
     expect(Number.isInteger(LOOT_DATA_VERSION)).toBe(true);
-    expect(LOOT_DATA_VERSION).toBeGreaterThan(0);
+    expect(LOOT_DATA_VERSION).toBe(2);
   });
 
   it('participates in the container seed derivation', () => {

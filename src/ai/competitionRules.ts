@@ -47,6 +47,8 @@ export interface CompetitionDemoValidationState {
  */
 export interface CompetitionRulesPolicy {
   readonly repairMaterials?: readonly InventoryStack[];
+  /** Minimum player stock reserved for progression while the related gate is closed. */
+  readonly reservedPlayerMaterials?: readonly InventoryStack[];
   /** Required to bind a gate repair trust check to a specific NPC. */
   readonly repairNpcByGate?: Readonly<Record<string, string>>;
   readonly maxInteractionDistance?: number;
@@ -203,16 +205,33 @@ export function validateCompetitionProposal(
     if (!npc || npc.status !== 'available' || !validInventory(npc.inventory)) return reject('invalid_target', 'npc_unavailable');
     const near = proximityReason(state.player, npc, state, policy);
     if (near) return reject(near, 'npc_out_of_reach');
-    if (!Number.isFinite(npc.trust) || npc.trust < COMPETITION_TRUST_THRESHOLDS.transaction) return reject('low_trust');
+    if (!Number.isFinite(npc.trust)) return reject('invalid_target', 'invalid_npc_trust');
+    const playerToNpc = from === 'player';
+    // Trust gates what an NPC is willing to hand over, not whether it can accept
+    // a player's voluntary gift. The demo starts at trust 35 and explicitly
+    // requires the player to be able to give before reaching the 40 threshold.
+    if (!playerToNpc && npc.trust < COMPETITION_TRUST_THRESHOLDS.transaction) return reject('low_trust');
     const delta = configuredDelta(policy, 'give');
     if (delta === null || !Number.isFinite(npc.trust + delta)) return reject('invalid_target', 'invalid_trust_policy');
     const itemId = transfer.itemId as ItemId, quantity = transfer.quantity as number;
-    const playerToNpc = from === 'player';
     const owner = playerToNpc ? 'player' : { kind: 'npc' as const, npcId };
     const receiver = playerToNpc ? { kind: 'npc' as const, npcId } : 'player';
     const source = playerToNpc ? state.player.inventory : npc.inventory;
     if (!hasItems(source, itemId, quantity)) return reject('missing_item');
     if (hasOpaqueItemMetadata(source, itemId)) return reject('invalid_target', 'item_metadata_not_supported');
+    if (playerToNpc && policy.reservedPlayerMaterials !== undefined) {
+      if (!validInventory(policy.reservedPlayerMaterials)) return reject('invalid_target', 'invalid_reserved_player_materials');
+      const requiredById = new Map<ItemId, number>();
+      for (const required of policy.reservedPlayerMaterials) {
+        requiredById.set(required.itemId, (requiredById.get(required.itemId) ?? 0) + required.quantity);
+      }
+      for (const [reservedId, required] of requiredById) {
+        const held = state.player.inventory.reduce((total, stack) => total + (stack.itemId === reservedId ? stack.quantity : 0), 0);
+        const protectedQuantity = Math.min(held, required);
+        const remaining = held - (itemId === reservedId ? quantity : 0);
+        if (remaining < protectedQuantity) return reject('invalid_target', 'reserved_player_materials');
+      }
+    }
     return accepted(state, policy, { ...EMPTY_DELTA,
       inventory: inventoryDeltas([{ owner, itemId, quantityDelta: -quantity }, { owner: receiver, itemId, quantityDelta: quantity }]),
       trust: delta === 0 ? [] : [{ npcId, delta }],

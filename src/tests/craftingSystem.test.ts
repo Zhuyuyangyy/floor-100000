@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
+import { ALIN_REPAIR_GATE_FLAG } from '../data/floorGates';
 import { addItem, countItem } from '../systems/InventorySystem';
 import {
   canCraft,
@@ -10,6 +11,7 @@ import {
   DARK_NIGHT_ALPHA,
   LAMP_NIGHT_ALPHA,
 } from '../systems/CraftingSystem';
+import { setFlag } from '../systems/WorldFlags';
 import type { GameState, ItemId } from '../core/gameTypes';
 
 function give(state: GameState, items: Array<[ItemId, number]>): void {
@@ -20,12 +22,14 @@ describe('canCraft', () => {
   it('passes when all materials are present', () => {
     const s = createNewGame(1);
     give(s, [['wood', 2], ['tape', 1]]);
+    setFlag(s, ALIN_REPAIR_GATE_FLAG);
     expect(canCraft(s, 'reinforced_door').ok).toBe(true);
   });
 
   it('reports each missing material', () => {
     const s = createNewGame(1);
     give(s, [['wood', 1]]);
+    setFlag(s, ALIN_REPAIR_GATE_FLAG);
     const r = canCraft(s, 'reinforced_door');
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -59,8 +63,33 @@ describe('craft', () => {
   it('refuses to build the same upgrade twice', () => {
     const s = createNewGame(1);
     give(s, [['wood', 2], ['tape', 1], ['wood', 2], ['tape', 1]]);
+    setFlag(s, ALIN_REPAIR_GATE_FLAG);
     expect(craft(s, 'reinforced_door').ok).toBe(true);
     expect(craft(s, 'reinforced_door').ok).toBe(false);
+  });
+
+  it('preserves the exact Alin gate recipe when attempting the same dorm-door craft', () => {
+    const s = createNewGame(1);
+    give(s, [['wood', 2], ['tape', 1]]);
+
+    const check = canCraft(s, 'reinforced_door');
+    expect(check.ok).toBe(false);
+    if (!check.ok) expect(check.reason).toContain('预留给阿林维修通道');
+    const result = craft(s, 'reinforced_door');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain('预留给阿林维修通道');
+    expect(countItem(s.player.inventory, 'wood')).toBe(2);
+    expect(countItem(s.player.inventory, 'tape')).toBe(1);
+    expect(hasUpgrade(s, 'reinforced_door')).toBe(false);
+  });
+
+  it('allows spending only surplus above the gate reserve', () => {
+    const s = createNewGame(1);
+    give(s, [['wood', 4], ['tape', 2]]);
+
+    expect(craft(s, 'reinforced_door').ok).toBe(true);
+    expect(countItem(s.player.inventory, 'wood')).toBe(2);
+    expect(countItem(s.player.inventory, 'tape')).toBe(1);
   });
 });
 

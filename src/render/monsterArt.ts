@@ -477,9 +477,9 @@ export function createMonsterView(scene: Phaser.Scene, opts: MonsterViewOptions)
 
   root.add([shadow, body, tag.root]);
 
-  const moveTo = (x: number, ms: number, ease: string): void => {
+  const moveTo = (x: number, ms: number, ease: string, onComplete?: () => void): void => {
     scene.tweens.killTweensOf(root);
-    scene.tweens.add({ targets: root, x, duration: ms, ease });
+    scene.tweens.add({ targets: root, x, duration: ms, ease, onComplete });
   };
 
   return {
@@ -493,24 +493,21 @@ export function createMonsterView(scene: Phaser.Scene, opts: MonsterViewOptions)
       flash.setAlpha(0.9);
       scene.tweens.add({ targets: flash, alpha: 0, duration: 150 });
       // 击退：后撤 knockback px 再弹回（先快后慢，读作「被打得退了一步」）
-      moveTo(opts.x + knockback, 90, 'Quad.easeOut');
-      scene.time.delayedCall(90, () => {
+      moveTo(opts.x + knockback, 90, 'Quad.easeOut', () => {
         if (!root.active) return;
         moveTo(opts.x, 170, 'Sine.easeInOut');
       });
     },
     dodge(): void {
       // 未命中：朝玩家（左）侧移一小步再归位——和击退反向，读作闪避
-      moveTo(opts.x - 14, 70, 'Quad.easeOut');
-      scene.time.delayedCall(70, () => {
+      moveTo(opts.x - 14, 70, 'Quad.easeOut', () => {
         if (!root.active) return;
         moveTo(opts.x, 120, 'Sine.easeInOut');
       });
     },
     lunge(): void {
       // 反击：朝玩家前冲 38px 再归位
-      moveTo(opts.x - 38, 130, 'Quad.easeIn');
-      scene.time.delayedCall(130, () => {
+      moveTo(opts.x - 38, 130, 'Quad.easeIn', () => {
         if (!root.active) return;
         moveTo(opts.x, 200, 'Quad.easeOut');
       });

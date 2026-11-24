@@ -156,6 +156,7 @@ import { OptionTreeBrain } from '../ai/brains/optionTreeBrain';
 import { createNpcState } from '../data/npcPersonalities';
 import { loadNpcState, recordMemory, saveNpcState } from '../systems/NpcMemory';
 import { decideNpcAction, isDialogueFresh, type DialogueSession, type NpcRuntimeConfig } from '../systems/NpcRuntime';
+import { runAlinRepairScenario, type AlinRepairScenarioResult } from '../scenarios/alinRepairDemo';
 import {
   createWandererDecisionConfig,
   decideWandererIntent,
@@ -401,7 +402,9 @@ export class GameScene extends Phaser.Scene {
   // sessionId/revision：AI 异步返回的保鲜键。玩家每次开对话 sessionId+1，
   // 每次操作 revision+1；过期 AI 结果不得覆盖新对话（P1-2）。
   private dialogueSessionSeq = 0;
-  private dialogue: { npc: NpcId; level: 'main' | 'trade'; selected: number; message: string; messageSource: 'script' | 'offline-ai' | 'ollama' | 'fallback'; lineToggle: number; sessionId: number; revision: number } | null = null;
+  private dialogue: { npc: NpcId; level: 'main' | 'trade'; selected: number; message: string; messageSource: 'script' | 'offline-ai' | 'ollama' | 'fallback' | 'competition-offline'; lineToggle: number; sessionId: number; revision: number } | null = null;
+  /** Last deterministic competition result, available to Phaser integration tests. */
+  private lastAlinRepairResult?: AlinRepairScenarioResult;
   // Offline persona brain is the default. A configured local Ollama opts into
   // model-generated lines; the original greeting remains the fallback.
   private aiRuntimes = new Map<string, NpcRuntimeConfig>();
@@ -487,6 +490,7 @@ export class GameScene extends Phaser.Scene {
     this.craftSelected = 0;
     this.dialogueOpen = false;
     this.dialogue = null;
+    this.lastAlinRepairResult = undefined;
     this.shelterOpen = false;
     this.shelterSelected = 0;
     this.pauseOpen = false;
@@ -3288,7 +3292,8 @@ export class GameScene extends Phaser.Scene {
     const d = this.dialogue;
     if (!d) return [];
     if (d.level === 'main') {
-      return ['问候', '询问', '交易', '退出'].map((label) => ({ label }));
+      const labels = d.npc === 'alin' ? ['问候', '维修门计划', '交易', '退出'] : ['问候', '询问', '交易', '退出'];
+      return labels.map((label) => ({ label }));
     }
     const npc = getNpc(d.npc);
     return [
@@ -3432,6 +3437,7 @@ export class GameScene extends Phaser.Scene {
       'offline-ai': '本地行为 AI · 规则驱动',
       ollama: 'Ollama 本地模型',
       fallback: '模型未响应 · 基础对白',
+      'competition-offline': 'offline-fallback · 场景规则提案',
     }[d.messageSource]);
     this.dialogueMessage.setText(d.message || '……');
     const options = this.dialogueOptionsView();
@@ -3473,6 +3479,10 @@ export class GameScene extends Phaser.Scene {
           d.lineToggle++;
           break;
         case 1:
+          if (npc.id === 'alin') {
+            void this.runAlinRepairPlan(npc, { sessionId: d.sessionId, revision: d.revision });
+            return;
+          }
           d.message = npc.asks[d.lineToggle % npc.asks.length];
           d.lineToggle++;
           break;
@@ -3505,6 +3515,42 @@ export class GameScene extends Phaser.Scene {
       d.message = '';
     }
     this.refreshDialogue();
+  }
+
+  /** Run the A6 observe/plan/validate/executor loop without inventing costs. */
+  private async runAlinRepairPlan(npc: NpcDef, captured: DialogueSession): Promise<void> {
+    const current = this.dialogue;
+    if (!current || current.npc !== npc.id) return;
+    current.messageSource = 'competition-offline';
+    current.message = '只读观察 → 结构化提案 → 校验…';
+    this.refreshDialogue();
+    try {
+      const previousResult = this.lastAlinRepairResult;
+      const result = await runAlinRepairScenario(getGame());
+      this.lastAlinRepairResult = result;
+      if (!isDialogueFresh(this.currentDialogueSession(), captured)) return;
+      const trust = result.after.npcs[0]?.trust ?? 35;
+      const alreadyCommitted = previousResult?.status === 'executed' && result.status === 'already_open';
+      const label = alreadyCommitted || result.status === 'already_open'
+        ? '门已打开｜未重复提交'
+        : result.status === 'executed'
+          ? '门已打开｜已提交'
+          : result.validation?.accepted === false && result.validation.detailCode === 'repair_materials_unconfigured'
+            ? '待确认｜缺维修配方'
+            : result.validation?.accepted === false && result.validation.reason === 'low_trust'
+              ? `信任${trust}/70｜拒绝`
+              : '校验拒绝｜未改变';
+      current.message = label;
+      current.revision += 1;
+      saveToStorage(getGame());
+      this.refreshInventory();
+      this.refreshDialogue();
+    } catch {
+      if (!isDialogueFresh(this.currentDialogueSession(), captured)) return;
+      current.message = 'offline-fallback｜规划失败｜游戏状态未改变';
+      current.revision += 1;
+      this.refreshDialogue();
+    }
   }
 
   // ── input ──────────────────────────────────────────────────────────────

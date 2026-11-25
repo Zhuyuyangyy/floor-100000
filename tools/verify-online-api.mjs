@@ -145,6 +145,7 @@ let modelSamplesObserved = 0;
 // 「token 无效、或平台网关挡住了」——token 显然有效。同一份产物里两句话
 // 互相矛盾，而读者会信末尾那句定性结论。
 // 判据不动（0 采样仍然拒绝覆盖），只是不再把「采样段空转」说成「token 无效」。
+// 它同时写进 meta（同名 key），因为排查的人拿到的是文件、不是控制台。
 let modelRepliesOutsideSampling = 0;
 // FAIL 分两类，只加不混：
 //   gated=false —— 判据跑了，被测对象不合格。这是产品的问题。
@@ -1096,6 +1097,21 @@ const meta = {
   // private 挡住 / 上游 503）结果都是它归零，所以用它能一次盖住四种，但
   // 反过来不成立：它归零不必然意味着那四种。
   modelSamplesObserved,
+  // 采样段以外拿到过几次模型回复（维修段 + 注入段），口径与上面同样严格：
+  // 200 且 decisionSource === 'model'。
+  //
+  // ⚠️ 它只在一个时候有解读价值：modelSamplesObserved === 0 时。
+  //   samples 0 + 这里 0   → 一次模型回复都没有：token 层面就没通（未填/拼错/
+  //                          过期/private 挡住/上游 503），或前端产物取不到。
+  //   samples 0 + 这里 > 0 → token 是好的，只有采样段挂了（分节失败）。
+  // 这两种情况的排查方向相反，而以前只看 modelSamplesObserved: 0 分不出来——
+  // 控制台当时说对了，但控制台不跟着文件走。
+  // samples > 0 时这个字段没有信息量（值是几都正常），不要据此推断任何事。
+  //
+  // ⚠️ 它是**自标字段，不是判据**。任何 `if` 都不要引用它；尤其不要用它把
+  // 「采样段 0 采样」救成「算非零可以落盘」——那等于让一个偶然成功的请求
+  // 把没有观测的文件送过门，是把已经堵上的洞换个形状重新打开。
+  modelRepliesOutsideSampling,
   // 无 token 却仍然落了盘，说明是 FORCE_WRITE 强制留档的，不是证据。
   // 这个字段让「这份文件是真是假」不再需要靠「通过几条」反推。
   forceWrite: !TOKEN.length && FORCE_WRITE,

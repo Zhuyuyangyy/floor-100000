@@ -334,9 +334,28 @@ function buildRepairMessages(repair) {
 function buildMessages(obs) {
   const traits = obs.traits;
   const pct = (n) => Math.round(n * 100);
+  // 记忆必须带分量，不能只带文本。
+  //
+  // `weight` 由前端算好再传上来（competitionModelBridge.toObservationMemory：
+  // 守约 +0.5、毁约 -0.6、未决 0），语义是「这件事对这位居民有多重」。
+  // 之前这里只拼 day/kind/summary，weight 被干净地丢掉了——于是「他上次帮过
+  // 我」和「他上次放我鸽子」在提示词里长得一样，模型只能靠 summary 的措辞猜。
+  // 那正是「记忆能存、但影响不到决策」的断点所在。
+  //
+  // 写法上不直接印数字（0.5 对模型没有直观含义），而是译成中文强度词，
+  // 同时保留原始数值，免得以后有人以为可以在提示词里做算术。
+  const weightWord = (w) => {
+    if (w >= 0.75) return '极重';
+    if (w >= 0.35) return '较重';
+    if (w > -0.35) return '一般';
+    if (w > -0.75) return '偏负面';
+    return '严重负面';
+  };
   const memory = obs.memory.length === 0
     ? '（尚无共同经历）'
-    : obs.memory.map((m) => `第${m.day}天 ${m.kind}：${m.summary}`).join('；');
+    : obs.memory
+      .map((m) => `第${m.day}天 ${m.kind}［${weightWord(m.weight)}］：${m.summary}`)
+      .join('；');
   const relation = Object.entries(obs.relationship).map(([k, v]) => `${k}:${v}`).join('，') || '初识';
 
   const system = [

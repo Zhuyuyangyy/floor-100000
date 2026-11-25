@@ -95,7 +95,13 @@ describe('NPC 代理：安全边界', () => {
         NPC_MODEL_ID: 'pinned-model',
         NPC_MAX_TOKENS: '111',
         NPC_SESSION_MAX_CALLS: '3',
-        NPC_DAILY_BUDGET: '5',
+        // 每日预算要够这一整个 describe 用。
+        //
+        // 原来是 5：记忆那组对照（正/负/无记忆三发）加上截断验证（一发）
+        // 一进来就把它吃光，后面的「畸形观察被拒」「超长请求体 413」全部
+        // 拿到 429 —— 那两条不是产品坏了，是被前面的测试饿死了。
+        // 限流本身另有专门的 describe 用显式计数验证，不靠这个数字。
+        NPC_DAILY_BUDGET: '20',
         NPC_BREAKER_THRESHOLD: '2',
         NPC_BREAKER_COOLDOWN_MS: '60000',
       },
@@ -170,6 +176,62 @@ describe('NPC 代理：安全边界', () => {
     const serialized = JSON.stringify(upstreamCalls[0]?.body?.messages ?? []);
     expect(serialized).not.toContain('IGNORE ALL RULES');
     expect(serialized).not.toContain('leak-attempt');
+  });
+
+  // 记忆必须真的进入提示词，而且要带分量。
+  //
+  // 之前这里只有「不该出现的没出现」这类断言，从来没有一条断言「该出现的
+  // 出现了」。于是 `weight` 被白名单接收、校验、存进对象，然后在拼提示词时
+  // 被静默丢掉，没有任何测试变红——「记忆能存但影响不到决策」这个断点，
+  // 就是这样在测试全绿的情况下存在的。
+  //
+  // 两条对照必须产出不同提示词：守约（正分量）与毁约（负分量）。
+  it('记忆进入提示词，且正负分量在提示词里可区分', async () => {
+    const ask = async (clientId, memory) => {
+      upstreamCalls.length = 0;
+      await fetch(`${baseUrl}/api/npc/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId, observation: validObservation({ memory }) }),
+      });
+      return String(upstreamCalls[0]?.body?.messages?.[1]?.content ?? '');
+    };
+
+    const kept = await ask('mem-kept', [
+      { day: 2, kind: 'promise', summary: '答应修门，已兑现', weight: 0.5 },
+    ]);
+    // 1. 记忆正文必须出现（这条是原先缺的）
+    expect(kept).toContain('答应修门，已兑现');
+    // 2. 分量必须出现，且方向正确
+    expect(kept).toContain('较重');
+
+    const broken = await ask('mem-broken', [
+      { day: 2, kind: 'promise', summary: '答应修门，没做到', weight: -0.6 },
+    ]);
+    expect(broken).toContain('答应修门，没做到');
+    // 3. 负分量不能和正分量长得一样——这是「记忆影响决策」的前提
+    expect(broken).toContain('偏负面');
+    expect(broken).not.toContain('较重');
+
+    // 4. 没有记忆时要有明确说法，而不是留空让模型自己编
+    const none = await ask('mem-none', []);
+    expect(none).toContain('尚无共同经历');
+  });
+
+  it('记忆条数与摘要长度按 LIMITS 截断，防止撑爆提示词', async () => {
+    upstreamCalls.length = 0;
+    const many = Array.from({ length: 40 }, (_, i) => ({
+      day: 1, kind: 'fact', summary: `事件${i}`, weight: 0,
+    }));
+    await fetch(`${baseUrl}/api/npc/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId: 'mem-many', observation: validObservation({ memory: many }) }),
+    });
+    const prompt = String(upstreamCalls[0]?.body?.messages?.[1]?.content ?? '');
+    // 只保留前 LIMITS.memory 条（24）：第 0 条在，第 39 条不在。
+    expect(prompt).toContain('事件0');
+    expect(prompt).not.toContain('事件39');
   });
 
   it('畸形观察对象被拒绝，且不打上游', async () => {

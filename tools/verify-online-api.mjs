@@ -636,6 +636,24 @@ if (notes.length > 0) {
 }
 const passed = results.filter((r) => r.ok).length;
 console.log(`\n通过 ${passed}/${results.length}`);
+
+// ── 这份结果打的是谁 ───────────────────────────────────────────────────────
+// 加这三行是有代价换来的教训：本仓库里曾经同时存在两套 api-verify.json，
+// 一套是打线上的（首页 1668B、JS 1661379B、healthz dailyUsed>0），一套是打
+// 本地离线桩的（首页 66B、JS 32B、dailyUsed 恒为 0），**文件名和结构完全一样**。
+// 结果有人把桩的那套当成线上的引用进文档，靠「1668 vs 66」这种响应体积间接
+// 反推才拆穿。往后再出现同样情况，不必再猜：每份结果自带它打的是谁。
+//
+// 只记录 BASE 与「有没有带 token」，不写 token 本身——这个文件是要进仓库的。
+const meta = {
+  base: BASE,
+  isDefaultBase: BASE === 'https://studio-a1578804454-floor-100000.api-inference.modelscope.net',
+  hasToken: TOKEN.length > 0,
+  startedAt: new Date().toISOString(),
+  node: process.version,
+};
+console.log(`\n目标 ${meta.base}${meta.hasToken ? '' : '（无 token）'}`);
 writeFileSync(`${OUT}/api-verify.json`, JSON.stringify(results, null, 2), 'utf-8');
 writeFileSync(`${OUT}/api-verify-notes.json`, JSON.stringify(notes, null, 2), 'utf-8');
+writeFileSync(`${OUT}/api-verify-meta.json`, JSON.stringify(meta, null, 2), 'utf-8');
 if (passed !== results.length) process.exitCode = 1;

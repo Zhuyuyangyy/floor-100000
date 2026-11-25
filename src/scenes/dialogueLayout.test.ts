@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { MAX_UTTERANCE } from '../ai/rulesExecutor';
 import { TYPE } from '../render/uiKit';
+import { portraitViewportFor } from '../core/design';
 import { computeDialogueLayout } from './dialogueLayout';
 
 // 对话框面板布局。为什么这些断言必须存在：
@@ -14,9 +15,24 @@ import { computeDialogueLayout } from './dialogueLayout';
 // 关键的一条是「选项区永远在消息井下方」。这条不等式成立 = 结构上不可能重叠，
 // 比事后量像素更可靠：它不依赖字体度量、不依赖浏览器、不 flake。
 
-/** 桌面与竖屏两种视口下的面板宽度（portrait 由 panelWidthFor 收窄得到） */
-const DESKTOP_PANEL_W = 460;
-const PORTRAIT_PANEL_W = 265;
+// 面板宽度不是随手挑的数字，是游戏真正会算出来的那个值：
+// 竖屏先由 portraitViewportFor 裁出可见画布宽，再由 panelWidthFor 减 24。
+// 这两步都在 src/core/design.ts 和 GameScene 里，是纯函数，可以直接引。
+const DESKTOP_VIEWPORT = [1280, 800] as const;
+const PORTRAIT_VIEWPORT = [390, 844] as const;
+/** 360x900 这类窄安卓机：可见画布只剩 288，才是真正踩到 7 行的地方 */
+const NARROW_VIEWPORT = [360, 900] as const;
+
+/** 复刻 GameScene.panelWidthFor：桌面直接用 460，竖屏收窄到画布宽 − 24。 */
+function panelWidthFor(viewport: readonly [number, number], desktopWidth = 460): number {
+  const [w, h] = viewport;
+  if (w >= h) return desktopWidth;
+  return Math.min(desktopWidth, portraitViewportFor(w, h).width - 24);
+}
+
+const DESKTOP_PANEL_W = panelWidthFor(DESKTOP_VIEWPORT);
+const PORTRAIT_PANEL_W = panelWidthFor(PORTRAIT_VIEWPORT);
+const NARROW_PANEL_W = panelWidthFor(NARROW_VIEWPORT);
 
 function layoutFor(panelWidth: number, rawMax = MAX_UTTERANCE) {
   return computeDialogueLayout({ panelWidth, bodyFontSize: TYPE.body, rawMax });
@@ -34,8 +50,8 @@ describe('对话框布局：面板按台词推导，选项区永远在消息井�
     expect(src).not.toMatch(/(?:const|let)\s+\w*(?:RAW_MAX|MAX_LEN|UTTERANCE_MAX)\w*\s*=\s*\d+/);
   });
 
-  it('结构不重叠：选项区顶部严格大于消息井底部（桌面 / 竖屏都成立）', () => {
-    for (const panelWidth of [DESKTOP_PANEL_W, PORTRAIT_PANEL_W]) {
+  it('结构不重叠：选项区顶部严格大于消息井底部（桌面 / 竖屏 / 窄屏都成立）', () => {
+    for (const panelWidth of [DESKTOP_PANEL_W, PORTRAIT_PANEL_W, NARROW_PANEL_W]) {
       const layout = layoutFor(panelWidth);
       // 这是整套布局的地基。等于号也不行：贴边同样是压住。
       expect(layout.optionsTop).toBeGreaterThan(layout.wellBottom);
@@ -47,7 +63,7 @@ describe('对话框布局：面板按台词推导，选项区永远在消息井�
   it('台词上限翻倍到 120 字，不重叠这条依然成立（证明是自适应不是碰巧）', () => {
     // 这条是核心反证：如果有人把 MAX_UTTERANCE 放宽到 120 却没让面板跟着长，
     // 面板高度会停在 60 字的水位，选项行就会被 120 字的正文压住。
-    for (const panelWidth of [DESKTOP_PANEL_W, PORTRAIT_PANEL_W]) {
+    for (const panelWidth of [DESKTOP_PANEL_W, PORTRAIT_PANEL_W, NARROW_PANEL_W]) {
       const atSixty = layoutFor(panelWidth, MAX_UTTERANCE);
       const atOneTwenty = layoutFor(panelWidth, 120);
 
@@ -58,13 +74,26 @@ describe('对话框布局：面板按台词推导，选项区永远在消息井�
     }
   });
 
-  it('竖屏按 7 行算，不是被硬上限截到 6 行', () => {
-    // 这是一个真实算错的点，不是我编的边界：265 宽面板 → 221 折行宽 →
-    // 9 字/行 → ceil(60/9) = 7 行。旧实现有 `MAX_LINES = 6`，把第 7 行截掉，
-    // 于是 60 字台词在竖屏下多出 25px 探到选项行上。
+  it('7 行那条路径真的存在，而且不被硬上限截断（在 360x900 这类窄屏上）', () => {
+    // 这一条修的是一个真实的错：我最初把「竖屏面板宽」写成 265，但 265 是
+    // **390x844 的折行宽**（265 = 309 − 44），不是面板宽。按正确的 309 面板
+    // 算出来是 11 字/行 → 6 行，根本碰不到旧实现那个 `MAX_LINES = 6`。
+    //
+    // 7 行真的出现在 360x900 这类窄屏上：可见画布只剩 288，面板 264，
+    // 折行 220 → 9 字/行 → ceil(60/9) = 7 行。旧实现把它截成 6 行，
+    // 第 7 行的 25px 就压在第一个选项上。
+    const narrow = layoutFor(NARROW_PANEL_W);
+    expect(NARROW_PANEL_W).toBe(264);
+    expect(narrow.hanPerLine).toBe(9);
+    expect(narrow.messageLines).toBe(7);
+    // 旧公式会给出 6 行 183px 的井；现在 7 行是 183px 井、选项起点 223。
+    expect(narrow.wellHeight).toBe(7 * 25 + 8);
+
+    // 390x844 是 6 行——它从来就没踩到这个 bug，把它当成复现视口是错的。
     const portrait = layoutFor(PORTRAIT_PANEL_W);
-    expect(portrait.hanPerLine).toBe(9);
-    expect(portrait.messageLines).toBe(7);
+    expect(PORTRAIT_PANEL_W).toBe(309);
+    expect(portrait.hanPerLine).toBe(11);
+    expect(portrait.messageLines).toBe(6);
 
     // 桌面是 17 字/行 → 4 行。这个数字没变，说明修竖屏没有把桌面改坏。
     const desktop = layoutFor(DESKTOP_PANEL_W);

@@ -313,6 +313,8 @@ npm run competition:benchmark
      （默认输出到 `<repo>/output/online-verify/`，按脚本自身位置定位、与 cwd 无关；
      **无 `MS_TOKEN` 时一律不落盘**，设了 `SHOT_DIR` 也不写——要看条数就
      `FORCE_WRITE=1 SHOT_DIR=/tmp/probe` 两个一起给，落盘后 meta 里 `forceWrite: true`；
+     **目标目录里已有 `api-verify.json` 时，0 样本一律拒绝覆盖**（`4290c43`）——
+     这条不看有没有 token，也不在 `FORCE_WRITE` 分支里；
      `output/` 被 `.gitignore` 忽略，要留档就复制到已跟踪的 `artifacts/online-verify/`——
      仓库里现有的那份就是这么来的）
    - 离线基准：`npm run competition:benchmark`（写到 `artifacts/benchmark/`）

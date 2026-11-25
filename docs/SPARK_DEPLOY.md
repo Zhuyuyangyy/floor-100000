@@ -256,6 +256,31 @@ ONLINE_BASE=http://127.0.0.1:7860 node tools/verify-online-api.mjs
 >
 > 只给 `FORCE_WRITE` 不给 `SHOT_DIR` 会被拒绝（防止覆盖默认目录里的真产物）。
 
+> **门不止一道，而且最后一道和你拿没拿 token 无关。**
+> 目前共有五道，按引入顺序：
+>
+> | 提交 | 判据 | 挡的是 |
+> |---|---|---|
+> | `600c450` | 无凭证不落盘 | 401 空跑冒充证据 |
+> | `a2918b3` | `FORCE_WRITE` 必须配 `SHOT_DIR` | 只给开关不给目录 |
+> | `215b210` | 不得解回默认目录 | `SHOT_DIR=output/online-verify` |
+> | `3609d16` | 不得解回仓库根 | `SHOT_DIR=.` |
+> | `4290c43` | **目标目录已有 `api-verify.json` 且本轮 0 样本 → 拒绝** | 任何指向已有证据目录的写法 |
+>
+> **第五道是无条件的，不在 `FORCE_WRITE` 分支里。** 它挡的是这样一条路径：
+>
+> ```bash
+> MS_TOKEN=<拼错的> SHOT_DIR=artifacts/online-verify node tools/verify-online-api.mjs
+> # → 拒绝覆盖：...api-verify.json 已经存在，而这一轮 0 次模型回复
+> ```
+>
+> `TOKEN.length > 0` 会把所有 `FORCE_WRITE &&` 判据短路掉，所以这条**连开关都不用开**；
+> 而写出来的产物自述是 `hasToken: true / forceWrite: false`，**和真证据逐字段一样**。
+> **「有 token 就可信」在这里恰好反了**——带 token 走错的后果比不带 token 更隐蔽。
+>
+> 前四道是黑名单（枚举「要保护哪个目录」），第五道是白名单（只问「这里已有证据吗」）。
+> 黑名单永远漏——`artifacts/online-verify` 就是这么漏过去的，它是唯一入库的权威源。
+
 `tools/verify-online-api.mjs` 是本项目的线上验收脚本，分两段：
 **基础段 32 条**（无条件执行）+ **记忆段**（同样无条件执行）。
 记忆段一直是无条件裸块，但**它内部的断言条数会随脚本演进变化**——

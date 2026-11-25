@@ -307,16 +307,15 @@ const OUT = process.env.SHOT_DIR || resolve(REPO_ROOT, 'output/online-verify');
 **不依赖你从哪个目录调用**。要换位置再设 `SHOT_DIR`。
 复核：`grep -n "SHOT_DIR" tools/verify-online-api.mjs`。
 
-### 落盘门控：四道已入库的门 + 一道在工作区
+### 落盘门控：五道门，分属五个提交
 
-**已入库的四道**（`git log -S` 可逐个验证）：
-
-| 提交 | 门 | 判据 |
-|---|---|---|
-| `600c450` | 无 token 不落盘 | `TOKEN.length > 0` |
-| `a2918b3` | `FORCE_WRITE` 必须配 `SHOT_DIR` | `FORCE_WRITE && !SHOT_DIR` → 拒绝 |
-| `215b210` | `SHOT_DIR` 不得解回**默认目录** | `resolve(SHOT_DIR) === DEFAULT_OUT` → 拒绝 |
-| `3609d16` | `SHOT_DIR` 不得解回**仓库根** | `resolve(SHOT_DIR) === REPO_ROOT` → 拒绝 |
+| 提交 | 门 | 判据 | 覆盖的错法 |
+|---|---|---|---|
+| `600c450` | 无凭证不落盘 | `TOKEN.length > 0` | 401 空跑冒充证据 |
+| `a2918b3` | `FORCE_WRITE` 必须配 `SHOT_DIR` | `FORCE_WRITE && !SHOT_DIR` | 只给开关不给目录 |
+| `215b210` | 不得解回**默认目录** | `resolve(SHOT_DIR) === DEFAULT_OUT` | `SHOT_DIR=output/online-verify` |
+| `3609d16` | 不得解回**仓库根** | `resolve(SHOT_DIR) === REPO_ROOT` | `SHOT_DIR=.` |
+| `4290c43` | 已有产物 + 0 样本 → 拒绝 | `OUT_HAS_EVIDENCE && modelSamplesObserved === 0` | **任何**指向已有证据目录的写法 |
 
 > **第三、四道门分属不同提交，容易记混。** 分别是
 > `git log -S 'FORCED_ONTO_DEFAULT'` → 只有 `215b210`；
@@ -328,25 +327,35 @@ const OUT = process.env.SHOT_DIR || resolve(REPO_ROOT, 'output/online-verify');
 > （只有 `output/` 在），于是 `git status` 里出现为未跟踪文件，一次 `git add -A` 就进库了。
 > **不是数据损坏，是把垃圾提交上去**——比覆盖证据更难发现。
 
-> **这四道都是黑名单，所以必然有第五个洞。** 它们判的是「解析后是不是等于
-> 某个被点名的目录」。**值不值得保护取决于目录里有没有证据，而不是目录叫什么。**
-> 实测漏掉的入口：
+> **前四道是黑名单，第五道才换了方向。** 前四道判的是「解析后是不是等于某个
+> 被点名的目录」——**值不值得保护取决于目录里有没有证据，不是目录叫什么**。
+> 于是每发现一个漏网目录就得补一条，`artifacts/online-verify` 就是这样漏过去的
+> （它是唯一入库的权威源，`output/` 毁了能从它恢复，它毁了只能翻 git 历史）。
 >
-> | `SHOT_DIR` | 四道门的结果 |
+> `4290c43` 把判据改成白名单：**目标目录里已有 `api-verify.json` 就要求这一轮
+> 真采到样本**，否则拒绝。空目录不受影响（那里没有东西可毁）。
+>
+> **它是无条件判据，不在 `FORCE_WRITE` 分支里**——这一点比门本身重要。
+> 因为它挡的是一条**不用开任何开关**的路径：
+>
+> | 路径 | 是否被挡 |
 > |---|---|
-> | `output/online-verify` / `./output/online-verify` | 拒绝（== 默认目录）|
-> | `.` | 拒绝（== 仓库根）|
-> | **`artifacts/online-verify`** | **放行——那是唯一入库的权威源** |
-> | `..`、`/tmp/x` | 放行（无害）|
+> | `FORCE_WRITE=1 SHOT_DIR=artifacts/online-verify`（已有产物）| 拒绝 |
+> | `MS_TOKEN=<拼错的> SHOT_DIR=artifacts/online-verify`（已有产物）| **拒绝** |
+> | `FORCE_WRITE=1 SHOT_DIR=/tmp/空目录` | 放行（写出三份）|
 >
-> `artifacts/` 那条比默认目录更危险：`output/` 毁了能从 `artifacts/` 恢复，
-> `artifacts/` 毁了只能翻 git 历史——而且假产物一旦赶上 `git add -A` 就真进库了。
+> 第二行是最危险的：`TOKEN.length > 0` 会把所有 `FORCE_WRITE &&` 判据短路掉，
+> 连开关都不用开；而写出来的产物自述是 `hasToken: true / forceWrite: false`，
+> **与真证据逐字段一致，meta 里看不出任何异常**。
+> 「有 token 就可信」是这里最自然的错误直觉，实测结果恰好相反——
+> 带 token 走错的后果比不带 token 更隐蔽，因为后者至少会在 meta 里留 `forceWrite: true`。
 >
-> **正确的方向是白名单：目标目录里已有 `api-verify.json` 就拒绝。**
-> 这条已由 A1 在工作区实现（`OUT_HAS_EVIDENCE = existsSync(resolve(OUT, 'api-verify.json'))`），
-> **但截至本文写作时尚未提交**，所以上面那张表描述的是**入库版本**的真实行为。
-> 复核：`grep -n "OUT_HAS_EVIDENCE" tools/verify-online-api.mjs` 有命中 = 已实现；
-> `git log -S 'OUT_HAS_EVIDENCE'` 有命中 = 已入库。**两者不一定同时成立。**
+> 三条都是我实测的（`4290c43` 之后，2026-11-26 04:1x）：
+> 两次拒绝后 `artifacts/online-verify/api-verify.json` 的 md5 都是 `cb827d5a…` 未变，
+> 空目录那次写出三份 json。
+>
+> 复核这五道门是否都在：
+> `for v in FORCED_WITHOUT_DIR FORCED_ONTO_DEFAULT FORCED_INTO_ROOT OUT_HAS_EVIDENCE; do grep -c "$v" tools/verify-online-api.mjs; done`
 
 > **`FORCE_WRITE` 逃生口：两个一起给，只给 `SHOT_DIR` 不写。**
 > 没 token 时脚本**一律不落盘**，只给提示；这是有意的，防止 401 空跑的结果
@@ -365,8 +374,13 @@ const OUT = process.env.SHOT_DIR || resolve(REPO_ROOT, 'output/online-verify');
 > `SHOT_DIR 解析后就是默认输出目录：拒绝覆盖（这等于没换地方）`，
 > `api-verify.json` 的 md5 保持 `cb827d5a…` 不变。
 >
-> **这四道门说明一件事：** 光有「提示语」不够，得是判据。
+> **这五道门说明一件事：** 光有「提示语」不够，得是判据。
 > 提示语漏读一次，证据就没了；判据拦得住。
+>
+> 但**四道黑名单 + 一道白名单**的过程本身也说明另一件事：
+> 黑名单永远拦不全，因为要枚举的是「所有值得保护的位置」，而它会增长。
+> 白名单只需要问一个问题——**这个目录里已有证据吗**——就不用枚举了。
+> 前四道各自堵住一次真实事故，第五道才是把方向掉过来。
 
 ---
 

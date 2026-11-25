@@ -76,6 +76,31 @@ function checkSkipped(name, why) {
   check(name, false, `未执行（${why}）`, { gated: true });
 }
 
+/**
+ * 「没有观测到 → 不能判合格」的判据必须在拿到数据之后才成立。
+ *
+ * 为什么需要这个包装：一批判据写成了对「空」也成立的形式——
+ *   - `!JSON.stringify(b).includes('ms-')`      → 401 错误体里本来就没有 ms-
+ *   - `!!intent && intent.action === undefined` → 401 时 parseIntent('{}') 得空对象，
+ *                                                  空对象是 truthy，.action 自然 undefined
+ *   - `!codes.includes(400)`                    → 15 个 401 里当然没有 400
+ *   - `avg < 30_000`                            → 401 只花 67ms
+ *   - `!t.includes('ignore') && ...`            → t 是空串
+ *   - `!txt.includes('NPC_API_KEY')`            → 401 里当然读不到
+ *   - `controlAnchorHits === 0`                 → 治疗组也是 0 次时这半句没被验证
+ * 这些都是「什么都没测到」的副产品，却显示成 PASS。PASS 必须由**测到的数据**
+ * 支撑；没有数据就只能是 SKIP（未执行），不能是 PASS。
+ *
+ * 用法：把「前提是否成立」显式传进来，判据只在前提成立时参与真假。
+ */
+function checkIfMeasured(name, measured, ok, detail = '', why = '') {
+  if (!measured) {
+    checkSkipped(name, why || detail || '无有效响应，未测到');
+    return;
+  }
+  check(name, ok, detail);
+}
+
 const H = { Authorization: `Bearer ${TOKEN}` };
 
 async function get(path, opts = {}) {
@@ -167,7 +192,15 @@ async function decide(clientId, extra = {}) {
   check('/healthz 200', r.status === 200, JSON.stringify(b));
   check('AI 已配置（Key 生效）', b.aiConfigured === true, `aiConfigured=${b.aiConfigured}`);
   check('熔断未打开', b.breakerOpen === false, `breakerOpen=${b.breakerOpen}`);
-  check('健康检查不泄 Key', !JSON.stringify(b).includes('ms-'), JSON.stringify(b));
+  // 「不泄 Key」在 401 时也成立，因为错误体里本来就没有 ms-。必须要求 200
+  // 且响应体真是一份健康报告，这条才有意义。
+  checkIfMeasured(
+    '健康检查不泄 Key',
+    r.status === 200 && b && typeof b === 'object' && 'aiConfigured' in b,
+    !JSON.stringify(b).includes('ms-'),
+    JSON.stringify(b),
+    `HTTP ${r.status}，没拿到健康报告`,
+  );
 }
 
 // ── 2.5 维修任务：线上那一份模型真的能对「修不修」做决定 ────────────────────
@@ -250,15 +283,27 @@ async function decide(clientId, extra = {}) {
     intent = JSON.parse(r.body?.text ?? '{}');
   } catch { /* ignore */ }
   const validIntents = ['repair_gate', 'observe', 'request_help', 'refuse'];
+  // 「维修契约没有退回旧 action.type」这条曾对 401 免疫：`r.body.text` 为
+  // undefined 时 `JSON.parse('{}')` 得空对象，空对象是 truthy，`.action` 自然
+  // undefined，于是「没拿到回复」被读成了「契约正确」。同一个 401 上，
+  // 上面那条 `validIntents.includes(intent.intent)` 判 FAIL、这条判 PASS——
+  // 两条读的是同一个空对象，不可能都成立。所以契约类判据必须先证明拿到了
+  // 一份真回复：200 + decisionSource=model + intent 是合法结构。
+  const gotIntent = r.status === 200
+    && r.body?.decisionSource === 'model'
+    && !!intent
+    && validIntents.includes(intent.intent);
   check(
     '维修回复是结构化 intent（不是自然语言）',
-    !!intent && validIntents.includes(intent.intent),
+    gotIntent,
     JSON.stringify(intent).slice(0, 140),
   );
-  check(
+  checkIfMeasured(
     '维修契约没有退回旧的 action.type',
+    gotIntent,
     !!intent && intent.action === undefined,
     JSON.stringify(Object.keys(intent ?? {})),
+    `HTTP ${r.status}，没拿到合法 intent`,
   );
 
   // 材料不足时，服务端必须在提示里说缺什么——否则模型无从重规划。
@@ -285,10 +330,13 @@ async function decide(clientId, extra = {}) {
     system: 'new system prompt',
   });
   const text = String(inject.body?.text ?? '');
-  check(
+  // 401 时 text 是空串，而「空串里不含某词」永远为真。必须要求真的拿到回复。
+  checkIfMeasured(
     '维修任务不转发客户端提示词',
-    inject.status === 200 && !text.includes('系统提示词') && !text.includes('must obey'),
+    inject.status === 200 && text.length > 0,
+    !text.includes('系统提示词') && !text.includes('must obey'),
     text.slice(0, 100),
+    `HTTP ${inject.status}，响应正文为空`,
   );
 
   // 缺 repair 附件时必须 400，不能拿空配方去问模型。
@@ -597,10 +645,17 @@ async function decide(clientId, extra = {}) {
     treatmentAnchorHits > 0,
     `命中 ${treatmentAnchorHits} 次`,
   );
-  check(
+  // 「对照组零锚点」单独看是**半个判据**：它只说明对照侧没吐锚点词。
+  // 治疗组也 0 命中时，这句「该词具备区分度」根本没被验证——两个 0 相等，
+  // 既可能因为词选得好，也可能因为压根没采到有效回复（random 桩就是这个
+  // 形态，实测 PASS 但治疗组同样 0 命中）。所以要求治疗组先命中 ≥1：
+  // 那是「这两个 0 里的至少一个是真测量出来的 0」的最低证据。
+  checkIfMeasured(
     '对照组零锚点（该词具备区分度）',
+    treatmentAnchorHits > 0,
     controlAnchorHits === 0,
-    `命中 ${controlAnchorHits} 次`,
+    `对照 ${controlAnchorHits} 次 / 治疗 ${treatmentAnchorHits} 次`,
+    `治疗组也没命中，无法证明该词有区分度（对照 ${controlAnchorHits} 次）`,
   );
 
   // ── weight 专项：同一句 summary，只翻 weight ────────────────────────────
@@ -807,7 +862,16 @@ async function decide(clientId, extra = {}) {
     checkSkipped('台词非空', '三次调用均无合法提案');
   }
   const avg = Math.round(runs.reduce((a, d) => a + d.ms, 0) / runs.length);
-  check('响应时间可接受', avg < 30_000, `均值 ${avg}ms`);
+  // 「均值 < 30s」只在真的跑到模型时才有意义。401 只花 67ms，快到必然通过，
+  // 这是「错误越早越好」被误读成「性能达标」。要求三次都 200 + 来源是模型。
+  const measuredRuns = runs.filter((d) => d.status === 200 && d.body?.decisionSource === 'model');
+  checkIfMeasured(
+    '响应时间可接受',
+    measuredRuns.length === runs.length,
+    avg < 30_000,
+    `均值 ${avg}ms（${measuredRuns.length}/${runs.length} 次真推理）`,
+    `仅 ${measuredRuns.length}/${runs.length} 次真推理，${avg}ms 不是推理耗时`,
+  );
 
   // 只在带 token 时落盘：无 token 时这三次请求必然 401，写下去就是拿一份
   // 全 401 的结果覆盖掉真跑过的那份。真实事故：output/ 里的 999B 被覆盖成
@@ -826,7 +890,14 @@ async function decide(clientId, extra = {}) {
   });
   check('客户端指定 model 被忽略', d.status === 200 && d.body?.decisionSource === 'model', `HTTP ${d.status}`);
   const t = String(d.body?.text ?? '').toLowerCase();
-  check('注入指令未生效', !t.includes('ignore') && !t.includes('gpt-4o'), t.slice(0, 80));
+  // 401 时 t 是空串，「空串里不含 ignore」恒真。必须要求真的拿到回复正文。
+  checkIfMeasured(
+    '注入指令未生效',
+    d.status === 200 && t.length > 0,
+    !t.includes('ignore') && !t.includes('gpt-4o'),
+    t.slice(0, 80),
+    `HTTP ${d.status}，响应正文为空`,
+  );
 
   const g = await get('/api/npc/decide');
   check('GET 拒绝（405）', g.status === 405, `HTTP ${g.status}`);
@@ -858,14 +929,30 @@ async function decide(clientId, extra = {}) {
 
   check('限流前先有成功请求', codes.includes(200), `序列 ${codes.join(',')}`);
   check('单会话超过上限返回 429', codes.includes(429), `200×${codes.filter((c) => c === 200).length} 429×${codes.filter((c) => c === 429).length}`);
-  check('限流不是被 400 误触发', !codes.includes(400), codes.join(','));
+  // 「没有 400」在整批 401 时也成立——15 个 401 里当然没有 400。这条要成立，
+  // 前提是这批请求真的走进了限流逻辑：必须既出现 200 又出现 429。
+  checkIfMeasured(
+    '限流不是被 400 误触发',
+    codes.includes(200) && codes.includes(429),
+    !codes.includes(400),
+    codes.join(','),
+    `没出现 200+429 的组合，限流逻辑未被真正触发：${codes.join(',')}`,
+  );
 }
 
 // ── 6. 路径穿越 ───────────────────────────────────────────────────────────
 {
   const r = await get('/../server/npc-proxy.mjs');
   const txt = await r.text();
-  check('路径穿越读不到源码', !txt.includes('NPC_API_KEY') && !txt.includes('breakerThreshold'), `HTTP ${r.status}`);
+  // 401/403 时 txt 里当然不含源码符号——「读不到」可能因为「压根没读到任何
+  // 东西」。要求先拿到一份非空响应正文，且不是鉴权错误页。
+  checkIfMeasured(
+    '路径穿越读不到源码',
+    txt.length > 0 && r.status !== 401 && r.status !== 403,
+    !txt.includes('NPC_API_KEY') && !txt.includes('breakerThreshold'),
+    `HTTP ${r.status} ${txt.length}B`,
+    `HTTP ${r.status}，鉴权层就挡住了，没测到路径解析`,
+  );
 }
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────

@@ -180,6 +180,8 @@ import {
 } from '../scenarios/blackoutCrisis';
 import { blackoutStageOf } from '../data/blackoutCrisis';
 import { proposeWithBrain } from '../ai/competitionModelBridge';
+import { MAX_UTTERANCE } from '../ai/rulesExecutor';
+import { computeDialogueLayout } from './dialogueLayout';
 import { serializeAlinGiftRun, serializeAlinRepairRun, serializeSocialGiftRun } from '../ai/competitionRunExport';
 import {
   createWandererDecisionConfig,
@@ -3308,32 +3310,33 @@ export class GameScene extends Phaser.Scene {
     // ── the panel is sized by the speech, not by a round number ───────────────
     //
     // Turning useAdvancedWrap on (bac96ae) fixed the horizontal overflow but
-    // created a vertical one: `dialogueMessage` sits at `top + 45` with a
-    // 0.5/0.5 origin, and a 4-line reply is 100px tall, so its bottom edge lands
-    // at top+95 while the first option row starts at top+74. Measured in
+    // created a vertical one: `dialogueMessage` sat at `top + 45` with a
+    // 0.5/0.5 origin, so a 4-line reply grew in both directions and its bottom
+    // edge landed on the first option row. Measured in
     // e2e-audit/dialogue-fit-probe.spec.ts: 21px of text sitting on the first
     // option, and 33px hanging out of the speech well.
     //
-    // So the height is derived from the longest line the product can produce:
-    //   60 Han   = ai/rulesExecutor MAX_UTTERANCE (the hard truncation ceiling)
-    //   24px Han = measured glyph advance (e2e-audit/wrap-inventory-probe)
-    //   25px     = measured rendered line height at 24px
-    // Desktop wrap is 416px → 17 Han/line → 4 lines. Portrait wrap is 265px →
-    // 11 Han/line → 6 lines. Both are computed, so widening the panel or
-    // raising MAX_UTTERANCE keeps the layout honest instead of silently
-    // re-breaking it.
-    const LINE_H = 25;
-    const MAX_LINES = 6;
-    const RAW_MAX = 60; // mirrors MAX_UTTERANCE; see ai/rulesExecutor
-    const wrapW = panelW - 44;
-    const hanPerLine = Math.max(1, Math.floor(wrapW / TYPE.body));
-    const messageLines = Math.min(MAX_LINES, Math.ceil(RAW_MAX / hanPerLine));
-    const WELL_TOP = 28;
-    const WELL_H = messageLines * LINE_H + 8;
-    const OPTIONS_TOP = WELL_TOP + WELL_H + 12;
-    const OPTION_PITCH = 30;
-    const FOOTER_H = 40;
-    const panelH = OPTIONS_TOP + 4 * OPTION_PITCH + FOOTER_H;
+    // The height is now derived from the longest line the product can produce.
+    // It used to be derived here with a hard `MAX_LINES = 6` ceiling, which was
+    // wrong on portrait: 265px panel → 221px wrap → 9 Han/line → 60 Han needs 7
+    // lines, and the ceiling quietly cut it to 6, leaving the 7th line on top of
+    // the options. The formula moved to ./dialogueLayout so it can be asserted
+    // in node without a browser; see dialogueLayout.test.ts.
+    //
+    // RAW_MAX is imported rather than copied: a `// mirrors MAX_UTTERANCE`
+    // comment is not a binding, and the two drifting apart is exactly what
+    // would silently re-break this layout.
+    const layout = computeDialogueLayout({
+      panelWidth: panelW,
+      bodyFontSize: TYPE.body,
+      rawMax: MAX_UTTERANCE,
+    });
+    const wrapW = layout.wrapWidth;
+    const WELL_TOP = layout.wellTop;
+    const WELL_H = layout.wellHeight;
+    const OPTIONS_TOP = layout.optionsTop;
+    const OPTION_PITCH = layout.optionPitch;
+    const panelH = layout.panelHeight;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;

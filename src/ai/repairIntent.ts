@@ -48,6 +48,17 @@ export interface RepairIntentDecision {
   /** request_help 时它缺的具体物品。 */
   readonly itemId?: ItemId;
   readonly quantity?: number;
+  /**
+   * repair_gate 指向的目标（门禁 id）。
+   *
+   * 必须透传，不能丢：并非所有维修目标都是通行门——停电危机修的是塔楼主线
+   * （`tower-main-power`），它借的是 repair_gate 的语义，而不是真的在修门。
+   * 解析层把 target 吃掉的话，调用方只能回退到「当前场景默认那一个」，一旦
+   * 场景里有两个可修目标就会修错东西。缺省 = 调用方按场景默认处理。
+   *
+   * 合法性（长度截断）由共享层 `validateContractShape` 负责，这里只搬运。
+   */
+  readonly target?: string;
 }
 
 function isIntent(value: unknown): value is RepairIntent {
@@ -96,6 +107,9 @@ export function parseRepairIntent(raw: string): RepairIntentDecision | null {
     decision.itemId = shape.itemRequest.itemId;
     decision.quantity = shape.itemRequest.quantity;
   }
+  // 维修目标透传（见 RepairIntentDecision.target 注释）。只在 repair_gate 上
+  // 有意义；其它意图即便模型多写了 target 也不外泄，避免调用方误读。
+  if (shape.intent === 'repair_gate' && shape.target) decision.target = shape.target;
   return decision;
 }
 

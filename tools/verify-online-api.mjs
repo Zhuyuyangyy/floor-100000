@@ -8,10 +8,26 @@
 // 浏览器层面的交互（角色移动、对话 UI、存档）已在 e2e-live/ 用同一份构建
 // 产物验证过；这里补的是「线上那一份」独有的东西。
 import { writeFileSync, mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 
 const BASE = process.env.ONLINE_BASE ?? 'https://studio-a1578804454-floor-100000.api-inference.modelscope.net';
 const TOKEN = process.env.MS_TOKEN ?? '';
-const OUT = process.env.SHOT_DIR ?? 'D:/ZYY_Inovation/game/wt-r2/output/online-verify';
+// 默认输出目录按**脚本自身位置**推仓库根，不用 process.cwd()，也不用绝对路径。
+//
+// 原来这里写死 'D:/ZYY_Inovation/game/wt-r2/output/online-verify'，本机跑没问题，
+// 但评委 clone 到别的路径就静默跑偏：
+//   - macOS / Linux 上 'D:/...' 不是绝对路径，会被当成相对路径，在**当前工作
+//     目录**下造一个名叫 `D:` 的目录，然后一路写进去；
+//   - 下面的 mkdirSync(recursive: true) 保证它不会报错，于是没人发现；
+//   - 参赛材料里「评委可自行复现」这句话，产物落在一个叫 `D:` 的怪目录里，
+//     比不复现更难看。
+//
+// 也不用 process.cwd()：那取决于从哪个目录调用脚本，`node tools/x.mjs` 与
+// `cd tools && node x.mjs` 会得到不同结果，只是把不确定性换了个地方。
+// import.meta.url 是脚本自己的位置，与 cwd 无关。
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const OUT = process.env.SHOT_DIR ?? resolve(REPO_ROOT, 'output/online-verify');
 
 mkdirSync(OUT, { recursive: true });
 

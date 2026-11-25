@@ -72,7 +72,7 @@ export function itemIconKey(itemId: ItemId): string  // 恒等于 itemId，但�
 
 ### 3.1 现状问题（实测）
 
-640×360 内部分辨率下：
+640×360 内部分辨率下（**注：画布后来改为 1280x720，本表字号已全部翻倍；下表是当时的实测记录，保留作为决策依据，当前值见 `src/render/uiKit.ts` 的 `TYPE`**）：
 
 | 元素 | 当前字号 | 问题 |
 |---|---|---|

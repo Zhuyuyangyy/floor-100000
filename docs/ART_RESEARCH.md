@@ -205,4 +205,5 @@ this.add.rectangle(x, y, w, h)
 - ADD 光不能靠堆矩形（会被预乘 alpha 吃掉），必须用 canvas 渐变贴图 —— 已解决
 - `add.rectangle` 的 fillAlpha 参数在 Phaser 4 无效，必须 `setAlpha()` —— 已解决
 - 640×360 画布 + 2x 显示：中文 10px 是下限 —— 已解决
+  > 画布后来改成了 **1280x720 + 1:1 显示**（`src/core/design.ts`），所以这条的数值已过时；结论「中文有可读下限」仍然成立，只是当前下限按 1280 画布算成 `TYPE.caption = 20`（`src/render/uiKit.ts`）。
 - 阴影层不能盖在角色上（depth 必须同层后画）—— 已解决

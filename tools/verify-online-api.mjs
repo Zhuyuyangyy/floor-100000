@@ -79,6 +79,20 @@ async function decide(clientId, extra = {}) {
     );
     check('前端产物无密钥/上游地址', leaks.length === 0, leaks.length ? leaks.join(',') : 'clean');
     check('前端走同源代理', code.includes('api/npc/decide'), '');
+
+    // 线上那一份是不是「有六位居民」的那一版，只能从产物里认。
+    //
+    // 之前只校验了密钥和接口，于是「部署成功」和「部署成了旧版本」在报告里长得
+    // 一模一样——创空间重新构建会沿用上一次成功的镜像当作缓存基底，只有真正重新
+    // 打包才会换掉 JS 文件名。所以这里比对名字本身：漏一个名字就说明推上去的不是
+    // 这一版，或者构建缓存把旧产物粘了回来。
+    const residents = ['老陈', '小周', '大刘', '小满', '阿珍', '阿林'];
+    const missing = residents.filter((name) => !code.includes(name));
+    check(
+      '产物含六位楼内居民',
+      missing.length === 0,
+      missing.length ? `缺 ${missing.join(',')}` : residents.join('、'),
+    );
   }
 }
 

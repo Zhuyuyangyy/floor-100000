@@ -71,6 +71,11 @@ import {
   saveCompetitionNpcMemory,
 } from '../systems/CompetitionNpcMemoryStore';
 import { COMPETITION_TRUST_BASE } from '../ai/competitionRules';
+import {
+  emptyCompetitionDelta,
+  validateCompetitionProposal,
+  type CompetitionRulesPolicy,
+} from '../ai/competitionRules';
 import { flagCount, setFlag } from '../systems/WorldFlags';
 
 // ── 小工具 ──────────────────────────────────────────────────────────────────
@@ -1007,28 +1012,62 @@ function repairObservation(game: GameState, sequence: number): CompetitionObserv
 }
 
 /**
- * 场景自己的裁决。
+ * 本章的维修策略。
  *
- * 为什么不复用 competitionRules.validateCompetitionProposal：那把尺子把
- * repair_gate 的信任门槛写死成 demo 的 70，而本章的信任门槛按态度分档
- * （40/55/65）。为了迁就一个 demo 常量去改全局阈值、或者偷偷把存档里的
- * 信任改成 70，都会污染别人正在跑的东西。所以规则留在这里，只让运行时
- * （observe/plan/propose/validate/execute/feedback）保持通用。
+ * 信任门槛、材料配方、距离上限这些**数值裁决**只有这一份，validate 与
+ * execute 共用它。以前场景自己写了一套 `validateRepair()`，等于在
+ * `competitionRules` 旁边又立了一把尺子：预检说行、executor 说不行，
+ * 两边一旦漂移就会出现「显示能修、点了没反应」。现在数值全交给
+ * `validateCompetitionProposal`，场景只在 policy 里给出本章的取值。
  */
-function validateRepair(game: GameState): { ok: true; detail: 'ok' } | { ok: false; detail: BlackoutDetailCode } {
+function repairPolicy(game: GameState): CompetitionRulesPolicy {
+  return {
+    // 闸门挂在阿林这一扇（塔楼主线），材料是本章的配方。
+    repairMaterials: BLACKOUT_REPAIR_MATERIALS,
+    repairNpcByGate: { [BLACKOUT_POWER_GATE_ID]: 'alin' },
+    maxInteractionDistance: INTERACT_DISTANCE,
+    // 门槛按阿林此刻的合作意愿给：合作 40 / 中立 55 / 谨慎 65。
+    // executor 缺省是 demo 的 70，那是「陌生人对竞赛 demo」的数值，
+    // 不适合本章已经有人情往来的关系。裁决权在本章，执行权在 executor。
+    trustThresholds: { repair_gate: BLACKOUT_TRUST_FOR_STANCE[alinStanceOf(game)] },
+    // executor 只负责「世界的物理变化」，信任分档由 finishRepairStory 按合作/
+    // 中立/谨慎分别补，这里不额外加，避免两处各加一次。
+    trustDeltas: { repair_gate: 0 },
+  };
+}
+
+/**
+ * executor 看不见的那几条剧情前置。
+ *
+ * 这里刻意**只**保留规则层表达不了的东西：阶段（危机有没有开始/了结）和
+ * 「谨慎的人要先当面看见零件」。信任、材料、距离、闸门状态一概不在这里
+ * 重复判断——那些由 `validateCompetitionProposal` 统一裁决，否则又变成
+ * 「两套规则」。
+ */
+function repairPrecondition(game: GameState): BlackoutDetailCode {
   const stage = blackoutStageOf(game);
-  if (stage === 'initial') return { ok: false, detail: 'crisis_not_started' };
-  if (stage === 'resolved_repair' || stage === 'resolved_fail') return { ok: false, detail: 'crisis_resolved' };
+  if (stage === 'initial') return 'crisis_not_started';
+  if (stage === 'resolved_repair' || stage === 'resolved_fail') return 'crisis_resolved';
+  // 楼层/距离单独先判一次：executor 把「在楼上」和「站得远」合并成 too_far，
+  // 但玩家需要知道到底是哪一种。
   const reach = reachability(game, 'alin');
-  if (reach !== 'ok') return { ok: false, detail: reach };
-  const stance = alinStanceOf(game);
-  if (alinTrust(game) < BLACKOUT_TRUST_FOR_STANCE[stance]) return { ok: false, detail: 'low_trust' };
-  // 谨慎态的额外前置：先核料。同一天有效，隔天要重新看。
-  if (stance === 'guarded' && !verifiedToday(game)) return { ok: false, detail: 'materials_unverified' };
-  for (const material of BLACKOUT_REPAIR_MATERIALS) {
-    if (!playerHas(game, material.itemId, material.quantity)) return { ok: false, detail: 'missing_item' };
-  }
-  return { ok: true, detail: 'ok' };
+  if (reach !== 'ok') return reach;
+  return 'ok';
+}
+
+/** 谨慎态「先核料」：同一天有效，隔天要重新看。纯剧情规则，规则层没有这个概念。 */
+function needsVerifyFirst(game: GameState): boolean {
+  return alinStanceOf(game) === 'guarded' && !verifiedToday(game);
+}
+
+/** 把规则层的拒绝理由翻译成本章的对外 detail 码。 */
+function detailFromRejection(reason: string, detailCode: string | undefined): BlackoutDetailCode {
+  if (reason === 'low_trust') return 'low_trust';
+  if (reason === 'missing_item') return 'missing_item';
+  if (reason === 'too_far') return 'too_far';
+  if (detailCode === 'gate_not_repairable') return 'crisis_resolved';
+  if (detailCode === 'npc_unavailable') return 'npc_unavailable';
+  return 'nothing_to_do';
 }
 
 /**
@@ -1114,7 +1153,7 @@ export async function runBlackoutRepair(
       return {
         kind: 'repair_gate',
         gateId: BLACKOUT_POWER_GATE_ID,
-        // 提案里带的是配方原文；能不能用仍由 validateRepair 独立裁决。
+        // 提案里带的是配方原文；能不能用仍由规则层与 repairPolicy 独立裁决。
         materials: cloneStacks(BLACKOUT_REPAIR_MATERIALS),
       };
     },
@@ -1133,44 +1172,52 @@ export async function runBlackoutRepair(
         materials: cloneStacks(BLACKOUT_REPAIR_MATERIALS),
       };
     },
-    validate: async (_observation, _proposal) => {
-      const checked = validateRepair(game);
-      lastDetail = checked.detail;
-      if (checked.ok) {
+    validate: async (_observation, proposal) => {
+      const precondition = repairPrecondition(game);
+      if (precondition !== 'ok') {
+        lastDetail = precondition;
         return {
-          accepted: true,
-          reason: 'ok',
-          expectedStateDelta: {
-            inventory: BLACKOUT_REPAIR_MATERIALS.map((material) => ({
-              owner: 'player' as const,
-              itemId: material.itemId,
-              quantityDelta: -material.quantity,
-            })),
-            trust: [],
-            relationships: [],
-            memoryAdded: [],
-            flags: [],
-            hp: [],
-            positions: [],
-            gateStatus: [{ gateId: BLACKOUT_POWER_GATE_ID, from: 'closed' as const, to: 'open' as const }],
-            elapsedMinutes: 0,
-          },
+          accepted: false,
+          reason: precondition === 'wrong_floor' || precondition === 'too_far' ? 'too_far' : 'invalid_target',
+          detailCode: `blackout:${precondition}`,
+          expectedStateDelta: emptyCompetitionDelta(),
         };
       }
-      const reason = checked.detail === 'low_trust'
-        ? 'low_trust' as const
-        : checked.detail === 'missing_item'
-          ? 'missing_item' as const
-          : checked.detail === 'wrong_floor' || checked.detail === 'too_far'
-            ? 'too_far' as const
-            : 'invalid_target' as const;
+      // 信任 / 材料 / 距离 / 闸门状态全部由规则层裁决——与 execute 里的提交
+      // 用的是同一个函数、同一份 policy，所以两边不可能给出不同答案。
+      const checked = validateCompetitionProposal(liveExecutorState, proposal, repairPolicy(game));
+      // 报错优先级要与旧行为一致：先告诉他「我不信你」，再说「你还没核料」，
+      // 最后才是「你缺零件」。规则层本身也是信任先于材料，这里只是把
+      // 剧情前置插在中间那一段。
+      if (!checked.accepted && checked.reason === 'low_trust') {
+        lastDetail = 'low_trust';
+        return {
+          accepted: false,
+          reason: 'low_trust',
+          detailCode: 'blackout:low_trust',
+          expectedStateDelta: checked.expectedStateDelta,
+        };
+      }
+      // 谨慎态要先核料：这是剧情前置，规则层不认识「核料」这件事。
+      if (needsVerifyFirst(game)) {
+        lastDetail = 'materials_unverified';
+        return {
+          accepted: false,
+          reason: 'invalid_target',
+          detailCode: 'blackout:materials_unverified',
+          expectedStateDelta: emptyCompetitionDelta(),
+        };
+      }
+      if (checked.accepted) {
+        lastDetail = 'ok';
+        return checked;
+      }
+      lastDetail = detailFromRejection(checked.reason, checked.detailCode);
       return {
         accepted: false,
-        reason,
-        detailCode: `blackout:${checked.detail}`,
-        expectedStateDelta: {
-          inventory: [], trust: [], relationships: [], memoryAdded: [], flags: [], hp: [], positions: [], gateStatus: [], elapsedMinutes: 0,
-        },
+        reason: checked.reason,
+        detailCode: `blackout:${lastDetail}`,
+        expectedStateDelta: checked.expectedStateDelta,
       };
     },
     execute: async (observation, proposal) => {
@@ -1180,28 +1227,20 @@ export async function runBlackoutRepair(
       if (serializeCompetitionWorldState(current) !== serializeCompetitionWorldState(observation.world)) {
         return { status: 'interrupted', actualStateDelta: null };
       }
-      const recheck = validateRepair(game);
-      if (!recheck.ok) {
-        lastDetail = recheck.detail;
+      const recheck = repairPrecondition(game);
+      if (recheck !== 'ok') {
+        lastDetail = recheck;
+        return { status: 'interrupted', actualStateDelta: null };
+      }
+      if (needsVerifyFirst(game)) {
+        lastDetail = 'materials_unverified';
         return { status: 'interrupted', actualStateDelta: null };
       }
       // 唯一提交入口是 executeCompetitionProposal：它负责幂等键、staged 库存、
       // 先扣后加、闸门整体校验。绕开它等于在护栏旁边开一条没有护栏的路。
       const committed = executeCompetitionProposal(liveExecutorState, proposal, {
         operationId,
-        policy: {
-          // 闸门挂在阿林这一扇（塔楼主线），材料是本章的配方。
-          repairMaterials: BLACKOUT_REPAIR_MATERIALS,
-          repairNpcByGate: { [BLACKOUT_POWER_GATE_ID]: 'alin' },
-          maxInteractionDistance: INTERACT_DISTANCE,
-          // 门槛按阿林此刻的合作意愿给：合作 40 / 中立 55 / 谨慎 65。
-          // executor 缺省是 demo 的 70，那是「陌生人对竞赛 demo」的数值，
-          // 不适合本章已经有人情往来的关系。裁决权在本章，执行权在 executor。
-          trustThresholds: { repair_gate: BLACKOUT_TRUST_FOR_STANCE[alinStanceOf(game)] },
-          // executor 只负责「世界的物理变化」，信任分档由本章自己的 validateRepair
-          // 裁决；这里不额外加信任，避免两处各加一次。
-          trustDeltas: { repair_gate: 0 },
-        },
+        policy: repairPolicy(game),
       });
       if (committed.status === 'duplicate') {
         // 同一 operationId 已经提交过：不能重复扣料，如实报告而不是假装成功。

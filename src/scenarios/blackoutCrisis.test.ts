@@ -21,12 +21,15 @@ import {
   blackoutStageOf,
 } from '../data/blackoutCrisis';
 import { CONTRACT_INTENTS } from '../ai/actionContract';
-import { ALIN_REPAIR_GATE_FLAG } from '../data/floorGates';
+import { COMPETITION_TRUST_BASE } from '../ai/competitionRules';
+import { ALIN_REPAIR_GATE_FLAG, isAlinRepairGateOpen } from '../data/floorGates';
 import { countItem } from '../systems/InventorySystem';
 import { loadNpcInventory } from '../systems/NpcInventory';
 import { loadCompetitionNpcMemory } from '../systems/CompetitionNpcMemoryStore';
 import { loadNpcState, saveNpcState } from '../systems/NpcMemory';
 import { flagCount, setFlag } from '../systems/WorldFlags';
+import { runAlinGiftScenario } from './alinGiftDemo';
+import { runAlinRepairScenario } from './alinRepairDemo';
 import {
   acceptAzhenThanks,
   alinStanceOf,
@@ -631,6 +634,136 @@ describe('A2-04 跨天记忆影响决策', () => {
     const again = acceptAzhenThanks(cooperative);
     expect(again.ok).toBe(false);
     expect(again.detail).toBe('already_requested');
+  });
+});
+
+// ── 玩家真实路径（P0-a / P0-b）──────────────────────────────────────────────
+//
+// 上面所有用例都在夹具里手工 setAlinTrust 或 seedCompetitionFact，绕过了
+// 「第一次写存档记忆」那一步。真实玩家不会绕——他从 createNewGame 开始，
+// 一张白纸走到底。下面这组用**完全真实的起点**，不手工设信任、不手工塞记忆，
+// 只允许玩家在游戏里做得到的事：送礼、修门、跨天、拿零件、找阿林。
+//
+// 为什么必须单开一组：这正是当初首章「代码跑得通但玩家走不通」的漏网之处。
+// 夹具把信任钉死之后，`appendMemory` 首写把基准抹成 0 这件事永远暴露不出来。
+
+describe('P0-a 首次落盘记忆不得抹掉既有信任', () => {
+  it('危机启动后 effective 信任仍是 35，不是 0', () => {
+    // 完全真实起点：不设信任，只把门打开（玩家修好门后的状态）。
+    const game = gateOpenGame();
+    // 危机前：raw 是 undefined，靠 `?? COMPETITION_TRUST_BASE` 兜底成 35。
+    expect(loadNpcState(game, 'alin')?.relationship.player).toBeUndefined();
+    expect(observeBlackout(game).alinTrust).toBe(COMPETITION_TRUST_BASE);
+
+    const sync = syncBlackoutCrisis(game);
+    expect(sync.stage).toBe('investigating');
+
+    // 这是 bug 的核心断言：启动危机要写两条记忆（observed + 库存标记），
+    // 首写时 baseline 来自 createNpcStateFor，relationship 是 {}。
+    // 如果不在 appendMemory 里补基准，这里会变成 0，玩家的 35 分交情凭空消失。
+    expect(loadNpcState(game, 'alin')?.relationship.player).toBe(COMPETITION_TRUST_BASE);
+    expect(observeBlackout(game).alinTrust).toBe(COMPETITION_TRUST_BASE);
+  });
+
+  it('已有信任时不会被基准覆盖（补默认值只补 undefined，不覆盖真值）', () => {
+    const game = gateOpenGame();
+    // 玩家已经攒到 78.2（比如先送了礼）。
+    setAlinTrust(game, 78.2);
+    syncBlackoutCrisis(game);
+    // 补默认值必须严格是「缺了才补」，不能把 78.2 打回 35。
+    expect(observeBlackout(game).alinTrust).toBe(78.2);
+  });
+
+  it('接单（request_help）在 35 之上累加，而不是从 0 起算', () => {
+    const game = gateOpenGame();
+    syncBlackoutCrisis(game);
+    expect(requestBlackoutHelp(game, 'alin').ok).toBe(true);
+    // help 权重 0.5 → 0.5 × 20 × (0.5 + loyalty 0.7) = 12。
+    // 基准 35 + 12 = 47。若基准被抹成 0，这里会是 12。
+    expect(observeBlackout(game).alinTrust).toBeCloseTo(47, 5);
+  });
+
+  it('先启动危机、后送礼（B 顺序）：基准没丢，三件礼物仍能过 55', async () => {
+    // 这条补的是「真实玩家路径」那条测试的盲区：那条先送礼，first-write 时
+    // baseline 已经是真实存档，走不到「首写抹零」的分支。玩家完全可能反过来
+    // ——先跨天触发危机，再回头攒交情。如果首写把 35 抹成 0，这条路线会崩，
+    // 而另一条路线看不出问题。
+    const game = gateOpenGame();
+    expect(syncBlackoutCrisis(game).stage).toBe('investigating');
+    // P0-a 的核心：启动危机后仍是 35，不是 0。
+    expect(observeBlackout(game).alinTrust).toBe(COMPETITION_TRUST_BASE);
+
+    // 35 起送 3 件 → 78.2，能过中立门槛 55。
+    for (const itemId of ['clean_water', 'clean_water', 'clean_water'] as const) {
+      expect((await runAlinGiftScenario(game, itemId, 1)).status).toBe('executed');
+    }
+    expect(observeBlackout(game).alinTrust).toBeCloseTo(78.2, 5);
+
+    giveAllRepairParts(game);
+    const repair = await runBlackoutRepair(game);
+    expect(repair.status).toBe('executed');
+  });
+});
+
+describe('P0-b 中立态必须能在开局资源内走通', () => {
+  it('真实玩家路径：送礼攒信任 → 修门 → 跨天 → 修主线，全程用开局资源', async () => {
+    // 这里刻意不用 gateOpenGame()：那条夹具把门预设成已开，会跳过玩家真正
+    // 要做的第一步。真实起点是 createNewGame —— 门关着，阿林不信你。
+    const game = createNewGame(2026);
+    game.currentFloor = NPC_FLOOR;
+    game.player.x = getNpc('alin').x;
+    expect(isAlinRepairGateOpen(game)).toBe(false);
+
+    // 开局信任 35，修门门槛 70，差 35 —— 需要 3 件礼物（每件 +14.4）。
+    for (const itemId of ['ration_pack', 'ration_pack', 'clean_water'] as const) {
+      expect(game.player.inventory.slots.some((s) => s.itemId === itemId)).toBe(true);
+      const gift = await runAlinGiftScenario(game, itemId, 1);
+      expect(gift.status).toBe('executed');
+    }
+    // 35 + 3×14.4 = 78.2，够得着修门的 70。
+    expect(loadNpcState(game, 'alin')?.relationship.player).toBeCloseTo(78.2, 5);
+
+    // 2 层维修材料箱必出木材×2 + 胶带×1，玩家捡得到。
+    givePart(game, 'wood', 2);
+    givePart(game, 'tape', 1);
+    const door = await runAlinRepairScenario(game);
+    expect(door.status).toBe('executed');
+    expect(isAlinRepairGateOpen(game)).toBe(true);
+
+    // 只送了 1 瓶水，还剩 2 瓶可喝——这是「口渴陷阱」必须留出的余量。
+    const waterLeft = game.player.inventory.slots
+      .filter((s) => s.itemId === 'clean_water')
+      .reduce((total, s) => total + s.quantity, 0);
+    expect(waterLeft).toBe(2);
+
+    // 跨天，危机启动。信任必须完整带过来（P0-a），而不是归零。
+    game.day = 2;
+    expect(syncBlackoutCrisis(game).stage).toBe('investigating');
+    expect(observeBlackout(game).alinTrust).toBeCloseTo(78.2, 5);
+    // 攒到这份交情后阿林是「合作态」，门槛 40，比中立态宽松。
+    expect(alinStanceOf(game)).toBe('cooperative');
+
+    // 4 层电箱必出保险丝×1 + 电线×2，搬回来就能修。
+    giveAllRepairParts(game);
+    const repair = await runBlackoutRepair(game);
+    expect(repair.status).toBe('executed');
+    expect(repair.detail).toBe('ok');
+  });
+
+  it('开局资源足够：3 瓶水 + 2 份口粮里，凑 3 件就够门槛且至少留 2 瓶水', () => {
+    // 这条守的是「数值有余量」，不是「刚好卡线」。修门 70、每件 14.4：
+    // 15 + 4×14.4 = 92.6 太宽，35 + 2×14.4 = 63.8 又不够。
+    // 真正的可行解是 3 件（78.2），且其中最多含 1 瓶水 —— 于是至少剩 2 瓶。
+    const startTrust = COMPETITION_TRUST_BASE;
+    const perGift = 14.4;
+    const gateThreshold = 70;
+    const giftsNeeded = Math.ceil((gateThreshold - startTrust) / perGift);
+    expect(giftsNeeded).toBe(3);
+    // 开局 3 水 + 2 粮 = 5 件，送 3 件绰绰有余；只要其中水 ≤ 1 瓶就能留 2 瓶。
+    expect(startTrust + giftsNeeded * perGift).toBeGreaterThanOrEqual(gateThreshold);
+    // 少于 3 件一定不够 —— 若有人把 TRUST_BASE 调低或单件价值调高，这条会红，
+    // 提醒回去重算「要不要留水」而不是悄悄变得更容易。
+    expect(startTrust + (giftsNeeded - 1) * perGift).toBeLessThan(gateThreshold);
   });
 });
 

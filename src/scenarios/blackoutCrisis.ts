@@ -440,6 +440,21 @@ function appendMemory(
   const priorMemories = loadCompetitionNpcMemory(game, npcId);
   const inventory = loadNpcInventory(game, npcId);
   const baseline = loadNpcState(game, npcId) ?? createNpcStateFor(npcId);
+  // 首次写记忆时不能让「还没记过关系」变成「关系是 0」。
+  //
+  // `createNpcStateFor` 给的 `relationship` 是空对象，而 `recordMemory` 内部
+  // 用 `(current[actor] ?? 0) + delta` 取基准——于是第一条记忆落下时，这位
+  // 居民对玩家的既有好感（本章按 COMPETITION_TRUST_BASE = 35 记）会被写成 0。
+  // 症状：危机一启动，原本 effective 35 的阿林直接变成 0，之后三瓶净水
+  // （3×14.4）也只到 43.2，永远够不到中立门槛 55，首章永久软锁。
+  //
+  // 为什么修在这里而不是 NpcMemory：`?? 0` 是通用语义（没记过这个 actor
+  // 就该从 0 算增量），改它会波及所有 NPC 的社交数值。为什么不改
+  // createNpcStateFor 让所有 NPC 出生带 35：那会把「陌生人」变成「半熟」。
+  // 本章的 35 是「同一栋楼住着」的初始交情，只属于本章，所以只在本章补。
+  if (baseline.relationship.player === undefined) {
+    baseline.relationship = { ...baseline.relationship, player: COMPETITION_TRUST_BASE };
+  }
   const next = recordMemory(baseline, {
     day: game.day,
     minute: Math.floor(game.gameMinuteOfDay),

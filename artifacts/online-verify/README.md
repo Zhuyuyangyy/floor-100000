@@ -307,7 +307,9 @@ const OUT = process.env.SHOT_DIR || resolve(REPO_ROOT, 'output/online-verify');
 **不依赖你从哪个目录调用**。要换位置再设 `SHOT_DIR`。
 复核：`grep -n "SHOT_DIR" tools/verify-online-api.mjs`。
 
-### 落盘门控：四道门，分属四个提交
+### 落盘门控：四道已入库的门 + 一道在工作区
+
+**已入库的四道**（`git log -S` 可逐个验证）：
 
 | 提交 | 门 | 判据 |
 |---|---|---|
@@ -325,6 +327,26 @@ const OUT = process.env.SHOT_DIR || resolve(REPO_ROOT, 'output/online-verify');
 > 但它把 `api-verify*.json` 写进了**仓库根**——这三个文件名不在 `.gitignore` 里
 > （只有 `output/` 在），于是 `git status` 里出现为未跟踪文件，一次 `git add -A` 就进库了。
 > **不是数据损坏，是把垃圾提交上去**——比覆盖证据更难发现。
+
+> **这四道都是黑名单，所以必然有第五个洞。** 它们判的是「解析后是不是等于
+> 某个被点名的目录」。**值不值得保护取决于目录里有没有证据，而不是目录叫什么。**
+> 实测漏掉的入口：
+>
+> | `SHOT_DIR` | 四道门的结果 |
+> |---|---|
+> | `output/online-verify` / `./output/online-verify` | 拒绝（== 默认目录）|
+> | `.` | 拒绝（== 仓库根）|
+> | **`artifacts/online-verify`** | **放行——那是唯一入库的权威源** |
+> | `..`、`/tmp/x` | 放行（无害）|
+>
+> `artifacts/` 那条比默认目录更危险：`output/` 毁了能从 `artifacts/` 恢复，
+> `artifacts/` 毁了只能翻 git 历史——而且假产物一旦赶上 `git add -A` 就真进库了。
+>
+> **正确的方向是白名单：目标目录里已有 `api-verify.json` 就拒绝。**
+> 这条已由 A1 在工作区实现（`OUT_HAS_EVIDENCE = existsSync(resolve(OUT, 'api-verify.json'))`），
+> **但截至本文写作时尚未提交**，所以上面那张表描述的是**入库版本**的真实行为。
+> 复核：`grep -n "OUT_HAS_EVIDENCE" tools/verify-online-api.mjs` 有命中 = 已实现；
+> `git log -S 'OUT_HAS_EVIDENCE'` 有命中 = 已入库。**两者不一定同时成立。**
 
 > **`FORCE_WRITE` 逃生口：两个一起给，只给 `SHOT_DIR` 不写。**
 > 没 token 时脚本**一律不落盘**，只给提示；这是有意的，防止 401 空跑的结果
@@ -345,23 +367,6 @@ const OUT = process.env.SHOT_DIR || resolve(REPO_ROOT, 'output/online-verify');
 >
 > **这四道门说明一件事：** 光有「提示语」不够，得是判据。
 > 提示语漏读一次，证据就没了；判据拦得住。
-
-> **但必须说清楚：门是四道，不是封死的。** 判据是「解出来的绝对路径等于某个
-> 特定目录就拒绝」，于是只堵住了被点名的位置。按当前代码推演（`resolve` 后逐个比对）：
->
-> | `SHOT_DIR` | 结果 |
-> |---|---|
-> | `output/online-verify` / `./output/online-verify` | 拒绝（== 默认目录）|
-> | `.` | 拒绝（== 仓库根）|
-> | `artifacts/online-verify` | **放行**——入库权威源 |
-> | `..`、`/tmp/x` | 放行 |
->
-> **真正的判据应该是「目标目录里已有 `api-verify.json` 就拒绝」**，那能一刀切住
-> 所有存过证据的目录；现在这个写法是「每发现一条漏一条」——`215b210` 堵了默认目录，
-> `3609d16` 才补上仓库根，**下一条漏在哪要靠下一次踩到才知道**。
-> 本轮不再往下补（`artifacts/` 那条需要有人主动把 `SHOT_DIR` 指向权威源，
-> 不是照提示做会走到的路；且 `tools/` 有并行改动）。
-> **不要把这一段读成「已经完备」。**
 
 ---
 

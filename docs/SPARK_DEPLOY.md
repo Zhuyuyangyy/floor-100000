@@ -273,7 +273,7 @@ ONLINE_BASE=http://127.0.0.1:7860 node tools/verify-online-api.mjs
 >
 > ```bash
 > MS_TOKEN=<拼错的> SHOT_DIR=artifacts/online-verify node tools/verify-online-api.mjs
-> # → 拒绝覆盖：...api-verify.json 已经存在，而这一轮 0 次模型回复
+> # → 拒绝覆盖：...api-verify.json 已经存在，而这一轮采样段 0 次模型回复
 > ```
 >
 > `TOKEN.length > 0` 会把所有 `FORCE_WRITE &&` 判据短路掉，所以这条**连开关都不用开**；
@@ -321,8 +321,11 @@ node -e "const L=require('fs').readFileSync('tools/verify-online-api.mjs','utf8'
 > 三个函数名都要数。
 >
 > **核对方式只对记忆段有效：** 记忆段内静态条数 == 该段运行时三个前缀之和
-> （实测 8 == 8）。**全局不适用**——全局静态 47、运行时 40，差的 7 条来自
-> 互斥分支（`if/else` 两支各写一份 `check`，只走一支）。拿全局去校验会对不上。
+> （实测 8 == 8）。**全局不适用**——全局静态 47、运行时 40。
+> 这 7 条差额**不只是互斥分支**：`−3` 是三个包装函数体内的转发调用（不产生独立记录）、
+> `−4` 是首页段 `else` 支的 4 条 `checkSkipped`、`−2` 是提案段 `if/else` 的一支，
+> 而 `+2` 是记忆段 `记忆改变决策：…` 在 3 元循环里展开成 3 条。
+> `47 − 3 − 4 − 2 + 2 = 40`。拿全局去校验必然对不上。
 
 它按段落标题定位，不认行号，所以脚本重排也不会失效。
 

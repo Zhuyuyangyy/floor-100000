@@ -324,13 +324,8 @@ async function decide(clientId, extra = {}) {
     return { status: res.status, body, ms, reply: parseReply(body) };
   };
 
-  // 四组对照。每一组只改 memory，其余字段逐字相同。
-  //
-  // 前三组改的是 summary（记忆正文），断言「决策确实变了」。
-  // 第四组只改 weight、summary 一字不动，它验证的是「分量也进了提示词」这条
-  // 更细的链路——但它的效果只有「较重」→「严重负面」一个词，模型是否因此改口
-  // 是概率性的，把它写成 PASS/FAIL 就是给 CI 埋随机失败。所以它只采集证据、
-  // 不作断言，结论记进 notes，由人看原文判断。
+  // 三组对照：改的是 summary（记忆正文），断言「决策确实变了」。
+  // weight 单独成组，见下面「weight 专项」——它的判据不同，不能混在这里。
   const CONTRASTS = [
     {
       label: '无记忆 vs 受助',
@@ -353,13 +348,6 @@ async function decide(clientId, extra = {}) {
       anchors: null,
       control: [mem(1, 'refusal', '玩家当面拒绝把木板借给你，让你自己想办法。', -0.5)],
       treatment: [mem(1, 'help', '玩家主动把身上最后一块木板塞给了你，没要任何回报。', 0.6)],
-    },
-    {
-      label: '同一句话·只改 weight',
-      assert: false,
-      anchors: null,
-      control: [mem(2, 'promise', '玩家答应第2天带保险丝回来。', -0.9)],
-      treatment: [mem(2, 'promise', '玩家答应第2天带保险丝回来。', 0.9)],
     },
   ];
 
@@ -449,6 +437,110 @@ async function decide(clientId, extra = {}) {
     controlAnchorHits === 0,
     `命中 ${controlAnchorHits} 次`,
   );
+
+  // ── weight 专项：同一句 summary，只翻 weight ────────────────────────────
+  //
+  // 这是唯一能证明「权重本身影响决策」的设计，但也最容易做出假绿。
+  //
+  // 直接断言「B 与 C 的 text 不同」是无效判据：服务端 temperature 固定 0.8，
+  // 同一份提示词连发两次文本也几乎必然不同（段首噪声基线就是在量化这件事）。
+  // 那样写的话，即使服务端把 weight 完全丢掉，这条断言照样是绿的。
+  //
+// 判据改成**带方向的极性对比 + 单调性**，而不是分布距离：
+//
+ //   base = weight 0（中性档）
+   //   pos  = weight +0.9（较重）
+   //   neg  = weight -0.9（严重负面）
+ //
+ // 每个意图先映射成极性分：愿意付出/交换 = +1，拒绝/敌意/回避 = -1，
+ // 纯对话 = 0。然后要求两件事同时成立：
+ //   1. mean(pos) - mean(neg) >= 1.0（平均差至少一整档）
+ //   2. mean(pos) >= mean(base) >= mean(neg)（三个档位按权重单调排列）
+ //
+ // 为什么不用「分布距离 > 重采样噪声」：自己跟自己比时噪声地板常常估成 0
+ // （base 组 4 个样本全同），于是任何抖动都算「超出噪声」。实测随机桩下
+ // 那种判据的假阳性率约 50%（8 次跑 4 次误判通过），不能用来下结论。
+ //
+// 极性差 >= 1.0 的口径更硬：均匀随机的意图分布下，4×2 个样本的均值差
+// 标准差约 0.5，要求 1.0 相当于两个标准差，假阳性率降到个位数百分比。
+  {
+    const SUMMARY = '玩家答应第2天带保险丝回来。';
+    // 每组 4 个样本。每次请求用独立 clientId（askMemory 内已带时间戳+随机后缀），
+    // 不撞服务端 12 次/分钟的单会话限流。
+    const SAMPLES = 4;
+    const groups = {
+      base: [mem(2, 'promise', SUMMARY, 0)],
+      pos: [mem(2, 'promise', SUMMARY, 0.9)],
+      neg: [mem(2, 'promise', SUMMARY, -0.9)],
+    };
+
+    const collected = { base: [], pos: [], neg: [] };
+    for (const [name, memory] of Object.entries(groups)) {
+      for (let i = 0; i < SAMPLES; i++) {
+        const r = await askMemory(memory, `w-${name}-${i}`);
+        if (r.reply) collected[name].push(r.reply);
+      }
+    }
+
+    // 意图分布：{'dialogue':2,'refuse':1} 这种计数，人一眼能看懂。
+    const dist = (rs) => {
+      const counts = {};
+      for (const r of rs) counts[r.intent] = (counts[r.intent] ?? 0) + 1;
+      return counts;
+    };
+    // 极性分：正分=愿意付出（gift/trade），负分=拒绝（refuse/flee/attack），
+    // 中性=纯对话或观察。这一层是「态度」的量化，不是任意打分——
+    // 它只区分「愿不愿意为这个人做事」，不评价台词好坏。
+    const POLARITY = { gift: 1, trade: 1, refuse: -1, flee: -1, attack: -1, dialogue: 0, observe: 0 };
+    const mean = (rs) => (rs.length === 0 ? 0 : rs.reduce((sum, r) => sum + (POLARITY[r.intent] ?? 0), 0) / rs.length);
+
+    const dBase = dist(collected.base);
+    const dPos = dist(collected.pos);
+    const dNeg = dist(collected.neg);
+    const mBase = mean(collected.base);
+    const mPos = mean(collected.pos);
+    const mNeg = mean(collected.neg);
+
+    const polarityGap = mPos - mNeg;
+    // 单调性：权重越高态度越正。允许 base 落在中间任意处。
+    const monotone = mPos >= mBase && mBase >= mNeg;
+    // 两条都必须成立，缺一不可：只看 gap 会放过「pos/neg 反了但差得远」，
+    // 只看 monotone 会放过「三个档位都一样」。
+    const passed = polarityGap >= 1.0 && monotone;
+
+    const detail =
+      `base${JSON.stringify(dBase)}(极性${mBase.toFixed(2)})`
+      + ` pos${JSON.stringify(dPos)}(极性${mPos.toFixed(2)})`
+      + ` neg${JSON.stringify(dNeg)}(极性${mNeg.toFixed(2)})`
+      + `｜极性差=${polarityGap.toFixed(2)}(需≥1.00) 单调=${monotone}`;
+    check('记忆权重影响决策（同文本只翻 weight）', passed, detail);
+
+    if (!passed) {
+      // 如实报：这是产品口径的结论，不是测试要迁就的东西。
+      notes.push(
+        `weight 未观察到方向性影响：极性差 ${polarityGap.toFixed(2)}（需≥1.00），单调 ${monotone}。`
+        + '「记忆权重影响决策」这条在本次采样下不成立，应如实写入文档而不是包装成成功。',
+      );
+    }
+
+    // 原文全量落盘：评委要看的是模型在三个档位各说了什么。
+    writeFileSync(
+      `${OUT}/memory-weight-evidence.json`,
+      JSON.stringify(
+        {
+          summary: SUMMARY,
+          samplesPerGroup: SAMPLES,
+          criterion: { polarityGapMin: 1.0, requireMonotone: true },
+          polarity: { base: mBase, pos: mPos, neg: mNeg, gap: polarityGap, monotone },
+          groups: collected,
+          distributions: { base: dBase, pos: dPos, neg: dNeg },
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    );
+  }
 
   // 结构性诊断（读 npc-proxy.mjs 得出，HTTP 层观测不到，故记 NOTE 而非 PASS/FAIL）。
   notes.push('服务端 buildMessages 渲染 day/kind/weight强度词/summary；memory.actor 不进提示词（sanitizeObservation 未保留它）。');

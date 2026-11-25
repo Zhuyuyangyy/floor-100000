@@ -27,9 +27,35 @@ const TOKEN = process.env.MS_TOKEN ?? '';
 // `cd tools && node x.mjs` 会得到不同结果，只是把不确定性换了个地方。
 // import.meta.url 是脚本自己的位置，与 cwd 无关。
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = process.env.SHOT_DIR ?? resolve(REPO_ROOT, 'output/online-verify');
+// 用 || 不用 ??：`SHOT_DIR=` 给的是空串，?? 只挡 null/undefined，会把 OUT 设成
+// 空串然后在 mkdirSync 里炸掉。而「给了空串」的正确语义是「没给」。
+const OUT = process.env.SHOT_DIR || resolve(REPO_ROOT, 'output/online-verify');
 
 mkdirSync(OUT, { recursive: true });
+
+// 落盘许可。两类产物、两道门，不是同一个东西，不能合并成一个 if。
+//
+// ── 第一类：判据清单（api-verify*.json）──
+// 记的是「跑了哪些条、哪条没过、哪条根本没跑」。无 token 时它依然有信息量：
+// 40 条里 7 条通过、6 条 SKIP，正是在验证 SKIP 分类本身。
+//   有 MS_TOKEN                          → 允许写（真证据）
+//   FORCE_WRITE=1 **且** SHOT_DIR 非空   → 允许写（只用于检查脚本自身）
+//
+// ── 第二类：采样内容（real-model-runs / memory-evidence / memory-weight-evidence）──
+// 记的是「模型具体说了什么」。无 token 时一条样本都没有，写出来就是一份
+// 文件名叫「证据」、内容全空的文件（d2b2f79 修的就是这个）。所以这一类
+// 只认 MS_TOKEN，不认 FORCE_WRITE。两个 if 长得不一样是**故意的**。
+//
+// FORCE_WRITE 为什么必须同时要求 SHOT_DIR：不加这个限制时，
+// `FORCE_WRITE=1 node tools/verify-online-api.mjs` 会安静地把
+// output/online-verify/ 里的真产物覆盖成「40 条里 7 条通过、其余全 401」——
+// 正是 600c450 花力气堵掉的那起事故，又开了一条缝。实测复现过：api-verify.json
+// 的 md5 从 cb827d5a957974ea382672f07469c804 变成 703cd608f6d2c8db2c0ea20ac38cb99b。
+// 原来那句提示写的是「加 FORCE_WRITE=1 并配 SHOT_DIR」——但「并配」只是一句
+// 劝告，不是判据，读的人漏掉后半句就毁掉了证据。现在它是一道判据。
+const FORCE_WRITE = process.env.FORCE_WRITE === '1';
+const FORCED_WITHOUT_DIR = FORCE_WRITE && !process.env.SHOT_DIR;
+const CAN_WRITE_CHECKLIST = TOKEN.length > 0 || (FORCE_WRITE && Boolean(process.env.SHOT_DIR));
 
 const results = [];
 // 观测到但无法用 PASS/FAIL 表达的结论（例如需要读服务端源码才能确认的字段丢弃）。
@@ -557,11 +583,12 @@ async function decide(clientId, extra = {}) {
   // 门槛 1.5：只要有两组走了极性通道且各差 1.0，第三组靠锚点，就够。再高会
   // 误杀「模型对受助只是改口没改行动」这种合理表现。蒙特卡洛下随机桩（三组
   // 都不读记忆）通过三组都成立 + 总增益≥1.5 的概率是 0.0043%（30 万次模拟）。
-  const united = allMoved && allComplete && totalPolarityGain >= 1.5;
+  const UNITED_GAIN_MIN = 1.5;
+  const united = allMoved && allComplete && totalPolarityGain >= UNITED_GAIN_MIN;
   check(
     '记忆改变决策（三组合一：三组均成立且极性总增益达标）',
     united,
-    `${asserted.length}组 全成立=${allMoved} 极性总增益=${totalPolarityGain.toFixed(2)}(需≥1.50) 采样全=${allComplete}`,
+    `${asserted.length}组 全成立=${allMoved} 极性总增益=${totalPolarityGain.toFixed(2)}(需≥${UNITED_GAIN_MIN.toFixed(2)}) 采样全=${allComplete}`,
   );
 
   // 锚点单独成判据：它证明模型真的读到了记忆正文，而不只是被措辞扰动。
@@ -606,6 +633,12 @@ async function decide(clientId, extra = {}) {
     // 每组 4 个样本。每次请求用独立 clientId（askMemory 内已带时间戳+随机后缀），
     // 不撞服务端 12 次/分钟的单会话限流。
     const SAMPLES = 4;
+    // 阈值只在这里定义一次。之前 1.0 在判据、detail 文案、证据文件里各写了一份，
+    // d2b2f79 只修了对照段的 polarityGapMin（证据里写 0.5、判据用 1.0），
+    // weight 段的这段漏了——同样的错法，同一个文件，相隔不到 300 行。
+    // 三处如果哪天改了一处，证据文件记录的阈值就和实际判据不一致，后人拿
+    // 证据复核会算出相反结论。所以判据、文案、落盘全部引用这个常量。
+    const WEIGHT_POLARITY_GAP_MIN = 1.0;
     const groups = {
       base: [mem(2, 'promise', SUMMARY, 0)],
       pos: [mem(2, 'promise', SUMMARY, 0.9)],
@@ -657,13 +690,13 @@ async function decide(clientId, extra = {}) {
     const complete = SAMPLES * Object.keys(groups).length === collected.base.length + collected.pos.length + collected.neg.length;
     // 三条都必须成立，缺一不可：只看 gap 会放过「pos/neg 反了但差得远」，
     // 只看 monotone 会放过「三个档位都一样」，不看 complete 会在上游失败时假绿。
-    const passed = complete && polarityGap >= 1.0 && monotone;
+    const passed = complete && polarityGap >= WEIGHT_POLARITY_GAP_MIN && monotone;
 
     const detail =
       `base${JSON.stringify(dBase)}(极性${mBase.toFixed(2)})`
       + ` pos${JSON.stringify(dPos)}(极性${mPos.toFixed(2)})`
       + ` neg${JSON.stringify(dNeg)}(极性${mNeg.toFixed(2)})`
-      + `｜极性差=${Number.isNaN(polarityGap) ? 'NaN' : polarityGap.toFixed(2)}(需≥1.00)`
+      + `｜极性差=${Number.isNaN(polarityGap) ? 'NaN' : polarityGap.toFixed(2)}(需≥${WEIGHT_POLARITY_GAP_MIN.toFixed(2)})`
       + ` 单调=${monotone}`
       + (complete ? '' : ` 采样不全（失败 ${failures.base}/${failures.pos}/${failures.neg}）`);
     check('记忆权重影响决策（同文本只翻 weight）', passed, detail);
@@ -676,7 +709,7 @@ async function decide(clientId, extra = {}) {
     } else if (!passed) {
       // 如实报：这是产品口径的结论，不是测试要迁就的东西。
       notes.push(
-        `weight 未观察到方向性影响：极性差 ${polarityGap.toFixed(2)}（需≥1.00），单调 ${monotone}。`
+        `weight 未观察到方向性影响：极性差 ${polarityGap.toFixed(2)}（需≥${WEIGHT_POLARITY_GAP_MIN.toFixed(2)}），单调 ${monotone}。`
         + '「记忆权重影响决策」这条在本次采样下不成立，应如实写入文档而不是包装成成功。',
       );
     }
@@ -695,7 +728,7 @@ async function decide(clientId, extra = {}) {
           {
             summary: SUMMARY,
             samplesPerGroup: SAMPLES,
-            criterion: { polarityGapMin: 1.0, requireMonotone: true },
+            criterion: { polarityGapMin: WEIGHT_POLARITY_GAP_MIN, requireMonotone: true },
             polarity: { base: mBase, pos: mPos, neg: mNeg, gap: polarityGap, monotone },
             groups: collected,
             distributions: { base: dBase, pos: dPos, neg: dNeg },
@@ -726,7 +759,7 @@ async function decide(clientId, extra = {}) {
             passed: united,
             allContrastsMoved: allMoved,
             polarityGainTotal: totalPolarityGain,
-            polarityGainMin: 1.5,
+            polarityGainMin: UNITED_GAIN_MIN,
             allComplete,
             note: '联合判据的假阳性率（随机意图、完全不读记忆的桩，30 万次模拟）约 0.0043%。逐组 PASS 单看有约 4% 误判率，引用单组结论前先看这里。',
           },
@@ -863,6 +896,9 @@ const meta = {
   base: BASE,
   isDefaultBase: BASE === 'https://studio-a1578804454-floor-100000.api-inference.modelscope.net',
   hasToken: TOKEN.length > 0,
+  // 无 token 却仍然落了盘，说明是 FORCE_WRITE 强制留档的，不是证据。
+  // 这个字段让「这份文件是真是假」不再需要靠「40 条里 7 条通过」反推。
+  forceWrite: !TOKEN.length && FORCE_WRITE,
   startedAt: new Date().toISOString(),
   node: process.version,
 };
@@ -874,18 +910,44 @@ console.log(`\n目标 ${meta.base}${meta.hasToken ? '' : '（无 token）'}`);
 //
 // 也不静默跳过：跑的人需要知道「这次没写」以及为什么。所以打一行说明、
 // 退出码置 1（无 token = 验收不完整），但不落盘。
-// 这一行本身也是被实测推翻过的。原文写的是「如需强制留档，显式设置 SHOT_DIR
-// 指向一个临时目录后重跑」——**那句话是假的**：SHOT_DIR 只改落盘位置，不改
-// 「要不要落盘」，写完这一版之前的实现里 token 判断在 SHOT_DIR 之后，所以设了
-// 也一个字节都不写（实测 SHOT_DIR=/tmp/probe-shot，退出 1，目录为空）。
-// 留档开关现在是真的：谁要强制看数字就显式加 FORCE_WRITE=1。
-if (!meta.hasToken && process.env.FORCE_WRITE !== '1') {
+//
+// 这一段被实测推翻过两次，两次都记在下面，因为同样的错法很容易第三次出现：
+//
+//   第一次：原文写「如需强制留档，显式设置 SHOT_DIR 指向一个临时目录后重跑」。
+//   那句话是假的——判定只看 token，SHOT_DIR 只改落盘位置。照做的人拿到空目录。
+//   教训：**提示语里承诺的每一个开关，都必须真的接在判据上。**
+//
+//   第二次（就是这次）：加了 FORCE_WRITE=1 之后，`FORCE_WRITE=1 node tools/...`
+//   不配 SHOT_DIR 会直接写进默认 OUT，把真产物覆盖成 40 条里 7 条通过、其余
+//   全 401 的那份。实测 md5 从 cb827d5a… 变成 703cd608…。600c450 堵的洞
+//   又开了，而且这次更隐蔽：600c450 挡的是「忘记带 token 的人」，这一版挡不住
+//   「看到提示照做的人」。教训：**加了逃生门就要想清楚它通向哪。**
+//
+// 所以现在的形状是：强制留档必须同时满足两个条件——显式开开关，且显式指定
+// 落到别处。只写 FORCE_WRITE=1 不给目录，视为误用，仍然不写。
+if (!CAN_WRITE_CHECKLIST && FORCED_WITHOUT_DIR) {
+  console.log('FORCE_WRITE=1 但没有指定 SHOT_DIR：拒绝覆盖默认目录里的现有产物。');
+  console.log('强制留档必须落到别处，两个都要给：FORCE_WRITE=1 SHOT_DIR=/tmp/xxx node tools/verify-online-api.mjs');
+  console.log(`（默认目录是 ${resolve(REPO_ROOT, 'output/online-verify')}，里面可能是带 token 真跑出来的证据。）`);
+  process.exitCode = 1;
+} else if (!CAN_WRITE_CHECKLIST) {
   console.log('未带 MS_TOKEN：私有创空间接口必然 401，本次结果不作为证据，不写入文件。');
-  console.log('如需强制留档（例如只想看判据条数），加 FORCE_WRITE=1 并配 SHOT_DIR 指向临时目录。');
+  console.log('如需强制留档（例如只想看判据条数），两个一起给：FORCE_WRITE=1 SHOT_DIR=/tmp/xxx');
   process.exitCode = 1;
 } else {
   writeFileSync(`${OUT}/api-verify.json`, JSON.stringify(results, null, 2), 'utf-8');
   writeFileSync(`${OUT}/api-verify-notes.json`, JSON.stringify(notes, null, 2), 'utf-8');
   writeFileSync(`${OUT}/api-verify-meta.json`, JSON.stringify(meta, null, 2), 'utf-8');
+  // 强制留档的产物必须自我标明，否则它会和真证据一样躺在目录里被人引用。
+  // 上面那次事故的收尾难点就在这里：文件结构完全合法，只能靠「40 条里 7 条
+  // 通过」反推没带 token——那是要靠人算的，不可靠。
+  if (!meta.hasToken) {
+    // 必须说清哪些没写。强制留档只覆盖判据清单，采样内容（real-model-runs /
+    // memory-evidence / memory-weight-evidence）仍只认 MS_TOKEN。只说「已强制
+    // 留档」会让人以为这个目录里是完整的一套，回头找不到记忆证据再怀疑脚本坏了。
+    console.log(`已强制留档到 ${OUT}：只有判据清单三份，不含采样内容。`);
+    console.log('（real-model-runs / memory-evidence / memory-weight-evidence 仍需 MS_TOKEN，本次未写。）');
+    console.log('这些文件不是证据：api-verify-meta.json 里 forceWrite: true 可查，不要引用进参赛材料。');
+  }
   if (passed !== results.length) process.exitCode = 1;
 }

@@ -1,0 +1,49 @@
+MIT License
+
+Copyright (c) 2026 The "第100000层：末日宿舍 / Floor 100000" project authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+STATUS — PENDING OWNER CONFIRMATION
+================================================================================
+
+This file is a DRAFT. It has not been formally adopted by the copyright holder.
+
+Why it exists: the repository previously carried no `LICENSE` file and no
+`license` field in `package.json`. `THIRD_PARTY_NOTICES.md` described the source
+code only as "MIT-shaped original work" — a description, not a grant.
+
+What the copyright holder must decide before treating this as final:
+
+  1. Confirm MIT as the intended licence for the source code, and fill in the
+     real copyright holder name above (individual legal name or entity).
+  2. Confirm that the scope is code only. The ART IS NOT COVERED by this MIT
+     grant. `public/assets/artpack/`, `public/assets/ui/frame-*.png`,
+     `public/assets/ui/slot.png`, `public/assets/env/`, `public/assets/title/`
+     and `public/assets/weapons/` are owner-supplied artwork whose terms the
+     owner has not yet stated. See THIRD_PARTY_NOTICES.md.
+  3. Confirm that third-party components keep their own licences: Phaser (MIT),
+     Ark Pixel Font (SIL OFL 1.1), Kenney selection marker (CC0 1.0), pixelfx
+     effect sheets (MIT). Those are enumerated in THIRD_PARTY_NOTICES.md and are
+     not relicensed by this file.
+
+Until the holder confirms, treat this file as a proposal. If a different licence
+is chosen, replace the text above wholesale rather than appending to it — a
+LICENSE file with two licences in it grants nothing clearly.

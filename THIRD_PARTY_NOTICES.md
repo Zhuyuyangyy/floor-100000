@@ -1,6 +1,19 @@
 # THIRD_PARTY NOTICES
 
-Third-party assets bundled with this project, with their licence and provenance.
+Third-party assets and dependencies, with their licence and provenance.
+
+**How to read this file.** Every entry below states where the claim came from.
+The source is one of:
+
+- `package.json` / the installed `node_modules/<pkg>/package.json` — machine-readable licence field.
+- A `LICENSE` file shipped inside the package or the asset directory — read verbatim.
+- The project owner, stated directly.
+
+Anything not backed by one of those three is marked **来源待确认 (provenance unconfirmed)**
+and must not be relied on. This file deliberately does not guess.
+
+Last verified: 2026-11-25, against the working tree (Phaser 4.2.1, no `LICENSE` file
+in the repo root at that time — see `LICENSE`, which is a draft awaiting owner sign-off).
 
 ## Selection marker — Kenney, CC0 1.0
 
@@ -84,8 +97,88 @@ Third-party assets bundled with this project, with their licence and provenance.
 
 ---
 
+## Verification status of the asset entries above
+
+Checked on 2026-11-25 by listing the filesystem and reading the bundled files.
+"Verified" means the file exists **and** its licence text or metadata was read
+locally. "Claim only" means the file exists but the upstream provenance in the
+entry above was written by an earlier contributor and cannot be re-checked
+offline — those must be confirmed against the upstream source before publication.
+
+| Entry | File present? | Licence text present? | Status |
+| --- | --- | --- | --- |
+| Kenney selection marker | `public/assets/ui/marker.png` — yes | no local copy; CC0 needs no bundled text | **Claim only** (upstream URL + crop coordinates not re-verified) |
+| Art pack (owner) | `public/assets/artpack/` — 30 files; `ui/frame-*.png`, `ui/slot.png` — yes | n/a | **Owner to state terms** |
+| pixelfx effect sheets | `public/assets/fx/` — 27 PNGs across `melee/`, `impacts/`, `fire/`, `water/`, `pickups/`, `status/` — yes | no local `LICENSE` copy; MIT attribution is in this file only | **Claim only** (which of the 27 sheets derive from pixelfx vs. project-drawn is not recorded per-file) |
+| Ark Pixel Font | `public/assets/fonts/ark-pixel-latin.woff2`, `public/assets/fonts/ark-pixel-zh_hans.woff2` — yes | `public/assets/fonts/OFL.txt` — yes, SIL OFL 1.1, "Copyright (c) 2021, TakWolf" | **Verified** (release tag `2026.11.10` in the entry above is not verifiable offline) |
+| Audio | no audio files anywhere under `public/` | n/a | **Verified by absence** — `src/render/audio.ts` synthesises every SFX via Web Audio |
+| Character rigs | `art-src/rigs/` — 5 rig SVGs + 5 anim JSONs | n/a | **Project-generated, per repo docs; copyright holder unrecorded** |
+
+Where a table row says "Claim only", the honest public statement is: *"bundled
+from the source named above; licence believed to be X; not re-verified for this
+release."* Do not upgrade that to a flat assertion without checking upstream.
+
+---
+
 ## Everything else
 
 All other art and audio in this repository is original and generated at runtime by
 `src/render/pixelArt.ts` and `src/render/audio.ts`, except for the Kenney marker,
 owner-supplied art pack, the pixelfx atlases and the Ark Pixel typeface listed above.
+
+---
+
+## Build and test dependencies (npm)
+
+None of these are bundled into the shipped game except Phaser. The rest are
+build-time or test-time only, and their licences are recorded here because a
+public repository distributes them via `package-lock.json`.
+
+Verified by reading the installed `node_modules/<pkg>/package.json` on 2026-11-25.
+
+| Package | Version | Licence (from its `package.json`) | Runtime or build-only |
+| --- | --- | --- | --- |
+| `phaser` | 4.2.1 | **MIT** — `node_modules/phaser/LICENSE.md`, "Copyright (c) 2026 Richard Davey, Phaser Studio Inc." | **runtime**, bundled into `dist/` |
+| `typescript` | 7.0.2 | **Apache-2.0** | build only (`tsc`) |
+| `vite` | 8.3.5 | **MIT** | build only |
+| `vitest` | 5.0.5 | **MIT** | test only |
+| `@playwright/test` | 1.64.1 | **Apache-2.0** | test only |
+| `electron` | 45.0.0 | **MIT** | desktop packaging only |
+| `electron-builder` | 26.18.0 | **MIT** | desktop packaging only |
+| `@electron/packager` | 20.3.0 | **BSD-2-Clause** | desktop packaging only |
+| `@types/node` | 26.6.5 | **MIT** | types only |
+
+Notes worth knowing:
+
+- **Only Phaser reaches the player.** `dist/` contains the Phaser engine plus this
+  project's own code and assets. Everything else in the table above is a
+  development dependency and is absent from the production bundle.
+- **Transitive dependencies are not enumerated here.** `package-lock.json` pins
+  several hundred of them; each carries its own licence. For a formal audit run
+  `npx license-checker --summary` or equivalent against the lockfile. This file
+  covers the direct, declared dependencies only.
+- **TypeScript 7.0.2 and Vite 8.3.5 are ahead of the widely deployed versions.**
+  The versions above are what is actually installed, read from disk, not what a
+  package registry currently recommends.
+
+---
+
+## Environment variables and secrets
+
+The deployed configuration moves the model API key out of the browser and into
+the server process (`server/npc-proxy.mjs`, variable `NPC_API_KEY`). No key,
+token, upstream URL or account identifier is present in the frontend bundle —
+this is asserted by a test, not by inspection: `output/online-verify/api-verify.json`
+entry "前端产物无密钥/上游地址" reports `clean` against a real deployed build.
+
+---
+
+## Open items — do not publish without settling these
+
+| Item | What is unknown | Who can settle it |
+| --- | --- | --- |
+| Source code licence | No `LICENSE`, no `package.json` `license` field. `LICENSE` is a draft. | Project owner |
+| Owner-supplied art pack, `env/`, `title/`, `weapons/` | The owner has not stated terms for redistribution. A public repo grants a licence the owner may not intend. | Project owner |
+| `art-src/rigs/*.svg` + `*.anim.json` | Described in-repo as project-generated. Copyright holder name not recorded. | Project owner |
+| `素材库/` design-collection directory | Contents and their individual provenances are catalogued in that directory's own README; not audited here. | Project owner |
+| Ship-time audio | No audio files exist — all SFX are synthesised at runtime. Nothing to license. | — (closed) |

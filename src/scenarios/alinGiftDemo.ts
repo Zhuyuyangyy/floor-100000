@@ -346,8 +346,13 @@ export async function runAlinGiftScenario(game: GameState, itemId: ItemId, quant
     }),
     propose: async (observation, _goal, plan, previousFeedback) =>
       !previousFeedback && plan.nextAction === 'give' && observation.availableActions.includes('give') ? proposal : null,
-    fallback: async (_observation, _goal, plan, previousFeedback) =>
-      !previousFeedback && plan.nextAction === 'give' ? proposal : null,
+    // 注意第 4 个参数是 reason（'no_proposal'|'proposal_unavailable'|'proposal_error'），
+    // 不是上一轮的反馈。原来这里写成 `!previousFeedback && ...`：一个非空字符串
+    // 取反恒为 false，所以这个 fallback 从未执行过——「模型超时自动降级」在赠礼
+    // 路径上同样是死的。与 alinRepairDemo 的修法一致：按 plan 判断，不拿 reason
+    // 当布尔。
+    fallback: async (_observation, _goal, plan) =>
+      plan.nextAction === 'give' ? proposal : null,
     validate: async (observation, candidate) => validateCompetitionProposal(validationState(observation), candidate, policy),
     execute: async (observation, candidate) => {
       const current = worldSnapshot(game);

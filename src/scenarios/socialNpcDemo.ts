@@ -356,8 +356,10 @@ export async function runSocialGiftScenario(
       !previousFeedback && plan.nextAction === 'give' && current.availableActions.includes('give')
         ? proposal
         : null,
-    fallback: async (_current, _goal, plan, previousFeedback) =>
-      !previousFeedback && plan.nextAction === 'give' ? proposal : null,
+    // 第 4 个参数是 reason 而不是上一轮反馈；`!previousFeedback` 恒为 false，
+    // 导致这条 fallback 从未执行。与 alinRepairDemo / alinGiftDemo 一并修正。
+    fallback: async (_current, _goal, plan) =>
+      plan.nextAction === 'give' ? proposal : null,
     validate: async (current, candidate) => validateCompetitionProposal(validationState(current.world), candidate, policy),
     execute: async (current, candidate) => {
       // 过期提案不得落到已变化的世界。

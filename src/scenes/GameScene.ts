@@ -3371,9 +3371,17 @@ export class GameScene extends Phaser.Scene {
     this.dialogueObjects.push(...buildPanelHeader(this, left, top, panelW, '', UI.good, depth + 5));
 
     // The speech well is as tall as the longest reply can get, and the message
-    // is anchored to its TOP — not to a fixed offset with a 0.5 origin. With a
-    // centre anchor a 1-line and a 4-line reply grow in both directions, which
-    // is what put long lines through the option list.
+    // is centred in that well (`setOrigin(0.5)` below — unchanged).
+    //
+    // To be precise about the mechanism, because a previous version of this
+    // comment got it wrong: the anchor was NOT changed to top. The fix is
+    // entirely in the well height. It used to be a fixed 34px while the speech
+    // sat at `top + 45` with a centre anchor, so a 4-line reply (100px) grew
+    // both ways and its bottom edge landed at top+95 while the first option row
+    // started at top+74. Now the well is `messageLines * 25 + 8`, the text is
+    // still centred in it, and 4 lines fit exactly. Measured: well y[234..342]
+    // (h=108) with text y[238..338] — that is the centre-anchor position
+    // (288 ± 50), not the top-anchor one (234..334).
     this.dialogueObjects.push(...buildPanelWell(this, left + 12, top + WELL_TOP, panelW - 24, WELL_H, depth + 5));
     // dialogueTitle MUST be in the list: closeDialogue() hides everything in it,
     // and a name left out of the list stays on screen after the panel closes.

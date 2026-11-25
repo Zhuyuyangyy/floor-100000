@@ -738,7 +738,12 @@ async function decide(clientId, extra = {}) {
   const avg = Math.round(runs.reduce((a, d) => a + d.ms, 0) / runs.length);
   check('响应时间可接受', avg < 30_000, `均值 ${avg}ms`);
 
-  writeFileSync(`${OUT}/real-model-runs.json`, JSON.stringify({ avgMs: avg, runs }, null, 2), 'utf-8');
+  // 只在带 token 时落盘：无 token 时这三次请求必然 401，写下去就是拿一份
+  // 全 401 的结果覆盖掉真跑过的那份。真实事故：output/ 里的 999B 被覆盖成
+  // 852B，只能靠 artifacts/ 的副本救回。见文件末尾同一处判断。
+  if (TOKEN.length > 0) {
+    writeFileSync(`${OUT}/real-model-runs.json`, JSON.stringify({ avgMs: avg, runs }, null, 2), 'utf-8');
+  }
 }
 
 // ── 4. 安全边界：不能当开放代理 ────────────────────────────────────────────
@@ -816,7 +821,20 @@ const meta = {
   node: process.version,
 };
 console.log(`\n目标 ${meta.base}${meta.hasToken ? '' : '（无 token）'}`);
-writeFileSync(`${OUT}/api-verify.json`, JSON.stringify(results, null, 2), 'utf-8');
-writeFileSync(`${OUT}/api-verify-notes.json`, JSON.stringify(notes, null, 2), 'utf-8');
-writeFileSync(`${OUT}/api-verify-meta.json`, JSON.stringify(meta, null, 2), 'utf-8');
-if (passed !== results.length) process.exitCode = 1;
+
+// 无 token 时不能照写。真实事故：默认 OUT 下空跑一次，output/ 里的
+// real-model-runs.json 从 999B 被覆盖成 852B（3 条 401），只能靠 artifacts/
+// 的副本救回来——而 output/ 在 .gitignore 里，被覆盖就真的没了。
+//
+// 也不静默跳过：跑的人需要知道「这次没写」以及为什么。所以打一行说明、
+// 退出码置 1（无 token = 验收不完整），但不落盘。
+if (!meta.hasToken) {
+  console.log('未带 MS_TOKEN：私有创空间接口必然 401，本次结果不作为证据，不写入文件。');
+  console.log(`如需强制留档，显式设置 SHOT_DIR 指向一个临时目录后重跑。`);
+  process.exitCode = 1;
+} else {
+  writeFileSync(`${OUT}/api-verify.json`, JSON.stringify(results, null, 2), 'utf-8');
+  writeFileSync(`${OUT}/api-verify-notes.json`, JSON.stringify(notes, null, 2), 'utf-8');
+  writeFileSync(`${OUT}/api-verify-meta.json`, JSON.stringify(meta, null, 2), 'utf-8');
+  if (passed !== results.length) process.exitCode = 1;
+}

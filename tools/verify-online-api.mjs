@@ -53,9 +53,25 @@ mkdirSync(OUT, { recursive: true });
 // 的 md5 从 cb827d5a957974ea382672f07469c804 变成 703cd608f6d2c8db2c0ea20ac38cb99b。
 // 原来那句提示写的是「加 FORCE_WRITE=1 并配 SHOT_DIR」——但「并配」只是一句
 // 劝告，不是判据，读的人漏掉后半句就毁掉了证据。现在它是一道判据。
+//
+// ── a2918b3 之后又漏掉的一半：SHOT_DIR 指向哪里没人管 ──
+// 上面那道判据只回答了「给了目录吗」，没回答「这个目录是不是就是默认目录」。
+// 实测：`FORCE_WRITE=1 SHOT_DIR=output/online-verify`（相对路径，正是提示语
+// 让你「配 SHOT_DIR」时最顺手的写法）依然覆盖真产物，md5 变 7cf93b6e。
+// 判据不能是「有没有给路径」，必须是「解出来的绝对路径是否等于默认目录」。
+// 相对路径、`.`、`./..` 展开后可能都指回默认目录，只有解析成绝对路径再比才拦得住。
 const FORCE_WRITE = process.env.FORCE_WRITE === '1';
 const FORCED_WITHOUT_DIR = FORCE_WRITE && !process.env.SHOT_DIR;
-const CAN_WRITE_CHECKLIST = TOKEN.length > 0 || (FORCE_WRITE && Boolean(process.env.SHOT_DIR));
+const DEFAULT_OUT = resolve(REPO_ROOT, 'output/online-verify');
+// resolve 会处理相对路径、`.`/`..`、多余分隔符和末尾斜杠，但不处理符号链接。
+// 对本仓库够用：默认目录不是软链。若以后变成软链，这里要换 realpathSync。
+const FORCED_ONTO_DEFAULT = FORCE_WRITE && Boolean(process.env.SHOT_DIR)
+  && resolve(process.env.SHOT_DIR) === DEFAULT_OUT;
+// 注意 `&& !FORCED_ONTO_DEFAULT` 不是多余的：没有它，下面那个拒绝分支永远
+// 进不去（CAN_WRITE_CHECKLIST 已经是 true，第一层 if 就吃不中）。判据要
+// 改在「许可」这里，不能只在事后拦——否则又是一句劝告。
+const CAN_WRITE_CHECKLIST = TOKEN.length > 0
+  || (FORCE_WRITE && Boolean(process.env.SHOT_DIR) && !FORCED_ONTO_DEFAULT);
 
 const results = [];
 // 观测到但无法用 PASS/FAIL 表达的结论（例如需要读服务端源码才能确认的字段丢弃）。
@@ -1015,7 +1031,17 @@ console.log(`\n目标 ${meta.base}${meta.hasToken ? '' : '（无 token）'}`);
 if (!CAN_WRITE_CHECKLIST && FORCED_WITHOUT_DIR) {
   console.log('FORCE_WRITE=1 但没有指定 SHOT_DIR：拒绝覆盖默认目录里的现有产物。');
   console.log('强制留档必须落到别处，两个都要给：FORCE_WRITE=1 SHOT_DIR=/tmp/xxx node tools/verify-online-api.mjs');
-  console.log(`（默认目录是 ${resolve(REPO_ROOT, 'output/online-verify')}，里面可能是带 token 真跑出来的证据。）`);
+  console.log(`（默认目录是 ${DEFAULT_OUT}，里面可能是带 token 真跑出来的证据。）`);
+  process.exitCode = 1;
+} else if (!CAN_WRITE_CHECKLIST && FORCED_ONTO_DEFAULT) {
+  // 这一支是 a2918b3 漏掉的那半：给了 SHOT_DIR，但解出来就是默认目录。
+  // 「FORCE_WRITE=1 SHOT_DIR=output/online-verify」是最容易被写出来的组合，
+  // 因为提示语让你「配 SHOT_DIR」，而默认目录是唯一一个你手边现成的。
+  // 实测它照样覆盖真产物（md5 变 7cf93b6e）。判据必须是「解出的绝对路径
+  // 不等于默认目录」，不是「环境变量非空」。
+  console.log('SHOT_DIR 解析后就是默认输出目录：拒绝覆盖（这等于没换地方）。');
+  console.log(`  SHOT_DIR=${process.env.SHOT_DIR}  →  ${resolve(process.env.SHOT_DIR)}`);
+  console.log('强制留档必须落到别处，例如：FORCE_WRITE=1 SHOT_DIR=/tmp/verify-xxx node tools/verify-online-api.mjs');
   process.exitCode = 1;
 } else if (!CAN_WRITE_CHECKLIST) {
   console.log('未带 MS_TOKEN：私有创空间接口必然 401，本次结果不作为证据，不写入文件。');

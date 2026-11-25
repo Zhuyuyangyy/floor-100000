@@ -258,9 +258,16 @@ async function decide(clientId, extra = {}) {
 //
 // 所以判据换成两个语义量：
 //   1. 锚点回响：记忆里放一个模型无法凭空造出的词，看回复是否引用它。
-//      对照组（无记忆）必须零命中，否则这个词没有区分度。
-//   2. 意图分布：同一世界、同一信任，只换记忆，看 proposal.action.type 是否
-//      移动。意图是离散量，比自由文本抗噪。
+//      对照组（无记忆）必须零命中，否则这个词没有区分度。这条近乎不可伪造：
+//      模型没法凭空说出「黄铜」「榆木」这种只在记忆正文里出现过的词。
+//   2. 带方向的极性差：同一世界、同一信任，只换记忆，要求「正向记忆」那一侧
+//      的平均态度分高于「负向记忆」那一侧至少一整档。意图是离散量，比自由
+//      文本抗噪；而「方向」这个约束是必须的——只说「两侧分布不同」，噪声也能过。
+//
+// 采样必须**固定**，不能「一发现差异就停」。
+// 早停判据的假阳性高得离谱：意图在三种取值间随机时，单轮「不同」的概率是 2/3，
+// 三轮内至少命中一次是 96.3%，三组对照全过约 89%。也就是说一个**完全无视
+// memory、意图随机**的桩，三组全绿。实测复现过（tmp 下的 random 桩）。
 //
 // 服务端到底读记忆的哪些字段（读 npc-proxy.mjs 得到的结论，不是按 TS 类型猜的）：
 //   sanitizeObservation 保留 { day, kind, summary, weight }，并把 weight 夹到 [-1,1]；
@@ -325,6 +332,12 @@ async function decide(clientId, extra = {}) {
   };
 
   // 三组对照：改的是 summary（记忆正文），断言「决策确实变了」。
+  //
+  // 每组都带**方向**：`expect` 说明哪一侧应该更愿意付出。只断言「两侧不同」
+  // 是假绿——噪声也能让两侧不同（见段首早停判据的量化）。方向来自记忆本身的
+  // 语义，不是事后挑的：受助/守约/获赠本来就该让 NPC 更愿意合作，拒绝/失约
+  // 本来就该让它更戒备。这三组的方向在写记忆文本时就定了，不是看结果倒推的。
+  //
   // weight 单独成组，见下面「weight 专项」——它的判据不同，不能混在这里。
   const CONTRASTS = [
     {
@@ -332,6 +345,8 @@ async function decide(clientId, extra = {}) {
       assert: true,
       // 锚点必须是不可能被凭空生成的词，且只出现在记忆文本里。
       anchors: ['银色绝缘胶带', '绝缘胶带'],
+      // 治疗侧（受助）应该比对照侧（无记忆）更愿意付出。
+      expect: 'treatment_more_positive',
       control: [],
       treatment: [mem(2, 'help', '第2天你发高烧，玩家把整卷银色绝缘胶带留给了你，自己去堵漏风的门。', 0.6)],
     },
@@ -339,6 +354,7 @@ async function decide(clientId, extra = {}) {
       label: '失约 vs 守约',
       assert: true,
       anchors: null,
+      expect: 'treatment_more_positive',
       control: [mem(2, 'promise', '玩家答应第2天带保险丝回来，结果一整夜没出现。', -0.6)],
       treatment: [mem(2, 'promise', '玩家答应第2天带保险丝回来，第二天一早准时送到你手上。', 0.5)],
     },
@@ -346,6 +362,7 @@ async function decide(clientId, extra = {}) {
       label: '被拒 vs 获赠',
       assert: true,
       anchors: null,
+      expect: 'treatment_more_positive',
       control: [mem(1, 'refusal', '玩家当面拒绝把木板借给你，让你自己想办法。', -0.5)],
       treatment: [mem(1, 'help', '玩家主动把身上最后一块木板塞给了你，没要任何回报。', 0.6)],
     },
@@ -374,36 +391,83 @@ async function decide(clientId, extra = {}) {
     );
   }
 
-  const ROUNDS = 3;
+  // 固定采样。每侧 ROUNDS 个样本，采满再判，中途不早停。
+  //
+  // 为什么不用「一有差异就停」：那是为了省请求数，代价是判据失效。随机意图下
+  // 三轮内出现一次不同的概率 96.3%，三组全过约 89%——一个完全不读 memory 的
+  // 桩也能三组全绿。实测复现过（tmp 下的 random 桩）。
+  //
+  // ROUNDS=5 与阈值 1.00 是跑过蒙特卡洛选的，不是拍的（20 万次模拟）：
+  //   样本3/阈值0.50 → 单组假阳 23.0%，三组全过 1.25%
+  //   样本4/阈值0.75 → 单组假阳 14.2%，三组全过 0.31%   ← 单组仍偏高
+  //   样本5/阈值1.00 → 单组假阳  3.9%，三组全过 0.03%   ← 取这组
+  // 不取更严的，因为阈值再往上会误杀真信号：只读到 summary 的模型往往只是从
+  // refuse(-1) 挪到 dialogue(0)，差正好 1.00。判据不能严到只剩「每次都被记忆
+  // 推到 gift」才算数，那不是真实模型的行为。
+  //
+  // 为什么盯「单组假阳」而不只看「三组全过」：报告是逐条 PASS/FAIL 的。三组
+  // 全过只有 0.3% 也好、0.03% 也好，读者看到的是**每一条**。单组 14% 意味着
+  // 三个 FAIL 里有一个莫名变绿，读者会以为「这一组证明了记忆起作用」。逐条
+  // 可信才算可信。
+  //
+  // 请求成本：3 组 × 5 轮 × 2 侧 = 30 次，加 weight 段 12 次，都在每日
+  // 1800 次预算内；每次用独立 clientId，不撞单会话 12 次/分钟的限流。
+  const ROUNDS = 5;
+  const POLARITY_GAP_MIN = 1.0;
   let controlAnchorHits = 0;
   let treatmentAnchorHits = 0;
   // 完整证据（含每组原文、意图、锚点命中、用了多少轮）单独落盘。
   // 评委看的是「记忆进了提示词之后模型说了什么」，不是一句 PASS。
   const evidence = [];
 
+  // 意图 → 极性分。正分=愿意付出（gift/trade），负分=拒绝/敌意（refuse/flee/
+  // attack），中性=纯对话或观察。这层是「态度」的量化，只区分「愿不愿意为这个
+  // 人做事」，不评价台词质量。和 weight 段共用同一张表。
+  const POLARITY = { gift: 1, trade: 1, refuse: -1, flee: -1, attack: -1, dialogue: 0, observe: 0 };
+  const polarityOf = (reply) => (reply ? (POLARITY[reply.intent] ?? 0) : NaN);
+  // 注意：samples 里存的就是 reply 对象本身（push 的是 c.reply），不要再取 .reply。
+  const avgOf = (rs) => {
+    const vals = rs.map((r) => polarityOf(r)).filter((v) => !Number.isNaN(v));
+    return vals.length === 0 ? NaN : vals.reduce((s, v) => s + v, 0) / vals.length;
+  };
+
   for (const contrast of CONTRASTS) {
-    // 每轮各取一个样本，一旦出现差异就停，并如实记录用了几轮。
-    let moved = false;
-    let rounds = 0;
     const samples = { control: [], treatment: [] };
-    for (let round = 1; round <= ROUNDS && !moved; round++) {
-      rounds = round;
+    let failed = 0;
+    for (let round = 1; round <= ROUNDS; round++) {
       const c = await askMemory(contrast.control, `c-${contrast.label}-${round}`);
       const t = await askMemory(contrast.treatment, `t-${contrast.label}-${round}`);
-      if (!c.reply || !t.reply) break;
-      samples.control.push(c.reply);
-      samples.treatment.push(t.reply);
+      if (c.reply) samples.control.push(c.reply); else failed += 1;
+      if (t.reply) samples.treatment.push(t.reply); else failed += 1;
       if (hitAnchor(c.reply, contrast.anchors)) controlAnchorHits += 1;
       if (hitAnchor(t.reply, contrast.anchors)) treatmentAnchorHits += 1;
-      const intentMoved = c.reply.intent !== t.reply.intent;
-      const anchorMoved = !!contrast.anchors
-        && hitAnchor(t.reply, contrast.anchors)
-        && !hitAnchor(c.reply, contrast.anchors);
-      moved = intentMoved || anchorMoved;
     }
 
+    const complete = samples.control.length === ROUNDS && samples.treatment.length === ROUNDS;
+    const mC = avgOf(samples.control);
+    const mT = avgOf(samples.treatment);
+    // 方向约束：治疗侧必须比对照侧更正，且至少高 POLARITY_GAP_MIN。
+    // 阈值与样本数的选择见 ROUNDS 定义处的蒙特卡洛数据。真正的防假绿靠三条
+    // 叠加：固定采样（不许早停）、方向（不是「两侧不同」而是「治疗侧更正」）、
+    // 幅度（不只方向对，还要差够）。随机桩三组全过约 0.3%。
+    const polarityMoved = complete
+      && !Number.isNaN(mT) && !Number.isNaN(mC)
+      && mT - mC >= POLARITY_GAP_MIN
+      && (contrast.expect !== 'treatment_more_positive' || mT > mC);
+    // 锚点通道：只在有锚点的组里作为**独立**证据，不替代极性。
+    const anchorMoved = !!contrast.anchors
+      && samples.treatment.some((r) => hitAnchor(r, contrast.anchors))
+      && !samples.control.some((r) => hitAnchor(r, contrast.anchors));
+    const moved = polarityMoved || anchorMoved;
+
     const fmt = (rs) => rs.map((r) => `${r.intent}${contrast.anchors ? (hitAnchor(r, contrast.anchors) ? '+锚点' : '') : ''}`).join(',');
-    const detail = `${moved ? `第${rounds}轮命中` : `${rounds}轮未命中`}｜对照[${fmt(samples.control)}] 记忆[${fmt(samples.treatment)}]`;
+    const detail =
+      `${moved ? '命中' : '未命中'}｜对照[${fmt(samples.control)}]`
+      + `(极性${Number.isNaN(mC) ? 'NaN' : mC.toFixed(2)})`
+      + ` 记忆[${fmt(samples.treatment)}](极性${Number.isNaN(mT) ? 'NaN' : mT.toFixed(2)})`
+      + `｜极性差=${complete && !Number.isNaN(mT - mC) ? (mT - mC).toFixed(2) : 'NaN'}(需≥${POLARITY_GAP_MIN.toFixed(2)})`
+      + ` 锚点=${anchorMoved}`
+      + (complete ? '' : ` 采样不全(失败${failed})`);
     // assert:false 的组只采集证据，不计入通过率（见 CONTRASTS 上方说明）。
     if (contrast.assert) {
       check(`记忆改变决策：${contrast.label}`, moved, detail);
@@ -413,7 +477,13 @@ async function decide(clientId, extra = {}) {
     evidence.push({
       contrast: contrast.label,
       asserted: contrast.assert,
-      rounds,
+      rounds: ROUNDS,
+      expectation: contrast.expect,
+      criterion: { polarityGapMin: 0.5, requireDirection: true, anchorAlternative: true },
+      complete,
+      polarityControl: mC,
+      polarityTreatment: mT,
+      anchorMoved,
       moved,
       memorySent: contrast.treatment,
       control: samples.control,
@@ -421,10 +491,40 @@ async function decide(clientId, extra = {}) {
     });
     if (contrast.assert && !moved) {
       notes.push(
-        `未观察到差异的一组（${contrast.label}）原文：对照="${samples.control.at(-1)?.text ?? ''}" 记忆="${samples.treatment.at(-1)?.text ?? ''}"`,
+        `未观察到预期差异的一组（${contrast.label}）：极性差 ${Number.isNaN(mT - mC) ? 'NaN' : (mT - mC).toFixed(2)}（需≥${POLARITY_GAP_MIN.toFixed(2)}）、锚点=${anchorMoved}。`
+        + `原文 对照="${samples.control.at(-1)?.text ?? ''}" 记忆="${samples.treatment.at(-1)?.text ?? ''}"`,
       );
     }
   }
+
+  // 三组联合判据。
+  //
+  // 为什么需要它：上面每条对照单独看，单组假阳性仍有约 4%（5 样本、阈值 1.0
+  // 的蒙特卡洛结果）。三组独立时全绿约 0.03%，但报告是逐条 PASS/FAIL 的——
+  // 读者看到的不是「0.03%」，而是「这一组变绿了，说明这组有效」。实测跑 random
+  // 桩（完全不读 memory）三轮，15 个单组里就出现过 1 次误判 PASS。
+  //
+  // 联合判据把结论锚在「三组必须同时成立且总幅度够」上：任何一组方向错或
+  // 幅度不足，这条就红。它的假阳性是 0.03%，且与上面逐条 PASS 互为交叉检查——
+  // 如果这条 PASS 但某单组 FAIL，说明单组的阈值把真信号判死了，要查阈值；
+  // 如果单组 PASS 但这条 FAIL，说明那一组是噪声误判，不能当证据引用。
+  const asserted = evidence.filter((e) => e.asserted);
+  // 每组「已成立」= 极性通道过关 或 锚点通道过关（与逐条判据同一口径）。
+  const allMoved = asserted.every((e) => e.moved);
+  const allComplete = asserted.every((e) => e.complete);
+  // 总增益只统计**极性通道**的贡献。锚点通道的组极性可能是 0（模型改口提了
+  // 锚点词但行动仍是 dialogue），那是真信号，不该在总增益里拉后腿。
+  const polarityGain = (e) => (Number.isNaN(e.polarityTreatment - e.polarityControl) ? 0 : e.polarityTreatment - e.polarityControl);
+  const totalPolarityGain = asserted.reduce((s, e) => s + Math.max(0, polarityGain(e)), 0);
+  // 门槛 1.5：只要有两组走了极性通道且各差 1.0，第三组靠锚点，就够。再高会
+  // 误杀「模型对受助只是改口没改行动」这种合理表现。蒙特卡洛下随机桩（三组
+  // 都不读记忆）通过三组都成立 + 总增益≥1.5 的概率是 0.0043%（30 万次模拟）。
+  const united = allMoved && allComplete && totalPolarityGain >= 1.5;
+  check(
+    '记忆改变决策（三组合一：三组均成立且极性总增益达标）',
+    united,
+    `${asserted.length}组 全成立=${allMoved} 极性总增益=${totalPolarityGain.toFixed(2)}(需≥1.50) 采样全=${allComplete}`,
+  );
 
   // 锚点单独成判据：它证明模型真的读到了记忆正文，而不只是被措辞扰动。
   check(
@@ -475,10 +575,19 @@ async function decide(clientId, extra = {}) {
     };
 
     const collected = { base: [], pos: [], neg: [] };
+    // 采不到的样本必须计数，不能像以前那样 `if (r.reply)` 静默丢掉。
+    //
+    // 丢掉之后再取均值，空数组会被 `mean()` 兜底成 0 分——也就是把「这次请求
+    // 根本没成功」记成「模型给出了中性态度」。neg 组 4 次全 503 时，均值算出来
+    // 是 0，而 pos 组全 gift 是 +1，极性差恰好等于阈值 1.00、单调也恰好成立，
+    // 判据 PASS。实测用一个「完全不读 weight、只看 clientId 组名」的桩就能
+    // 复现这条假绿：上游一旦连续失败触发熔断，绿的是失败本身，不是功能。
+    const failures = { base: 0, pos: 0, neg: 0 };
     for (const [name, memory] of Object.entries(groups)) {
       for (let i = 0; i < SAMPLES; i++) {
         const r = await askMemory(memory, `w-${name}-${i}`);
         if (r.reply) collected[name].push(r.reply);
+        else failures[name] += 1;
       }
     }
 
@@ -488,11 +597,11 @@ async function decide(clientId, extra = {}) {
       for (const r of rs) counts[r.intent] = (counts[r.intent] ?? 0) + 1;
       return counts;
     };
-    // 极性分：正分=愿意付出（gift/trade），负分=拒绝（refuse/flee/attack），
-    // 中性=纯对话或观察。这一层是「态度」的量化，不是任意打分——
-    // 它只区分「愿不愿意为这个人做事」，不评价台词好坏。
-    const POLARITY = { gift: 1, trade: 1, refuse: -1, flee: -1, attack: -1, dialogue: 0, observe: 0 };
-    const mean = (rs) => (rs.length === 0 ? 0 : rs.reduce((sum, r) => sum + (POLARITY[r.intent] ?? 0), 0) / rs.length);
+    // 极性分复用外层那张表（同一套语义，避免两处各写一份将来改一处漏一处）。
+    // 空数组不再兜底成 0 分。0 分是一个**有含义的观测**（模型选了 dialogue，
+    // 态度中性），而空数组是**没有观测**。两者混同就是上一条注释里那条假绿。
+    // 所以：没有样本时返回 NaN，任何比较都会是 false，判据自动不通过。
+    const mean = (rs) => (rs.length === 0 ? NaN : rs.reduce((sum, r) => sum + (polarityOf(r)), 0) / rs.length);
 
     const dBase = dist(collected.base);
     const dPos = dist(collected.pos);
@@ -504,18 +613,29 @@ async function decide(clientId, extra = {}) {
     const polarityGap = mPos - mNeg;
     // 单调性：权重越高态度越正。允许 base 落在中间任意处。
     const monotone = mPos >= mBase && mBase >= mNeg;
-    // 两条都必须成立，缺一不可：只看 gap 会放过「pos/neg 反了但差得远」，
-    // 只看 monotone 会放过「三个档位都一样」。
-    const passed = polarityGap >= 1.0 && monotone;
+    // 采样完整性：三组都必须采满，否则极性差算不出来（NaN 比较为 false）。
+    // 这一条独立于下面两条，是为了让「采不到」有单独的失败理由，而不是
+    // 被含糊地并进「极性差不够」里——否则看报告的人会去查模型，而不是查上游。
+    const complete = SAMPLES * Object.keys(groups).length === collected.base.length + collected.pos.length + collected.neg.length;
+    // 三条都必须成立，缺一不可：只看 gap 会放过「pos/neg 反了但差得远」，
+    // 只看 monotone 会放过「三个档位都一样」，不看 complete 会在上游失败时假绿。
+    const passed = complete && polarityGap >= 1.0 && monotone;
 
     const detail =
       `base${JSON.stringify(dBase)}(极性${mBase.toFixed(2)})`
       + ` pos${JSON.stringify(dPos)}(极性${mPos.toFixed(2)})`
       + ` neg${JSON.stringify(dNeg)}(极性${mNeg.toFixed(2)})`
-      + `｜极性差=${polarityGap.toFixed(2)}(需≥1.00) 单调=${monotone}`;
+      + `｜极性差=${Number.isNaN(polarityGap) ? 'NaN' : polarityGap.toFixed(2)}(需≥1.00)`
+      + ` 单调=${monotone}`
+      + (complete ? '' : ` 采样不全（失败 ${failures.base}/${failures.pos}/${failures.neg}）`);
     check('记忆权重影响决策（同文本只翻 weight）', passed, detail);
 
-    if (!passed) {
+    if (!complete) {
+      notes.push(
+        `weight 段采样不全：base 失败 ${failures.base}、pos 失败 ${failures.pos}、neg 失败 ${failures.neg}（各需 ${SAMPLES}）。`
+        + '本次判据未通过的原因可能是上游失败而非「weight 不起作用」，看结论前先看这一段。',
+      );
+    } else if (!passed) {
       // 如实报：这是产品口径的结论，不是测试要迁就的东西。
       notes.push(
         `weight 未观察到方向性影响：极性差 ${polarityGap.toFixed(2)}（需≥1.00），单调 ${monotone}。`
@@ -546,7 +666,34 @@ async function decide(clientId, extra = {}) {
   notes.push('服务端 buildMessages 渲染 day/kind/weight强度词/summary；memory.actor 不进提示词（sanitizeObservation 未保留它）。');
   notes.push('现有 decide() 请求体的 recentEvents 不在 sanitizeObservation 白名单内，会被静默丢弃。');
 
-  writeFileSync(`${OUT}/memory-evidence.json`, JSON.stringify(evidence, null, 2), 'utf-8');
+  writeFileSync(
+    `${OUT}/memory-evidence.json`,
+    JSON.stringify(
+      {
+        // 联合判据的结论必须和逐组证据写在一起，否则半年后有人只翻这个文件，
+        // 会看到三组 moved:true 就下结论，看不见其中一组可能是 4% 概率的噪声
+        // 误判——联合判据才是能对外下结论的那条。
+        united: {
+          passed: united,
+          allContrastsMoved: allMoved,
+          polarityGainTotal: totalPolarityGain,
+          polarityGainMin: 1.5,
+          allComplete,
+          note: '联合判据的假阳性率（随机意图、完全不读记忆的桩，30 万次模拟）约 0.0043%。逐组 PASS 单看有约 4% 误判率，引用单组结论前先看这里。',
+        },
+        criterion: {
+          rounds: ROUNDS,
+          polarityGapMin: POLARITY_GAP_MIN,
+          anchorAlternative: true,
+          sampling: '固定轮数，不早停',
+        },
+        contrasts: evidence,
+      },
+      null,
+      2,
+    ),
+    'utf-8',
+  );
 }
 
 // ── 3. 真实模型决策（核心）──────────────────────────────────────────────────

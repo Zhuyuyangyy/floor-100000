@@ -1,0 +1,149 @@
+{
+  "schema": "spark-run-record/v1",
+  "commit": "63ba49197ab9603f3ec1bc356e935c4379f78d3b",
+  "model": "npc-qwen:latest",
+  "generatedAt": "2026-11-25T09:52:05.089Z",
+  "settings": {
+    "think": false,
+    "format": "json",
+    "temperature": 0.7,
+    "num_predict": 192
+  },
+  "summary": {
+    "total": 6,
+    "validProposals": 6,
+    "emptyContent": 0,
+    "unparsed": 0,
+    "medianMs": 3830,
+    "p95Ms": 4175,
+    "medianEvalCount": 68
+  },
+  "records": [
+    {
+      "case": "alin-first-meet",
+      "run": 1,
+      "http": 200,
+      "wallMs": 3899,
+      "doneReason": "stop",
+      "evalCount": 61,
+      "thinkingChars": 0,
+      "contentChars": 136,
+      "emptyContent": false,
+      "parsed": {
+        "utter": "你手里有胶布？正好，这破门禁卡槽裂了。拿来帮我粘上，说不定能修好。",
+        "action": {
+          "type": "trade",
+          "itemId": "tape",
+          "quantity": 1,
+          "text": "用胶布换门禁维修"
+        },
+        "confidence": 0.85
+      }
+    },
+    {
+      "case": "alin-first-meet",
+      "run": 2,
+      "http": 200,
+      "wallMs": 4175,
+      "doneReason": "stop",
+      "evalCount": 68,
+      "thinkingChars": 0,
+      "contentChars": 151,
+      "emptyContent": false,
+      "parsed": {
+        "utterance": "兄弟，这破门卡死了。我这儿没工具，看你包里好像有胶带？借我试试，能修好算我欠你个人情。",
+        "action": {
+          "type": "refuse",
+          "itemId": "",
+          "quantity": 1,
+          "text": "暂时无法交换，需要胶带协助"
+        },
+        "confidence": 0.8
+      }
+    },
+    {
+      "case": "alin-first-meet",
+      "run": 3,
+      "http": 200,
+      "wallMs": 3830,
+      "doneReason": "stop",
+      "evalCount": 71,
+      "thinkingChars": 0,
+      "contentChars": 156,
+      "emptyContent": false,
+      "parsed": {
+        "utterance": "嘿，新来的？这门禁坏得厉害，光靠嘴说没用。你手里那卷胶带和木头，正好能凑合修一下。给我看看？",
+        "action": {
+          "type": "trade",
+          "itemId": "tape",
+          "quantity": 1,
+          "text": "请求交换胶带以修复门禁"
+        },
+        "confidence": 0.85
+      }
+    },
+    {
+      "case": "alin-high-trust",
+      "run": 1,
+      "http": 200,
+      "wallMs": 3400,
+      "doneReason": "stop",
+      "evalCount": 62,
+      "thinkingChars": 0,
+      "contentChars": 140,
+      "emptyContent": false,
+      "parsed": {
+        "utterance": "早啊。你带胶带来了？正好，门禁卡扣松了，我缺这个。",
+        "action": {
+          "type": "trade",
+          "itemId": "tape",
+          "quantity": 1,
+          "text": "把胶带给我，我帮你把门禁卡扣修好。"
+        },
+        "confidence": 0.9
+      }
+    },
+    {
+      "case": "alin-high-trust",
+      "run": 2,
+      "http": 200,
+      "wallMs": 3232,
+      "doneReason": "stop",
+      "evalCount": 64,
+      "thinkingChars": 0,
+      "contentChars": 148,
+      "emptyContent": false,
+      "parsed": {
+        "utterance": "你早。门禁还锁着，我修不了。你包里有胶带吗？递给我，我试试能不能临时封住缝隙。",
+        "action": {
+          "type": "trade",
+          "itemId": "tape",
+          "quantity": 1,
+          "text": "用胶带换取临时修复尝试"
+        },
+        "confidence": 0.9
+      }
+    },
+    {
+      "case": "alin-high-trust",
+      "run": 3,
+      "http": 200,
+      "wallMs": 3515,
+      "doneReason": "stop",
+      "evalCount": 68,
+      "thinkingChars": 0,
+      "contentChars": 151,
+      "emptyContent": false,
+      "parsed": {
+        "utterance": "兄弟，你手里有胶带吧？门禁卡扣松了。给我胶带，我立马修好这该死的门，放你过去。",
+        "action": {
+          "type": "trade",
+          "itemId": "tape",
+          "quantity": 1,
+          "text": "用1个胶带交换维修门禁服务"
+        },
+        "confidence": 0.95
+      }
+    }
+  ]
+}

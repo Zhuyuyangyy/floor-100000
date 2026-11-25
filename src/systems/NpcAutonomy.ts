@@ -112,12 +112,19 @@ export class WandererFallbackBrain implements NpcBrain {
  * brain, so even health checks cannot probe the local Ollama endpoint.
  */
 export function createWandererDecisionConfig(
-  config: Pick<AiNpcConfig, 'mode' | 'baseUrl' | 'model' | 'timeoutMs' | 'recallK'>,
+  config: Pick<AiNpcConfig, 'mode' | 'baseUrl' | 'model' | 'timeoutMs' | 'recallK'> &
+    Partial<Pick<AiNpcConfig, 'maxOutputTokens' | 'disableThinking'>>,
 ): WandererDecisionConfig {
   const fallback = new WandererFallbackBrain();
   return {
     brain: config.mode === 'ollama'
-      ? new OllamaBrain({ baseUrl: config.baseUrl, model: config.model, timeoutMs: config.timeoutMs })
+      ? new OllamaBrain({
+          baseUrl: config.baseUrl,
+          model: config.model,
+          timeoutMs: config.timeoutMs,
+          maxOutputTokens: config.maxOutputTokens,
+          disableThinking: config.disableThinking,
+        })
       : fallback,
     fallback,
     timeoutMs: config.timeoutMs,

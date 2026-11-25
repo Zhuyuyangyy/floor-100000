@@ -135,3 +135,61 @@ test('Judge Mode displays the real Alin gift trace and exports auditable JSON ev
   expect(JSON.stringify(exported)).toContain('player_gift');
   expect(errors).toEqual([]);
 });
+
+// 第二 NPC 的关键证据：给小周赠礼必须只改小周。评审最容易被糊弄的地方就是
+// 「看起来两个 NPC 都活着，其实只有阿林一条数据被反复写」。所以这里断言
+// 导出物里两人的库存分别是什么，而不只是「状态变了」。
+test('Xiaozhou gift changes only Xiaozhou and exports a social-gift trace', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await startJudgeGame(page);
+  await page.getByTestId('judge-mode-toggle').click();
+
+  await moveAndWaitForSceneSync(page, 40);
+  await page.keyboard.press('E');
+  await page.waitForFunction(() => {
+    const w = window as WindowProbe;
+    const scene = w.__PHASER_GAME__?.scene.getScene('Game') as SceneProbe | null | undefined;
+    return w.__PHASER_SESSION__?.getState()?.currentFloor === 2 && !scene?.stairClimb;
+  }, undefined, { timeout: 7000 });
+
+  // 小周在 x=800。给他一件背包里确定有的东西。
+  await moveAndWaitForSceneSync(page, 800);
+  await page.keyboard.press('E');
+  await expect.poll(() => visibleGameText(page, '小周（邻居）')).toBe(true);
+  await selectOption(page, '赠礼');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => visibleGameText(page, '赠送 ')).toBe(true);
+  await page.keyboard.press('Enter');
+
+  await expect.poll(() => page.getByTestId('judge-trace').textContent(), { timeout: 10_000 })
+    .toContain('"status": "executed"');
+  await expect(page.getByTestId('judge-trace')).toContainText('"committed": true');
+  // 面板必须报真实焦点，不能把两个人的记录都标成阿林。
+  await expect(page.getByTestId('judge-trace')).toContainText('小周');
+  await expect(page.getByTestId('judge-trace')).toContainText('player_gift');
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByTestId('judge-export').click(),
+  ]);
+  const stream = await download.createReadStream();
+  if (!stream) throw new Error('JSON download did not expose a readable stream');
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  const exported = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, any>;
+
+  expect(exported).toMatchObject({ format: 'floor-100000-competition-run', scenario: 'social-gift', seed: 42 });
+  // 快照里两人同时在场；小周多了净水，阿林必须一件都没有。
+  //
+  // 这里断「包含」而不是「恰好 1 件」：赠礼菜单执行后仍停在同一层，多按一次
+  // Enter 会再赠一件（既有行为，与本次改动无关）。真正要证明的是隔离——
+  // 给小周送礼，阿林那条记录根本不该被创建。
+  const npcsAfter = exported.world.stateAfter.npcs as Array<{ npcId: string; inventory: Array<{ itemId: string }> }>;
+  const zhouInventory = npcsAfter.find((npc) => npc.npcId === 'xiaozhou')?.inventory ?? [];
+  expect(zhouInventory.length).toBeGreaterThanOrEqual(1);
+  expect(zhouInventory.some((stack) => stack.itemId === 'clean_water')).toBe(true);
+  expect(npcsAfter.find((npc) => npc.npcId === 'alin')?.inventory).toEqual([]);
+  expect(JSON.stringify(exported)).toContain('player_gift');
+  expect(errors).toEqual([]);
+});

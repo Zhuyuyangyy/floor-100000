@@ -33,14 +33,33 @@ export const ITEM_ICON_FILES: Record<ItemId, string> = {
 // tools/build-characters.mjs draws them instead, on one 32x48 canvas with a
 // shared foot baseline and one shared palette.
 //
-// Explicit rather than derived: the game asks for these four keys by literal
+// Explicit rather than derived: the game asks for these keys by literal
 // ('player', 'wanderer') or by expression (npc_alin / npc_xiaozhou), and a
 // missing entry has to be a compile error rather than a green placeholder box.
-export const CHARACTER_KEYS = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer'] as const;
+//
+// The four residents after the wanderer are different: they have no painted
+// sheet. Their walk cycles are baked from the palettes in walkcycle.ts, which is
+// what CharacterColors.bulk exists for — see LAOCHEN_COLORS. Keeping them in this
+// list still matters, because it is the single place that makes "a character the
+// game can draw" a finite, checked set.
+export const CHARACTER_KEYS = [
+  'player',
+  'npc_alin',
+  'npc_xiaozhou',
+  'wanderer',
+  'npc_laochen',
+  'npc_azhen',
+  'npc_daliu',
+  'npc_xiaoman',
+] as const;
 
 export type CharacterKey = (typeof CHARACTER_KEYS)[number];
 
-export const CHARACTER_FILES: Record<CharacterKey, string> = {
+// Only the painted four have a file. BootScene loads exactly what is listed
+// here, and bakeWalkSheets() fills in the rest — a null means "bake it", not
+// "missing". Typing this as Partial is deliberate: a new resident that forgets
+// to declare a sheet must not be a load of `assets/artpack/undefined.png`.
+export const CHARACTER_FILES: Partial<Record<CharacterKey, string>> = {
   player: 'char-player.png',
   npc_alin: 'char-alin.png',
   npc_xiaozhou: 'char-xiaozhou.png',

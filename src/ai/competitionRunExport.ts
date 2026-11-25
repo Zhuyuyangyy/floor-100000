@@ -1,19 +1,25 @@
 import type { AlinGiftScenarioResult } from '../scenarios/alinGiftDemo';
 import type { AlinRepairScenarioResult } from '../scenarios/alinRepairDemo';
+import type { SocialScenarioResult } from '../scenarios/socialNpcDemo';
 import { serializeCompetitionTrace, serializeCompetitionWorldState } from './competitionTrace';
 
 const EXPORT_FORMAT = 'floor-100000-competition-run';
 const EXPORT_VERSION = 1;
 
-type AlinScenarioResult = AlinGiftScenarioResult | AlinRepairScenarioResult;
-type AlinScenarioName = 'alin-gift' | 'alin-repair';
+/**
+ * 所有已接通的确定性场景结果。三者结构上共有 status/attempts/before/after/
+ * hashes/observation/proposal/validation/execution/feedback/reason，因此可以
+ * 走同一条导出管线；`scenario` 字段由调用方显式指定，绝不从数据里猜。
+ */
+type ExportableScenarioResult = AlinGiftScenarioResult | AlinRepairScenarioResult | SocialScenarioResult;
+type ScenarioName = 'alin-gift' | 'alin-repair' | 'social-gift';
 
 /**
  * Export only the deterministic, explicitly allow-listed competition projection.
- * Both current Alin adapters are local/offline paths; this deliberately never
- * claims Spark live, and the scenario result types carry no live-provider proof.
+ * Every current adapter is a local/offline path; this deliberately never claims
+ * Spark live, and the scenario result types carry no live-provider proof.
  */
-function serializeAlinRun(result: AlinScenarioResult, scenario: AlinScenarioName): string {
+function serializeScenarioRun(result: ExportableScenarioResult, scenario: ScenarioName): string {
   const feedback = result.feedback.map((event) => ({
     attempt: event.attempt,
     // `status` is a trace allow-listed key; `outcome` is not.
@@ -86,10 +92,20 @@ function serializeAlinRun(result: AlinScenarioResult, scenario: AlinScenarioName
 
 /** Serialize the Alin gift scenario as stable, redacted competition-run JSON. */
 export function serializeAlinGiftRun(result: AlinGiftScenarioResult): string {
-  return serializeAlinRun(result, 'alin-gift');
+  return serializeScenarioRun(result, 'alin-gift');
 }
 
 /** Serialize the Alin repair scenario as stable, redacted competition-run JSON. */
 export function serializeAlinRepairRun(result: AlinRepairScenarioResult): string {
-  return serializeAlinRun(result, 'alin-repair');
+  return serializeScenarioRun(result, 'alin-repair');
+}
+
+/**
+ * Serialize a multi-NPC (阿林 + 小周) gift run.
+ *
+ * 单独一个场景名是必须的：把小周的结果标成 `alin-gift` 会让导出文件说谎，
+ * 而这份 JSON 正是评审用来核对「到底谁被改变了」的证据。
+ */
+export function serializeSocialGiftRun(result: SocialScenarioResult): string {
+  return serializeScenarioRun(result, 'social-gift');
 }

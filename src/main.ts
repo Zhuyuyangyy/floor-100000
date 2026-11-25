@@ -36,9 +36,15 @@ async function boot(): Promise<void> {
   window.addEventListener('pointerdown', unlock, { once: true });
   window.addEventListener('keydown', unlock, { once: true });
 
-  // Dev-only handles so Playwright can assert on real game state (active scene,
-  // GameState) rather than just the DOM. Stripped from production builds.
-  if (import.meta.env.DEV) {
+  // Dev handles so Playwright can assert on real game state (active scene,
+  // GameState) rather than just the DOM.
+  //
+  // 生产包里默认**不暴露**：公开试玩的页面上不该出现内部句柄。但「生产形态
+  // 的自动化验证」又需要走位和读状态（见 e2e-live/），所以额外认一个显式的
+  // `?debug=1`。两者都只是只读句柄，不改变游戏行为，也不参与 AI 决策路径。
+  const debugViaQuery =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === '1';
+  if (import.meta.env.DEV || debugViaQuery) {
     const w = window as unknown as {
       __PHASER_GAME__?: Phaser.Game;
       __PHASER_SESSION__?: { getState: () => unknown };

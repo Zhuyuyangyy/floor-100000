@@ -147,19 +147,20 @@ import {
 import { getItem } from '../data/items';
 import { HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
-import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
+import { getNpc, npcsOnFloor, type NpcDef, type NpcId } from '../data/npcs';
 import { ALIN_REPAIR_MATERIALS, closedFloorGateForTransition, isAlinRepairGateOpen } from '../data/floorGates';
 import { trade } from '../systems/TradeSystem';
-import { aiNpcConfig, archetypeForNpcId, npcFactFromDef } from '../ai/config';
+import { aiNpcConfig, npcFactFromDef } from '../ai/config';
 import { OllamaBrain } from '../ai/brains/ollamaBrain';
 import { LocalPersonaBrain } from '../ai/brains/localPersonaBrain';
 import { OptionTreeBrain } from '../ai/brains/optionTreeBrain';
-import { createNpcState } from '../data/npcPersonalities';
+import { createNpcState, createNpcStateFor } from '../data/npcPersonalities';
 import { loadNpcState, recordMemory, saveNpcState } from '../systems/NpcMemory';
 import { decideNpcAction, isDialogueFresh, type DialogueSession, type NpcRuntimeConfig } from '../systems/NpcRuntime';
 import { runAlinRepairScenario, type AlinRepairScenarioResult } from '../scenarios/alinRepairDemo';
 import { runAlinGiftScenario, type AlinGiftScenarioResult } from '../scenarios/alinGiftDemo';
-import { serializeAlinGiftRun, serializeAlinRepairRun } from '../ai/competitionRunExport';
+import { runSocialGiftScenario, type SocialScenarioResult } from '../scenarios/socialNpcDemo';
+import { serializeAlinGiftRun, serializeAlinRepairRun, serializeSocialGiftRun } from '../ai/competitionRunExport';
 import {
   createWandererDecisionConfig,
   decideWandererIntent,
@@ -412,11 +413,13 @@ export class GameScene extends Phaser.Scene {
   private lastAlinRepairResult?: AlinRepairScenarioResult;
   /** Last gift result, exposed like the repair result for browser integration diagnostics. */
   lastAlinGiftResult?: AlinGiftScenarioResult;
+  /** 最近一次赠礼结果；阿林走单 NPC 场景，小周走多 NPC 场景。 */
+  lastGiftResult?: AlinGiftScenarioResult | SocialScenarioResult;
   private judgePanel?: HTMLElement;
   private judgePanelContent?: HTMLPreElement;
   private judgeExportButton?: HTMLButtonElement;
   private judgeExpanded = false;
-  private judgeLatestResult?: AlinGiftScenarioResult | AlinRepairScenarioResult;
+  private judgeLatestResult?: AlinGiftScenarioResult | AlinRepairScenarioResult | SocialScenarioResult;
   // Offline persona brain is the default. A configured local Ollama opts into
   // model-generated lines; the original greeting remains the fallback.
   private aiRuntimes = new Map<string, NpcRuntimeConfig>();
@@ -672,7 +675,8 @@ export class GameScene extends Phaser.Scene {
       this.drawBed();
       this.drawWorkbench();
     }
-    if (floor === NPC_FLOOR) this.drawNpcs();
+    // Any floor with residents gets them drawn; drawNpcs() filters by floor.
+    if (npcsOnFloor(floor).length > 0) this.drawNpcs();
     // OVERHAUL: the floor's question marks go up last, above the room.
     this.buildEncounterSpots();
 
@@ -889,7 +893,9 @@ export class GameScene extends Phaser.Scene {
     // their radii would hijack the key (measured: it silently broke the NPC
     // trade and the journey specs), so each spot is nudged clear first.
     const taken: number[] = [UP_EXIT_X, DOWN_EXIT_X, ...this.floorView.containers.map((c) => c.x)];
-    if (state.currentFloor === NPC_FLOOR) taken.push(...NPCS.map((n) => n.x));
+    // Residents on THIS floor. Using the whole roster would let a 5th-floor
+    // resident push a 2nd-floor question mark out of the way for no reason.
+    taken.push(...npcsOnFloor(state.currentFloor).map((n) => n.x));
     // OVERHAUL Wave C1: the trader joins the taken list so nothing lands on
     // top of him, and he is drawn after the spots so he reads above them.
     // The player arrives at ENTRY_X on every floor, so a trader placed there
@@ -3174,8 +3180,11 @@ export class GameScene extends Phaser.Scene {
 
   // ── NPCs & dialogue ─────────────────────────────────────────────────────
   private drawNpcs(): void {
-    for (const npc of NPCS) {
-      const who = npc.id === 'alin' ? 'npc_alin' : 'npc_xiaozhou';
+    // Every resident standing on this floor. The sprite comes from the data row:
+    // it used to be a hard-coded `id === 'alin' ? 'npc_alin' : 'npc_xiaozhou'`
+    // ternary, which silently drew every resident added after 小周 as 小周.
+    for (const npc of npcsOnFloor(getGame().currentFloor)) {
+      const who = npc.sprite;
       const sprite = this.add
         .sprite(npc.x, PLAYER_FEET_Y, walkSheetKey(who))
         .setOrigin(0.5, 1)
@@ -3188,14 +3197,33 @@ export class GameScene extends Phaser.Scene {
       // Same contact shadow as the player, so an NPC stands on the floor rather
       // than hovering a few pixels above it.
       const shadow = addContactShadow(this, npc.x, PLAYER_FEET_Y + 2, 26, 2, 0.5);
-      const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5);
+      // The name plate needs two things the sprite does not: a depth above the
+      // wall dressing and the dust haze, and a backing plate.
+      //
+      // Measured before this: the label was created with the default depth 0, so
+      // it sat UNDER the wall art (1-3) and the haze (25) and read as a ghost —
+      // technically visible, practically unreadable. Two residents made that easy
+      // to miss; four standing shoulder to shoulder made it obvious. Same
+      // treatment the trader's label already gets, and for the same reason.
+      const nameLabel = this.add
+        .text(npc.x, FLOOR_HEIGHT - 68, npc.name, {
+          fontFamily: FONT_FAMILY,
+          fontSize: '22px',
+          color: hex(TEXT.primary),
+          backgroundColor: '#0b0f12cc',
+          padding: { x: 4, y: 2 },
+        })
+        .setOrigin(0.5)
+        .setDepth(ACTOR_DEPTH + 1);
       this.floorObjects.push(...shadow, sprite, nameLabel);
     }
   }
 
   private nearestNpc(state: GameState): NpcDef | null {
-    if (state.currentFloor !== NPC_FLOOR) return null;
-    for (const npc of NPCS) {
+    // Residents only exist on their own floor now, so the old `floor === NPC_FLOOR`
+    // guard became "is there anyone here at all".
+    const residents = npcsOnFloor(state.currentFloor);
+    for (const npc of residents) {
       if (Math.abs(npc.x - state.player.x) <= INTERACT_DISTANCE) return npc;
     }
     return null;
@@ -3389,16 +3417,21 @@ export class GameScene extends Phaser.Scene {
       execution: event.execution?.status ?? 'not-executed',
     }));
     const repair = 'decisionSource' in result;
+    // 赠礼既可能来自阿林（单 NPC 场景），也可能来自小周（多 NPC 场景）。
+    // 面板必须报真实焦点，不能把两个人的记录都标成阿林。
+    const focusNpcId = 'focusNpcId' in result ? result.focusNpcId : 'alin';
+    const focusName = getNpc(focusNpcId).name;
     const actualStateDelta = result.execution?.status === 'completed' ? result.execution.actualStateDelta : null;
     const replan = result.feedback.some((event) => event.outcome === 'executed' &&
       result.feedback.some((prior) => prior.attempt < event.attempt &&
         (prior.outcome === 'validation_rejected' || prior.outcome === 'execution_failed') &&
         prior.proposal !== undefined && JSON.stringify(prior.proposal) !== JSON.stringify(event.proposal)));
+    const focusSnapshot = result.after.npcs.find((npc) => npc.npcId === focusNpcId);
     const evidence = {
       mode: repair ? result.decisionSource : 'offline-fallback',
       seed: result.before.seed,
-      npc: '阿林',
-      target: result.observation.world.npcs.find((npc) => npc.npcId === 'alin')?.goal ?? null,
+      npc: focusName,
+      target: focusSnapshot?.goal ?? null,
       status: result.status,
       attempts: result.attempts,
       observation: result.observation,
@@ -3412,8 +3445,8 @@ export class GameScene extends Phaser.Scene {
         ? '未提交：没有已完成的 execution / actual state delta'
         : { committed: true, delta: actualStateDelta, after: result.after },
       memoryAndEventFeedback: {
-        before: result.before.npcs.find((npc) => npc.npcId === 'alin')?.memory ?? [],
-        after: result.after.npcs.find((npc) => npc.npcId === 'alin')?.memory ?? [],
+        before: result.before.npcs.find((npc) => npc.npcId === focusNpcId)?.memory ?? [],
+        after: focusSnapshot?.memory ?? [],
         events: feedback,
       },
       replan,
@@ -3430,7 +3463,11 @@ export class GameScene extends Phaser.Scene {
     const result = this.judgeLatestResult;
     if (!result) return;
     // Export only the scenario's redacted, allow-listed projection, never GameState.
-    const serialized = 'decisionSource' in result ? serializeAlinRepairRun(result) : serializeAlinGiftRun(result);
+    const isRepair = 'decisionSource' in result;
+    const isSocial = 'focusNpcId' in result;
+    const serialized = isRepair
+      ? serializeAlinRepairRun(result)
+      : isSocial ? serializeSocialGiftRun(result) : serializeAlinGiftRun(result);
     const safeRun = JSON.parse(serialized) as {
       world?: { stateBefore?: unknown; stateAfter?: unknown };
       hashes?: unknown;
@@ -3451,7 +3488,8 @@ export class GameScene extends Phaser.Scene {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `alin-${'decisionSource' in result ? 'repair' : 'gift'}-seed-${result.before.seed}.json`;
+    const name = isRepair ? 'alin-repair' : isSocial ? `social-${result.focusNpcId}-gift` : 'alin-gift';
+    anchor.download = `${name}-seed-${result.before.seed}.json`;
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -3459,10 +3497,14 @@ export class GameScene extends Phaser.Scene {
   // Label + icon key per dialogue option. The icon is the item the player
   // RECEIVES (the trade's output), matching how the crafting list shows outputs;
   // 问候/询问/退出/返回 are not items and get no icon.
-  private giftableAlinStacks() {
+  //
+  // 阿林有维修门需求，所以修门材料要从赠礼列表里留出来（否则玩家会把自己
+  // 刚攒好的材料送出去、门再也修不成）。小周没有配方需求，全部可赠。
+  private giftableStacks(npcId: NpcId) {
     const game = getGame();
     const slots = game.player.inventory.slots;
     const giftable = slots.filter((stack) => stack.meta === undefined);
+    if (npcId !== 'alin') return giftable;
     if (isAlinRepairGateOpen(game)) return giftable;
 
     const required = new Map(ALIN_REPAIR_MATERIALS.map((stack) => [stack.itemId, stack.quantity]));
@@ -3480,11 +3522,15 @@ export class GameScene extends Phaser.Scene {
     const d = this.dialogue;
     if (!d) return [];
     if (d.level === 'main') {
-      const labels = d.npc === 'alin' ? ['赠礼', '维修门计划', '交易', '退出'] : ['问候', '询问', '交易', '退出'];
+      // 位置 1/2/3 被 E2E 依赖（询问=1、交易=2），所以只把位置 0 换掉：
+      // 阿林是「赠礼」，小周从「问候」改成「赠礼」，「询问/交易/退出」不动。
+      const labels = d.npc === 'alin'
+        ? ['赠礼', '维修门计划', '交易', '退出']
+        : ['赠礼', '询问', '交易', '退出'];
       return labels.map((label) => ({ label }));
     }
     if (d.level === 'gift') {
-      const stacks = this.giftableAlinStacks();
+      const stacks = this.giftableStacks(d.npc);
       if (stacks.length === 0) return [{ label: '背包没有可赠送物品' }, { label: '返回' }];
       const start = this.dialogueGiftPage * 3;
       const visible = stacks.slice(start, start + 3);
@@ -3514,9 +3560,20 @@ export class GameScene extends Phaser.Scene {
     if (!cfg.enabled) return null;
     let runtime = this.aiRuntimes.get(npc.id);
     if (!runtime) {
+      // 三种模式：proxy（公开部署，同域后端持 Key）、ollama（直连本机/Spark）、
+      // offline（确定性规则人格）。proxy 与 ollama 只差传输层，裁决层不变。
+      const useModel = cfg.mode === 'ollama' || cfg.mode === 'proxy';
       runtime = {
-        brain: cfg.mode === 'ollama'
-          ? new OllamaBrain({ baseUrl: cfg.baseUrl, model: cfg.model, timeoutMs: cfg.timeoutMs })
+        brain: useModel
+          ? new OllamaBrain({
+              baseUrl: cfg.baseUrl,
+              model: cfg.model,
+              timeoutMs: cfg.timeoutMs,
+              maxOutputTokens: cfg.maxOutputTokens,
+              disableThinking: cfg.disableThinking,
+              proxyMode: cfg.proxyMode,
+              sessionId: cfg.sessionId,
+            })
           : new LocalPersonaBrain(),
         // 降级脑给该 NPC 自己的第一句问候——Spark 不可达时玩家看到的就是
         // 改造前那一句，这是护栏 2 的场景侧落地。
@@ -3533,7 +3590,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private npcStateFor(npc: NpcDef): NpcPersistedState {
-    return loadNpcState(getGame(), npc.id) ?? createNpcState(archetypeForNpcId(npc.id));
+    // Individual profile first: two residents sharing an archetype must not share
+    // a personality, or every neutral neighbour speaks in the same voice.
+    return loadNpcState(getGame(), npc.id) ?? createNpcStateFor(npc.id);
   }
 
   /** 当前对话的保鲜键；没有打开的对话时为 null。 */
@@ -3677,7 +3736,7 @@ export class GameScene extends Phaser.Scene {
     d.messageSource = 'script';
     const npc = getNpc(d.npc);
     if (d.level === 'gift') {
-      const stacks = this.giftableAlinStacks();
+      const stacks = this.giftableStacks(d.npc);
       if (stacks.length === 0) {
         if (d.selected === 1) {
           d.level = 'main';
@@ -3693,14 +3752,14 @@ export class GameScene extends Phaser.Scene {
       if (d.selected < visibleCount) {
         const stack = stacks[start + d.selected];
         if (stack) {
-          void this.runAlinGiftPlan(npc, { sessionId: d.sessionId, revision: d.revision }, stack.itemId);
+          void this.runGiftPlan(npc, { sessionId: d.sessionId, revision: d.revision }, stack.itemId);
           return;
         }
       } else if (d.selected === visibleCount) {
         if (start + 3 < stacks.length) {
           this.dialogueGiftPage += 1;
           d.selected = 0;
-          d.message = '选择一件赠送给阿林的物品';
+          d.message = `选择一件赠送给${npc.name}的物品`;
         } else {
           d.level = 'main';
           this.dialogueGiftPage = 0;
@@ -3714,15 +3773,10 @@ export class GameScene extends Phaser.Scene {
     if (d.level === 'main') {
       switch (d.selected) {
         case 0:
-          if (npc.id === 'alin') {
-            d.level = 'gift';
-            this.dialogueGiftPage = 0;
-            d.selected = 0;
-            d.message = '选择一件赠送给阿林的物品';
-          } else {
-            d.message = npc.greetings[d.lineToggle % npc.greetings.length];
-            d.lineToggle++;
-          }
+          d.level = 'gift';
+          this.dialogueGiftPage = 0;
+          d.selected = 0;
+          d.message = `选择一件赠送给${npc.name}的物品`;
           break;
         case 1:
           if (npc.id === 'alin') {
@@ -3763,16 +3817,21 @@ export class GameScene extends Phaser.Scene {
     this.refreshDialogue();
   }
 
-  private async runAlinGiftPlan(npc: NpcDef, captured: DialogueSession, itemId: ItemId): Promise<void> {
+  private async runGiftPlan(npc: NpcDef, captured: DialogueSession, itemId: ItemId): Promise<void> {
     const current = this.dialogue;
-    if (!current || current.npc !== npc.id || npc.id !== 'alin' || this.dialogueGiftPending) return;
+    if (!current || current.npc !== npc.id || this.dialogueGiftPending) return;
     this.dialogueGiftPending = true;
     current.messageSource = 'competition-offline';
     current.message = '赠礼提案 → 规则校验 → 状态提交…';
     this.refreshDialogue();
     try {
-      const result = await runAlinGiftScenario(getGame(), itemId, 1);
-      this.lastAlinGiftResult = result;
+      // 阿林走既有的单 NPC 场景（保留其修门材料与门禁语义）；小周走多 NPC
+      // 场景，两者共用同一条「提案 → 校验 → 执行 → 落盘」链路。
+      const result = npc.id === 'alin'
+        ? await runAlinGiftScenario(getGame(), itemId, 1)
+        : await runSocialGiftScenario(getGame(), npc.id, itemId, 1);
+      if (npc.id === 'alin') this.lastAlinGiftResult = result;
+      this.lastGiftResult = result;
       this.judgeLatestResult = result;
       this.refreshJudgeModePanel();
       // Persist the committed state even if the player closed the dialogue while
@@ -3780,7 +3839,7 @@ export class GameScene extends Phaser.Scene {
       saveToStorage(getGame());
       this.refreshInventory();
       if (!isDialogueFresh(this.currentDialogueSession(), captured)) return;
-      const trust = result.after.npcs[0]?.trust ?? 35;
+      const trust = result.after.npcs.find((entry) => entry.npcId === npc.id)?.trust ?? 35;
       current.message = result.status === 'executed'
         ? `赠送${getItem(itemId).displayName}×1成功｜信任${trust}`
         : result.reason;

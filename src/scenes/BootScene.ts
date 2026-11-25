@@ -62,8 +62,11 @@ export class BootScene extends Phaser.Scene {
       this.load.image(key, `assets/artpack/${file}`);
     }
 
-    // The four characters are drawn by tools/build-characters.mjs, not baked here.
+    // The four painted characters are drawn by tools/build-characters.mjs. The
+    // other residents have no file: CHARACTER_FILES leaves them out on purpose
+    // and bakeWalkSheets() builds their sheets from palettes instead.
     for (const [key, file] of Object.entries(CHARACTER_FILES)) {
+      if (!file) continue;
       this.load.image(key, `assets/artpack/${file}`);
     }
 

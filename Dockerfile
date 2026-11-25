@@ -10,21 +10,36 @@
 #   构建阶段用 --build-arg 都拿不到它，因为它压根没在构建期被引用。
 
 # ── 构建阶段 ────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS build
+# 用 debian slim 而不是 alpine：rolldown / lightningcss 都带原生二进制，
+# 在 musl 上要靠可选依赖挑到 musl 版本，任何解析偏差都会变成云端构建失败。
+# 云端构建的失败成本远高于多出来的几十 MB 镜像。
+FROM node:22-slim AS build
 WORKDIR /app
 
 # 先只拷贝依赖清单：源码改动不会让依赖层失效。
 COPY package.json package-lock.json ./
+# ELECTRON_SKIP_BINARY_DOWNLOAD / PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD：
+# devDependencies 里的 electron、electron-builder、@playwright/test 在构建阶段
+# 一个都用不到（只是 `npx vite build`），但它们各自的 postinstall 会去外网
+# 拉上百 MB 二进制。容器内一旦拉不动就是整次构建失败，而且耗时不可控。
+# 跳过下载即可，包本身仍在，`vite build` 不受影响。
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1 \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    npm_config_audit=false \
+    npm_config_fund=false
 RUN npm ci --no-audit --no-fund
 
 # 拷贝构建所需文件后产出 dist。
+# config/ 必须在列：src/core/config.ts 直接 import 了 ../config/game-balance.json，
+# 漏掉这一行会在 `vite build` 阶段报「Could not resolve」——云端构建直接失败。
 COPY tsconfig.json vite.config.ts index.html ./
+COPY config ./config
 COPY public ./public
 COPY src ./src
 RUN npx vite build
 
 # ── 运行阶段 ────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS runtime
+FROM node:22-slim AS runtime
 WORKDIR /app
 
 # 只带运行必需的东西：静态产物 + 代理进程。没有 src、没有 devDependencies。

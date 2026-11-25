@@ -137,7 +137,12 @@ async function decide(clientId, extra = {}) {
     ...overrides,
   });
 
-  const askRepair = async (extra = {}) => {
+  // repairOverrides 必须落在 repair 里，不能展开到请求体顶层。
+  // 之前这里是 `repair: repairBody(), ...extra`，于是 `askRepair({ playerHas: [...] })`
+  // 往请求体顶上塞了一个没人读的 playerHas，而 repair 仍是默认的「材料齐备」——
+  // 那条「缺料时不该声称能修」的检查从头到尾都没测到缺料，模型回答 repair_gate
+  // 是正确行为，却被记成缺陷。
+  const askRepair = async ({ repairOverrides = {}, ...extra } = {}) => {
     const t0 = Date.now();
     const res = await fetch(`${BASE}/api/npc/decide`, {
       method: 'POST',
@@ -158,7 +163,9 @@ async function decide(clientId, extra = {}) {
           availableActions: ['dialogue'],
           recentEvents: [],
         },
-        repair: repairBody(),
+        repair: repairBody(repairOverrides),
+        // 其余键照旧摊到请求体顶层：越权注入检查（prompt/instructions/system）
+        // 测的正是「客户端把提示词塞在顶层能不能接管推理」，必须真的发出去。
         ...extra,
       }),
     });
@@ -193,7 +200,7 @@ async function decide(clientId, extra = {}) {
   // 材料不足时，服务端必须在提示里说缺什么——否则模型无从重规划。
   // 这条从外部无法直接复查提示词，所以改验行为：给它一份缺料的输入，
   // 模型至少不该声称能修（若它仍返回 repair_gate，说明事实没传达到，是真缺陷）。
-  const short = await askRepair({ playerHas: [{ itemId: 'wood', quantity: 2 }] });
+  const short = await askRepair({ repairOverrides: { playerHas: [{ itemId: 'wood', quantity: 2 }] } });
   let shortIntent = null;
   try {
     shortIntent = JSON.parse(short.body?.text ?? '{}');

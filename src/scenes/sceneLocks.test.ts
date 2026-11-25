@@ -56,6 +56,10 @@ describe('重入锁生命周期：每条退出路径都要放锁', () => {
   });
 
   it('runAlinRepairPlan 与 runBlackoutRepairPlan 都有 finally 放锁', () => {
+    // 这两个窗口是按方法体实测长度定的，不是随手拍的数：
+    // 截到 `finally` 分别是 504 / 1104 字符，截到放锁语句是 2959 / 1121。
+    // 余量最小的是 alin 那条（还剩 41 字符）。所以方法体里加长注释时，宁可压缩
+    // 注释，也不要加窗口——加窗口只是把红推后，下一次照样会撞上。
     const alin = sliceFrom('private async runAlinRepairPlan(', 3000);
     expect(alin).toMatch(/finally\s*\{[\s\S]{0,200}?this\.repairInFlight = false;/);
 

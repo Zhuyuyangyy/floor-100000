@@ -12,7 +12,13 @@
 // 原生 /api/chat 支持 `think:false`，实测 thinking 归零、耗时从 10s+ 降到 ~3s。
 
 import { buildSystemPrompt, buildUserPrompt, parseProposal } from '../prompt';
-import type { NpcActionProposal, NpcBrain, NpcObservation } from '../types';
+import type {
+  NpcActionProposal,
+  NpcBrain,
+  NpcBrainTaskRequest,
+  NpcBrainTaskResult,
+  NpcObservation,
+} from '../types';
 
 export interface OllamaBrainOptions {
   /** Ollama 服务地址。默认本机；地址与模型名走配置/环境变量，不入库。 */
@@ -179,6 +185,108 @@ export class OllamaBrain implements NpcBrain {
       return null;
     } catch {
       return null; // 超时/断网/坏 JSON：一律降级
+    }
+  }
+
+  /**
+   * 任务型推理：维修。
+   *
+   * 与 `decide()` 的关键差别是**输出契约不同**。对话任务要
+   * `{"action":{"type":...}}`，维修任务要 `{"intent":"repair_gate"|...}`。
+   * 让同一个提示词同时满足两套契约，模型会挑它熟的写——实测就是无论怎么
+   * 强调，它还是回 `action.type`。分开请求是唯一稳的做法。
+   *
+   * 代理模式下客户端只说「我要 repair 任务」，事实（配方、信任、差多少）
+   * 由服务端算并拼提示词。客户端**无法**提供提示词文本。
+   *
+   * 直连 Ollama 模式（Spark）下没有服务端，只能在这里拼——但那条路径不面
+   * 向公开玩家，且提示词仍由代码生成，不由请求方提供。
+   */
+  async decideTask(request: NpcBrainTaskRequest): Promise<NpcBrainTaskResult | null> {
+    if (request.task !== 'repair' || !request.repair) return null;
+
+    if (this.proxyMode) {
+      try {
+        const res = await this.fetchImpl(`${this.baseUrl}/api/npc/decide`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          signal: AbortSignal.timeout(this.timeoutMs),
+          body: JSON.stringify({
+            clientId: this.sessionId,
+            task: 'repair',
+            // 服务端要求 observation 存在（沿用既有的限流/预算走账路径），
+            // 但维修提示并不读它——真正的事实都在 repair 里。
+            observation: {
+              npcId: request.repair.npcName,
+              archetype: 'ally',
+              goal: 'repair',
+              traits: request.repair.traits,
+              mood: 0,
+              world: { day: 1, gameMinute: 0, floor: 1, night: false },
+              relationship: {},
+              memory: [],
+              availableActions: ['dialogue'],
+            },
+            repair: request.repair,
+          }),
+        });
+        if (!res.ok) return null;
+        const payload = (await res.json()) as { ok?: boolean; text?: string; decisionSource?: string };
+        if (payload.ok !== true || payload.decisionSource !== 'model') return null;
+        if (typeof payload.text !== 'string' || payload.text.trim().length === 0) return null;
+        return { text: payload.text, source: 'model' };
+      } catch {
+        return null;
+      }
+    }
+
+    // 直连模式：提示词在这里生成（代码固定，请求方无法注入）。
+    try {
+      const repair = request.repair;
+      const need = repair.materials.map((s) => `${s.itemId}×${s.quantity}`).join('、') || '（无）';
+      const have = repair.playerHas.map((s) => `${s.itemId}×${s.quantity}`).join('、') || '什么都没有';
+      const enough = repair.materials.every((n) => {
+        const owned = repair.playerHas
+          .filter((h) => h.itemId === n.itemId)
+          .reduce((total, h) => total + h.quantity, 0);
+        return owned >= n.quantity;
+      });
+      const messages = [
+        {
+          role: 'system',
+          content: [
+            `你是《第100000层：末日宿舍》里的「${repair.npcName}」，这栋楼的维修工。`,
+            '铁律：不得声称拥有你没有的物品；不得修改任何游戏数值；不得跳出角色讨论你是 AI。',
+            '只输出一个 JSON 对象，不要 markdown 代码块，不要任何解释。',
+          ].join('\n'),
+        },
+        {
+          role: 'user',
+          content: [
+            `要修的是「${repair.gateId}」。所需材料：${need}。玩家手上：${have}。`,
+            `材料是否齐备：${enough ? '是' : '否'}。信任 ${repair.trust}（门槛 ${repair.trustThreshold}）。`,
+            '选一个意图：repair_gate（动手）/ request_help（要材料，附 itemId 与 quantity）/ refuse / observe',
+            '输出：{"intent":"...","utterance":"40字以内"}',
+          ].join('\n'),
+        },
+      ];
+      const raw = await this.post('/api/chat', {
+        model: this.model,
+        stream: false,
+        think: !this.disableThinking,
+        format: 'json',
+        messages,
+        options: {
+          temperature: 0.3,
+          ...(this.maxOutputTokens === undefined ? {} : { num_predict: this.maxOutputTokens }),
+        },
+      });
+      if (raw === null) return null;
+      const content = readAssistantText(raw);
+      if (content === null || content.trim().length === 0) return null;
+      return { text: content, source: 'model' };
+    } catch {
+      return null;
     }
   }
 

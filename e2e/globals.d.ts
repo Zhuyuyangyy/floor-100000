@@ -46,6 +46,15 @@ declare global {
       };
     };
     __PHASER_SESSION__?: { getState: () => E2EGameState | null };
+    /**
+     * 生产构建（`?debug=1`）下唯一的**写**通道。
+     *
+     * dev 包的 __PHASER_SESSION__ 直接返回活对象，读和写都能做；生产包的
+     * getState() 返回深拷贝快照，写它不会回写游戏。e2e-live 需要「瞬移到
+     * 楼梯口」这类夹具，所以走这个语义显式的入口，避免把「读状态」和
+     * 「改进程内状态」混在同一个名字下。
+     */
+    __PHASER_TEST_MUTATE__?: (mutator: (state: E2EGameState) => void) => void;
     __PHASER_TOWER__?: unknown;
   }
 }

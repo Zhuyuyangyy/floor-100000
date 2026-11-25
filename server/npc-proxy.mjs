@@ -127,6 +127,15 @@ function sweepSessions() {
 // ── 观察对象校验：白名单，字段级 ────────────────────────────────────────────
 const ACTION_KINDS = new Set(['dialogue', 'trade', 'gift', 'refuse', 'attack', 'flee']);
 
+/**
+ * 服务端内置的任务。客户端只能**选择**任务，永远不能提供提示词文本。
+ *
+ * 这是这个代理的存在理由：一旦允许客户端传 prompt，它就从「受控推理入口」
+ * 变成了「任何人都能免费调用的模型代理」——正是用户明确禁止的形态。
+ * 加任务时改这里，不要改协议。
+ */
+const TASKS = new Set(['dialogue', 'repair']);
+
 const LIMITS = {
   npcId: 64,
   archetype: 32,
@@ -137,6 +146,8 @@ const LIMITS = {
   relationshipKeys: 16,
   items: 24,
   stringField: 120,
+  /** 维修配方与玩家库存的条数上限；超出的截断而不是拒绝。 */
+  repairMaterials: 8,
 };
 
 function isPlainObject(value) {
@@ -265,6 +276,61 @@ const ACTION_SPEC = [
   '{"action":{"type":"flee"},"confidence":0.5}',
 ].join('\n  ');
 
+/**
+ * 维修任务的输出契约。
+ *
+ * 刻意与对话任务分开：维修的意图必须是显式的 `intent` 字段，不能再靠
+ * 「回复里有没有『门』字」猜。客户端那层的关键词推断已经删掉了，服务端
+ * 这边也不能留一条后门。
+ */
+const REPAIR_SPEC = [
+  '{"intent":"repair_gate","utterance":"现在动手。"}',
+  '{"intent":"request_help","itemId":"tape","quantity":1,"utterance":"还缺一卷胶带。"}',
+  '{"intent":"refuse","utterance":"材料不够，我不动这门。"}',
+  '{"intent":"observe","utterance":"我先看看线路。"}',
+].join('\n  ');
+
+/** 维修任务专用的提示。事实（够不够、信任多少）由服务端算好摆出来。 */
+function buildRepairMessages(repair) {
+  const need = repair.materials.map((s) => `${s.itemId}×${s.quantity}`).join('、') || '（无）';
+  const have = repair.playerHas.map((s) => `${s.itemId}×${s.quantity}`).join('、') || '什么都没有';
+  const enough = repair.materials.every((n) => {
+    const owned = repair.playerHas
+      .filter((h) => h.itemId === n.itemId)
+      .reduce((total, h) => total + h.quantity, 0);
+    return owned >= n.quantity;
+  });
+  const trustOk = repair.trust >= repair.trustThreshold;
+
+  const system = [
+    `你是《第100000层：末日宿舍》里的「${repair.npcName}」，这栋楼的维修工。`,
+    `人格：利他${Math.round(repair.traits.altruism * 100)}/务实${Math.round(repair.traits.pragmatism * 100)}/谨慎${Math.round(repair.traits.caution * 100)}。`,
+    '铁律：不得声称拥有你没有的物品；不得修改任何游戏数值；不得跳出角色讨论你是 AI。',
+    '只输出一个 JSON 对象，不要 markdown 代码块，不要任何解释。',
+  ].join('\n');
+
+  const user = [
+    `要修的是「${repair.gateId}」。`,
+    `所需材料：${need}。`,
+    `玩家手上现有一共：${have}。`,
+    `材料是否齐备：${enough ? '是' : '否'}。`,
+    `你对这个玩家的信任：${repair.trust}（愿意一起干活的门槛 ${repair.trustThreshold}）。`,
+    repair.previousRejectedReason ? `上一轮提案被拒绝，原因：${repair.previousRejectedReason}。` : '',
+    '按上面的实际情况选一个意图：',
+    '  repair_gate  = 现在就动手（只在材料齐且信任达标时选）',
+    '  request_help = 缺东西，请玩家去找（必须给 itemId 与 quantity）',
+    '  refuse       = 你不愿意或判断不该修',
+    '  observe      = 先观察，暂不行动',
+    '输出契约（任选其一）：',
+    `  ${REPAIR_SPEC}`,
+  ].filter(Boolean).join('\n');
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ];
+}
+
 function buildMessages(obs) {
   const traits = obs.traits;
   const pct = (n) => Math.round(n * 100);
@@ -296,8 +362,69 @@ function buildMessages(obs) {
   ];
 }
 
+// ── 维修任务校验 ───────────────────────────────────────────────────────────
+/**
+ * 维修任务的输入比对话窄得多，所以单独校验、单独重建。
+ *
+ * 白名单重建的意义：客户端塞进来的任何额外字段都不会到模型跟前。特别是
+ * `trust` 与 `materials`——如果让客户端自己报「我信任 100、只需要一块木头」，
+ * 这个校验就白做了。
+ */
+function sanitizeRepair(raw) {
+  if (!isPlainObject(raw)) return { error: 'repair_not_object' };
+  if (!boundedString(raw.gateId, LIMITS.stringField)) return { error: 'bad_gateId' };
+  if (!boundedString(raw.npcName, LIMITS.stringField)) return { error: 'bad_npcName' };
+
+  if (!isPlainObject(raw.traits)) return { error: 'bad_traits' };
+  const traits = {};
+  for (const key of ['altruism', 'pragmatism', 'aggression', 'loyalty', 'caution']) {
+    if (!unitNumber(raw.traits[key])) return { error: `bad_trait_${key}` };
+    traits[key] = raw.traits[key];
+  }
+
+  if (!finiteNumber(raw.trust) || raw.trust < 0 || raw.trust > 100) return { error: 'bad_trust' };
+  if (!finiteNumber(raw.trustThreshold) || raw.trustThreshold < 0 || raw.trustThreshold > 100) {
+    return { error: 'bad_trustThreshold' };
+  }
+
+  const materials = [];
+  if (Array.isArray(raw.materials)) {
+    for (const stack of raw.materials.slice(0, LIMITS.repairMaterials)) {
+      if (!isPlainObject(stack)) continue;
+      if (!boundedString(stack.itemId, LIMITS.stringField)) continue;
+      if (!finiteNumber(stack.quantity) || stack.quantity < 1) continue;
+      materials.push({ itemId: stack.itemId, quantity: Math.floor(stack.quantity) });
+    }
+  }
+  if (materials.length === 0) return { error: 'empty_materials' };
+
+  const playerHas = [];
+  if (Array.isArray(raw.playerHas)) {
+    for (const stack of raw.playerHas.slice(0, LIMITS.items)) {
+      if (!isPlainObject(stack)) continue;
+      if (!boundedString(stack.itemId, LIMITS.stringField)) continue;
+      if (!finiteNumber(stack.quantity) || stack.quantity < 1) continue;
+      playerHas.push({ itemId: stack.itemId, quantity: Math.floor(stack.quantity) });
+    }
+  }
+
+  const repair = {
+    gateId: raw.gateId,
+    npcName: raw.npcName,
+    traits,
+    trust: raw.trust,
+    trustThreshold: raw.trustThreshold,
+    materials,
+    playerHas,
+  };
+  if (boundedString(raw.previousRejectedReason, LIMITS.memorySummary)) {
+    repair.previousRejectedReason = raw.previousRejectedReason;
+  }
+  return { repair };
+}
+
 // ── 上游调用 ───────────────────────────────────────────────────────────────
-async function callUpstream(observation) {
+async function callUpstream(observation, task = 'dialogue', repair = null) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CONFIG.requestTimeoutMs);
   try {
@@ -309,7 +436,7 @@ async function callUpstream(observation) {
       },
       body: JSON.stringify({
         model: CONFIG.model,
-        messages: buildMessages(observation),
+        messages: task === 'repair' ? buildRepairMessages(repair) : buildMessages(observation),
         max_tokens: CONFIG.maxTokens,
         temperature: 0.8,
         stream: false,
@@ -486,8 +613,21 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // 任务选择：客户端只能从枚举里挑，不能给文本。
+    // 未声明任务一律按 dialogue 处理，保持对旧客户端的兼容。
+    const task = typeof body.task === 'string' && TASKS.has(body.task) ? body.task : 'dialogue';
+    let repair = null;
+    if (task === 'repair') {
+      const checked = sanitizeRepair(body.repair);
+      if (checked.error) {
+        sendJson(res, 400, { ok: false, reason: checked.error });
+        return;
+      }
+      repair = checked.repair;
+    }
+
     daily.count += 1;
-    const result = await callUpstream(sanitized.observation);
+    const result = await callUpstream(sanitized.observation, task, repair);
     if (!result.ok) {
       recordFailure();
       sendJson(res, 503, {

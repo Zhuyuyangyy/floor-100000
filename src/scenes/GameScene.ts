@@ -154,10 +154,12 @@ import { aiNpcConfig, npcFactFromDef } from '../ai/config';
 import { OllamaBrain } from '../ai/brains/ollamaBrain';
 import { LocalPersonaBrain } from '../ai/brains/localPersonaBrain';
 import { OptionTreeBrain } from '../ai/brains/optionTreeBrain';
-import { createNpcState, createNpcStateFor } from '../data/npcPersonalities';
+import { createNpcState, createNpcStateFor, NPC_PROFILES } from '../data/npcPersonalities';
 import { loadNpcState, recordMemory, saveNpcState } from '../systems/NpcMemory';
 import { decideNpcAction, isDialogueFresh, type DialogueSession, type NpcRuntimeConfig } from '../systems/NpcRuntime';
-import { runAlinRepairScenario, type AlinRepairScenarioResult } from '../scenarios/alinRepairDemo';
+import { runAlinRepairScenario, type AlinRepairModelPort, type AlinRepairScenarioResult } from '../scenarios/alinRepairDemo';
+import { parseRepairIntent, type RepairIntentDecision } from '../ai/repairIntent';
+import { COMPETITION_TRUST_THRESHOLDS } from '../ai/competitionRules';
 import { runAlinGiftScenario, type AlinGiftScenarioResult } from '../scenarios/alinGiftDemo';
 import { runSocialGiftScenario, type SocialScenarioResult } from '../scenarios/socialNpcDemo';
 import { serializeAlinGiftRun, serializeAlinRepairRun, serializeSocialGiftRun } from '../ai/competitionRunExport';
@@ -411,6 +413,8 @@ export class GameScene extends Phaser.Scene {
   private dialogueGiftPending = false;
   /** Last deterministic competition result, available to Phaser integration tests. */
   private lastAlinRepairResult?: AlinRepairScenarioResult;
+  /** 最近一次模型对维修表达的意图（含拒绝），供对话文案如实显示。 */
+  private lastRepairIntentNote?: RepairIntentDecision;
   /** Last gift result, exposed like the repair result for browser integration diagnostics. */
   lastAlinGiftResult?: AlinGiftScenarioResult;
   /** 最近一次赠礼结果；阿林走单 NPC 场景，小周走多 NPC 场景。 */
@@ -3856,6 +3860,78 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** Run the A6 observe/plan/validate/executor loop without inventing costs. */
+  /**
+   * 把模型接进维修决策的那个端口。
+   *
+   * 返回 undefined 表示「不接管」——配置关闭或模型不可用时，场景走它原本的
+   * 离线路径，玩家体验与改造前完全一致。返回一个函数才表示由模型决定修不修。
+   *
+   * 三条硬边界，缺一条这次改造就只是换了个说法：
+   *
+   * 1. **模型不能自己决定维修成功**。它产出的只是一个 proposal，材料清单来自
+   *    服务端配方（`input.materials`），validator 仍会独立核对身份与数量。
+   * 2. **模型说「不修」必须真的不修**。返回 null 就是拒绝，场景侧不许用 fallback
+   *    把它补回来——否则模型说完「材料不足我不能修」，门却开了。
+   * 3. **模型挂了不能卡住玩家**。请求失败时返回 null 并抛给上层的降级路径处理，
+   *    但这条路径的产出会在 decisionSource 里被标成 offline-fallback，不冒充模型。
+   */
+  private buildRepairProposalPort(npc: NpcDef): AlinRepairModelPort | undefined {
+    const runtime = this.getAiRuntime(npc);
+    if (!runtime) return undefined;
+    const cfg = aiNpcConfig();
+    if (cfg.mode !== 'ollama' && cfg.mode !== 'proxy') return undefined;
+    // 大脑没实现任务型推理（本地规则脑、回放脑）就不接管，退回离线路径。
+    const brain = runtime.brain;
+    if (typeof brain.decideTask !== 'function') return undefined;
+
+    return async (input) => {
+      const profile = NPC_PROFILES[npc.id];
+      const trust = input.observation.world.npcs[0]?.trust ?? 35;
+      const rejection = input.previousFeedback?.validation;
+      const previousRejectedReason = rejection && !rejection.accepted
+        ? (rejection.reason === 'missing_item' ? '材料不足'
+          : rejection.reason === 'low_trust' ? '信任不足'
+            : (rejection.detailCode ?? rejection.reason))
+        : undefined;
+
+      const result = await brain.decideTask!({
+        task: 'repair',
+        repair: {
+          gateId: input.gateId,
+          npcName: npc.name,
+          traits: { ...(profile?.traits ?? { altruism: 0.5, pragmatism: 0.5, aggression: 0.1, loyalty: 0.5, caution: 0.5 }) },
+          trust,
+          trustThreshold: COMPETITION_TRUST_THRESHOLDS.repairGate,
+          materials: input.materials.map((stack) => ({ itemId: stack.itemId, quantity: stack.quantity })),
+          playerHas: input.observation.world.player.inventory.map((stack: { itemId: string; quantity: number }) => ({ itemId: stack.itemId, quantity: stack.quantity })),
+          ...(previousRejectedReason ? { previousRejectedReason } : {}),
+        },
+      });
+
+      // 模型没答上来（超时/不可达/降级）：返回 null，让场景的 fallback 接管。
+      // 注意这跟「模型说不动」是两回事——这条路径的产出会被标成 offline-fallback。
+      if (!result || result.source !== 'model') return null;
+
+      const decision = parseRepairIntent(result.text);
+      if (!decision) return null;
+
+      // 只有明确说「现在修」才提案。refuse / observe / request_help 一律不动世界。
+      // request_help 将来要接成「向玩家发起委托」，那是另一件事，不能在维修
+      // 场景里偷懒当成维修执行掉。
+      if (decision.intent !== 'repair_gate') {
+        this.lastRepairIntentNote = decision;
+        return null;
+      }
+      this.lastRepairIntentNote = decision;
+      return {
+        kind: 'repair_gate',
+        gateId: input.gateId,
+        // 材料永远照服务端配方申请，不采信模型报的数。
+        materials: input.materials.map((stack) => ({ ...stack })),
+      };
+    };
+  }
+
   private async runAlinRepairPlan(npc: NpcDef, captured: DialogueSession): Promise<void> {
     const current = this.dialogue;
     if (!current || current.npc !== npc.id) return;
@@ -3865,7 +3941,15 @@ export class GameScene extends Phaser.Scene {
     try {
       const previousResult = this.lastAlinRepairResult;
       const game = getGame();
-      const result = await runAlinRepairScenario(game);
+      // 这里以前是 `runAlinRepairScenario(game)`——一个参数都不传，于是这个场景
+      // 里的 `propose` 端口永远返回写死的 repair_gate。用户看到的「AI 维修」其实
+      // 是确定性代码在跑，「模型」全程没有参与决策。
+      //
+      // 现在把模型接进来：模型负责「修不修」，validator 仍独立裁决「能不能修」。
+      // 模型拿不到 GameState，只能看到一份只读观察和维修配方。
+      const result = await runAlinRepairScenario(game, {
+        proposeWithModel: this.buildRepairProposalPort(npc),
+      });
       this.lastAlinRepairResult = result;
       this.judgeLatestResult = result;
       this.refreshJudgeModePanel();
@@ -3876,6 +3960,13 @@ export class GameScene extends Phaser.Scene {
       if (!isDialogueFresh(this.currentDialogueSession(), captured)) return;
       const trust = result.after.npcs[0]?.trust ?? 35;
       const alreadyCommitted = previousResult?.status === 'executed' && result.status === 'already_open';
+      // 模型说了什么就显示什么。
+      //
+      // 这一段是「模型拒绝」能被玩家看见的地方：以前模型无论说什么，界面上
+      // 都只有「门已打开」或「校验拒绝」两种结果，玩家无从知道阿林其实说过
+      // 「材料不够，我不动」。现在把它原话摆出来，并且**不覆盖**状态标签
+      // ——台词和结果分开显示，避免「他说不修」和「门开了」同时出现时读不懂。
+      const note = this.lastRepairIntentNote?.utterance;
       const label = alreadyCommitted || result.status === 'already_open'
         ? '门已打开｜未重复提交'
         : result.status === 'executed'
@@ -3885,7 +3976,7 @@ export class GameScene extends Phaser.Scene {
             : result.validation?.accepted === false && result.validation.reason === 'low_trust'
               ? `信任${trust}/70｜拒绝`
               : '校验拒绝｜未改变';
-      current.message = label;
+      current.message = note ? `${note}\n${label}` : label;
       current.revision += 1;
       this.refreshDialogue();
     } catch {

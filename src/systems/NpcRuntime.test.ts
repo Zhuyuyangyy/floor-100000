@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { addItem } from '../systems/InventorySystem';
 import { createNpcState } from '../data/npcPersonalities';
-import { buildObservation, decideNpcAction, isDialogueFresh } from './NpcRuntime';
+import { buildObservation, decideNpcAction, isDecisionFresh, isDialogueFresh, toProposalSource } from './NpcRuntime';
 import type { NpcFact } from '../ai/rulesExecutor';
 import type { NpcActionProposal, NpcBrain } from '../ai/types';
 
@@ -172,5 +172,45 @@ describe('isDialogueFresh：过期结果丢弃（P1-2）', () => {
   it('对话已关闭（null）→ 过期', () => {
     expect(isDialogueFresh(null, { sessionId: 1, revision: 0 })).toBe(false);
     expect(isDialogueFresh(undefined, { sessionId: 1, revision: 0 })).toBe(false);
+  });
+});
+
+describe('toProposalSource：内部来源 → 展示来源（AI-08）', () => {
+  // UI 的 Judge Mode 要能如实说明「这次是谁的决定」。内部三态与展示三态不是
+  // 一一对应：rejected 不是 rules，两头都没给建议时必须显示 fallback。
+  it('brain → model，fallback → rules，rejected → fallback', () => {
+    expect(toProposalSource('brain')).toBe('model');
+    expect(toProposalSource('fallback')).toBe('rules');
+    expect(toProposalSource('rejected')).toBe('fallback');
+  });
+
+  it('展示来源只可能是三个值之一，不会泄漏内部术语', () => {
+    const shown = (['brain', 'fallback', 'rejected'] as const).map(toProposalSource);
+    expect(new Set(shown)).toEqual(new Set(['model', 'rules', 'fallback']));
+    expect(shown).not.toContain('brain');
+  });
+});
+
+describe('isDecisionFresh：逻辑时间也会让提案过期（AI-08）', () => {
+  const fresh = { session: { sessionId: 1, revision: 0 }, day: 1, gameMinute: 560 };
+
+  it('会话与时间都相同 → 新鲜', () => {
+    expect(isDecisionFresh(fresh, { ...fresh })).toBe(true);
+  });
+
+  it('逻辑时间推进 1 分钟 → 过期', () => {
+    expect(isDecisionFresh(fresh, { ...fresh, gameMinute: 561 })).toBe(false);
+  });
+
+  it('跨天 → 过期', () => {
+    expect(isDecisionFresh(fresh, { ...fresh, day: 2 })).toBe(false);
+  });
+
+  it('会话已关闭 → 过期（即使时间没变）', () => {
+    expect(isDecisionFresh(fresh, { ...fresh, session: null })).toBe(false);
+  });
+
+  it('玩家翻了选项 → 过期', () => {
+    expect(isDecisionFresh(fresh, { ...fresh, session: { sessionId: 1, revision: 1 } })).toBe(false);
   });
 });

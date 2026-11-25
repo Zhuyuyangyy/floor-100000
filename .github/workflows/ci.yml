@@ -20,10 +20,18 @@ jobs:
       - run: npm ci
       - name: Typecheck
         run: npm run typecheck
-      - name: Unit tests
-        run: npm run test
+      # 构建必须排在单测之前，这不是习惯问题：server/npc-proxy.test.mts 会
+      # 真的 spawn server/npc-proxy.mjs，而它的静态根固定是仓库根的 dist/。
+      # 倒过来跑，本机有旧 dist 时一路绿，干净的 runner 上一定 404 —— 那正是
+      # 线上最危险的一类故障（容器首页 404）却检测不到。
+      #
+      # 构建不需要任何密钥：NPC_API_KEY 只在 server/npc-proxy.mjs 的运行时环境
+      # 里读取，前端产物只内联 VITE_ 前缀变量（见 src/ai/config.ts），并且
+      # 每一个 VITE_ 都有缺省值，空环境能构建出可运行的 proxy 模式包。
       - name: Build
         run: npm run build
+      - name: Unit tests
+        run: npm run test
 
   # Browser regression suite. Observability, not the merge gate.
   #

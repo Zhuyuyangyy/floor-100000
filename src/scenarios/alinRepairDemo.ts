@@ -33,7 +33,15 @@ export { ALIN_REPAIR_GATE_ID, ALIN_REPAIR_GATE_FLAG } from '../data/floorGates';
 export const ALIN_REPAIR_MAX_ATTEMPTS = 2;
 
 export type AlinRepairScenarioStatus = 'executed' | 'blocked' | 'already_open' | 'exhausted' | 'planning_failed';
-export type AlinRepairDecisionSource = 'offline-fallback';
+/**
+ * 这一次是谁决定的行为。
+ *
+ * 以前这里只有一个取值 `'offline-fallback'`——也就是说，无论玩家看到什么，
+ * 决定「修还是不修」的都是一段确定性代码，模型从未参与。加 `'model'` 不是
+ * 为了多一个枚举值，是为了让「这次真的是模型决定的」成为可断言、可展示的事实：
+ * Judge Mode 显示的是这个字段，验收脚本断言的也是它。
+ */
+export type AlinRepairDecisionSource = 'offline-fallback' | 'model';
 
 export interface AlinRepairScenarioResult {
   readonly status: AlinRepairScenarioStatus;
@@ -54,6 +62,36 @@ export interface AlinRepairScenarioResult {
 export interface AlinRepairScenarioOptions {
   /** Optional scenario overrides; the user-approved exact recipe is the default. */
   readonly policy?: CompetitionRulesPolicy;
+  /**
+   * 模型提案口：把「修不修」交还给模型，而不是由本文件的 `propose` 端口直接返回
+   * 一个写死的 `repair_gate`。
+   *
+   * 为什么做成注入而不是在这里直接 import 模型客户端：
+   * 1. 这个文件被 Spark 真机测试、线上代理、离线单测三处共用，任何一处硬绑网络
+   *    都会让另外两处无法离线跑。
+   * 2. 拒绝语义必须能被表达。旧实现在 `propose` 里无条件返回 repair_gate，
+   *    于是「模型说不能修」这件事**在结构上无法发生**——不管模型说什么，门都会
+   *    被修。让模型返回 `null`（不改世界）是这次改造的核心。
+   *
+   * 返回值约定：
+   * - 返回一个 proposal → 交给 validator 独立裁决（模型仍不能自己决定成败）
+   * - 返回 `null` → 模型不想动世界，本轮以 observe 收场，状态不变
+   * - 抛异常 / 超时 → 由 runCompetitionStep 的 fallback 端口接管，玩家仍能玩
+   */
+  readonly proposeWithModel?: (input: ModelProposalInput) => Promise<CompetitionActionProposal | null>;
+}
+
+/** 模型提案口的类型别名，供场景层在字段/方法签名里直接引用。 */
+export type AlinRepairModelPort = NonNullable<AlinRepairScenarioOptions['proposeWithModel']>;
+
+/** 模型提案口拿得到的东西——只读，且不含 GameState 句柄。 */
+export interface ModelProposalInput {
+  readonly observation: CompetitionObservationSnapshot;
+  /** 维修配方（模型不能自己改这份清单，只能照单申请）。 */
+  readonly materials: readonly InventoryStack[];
+  readonly gateId: string;
+  /** 上一轮被拒的反馈；模型据此重规划，而不是重复同一个提案。 */
+  readonly previousFeedback: CompetitionAttemptFeedback | null;
 }
 
 function cloneInventory(inventory: readonly InventoryStack[]): InventoryStack[] {
@@ -259,6 +297,17 @@ export async function runAlinRepairScenario(
 
   const liveExecutorState = executorState(game, firstWorld);
   const operationId = `alin-repair:${game.runSeed}:${game.day}:${game.gameMinuteOfDay}`;
+  const modelPort = options.proposeWithModel;
+  // 模型真正参与过（至少成功产出过一次提案）+ 它产出的东西真的被提交了，
+  // 才允许把 decisionSource 标成 'model'。只发过请求没拿到提案的不算。
+  let modelProposed = false;
+  // 「模型明确表示不动」与「模型挂了」必须分开记。
+  //
+  // 这两件事在代码里都表现为「propose 没给出 proposal」，但语义完全相反：
+  // 前者是模型做了决定（不该修），后者是降级（规则兜底）。如果混为一谈，
+  // 要么模型的拒绝被 fallback 覆盖（模型白说了），要么降级被当成模型决策
+  // （Judge Mode 骗人）。所以用一个显式标志把「模型说过不」钉住。
+  let modelDeclinedToAct = false;
   const runtime = await runCompetitionStep({
     observe: async () => {
       const world = gameWorldSnapshot(game);
@@ -275,6 +324,26 @@ export async function runAlinRepairScenario(
       return { nextAction: previousFeedback ? 'observe' : 'repair_gate' };
     },
     propose: async (observation, _goal, plan, previousFeedback): Promise<CompetitionActionProposal | null> => {
+      // 注意：模型模式下**不能**沿用 offline 的 `previousFeedback → 直接放弃` 规则。
+      // 那条规则的意思是「被拒了就别再试」，它让「失败后重规划」在结构上不可能发生
+      // ——而这正是官方评分点要看的反馈修正。模型模式下把重规划交给模型自己：
+      // 它可以从 repair_gate 转向 request_help，那是另一件事，不是重复同一个提案。
+      if (modelPort) {
+        if (!observation.availableActions.includes('repair_gate')) return null;
+        const proposal = await modelPort({
+          observation,
+          materials: policy.repairMaterials ? cloneInventory(policy.repairMaterials) : [],
+          gateId: ALIN_REPAIR_GATE_ID,
+          previousFeedback,
+        });
+        // 走到这里说明模型正常应答了。它回 null 就是「我不动」，不是「我挂了」。
+        if (!proposal) {
+          modelDeclinedToAct = true;
+          return null;
+        }
+        if (proposal.kind === 'repair_gate') modelProposed = true;
+        return proposal;
+      }
       if (previousFeedback || plan.nextAction !== 'repair_gate' || !observation.availableActions.includes('repair_gate')) return null;
       return {
         kind: 'repair_gate',
@@ -284,8 +353,24 @@ export async function runAlinRepairScenario(
         materials: policy.repairMaterials ? cloneInventory(policy.repairMaterials) : [],
       };
     },
-    fallback: async (_observation, _goal, plan, previousFeedback) => {
-      if (previousFeedback || plan.nextAction !== 'repair_gate') return null;
+    fallback: async (_observation, _goal, plan, reason) => {
+      // 模型模式下 fallback 仍然保留：模型超时/不可达时玩家必须还能玩完这件事。
+      // 但它的产出会被 decisionSource 明确标成 offline-fallback，不冒充模型。
+      //
+      // 这里第四个参数是 reason（'no_proposal' | 'proposal_unavailable' |
+      // 'proposal_error'），不是上一轮的反馈。旧代码把它命名成 previousFeedback
+      // 并拿来做 `if (previousFeedback || ...)` 的守卫——一个非空字符串永远为真，
+      // 于是这个 fallback **从来没有执行过一行**，「模型超时自动降级」这条护栏
+      // 一直是死的。离线路径测不出来，因为离线时 propose 总成功，走不到这里。
+      //
+      // 现在按 plan 判断：plan 说该修就修，说观望就不动。reason 只用于判断
+      // 是否需要额外说明，不影响是否兜底。
+      void reason;
+      // 模型明确说了「我不动」——这时 fallback 不许替它动。
+      // 否则模型的拒绝语义形同虚设：它说了不能修，系统照样把门修了，
+      // 而玩家看到的是「阿林拒绝了你」＋「门开了」。
+      if (modelDeclinedToAct) return null;
+      if (plan.nextAction !== 'repair_gate') return null;
       return {
         kind: 'repair_gate', gateId: ALIN_REPAIR_GATE_ID,
         materials: policy.repairMaterials ? cloneInventory(policy.repairMaterials) : [],
@@ -321,7 +406,10 @@ export async function runAlinRepairScenario(
   return {
     status,
     attempts: runtime.attempts,
-    decisionSource: 'offline-fallback',
+    // 只有「模型产出了 repair_gate 提案」且「它真的被提交成功」两个条件同时成立，
+    // 才敢说这次是模型决定的。模型空手而归、或者提案被 validator 拦下的，
+    // 都不算模型改变了世界——那种情况下把 source 标成 model 就是在骗评委。
+    decisionSource: modelProposed && status === 'executed' ? 'model' : 'offline-fallback',
     observation: finalObservation,
     proposal: runtime.proposal ?? lastRejected?.proposal ?? null,
     validation,

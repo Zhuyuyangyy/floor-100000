@@ -114,4 +114,39 @@ export interface NpcBrain {
   decide(observation: NpcObservation): Promise<NpcActionProposal | null>;
   /** 推理服务健康探测。不可用时 decide 不应被调用。 */
   health(): Promise<boolean>;
+  /**
+   * 可选：任务型推理。
+   *
+   * `decide()` 走的是「自由对话」这一种任务，提示词由大脑内部固定。维修这类
+   * 任务需要另一份输出契约（要求显式 `intent` 而不是 `action.type`），所以单开
+   * 一个口子。
+   *
+   * 为什么不把它塞进 decide 加个参数：`decide` 的签名是六个 brain 实现共用的
+   * 契约，为一个任务的差异化输出契约去改它，会让「本地规则脑」「回放脑」这些
+   * 没有任务概念的实现也跟着变形。可选方法做不到就不实现，调用方检查存在性。
+   */
+  decideTask?(task: NpcBrainTaskRequest): Promise<NpcBrainTaskResult | null>;
+}
+
+/** 目前只开放维修。加任务时改这个联合类型，而不是放任意字符串。 */
+export type NpcBrainTask = 'repair';
+
+export interface NpcBrainTaskRequest {
+  readonly task: NpcBrainTask;
+  /** 维修任务的输入。字段与代理端 sanitizeRepair 的白名单一一对应。 */
+  readonly repair?: {
+    readonly gateId: string;
+    readonly npcName: string;
+    readonly traits: Record<string, number>;
+    readonly trust: number;
+    readonly trustThreshold: number;
+    readonly materials: readonly { itemId: string; quantity: number }[];
+    readonly playerHas: readonly { itemId: string; quantity: number }[];
+    readonly previousRejectedReason?: string;
+  };
+}
+
+export interface NpcBrainTaskResult {
+  readonly text: string;
+  readonly source: 'model' | 'rules-fallback';
 }

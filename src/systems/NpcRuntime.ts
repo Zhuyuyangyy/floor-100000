@@ -29,6 +29,26 @@ export interface NpcRuntimeConfig {
 
 export type DecisionSource = 'brain' | 'fallback' | 'rejected';
 
+/**
+ * 对外（UI / Judge Mode）的来源标记。
+ *
+ * `DecisionSource` 是内部路径名（brain/fallback/rejected），不能直接显示给玩家
+ * ——「brain」既可能是真模型也可能是本地 persona 脑。这里把它压成三个玩家能
+ * 理解的口径：这次行为是模型决定的、规则决定的，还是两头都没给、只能兜底。
+ */
+export type ProposalSource = 'model' | 'rules' | 'fallback';
+
+/**
+ * 决策来源 → 展示来源。brain 记为 model（调用方保证 brain 是模型脑），
+ * fallback 记为 rules（降级脑就是选项树/人格规则），rejected 记为 fallback
+ * （没有任何一路给出可执行建议，UI 必须说明这不是 AI 的决定）。
+ */
+export function toProposalSource(source: DecisionSource): ProposalSource {
+  if (source === 'brain') return 'model';
+  if (source === 'fallback') return 'rules';
+  return 'fallback';
+}
+
 export interface NpcDecision {
   validated: ValidatedAction;
   source: DecisionSource;
@@ -81,6 +101,31 @@ export interface DialogueSession {
 
 export function isDialogueFresh(current: DialogueSession | null | undefined, captured: DialogueSession): boolean {
   return current !== null && current !== undefined && current.sessionId === captured.sessionId && current.revision === captured.revision;
+}
+
+/**
+ * 一次决策的完整保鲜凭证：会话双键 + 逻辑时间。
+ *
+ * 只有会话 ID 是不够的——玩家在同一场对话里等了 40 秒，游戏时钟已经走过
+ * 一个时段，此时模型给的「现在就去修门」可能已经越过了维修窗口。所以把
+ * 观察时刻的 day/gameMinute 一起封进凭证，任一变化即视为过期。
+ */
+export interface DecisionFreshness {
+  session: DialogueSession | null;
+  day: number;
+  gameMinute: number;
+}
+
+/**
+ * 提案是否可以落盘。过期提案必须被丢弃——它不是「稍微旧一点」，而是
+ * 针对另一个世界状态给出的建议；执行它等于让玩家回档到旧场景。
+ */
+export function isDecisionFresh(captured: DecisionFreshness, current: DecisionFreshness): boolean {
+  return (
+    isDialogueFresh(current.session, captured.session ?? { sessionId: -1, revision: -1 }) &&
+    captured.day === current.day &&
+    captured.gameMinute === current.gameMinute
+  );
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {

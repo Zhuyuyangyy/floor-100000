@@ -5,7 +5,32 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { resolve } from 'node:path';
+
+const DIST_INDEX = resolve(process.cwd(), 'dist', 'index.html');
+const BUILD_HINT =
+  '这组用例验证的是「容器里的首页不会 404」，所以必须在生产构建之后运行：'
+  + '先执行 npm run build（CI 里 build 也必须排在 test 之前）。';
+
+// 把「需要构建产物」这条前置依赖写成断言，而不是让它表现为一个含混的 404。
+//
+// 之前的失败形态是：本机有上一次留下的 dist/，于是本地全绿；CI 的 job 先跑
+// 单测后跑 build，干净 runner 上没有 dist/，两条静态资源用例 404。404 本身
+// 读起来像「服务端路由写错了」，把真正的原因（缺少构建）藏了起来。这个
+// beforeAll 让失败信息直接说出该做的那一条命令。
+//
+// 顺带查「产物是否完整」：dist/index.html 存在但引用的 JS 不存在，是中断的
+// 构建留下的典型半成品，症状同样是 404，但原因完全不同。
+beforeAll(() => {
+  expect(existsSync(DIST_INDEX), `找不到 ${DIST_INDEX}。${BUILD_HINT}`).toBe(true);
+  const html = readFileSync(DIST_INDEX, 'utf8');
+  const match = html.match(/src="\.?\/assets\/([^"]+\.js)"/);
+  expect(match, `dist/index.html 里没有引用构建后的 JS，产物不完整。${BUILD_HINT}`).not.toBeNull();
+  const assetPath = resolve(process.cwd(), 'dist', 'assets', match![1]);
+  expect(existsSync(assetPath), `dist/index.html 引用了 assets/${match![1]}，但该文件不存在，产物不完整。${BUILD_HINT}`).toBe(true);
+});
 
 /** 找一个空闲端口，避免与开发中的 5199/7860 撞车。 */
 function freePort() {

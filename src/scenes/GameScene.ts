@@ -568,7 +568,15 @@ export class GameScene extends Phaser.Scene {
     this.craftSelected = 0;
     this.dialogueOpen = false;
     this.dialogue = null;
+    // 重入锁也必须在这里归位。字段初始化器不随场景重启重跑（上面几段注释说的
+    // 就是这件事），所以在「维修进行中退出到标题/重开一局」之后，新场景实例会
+    // 继承上一局遗留的 true：`runAlinRepairPlan` 与 `runBlackoutRepairPlan` 都
+    // 以 `if (this.xInFlight) return;` 开头，于是维修永久静默失效，玩家点下去
+    // 没有任何反应、也没有报错。这不是理论风险，是「重开一局必现」。
+    this.repairInFlight = false;
+    this.blackoutInFlight = false;
     this.lastAlinRepairResult = undefined;
+    this.lastBlackoutRepairResult = undefined;
     this.lastAlinGiftResult = undefined;
     this.judgeLatestResult = undefined;
     this.shelterOpen = false;
@@ -4231,10 +4239,14 @@ export class GameScene extends Phaser.Scene {
     // 静默返回而不是弹提示：玩家连点两下时，本来就只该看到一次结果。
     if (this.repairInFlight) return;
     this.repairInFlight = true;
-    current.messageSource = 'competition-offline';
-    current.message = '只读观察 → 结构化提案 → 校验…';
-    this.refreshDialogue();
+    // 占位文案与 refreshDialogue 必须落在 try 里面。它们看起来「不可能抛」——
+    // refreshDialogue 只是 getNpc / setText / setTexture，而 'alin' 必然命中——
+    // 但那是「靠上游不抛」，不是「结构上不可能漏锁」。一旦这里抛，finally 覆盖
+    // 不到，repairInFlight 永久为 true，维修按钮从此失效。放进 try 才闭合。
     try {
+      current.messageSource = 'competition-offline';
+      current.message = '只读观察 → 结构化提案 → 校验…';
+      this.refreshDialogue();
       const previousResult = this.lastAlinRepairResult;
       const game = getGame();
       // 这里以前是 `runAlinRepairScenario(game)`——一个参数都不传，于是这个场景

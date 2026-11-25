@@ -61,3 +61,8 @@ re/feet-v3.py
 re/redo-wanderer.py
 re/wcol.py
 re/alpha.py
+
+# Playwright 临时输出目录。test-results/ 已在上面忽略，但 --output=.pw-xxx
+# 这种自定义目录不在其列：本地并行跑几轮就会堆出二十几个，一旦谁习惯性
+# git add -A 就会把它们全提交进去。
+.pw-*/

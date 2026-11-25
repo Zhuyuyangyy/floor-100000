@@ -81,8 +81,19 @@ export class MetaSelectScene extends Phaser.Scene {
     this.add.rectangle(width / 2, height / 2, width, height, UI.surface).setAlpha(0.62).setDepth(-29);
 
     const cx = width / 2;
-    const panelW = mobile ? Math.max(240, visibleWidth - 24) : 470;
-    const panelH = mobile ? 450 : 300;
+    // Desktop is 520x360, not 470x300. Every number below comes from measuring
+    // the text the panel actually has to hold (e2e-audit/wrap-inventory-probe):
+    //   caption  21 Han at 18px = 378px natural → 3 lines at 136 wrap = 75px
+    //   blurb    27 Han at 18px = 288px natural → 3 lines at 140 wrap = 76px
+    //   relics   5 rows, 148 start + 4*26 pitch + 22 text = 274 bottom
+    //   button   panelH - 38 centre, so top edge = panelH - 56
+    // At 470x300 the blurb's third line landed at y=352 and the relic column
+    // started at y=350 (2px overlap, measured), while the button top was y=454
+    // and the caption started at y=450 — four pixels apart.
+    // Portrait mode keeps 450: it has its own layout and is tracked separately
+    // (docs/UI_AUDIT_R3.md B-3), and was explicitly out of scope for this fix.
+    const panelW = mobile ? Math.max(240, visibleWidth - 24) : 520;
+    const panelH = mobile ? 450 : 360;
     const left = cx - panelW / 2;
     const top = height / 2 - panelH / 2;
     const depth = PANEL_DEPTH.menu.help;
@@ -95,8 +106,25 @@ export class MetaSelectScene extends Phaser.Scene {
     // ── the portrait ────────────────────────────────────────────────────────
     // Left third. The sprite is 88px of figure at native size, which is the
     // whole reason to give it room instead of a 16px thumbnail.
-    const portraitX = mobile ? left + 48 : left + 62;
-    const portraitFeet = mobile ? top + 188 : top + panelH - 70;
+    //
+    // The caption lives in its own full-width band under the roster now, not
+    // squeezed into this 122px column. The old placement was wrong twice:
+    //   1) `top + panelH - 70` put it at y=450 while the start button's top edge
+    //      is y=454 — both in the same bottom band, four pixels apart. It only
+    //      looked survivable because basicWordWrap never wrapped CJK: the line
+    //      stayed 360px wide and escaped sideways out of the panel instead of
+    //      growing downward into the button.
+    //   2) Once wrapping was switched on, a 108px column fits five Han per line,
+    //      so a 21-character caption became four ragged lines running through
+    //      the roster's unlock notes — measured x[392..500] y[340..416] against
+    //      lock rows at the same y. A wrapped line in the wrong slot is still a
+    //      broken screen; only the direction of the break changed.
+    //
+    // The caption band is now top+252..top+302 (two 25px lines), the start
+    // button top+304..top+340, and the portrait is centred in the 28..248
+    // roster band: feet at top+182 → sprite top+94..182.
+    const portraitX = mobile ? left + 48 : left + 66;
+    const portraitFeet = mobile ? top + 188 : top + 182;
     this.portraitGlow = this.add.graphics().setDepth(depth + 5);
     this.portrait = this.add
       .sprite(portraitX, portraitFeet, walkSheetKey('player'))
@@ -105,7 +133,24 @@ export class MetaSelectScene extends Phaser.Scene {
     this.portrait.play(idleAnimKey('player'));
 
     this.flavourText = this.add
-      .text(portraitX, portraitFeet + 10, '', { fontFamily: FONT_FAMILY, fontSize: mobile ? '12px' : '18px', color: hex(TEXT.secondary), align: 'center', wordWrap: { width: mobile ? 82 : 132 } })
+      .text(mobile ? portraitX : left + 169, mobile ? portraitFeet + 10 : top + 252, '', {
+        fontFamily: FONT_FAMILY,
+        fontSize: mobile ? '12px' : '18px',
+        color: hex(TEXT.secondary),
+        align: 'center',
+        // useAdvancedWrap 是这行能不能折行的开关，不是排版偏好。
+        // Phaser 的 basicWordWrap 按空格切词，中文整句只有一个「词」，
+        // 而「一个词比整行宽」的分支在首词时直接跳过换行（Text.js:571
+        // 的 `if (j > 0)`）—— 实测自然宽 360px、wrap=132px，一行都不折，
+        // 于是向左跑出面板 118px，后半句被「开始生存」按钮盖住。
+        //
+        // 桌面这一行的宽度是左栏净空（left+12 .. left+326 = 314px），
+        // 不再受立绘那 122px 窄列的限制：21 个汉字在 18px 下 314px 装 17 个，
+        // 折两行、50px 高，正好落在 top+252..302，按钮上沿 304 之前。
+        // 右栏遗物列从 left+338 起，所以这一行停在 left+326 不会穿过去。
+        // 竖屏沿用立绘下方那一条窄带，未改（见 UI_AUDIT_R3 B-3）。
+        wordWrap: { width: mobile ? 82 : 314, useAdvancedWrap: true },
+      })
       .setOrigin(0.5, 0)
       .setDepth(depth + 7);
 
@@ -172,7 +217,7 @@ export class MetaSelectScene extends Phaser.Scene {
       .setOrigin(mobile ? 0.5 : 0, 0)
       .setDepth(depth + 7);
     this.modeBlurbText = this.add
-      .text(mobile ? cx : colX, mobile ? top + 270 : top + 66, MODE_BLURBS[meta.mode], { fontFamily: FONT_FAMILY, fontSize: mobile ? '13px' : '18px', color: hex(TEXT.dim), align: mobile ? 'center' : 'left', wordWrap: { width: mobile ? panelW - 32 : 150 } })
+      .text(mobile ? cx : colX, mobile ? top + 270 : top + 66, MODE_BLURBS[meta.mode], { fontFamily: FONT_FAMILY, fontSize: mobile ? '13px' : '18px', color: hex(TEXT.dim), align: mobile ? 'center' : 'left', wordWrap: { width: mobile ? panelW - 32 : 150, useAdvancedWrap: true } })
       .setOrigin(mobile ? 0.5 : 0, 0)
       .setDepth(depth + 7);
     const relics = relicDisplay(meta);
@@ -187,11 +232,13 @@ export class MetaSelectScene extends Phaser.Scene {
         this.add.text(x, modeY + 10, label, { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(PALETTE.lightHigh) }).setOrigin(0.5).setDepth(depth + 9);
       }
     } else relics.forEach((r, i) => {
-      // Down to +140 and onto a 28px pitch: the blurb above it wraps to two or
-      // three lines at this width, and the relic column started at +108 where
-      // the third line now lands.
+      // Down to +160: the blurb above wraps to three lines at 150 width and its
+      // bottom edge measured y=top+142, so the old +140 start had the third line
+      // sitting on the first relic row (2px overlap, measured). +160 leaves 18px,
+      // and the last relic row bottom lands at top+294, clear of the button at
+      // top+304. Changing this pitch must re-check both numbers.
       this.add
-        .text(colX, top + 140 + i * 28, r.unlocked ? `◆ ${r.name}` : `◇ 第 ${r.need} 层`, {
+        .text(colX, top + 160 + i * 28, r.unlocked ? `◆ ${r.name}` : `◇ 第 ${r.need} 层`, {
           fontFamily: FONT_FAMILY,
           fontSize: '18px',
           color: r.unlocked ? hex(PALETTE.clothHigh) : hex(TEXT.disabledDeep),

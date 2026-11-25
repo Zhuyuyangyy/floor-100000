@@ -35,6 +35,7 @@ import {
   alinStanceOf,
   blackoutRepairNarration,
   blackoutSupplyHint,
+  ensureBlackoutHelpRequested,
   giveWaterToAzhen,
   observeBlackout,
   requestBlackoutHelp,
@@ -1185,5 +1186,125 @@ describe('P0-c 缺料提示：把「缺什么」接成「去哪拿」', () => {
     expect(result.status).toBe('executed');
     expect(result.nextStep).toBeNull();
     expect(blackoutRepairNarration(game, result)).toBe(result.message);
+  });
+});
+
+// ── P0-c：点维修即接单 ──────────────────────────────────────────────────────
+//
+// 补这条的由来：`requestBlackoutHelp` 在 GameScene 里零引用，`materials_needed`
+// 阶段除了 `syncBlackoutCrisis` 之外没有任何入口能到。连带后果是
+// `syncBlackoutCrisis` 里那段「承诺过期记一笔失信」永远没有作用对象——
+// `promiseDay` 恒为 0，`promiseBroken` 永远写不上，`guarded` 态永远进不去，
+// `verifyBlackoutMaterials`（只在 guarded 下需要）也因此成了死代码。
+//
+// 接法选的是「点维修 = 应承」而不是新增菜单项：菜单四项位置被 E2E 依赖，
+// 而玩家按下这个动作的语义本来就包含了答应。
+
+describe('P0-c 点维修即接单：materials_needed 有入口，失信逻辑有对象', () => {
+  it('investigating 时接单：stage 推进到 materials_needed，写一条承诺，信任 +12', () => {
+    const game = crisisGame();
+    expect(blackoutStageOf(game)).toBe('investigating');
+    const trustBefore = observeBlackout(game).alinTrust;
+
+    const accepted = ensureBlackoutHelpRequested(game);
+
+    expect(accepted?.ok).toBe(true);
+    expect(blackoutStageOf(game)).toBe('materials_needed');
+    // 单条承诺，且是 open 状态——后面的「过期记失信」要靠它。
+    const promises = loadCompetitionNpcMemory(game, 'alin').filter((entry) => entry.kind === 'promise');
+    expect(promises).toHaveLength(1);
+    expect(promises[0]).toMatchObject({ status: 'open' });
+    // help 权重 0.5 → 20 × (0.5 + 0.7) = +12。
+    expect(observeBlackout(game).alinTrust).toBeCloseTo(trustBefore + 12, 5);
+    // promiseDay 必须真的落在存档里，否则过期判定永假。
+    expect(flagCount(game, BLACKOUT_FLAG.promiseDay)).toBe(game.day);
+  });
+
+  it('连点两次维修：承诺只有一条，promiseDay 不被写第二遍，promiseBroken 不误触发', () => {
+    const game = crisisGame();
+    const trustAfterFirst = (() => {
+      ensureBlackoutHelpRequested(game);
+      return observeBlackout(game).alinTrust;
+    })();
+    const firstPromiseDay = flagCount(game, BLACKOUT_FLAG.promiseDay);
+
+    // 玩家因为「点了没反应」又点了一次——这是最常见的重复点击。
+    // 第二次已经不在 investigating，`ensureBlackoutHelpRequested` 直接返回 null，
+    // 连 `requestBlackoutHelp` 都不会进。
+    const second = ensureBlackoutHelpRequested(game);
+    expect(second).toBeNull();
+
+    // 就算绕过 stage 判断直接调 requestBlackoutHelp，它自己也幂等。
+    const direct = requestBlackoutHelp(game, 'alin');
+    expect(direct.ok).toBe(false);
+    expect(direct.detail).toBe('already_requested');
+
+    expect(loadCompetitionNpcMemory(game, 'alin').filter((entry) => entry.kind === 'promise')).toHaveLength(1);
+    expect(flagCount(game, BLACKOUT_FLAG.promiseDay)).toBe(firstPromiseDay);
+    // 多记一条 help 就会多 +12，信任被点两下刷上去——这条防的就是它。
+    expect(observeBlackout(game).alinTrust).toBeCloseTo(trustAfterFirst, 5);
+    // 承诺还没到期，失信不该被写。
+    expect(flagCount(game, BLACKOUT_FLAG.promiseBroken)).toBe(0);
+  });
+
+  it('只有 investigating 才自动接单：initial（门没开）与两个结局都不动手', () => {
+    // initial：门没开，危机没开始，点维修走的是另一条路（通用维修门演示），
+    // 这里不该悄悄把 stage 推进。
+    const notStarted = createNewGame(2028);
+    expect(blackoutStageOf(notStarted)).toBe('initial');
+    expect(ensureBlackoutHelpRequested(notStarted)).toBeNull();
+    expect(blackoutStageOf(notStarted)).toBe('initial');
+
+    // resolved_repair：事情做完了，不该再记一条承诺。
+    const repaired = crisisGame();
+    setAlinTrust(repaired, 60);
+    giveAllRepairParts(repaired);
+    return runBlackoutRepair(repaired).then(() => {
+      expect(blackoutStageOf(repaired)).toBe('resolved_repair');
+      expect(ensureBlackoutHelpRequested(repaired)).toBeNull();
+      expect(blackoutStageOf(repaired)).toBe('resolved_repair');
+
+      // resolved_fail 同理。
+      const failed = crisisGame(2029);
+      failed.day = 1 + BLACKOUT_DEADLINE_DAYS;
+      expect(syncBlackoutCrisis(failed).stage).toBe('resolved_fail');
+      expect(ensureBlackoutHelpRequested(failed)).toBeNull();
+      expect(blackoutStageOf(failed)).toBe('resolved_fail');
+    });
+  });
+
+  it('接单带来的 +12 真的让低信任玩家过线：40 差 15 → 接单后 52 再送一件就够 55', () => {
+    // 这条不是数字游戏：它说明「点维修」这个动作本身应该被算进信任，
+    // 否则玩家做对了事却看不到任何变化，只能在楼里到处送礼试门槛。
+    const game = crisisGame();
+    setAlinTrust(game, 40);
+    expect(alinStanceOf(game)).toBe('neutral');
+
+    ensureBlackoutHelpRequested(game);
+    const afterHelp = observeBlackout(game).alinTrust;
+    expect(afterHelp).toBeCloseTo(52, 5);
+
+    // 52 < 55，还差 3 分。看一眼门槛提示：他此刻说的是 52/55，
+    // 玩家据此知道「再攒一点就行」，而不是不知道怎么算。
+    const observation = observeBlackout(game);
+    expect(observation.alinTrust).toBeCloseTo(52, 5);
+    expect(BLACKOUT_TRUST_FOR_STANCE.neutral).toBe(55);
+  });
+
+  it('承诺过期记失信：接单后拖着不办，跨天就进 guarded，verifyBlackoutMaterials 才有意义', () => {
+    const game = crisisGame();
+    ensureBlackoutHelpRequested(game);
+    expect(alinStanceOf(game)).toBe('neutral');
+
+    // 接单当天 + BLACKOUT_PROMISE_DAYS 之后再跨一天 → 过期。
+    game.day = 1 + BLACKOUT_PROMISE_DAYS + 1;
+    syncBlackoutCrisis(game);
+
+    expect(flagCount(game, BLACKOUT_FLAG.promiseBroken)).toBeGreaterThan(0);
+    expect(alinStanceOf(game)).toBe('guarded');
+    // 这条记忆必须落库：阿林的失信判断读的就是它，不是临时变量。
+    expect(
+      loadCompetitionNpcMemory(game, 'alin').some((entry) => entry.kind === 'promise' && entry.status === 'broken'),
+    ).toBe(true);
   });
 });

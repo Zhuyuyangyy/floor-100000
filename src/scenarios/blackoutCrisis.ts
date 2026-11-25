@@ -651,6 +651,29 @@ export function requestBlackoutHelp(game: GameState, npcId: 'alin' | 'xiaozhou' 
 }
 
 /**
+ * 玩家按下「接回主线」时，先把「接单」这件事补上。
+ *
+ * 为什么接单不该是独立的菜单项：菜单是「送礼 / 维修 / 交易 / 关闭」，E2E 依赖
+ * 这四个位置，加第五项要重排，代价高于收益。而叙事上它根本不需要单独一步——
+ * 玩家点「接回主线」这个动作，本身就是「我答应帮你修」。
+ *
+ * 只在 `investigating` 调，有三个理由：
+ * - `initial` 时门还没开、危机没开始，`guardActive` 会拒，但那时也根本没有
+ *   「接回主线」这个选项（`isBlackoutActive` 为 false），多一次判断没坏处。
+ * - `materials_needed` 之后已经接过单，`requestBlackoutHelp` 内部靠
+ *   `promiseDay` flag 幂等，重复调用只会返回 `already_requested`，不会刷出
+ *   第二条承诺——所以连点三次维修也不会把承诺写三遍。
+ * - `resolved_*` 时 `guardActive` 会拒，不需要额外分支。
+ *
+ * 返回值交给调用方只是为了可测：失败不该阻断维修（玩家可能只是站远了），
+ * 直接把结果丢掉仍然是正确行为。
+ */
+export function ensureBlackoutHelpRequested(game: GameState): BlackoutActionResult | null {
+  if (blackoutStageOf(game) !== 'investigating') return null;
+  return requestBlackoutHelp(game, 'alin');
+}
+
+/**
  * propose_trade：和小周换零件。
  *
  * 他是这栋楼里唯一会囤货的人，所以也是零件的**第二条来源**——玩家在 4 层

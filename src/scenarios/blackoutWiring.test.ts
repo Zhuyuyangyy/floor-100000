@@ -376,4 +376,32 @@ describe('P0-c 装配层：被拒后的指路真的进了对话框', () => {
     // 反面对照：写死在模板字符串里的「4 层电箱」不该出现。
     expect(src).not.toContain('4 层电箱');
   });
+
+  it('runBlackoutRepairPlan 在维修之前先自动接单（否则 materials_needed 永远进不去）', () => {
+    const body = SCENE_SRC.match(/private async runBlackoutRepairPlan\([\s\S]*?\r?\n  \}/);
+    expect(body, '找不到 runBlackoutRepairPlan 的函数体').not.toBeNull();
+    const src = body![0];
+
+    // 必须真的调用，且必须在 runBlackoutRepair 之前：接单会把 stage 推到
+    // materials_needed、并记一条 help 记忆（+12 信任）。顺序反了，维修那一趟
+    // 就还是在 investigating 下判的，玩家看到的信任数字对不上。
+    expect(src).toContain('ensureBlackoutHelpRequested(state)');
+    const helpAt = src.indexOf('ensureBlackoutHelpRequested(state)');
+    const repairAt = src.indexOf('await runBlackoutRepair(state,');
+    expect(helpAt).toBeGreaterThan(-1);
+    expect(repairAt).toBeGreaterThan(-1);
+    expect(helpAt).toBeLessThan(repairAt);
+  });
+
+  it('接单只在 investigating 触发，且靠 promiseDay 幂等（连点不会重复记）', () => {
+    const body = SCENARIO_SRC.match(/export function ensureBlackoutHelpRequested\([\s\S]*?\r?\n\}\r?\n/);
+    expect(body, '找不到 ensureBlackoutHelpRequested 的函数体').not.toBeNull();
+    const src = body![0];
+    // 阶段判断必须在：少了它就会在 initial / resolved_* 上乱写承诺。
+    expect(src).toContain("blackoutStageOf(game) !== 'investigating'");
+    // 真正的写操作必须走 requestBlackoutHelp（它内部有 already_requested 的幂等），
+    // 不能在这里自己 setFlag —— 那会绕开幂等，点两次就写两条承诺。
+    expect(src).toContain("requestBlackoutHelp(game, 'alin')");
+    expect(src).not.toContain('setFlag(');
+  });
 });

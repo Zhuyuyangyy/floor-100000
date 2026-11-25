@@ -263,17 +263,20 @@ async function decide(clientId, extra = {}) {
 //      移动。意图是离散量，比自由文本抗噪。
 //
 // 服务端到底读记忆的哪些字段（读 npc-proxy.mjs 得到的结论，不是按 TS 类型猜的）：
-//   sanitizeObservation 保留 { day, kind, summary, weight }；
-//   buildMessages 只渲染 `第${day}天 ${kind}：${summary}`。
-// 也就是说 **weight 与 actor 不进提示词**。前端 toObservationMemory 算出的
-// promise kept=+0.5 / broken=-0.6 目前是死数据，只能靠 summary 的自由文本
-// 传情。这条不是本脚本能修的（server/ 不归我改），但决定了对照只能做成
-// 「一段话 vs 另一段话」，不能做成「同一段话换个权重」。
+//   sanitizeObservation 保留 { day, kind, summary, weight }，并把 weight 夹到 [-1,1]；
+//   buildMessages 渲染成 `第${day}天 ${kind}［强度词］：${summary}`。
+// 强度词由 weight 分档（极重/较重/一般/偏负面/严重负面），所以 weight **会**
+// 影响提示词，但只以离散档次的形式。这意味着「只改 weight、summary 一字不改」
+// 也能改变提示词——这正是下面第三组要做的事，它和前两组（改 summary）性质不同：
+// 前两组证明「记忆正文被读到」，第三组证明「记忆的分量也被用到」。
+//
+// actor 仍不进提示词：sanitizeObservation 干脆不保留它，前端 toObservationMemory
+// 填的 actor（'player' / 另一个 npcId）到这里就断了。要接得改服务端，不在本脚本范围。
 //
 // 顺带记录一个静默丢弃：现有 decide() 请求体里的 recentEvents 不在
 // sanitizeObservation 的白名单里，会被整个丢掉，模型从来没见过它。
 {
-  /** 服务端认可的记忆形状；weight 会被收下但不进提示词。 */
+  /** 服务端认可的记忆形状。 */
   const mem = (day, kind, summary, weight = 0) => ({ day, kind, summary, weight });
 
   const parseReply = (body) => {
@@ -321,10 +324,17 @@ async function decide(clientId, extra = {}) {
     return { status: res.status, body, ms, reply: parseReply(body) };
   };
 
-  // 三组对照。每一组只改 memory，其余字段逐字相同。
+  // 四组对照。每一组只改 memory，其余字段逐字相同。
+  //
+  // 前三组改的是 summary（记忆正文），断言「决策确实变了」。
+  // 第四组只改 weight、summary 一字不动，它验证的是「分量也进了提示词」这条
+  // 更细的链路——但它的效果只有「较重」→「严重负面」一个词，模型是否因此改口
+  // 是概率性的，把它写成 PASS/FAIL 就是给 CI 埋随机失败。所以它只采集证据、
+  // 不作断言，结论记进 notes，由人看原文判断。
   const CONTRASTS = [
     {
       label: '无记忆 vs 受助',
+      assert: true,
       // 锚点必须是不可能被凭空生成的词，且只出现在记忆文本里。
       anchors: ['银色绝缘胶带', '绝缘胶带'],
       control: [],
@@ -332,15 +342,24 @@ async function decide(clientId, extra = {}) {
     },
     {
       label: '失约 vs 守约',
+      assert: true,
       anchors: null,
       control: [mem(2, 'promise', '玩家答应第2天带保险丝回来，结果一整夜没出现。', -0.6)],
       treatment: [mem(2, 'promise', '玩家答应第2天带保险丝回来，第二天一早准时送到你手上。', 0.5)],
     },
     {
       label: '被拒 vs 获赠',
+      assert: true,
       anchors: null,
       control: [mem(1, 'refusal', '玩家当面拒绝把木板借给你，让你自己想办法。', -0.5)],
       treatment: [mem(1, 'help', '玩家主动把身上最后一块木板塞给了你，没要任何回报。', 0.6)],
+    },
+    {
+      label: '同一句话·只改 weight',
+      assert: false,
+      anchors: null,
+      control: [mem(2, 'promise', '玩家答应第2天带保险丝回来。', -0.9)],
+      treatment: [mem(2, 'promise', '玩家答应第2天带保险丝回来。', 0.9)],
     },
   ];
 
@@ -397,16 +416,22 @@ async function decide(clientId, extra = {}) {
 
     const fmt = (rs) => rs.map((r) => `${r.intent}${contrast.anchors ? (hitAnchor(r, contrast.anchors) ? '+锚点' : '') : ''}`).join(',');
     const detail = `${moved ? `第${rounds}轮命中` : `${rounds}轮未命中`}｜对照[${fmt(samples.control)}] 记忆[${fmt(samples.treatment)}]`;
-    check(`记忆改变决策：${contrast.label}`, moved, detail);
+    // assert:false 的组只采集证据，不计入通过率（见 CONTRASTS 上方说明）。
+    if (contrast.assert) {
+      check(`记忆改变决策：${contrast.label}`, moved, detail);
+    } else {
+      notes.push(`观察组（不作断言）｜${contrast.label}｜${detail}`);
+    }
     evidence.push({
       contrast: contrast.label,
+      asserted: contrast.assert,
       rounds,
       moved,
       memorySent: contrast.treatment,
       control: samples.control,
       treatment: samples.treatment,
     });
-    if (!moved) {
+    if (contrast.assert && !moved) {
       notes.push(
         `未观察到差异的一组（${contrast.label}）原文：对照="${samples.control.at(-1)?.text ?? ''}" 记忆="${samples.treatment.at(-1)?.text ?? ''}"`,
       );
@@ -425,9 +450,8 @@ async function decide(clientId, extra = {}) {
     `命中 ${controlAnchorHits} 次`,
   );
 
-  // 结构性诊断：weight 被服务端收下但不进提示词。
-  // 这条只能靠读 npc-proxy.mjs 得出，HTTP 层观测不到，所以记为 NOTE 而不是 PASS/FAIL。
-  notes.push('服务端 buildMessages 只渲染 day/kind/summary，memory.weight 与 actor 不进提示词（见 npc-proxy.mjs:337）。');
+  // 结构性诊断（读 npc-proxy.mjs 得出，HTTP 层观测不到，故记 NOTE 而非 PASS/FAIL）。
+  notes.push('服务端 buildMessages 渲染 day/kind/weight强度词/summary；memory.actor 不进提示词（sanitizeObservation 未保留它）。');
   notes.push('现有 decide() 请求体的 recentEvents 不在 sanitizeObservation 白名单内，会被静默丢弃。');
 
   writeFileSync(`${OUT}/memory-evidence.json`, JSON.stringify(evidence, null, 2), 'utf-8');

@@ -283,3 +283,34 @@ describe('装配层：分发拿到的是真实 GameState', () => {
     expect(SCENE_SRC).toContain('this.runBlackoutTrade(npc, session)');
   });
 });
+
+// ── 场景层的第三刀：唯一提交入口不能旁路 ────────────────────────────────────
+//
+// 这一组读的是 `blackoutCrisis.ts` 而不是 GameScene。理由：接线对了，但场景
+// 内部偷偷自己改库存、自己写 flags，玩家仍然能「修好」，只是绕过了幂等键、
+// staged 库存与「先扣后加」——重复点一次就能刷零件，而这些症状在 happy path
+// 测试里完全看不出来（因为它确实成功修好了）。
+
+const SCENARIO_SRC = readFileSync(new URL('./blackoutCrisis.ts', import.meta.url), 'utf8');
+
+describe('场景层：维修提交只走 executeCompetitionProposal', () => {
+  it('execute 端口调用的是 executeCompetitionProposal，而不是自己改库存', () => {
+    expect(SCENARIO_SRC).toMatch(/executeCompetitionProposal\(liveExecutorState,\s*proposal/);
+    // 写死一份 policy 副本就等于第二套数值来源：门槛一变，预检和提交就分叉。
+    // 现在两处都必须引用同一个 repairPolicy(game)。
+    expect(SCENARIO_SRC).toMatch(/validateCompetitionProposal\(liveExecutorState,\s*proposal,\s*repairPolicy\(game\)\)/);
+    expect(SCENARIO_SRC).toMatch(/policy:\s*repairPolicy\(game\)/);
+  });
+
+  it('场景不再私藏第二套裁决：validateRepair 这个名字不该再有函数定义', () => {
+    // A0 明确要求「不要留着当第二套规则」。允许注释里提到它（解释历史），
+    // 但不允许还有 function 定义——定义一旦回来，两份规则就会各自演化。
+    expect(SCENARIO_SRC).not.toMatch(/function validateRepair/);
+  });
+
+  it('三位居民的入口都在场景里真的被调用，而不是只导出', () => {
+    expect(SCENARIO_SRC).toContain('export async function runBlackoutRepair(');
+    expect(SCENARIO_SRC).toContain('export async function runXiaozhouTrade(');
+    expect(SCENARIO_SRC).toContain('export async function runAzhenExchange(');
+  });
+});

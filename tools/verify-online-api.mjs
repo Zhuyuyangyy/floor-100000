@@ -146,6 +146,19 @@ let modelSamplesObserved = 0;
 // 互相矛盾，而读者会信末尾那句定性结论。
 // 判据不动（0 采样仍然拒绝覆盖），只是不再把「采样段空转」说成「token 无效」。
 // 它同时写进 meta（同名 key），因为排查的人拿到的是文件、不是控制台。
+//
+// ⚠️ 统计范围：**严格互斥，不重叠。** 只数两个点——维修段那 1 次和注入段那 1 次。
+// 采样段（第 3 节那三次 `decide`）**一次都不计入**，所以它跟 modelSamplesObserved
+// 没有交集，两个数**不能相加**当「模型回复总数」：
+//   samples 3 + outside 2 ≠ 总回复 5，因为采样段那 3 次只在 samples 里。
+// 换个说法：这一轮模型回复总数 = samples + outside，但这个求和只在 samples > 0
+// 时有意义（那时 outside 本来就没信息量）；samples === 0 时 outside 就是全部。
+//
+// 之所以要写死这一句：字段名里带「Outside」而实现里是「只数两个固定点」，
+// 将来加一个新的 decide 调用点，很容易忘了在这里也加一处 += 1——那时
+// outside 就变成「部分之外」而不是「之外」，而界面上看不出这个变化。
+// 目前全脚本 `await decide(` 只有两处：第 3 节的三次循环、第 4 节的注入请求；
+// `askRepair()` 是第三个调用点（内部 fetch）。加调用点时搜这三处。
 let modelRepliesOutsideSampling = 0;
 // FAIL 分两类，只加不混：
 //   gated=false —— 判据跑了，被测对象不合格。这是产品的问题。
@@ -275,10 +288,28 @@ async function decide(clientId, extra = {}) {
 // ── 2. 健康检查 ────────────────────────────────────────────────────────────
 {
   const r = await get('/healthz');
-  const b = await r.json();
+  // 必须容错。真实网关返 JSON，但这一步崩掉的场景是真实存在的：企业网关、
+  // nginx 默认错误页、Cloudflare 拦截页、公司代理的自定义 401 页，响应体都是
+  // 纯文本。实测（桩返回 `text/plain` 的 401）：
+  //   SyntaxError: Unexpected token 'A', "Authentica"... is not valid JSON
+  //   脚本停在第 8 条判据，40 条只跑了 7 条，没有「通过 x/40」、没有拒绝信息。
+  //
+  // 它不毁数据（崩在落盘前，目录仍是空的），但**它把「token 无效」这个结论
+  // 翻译成了一段 Node 堆栈**。看到堆栈的人第一反应是「脚本坏了，去修脚本」，
+  // 不会想到「token 无效」——而这一整轮花在「让失败原因说人话」上的功夫
+  // （见 `99c7b7c`）就漏在这一处。
+  //
+  // 解析失败时 b 为 null。**下面两条判据必须显式处理 null**——原来的写法是
+// `b.aiConfigured === true`，b 为 null 时不是「自然判 FAIL」，是抛 TypeError
+// 把脚本再崩一次（实测：`TypeError: Cannot read properties of null`）。
+// 所以「包个 try/catch 就行」是错的，得让后面读 b 的地方能接受 null。
+  // 用 `b?.x` 而不是 `b.x`：b 为 null 时得到 undefined，`undefined === true` 是
+  // false，判 FAIL，这才是「没拿到健康报告」该有的表达。
+  let b = null;
+  try { b = await r.json(); } catch { /* 响应体不是 JSON，按没拿到健康报告处理 */ }
   check('/healthz 200', r.status === 200, JSON.stringify(b));
-  check('AI 已配置（Key 生效）', b.aiConfigured === true, `aiConfigured=${b.aiConfigured}`);
-  check('熔断未打开', b.breakerOpen === false, `breakerOpen=${b.breakerOpen}`);
+  check('AI 已配置（Key 生效）', b?.aiConfigured === true, `aiConfigured=${b?.aiConfigured}`);
+  check('熔断未打开', b?.breakerOpen === false, `breakerOpen=${b?.breakerOpen}`);
   // 「不泄 Key」在 401 时也成立，因为错误体里本来就没有 ms-。必须要求 200
   // 且响应体真是一份健康报告，这条才有意义。
   checkIfMeasured(

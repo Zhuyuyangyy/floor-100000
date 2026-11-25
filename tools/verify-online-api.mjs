@@ -16,6 +16,8 @@ const OUT = process.env.SHOT_DIR ?? 'D:/ZYY_Inovation/game/wt-r2/output/online-v
 mkdirSync(OUT, { recursive: true });
 
 const results = [];
+// 观测到但无法用 PASS/FAIL 表达的结论（例如需要读服务端源码才能确认的字段丢弃）。
+const notes = [];
 function check(name, ok, detail = '') {
   results.push({ name, ok, detail });
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ' :: ' + detail : ''}`);
@@ -244,6 +246,180 @@ async function decide(clientId, extra = {}) {
   check('缺维修附件返回 400', missing.status === 400, `HTTP ${missing.status}`);
 }
 
+// ── 2.6 记忆影响决策（名场面 A）─────────────────────────────────────────────
+//
+// 这一段要证明的不是「接口能通」，而是 observation.memory 真的改变了模型的判断。
+//
+// 为什么不能只断言「两次 text 不同」：服务端把 temperature 固定成 0.8
+// （npc-proxy.mjs 的 callUpstream），同一份提示词连发两次，返回文本几乎必然
+// 不同。于是「不同」这个断言在「服务端完全忽略 memory」的情况下也会通过——
+// 它是假绿。段末的「采样噪声基线」就是用来量化这件事的：同一份记忆连发两次，
+// 统计文本差异率。差异率接近 100% 时，任何基于 text 不等式的判据都不成立。
+//
+// 所以判据换成两个语义量：
+//   1. 锚点回响：记忆里放一个模型无法凭空造出的词，看回复是否引用它。
+//      对照组（无记忆）必须零命中，否则这个词没有区分度。
+//   2. 意图分布：同一世界、同一信任，只换记忆，看 proposal.action.type 是否
+//      移动。意图是离散量，比自由文本抗噪。
+//
+// 服务端到底读记忆的哪些字段（读 npc-proxy.mjs 得到的结论，不是按 TS 类型猜的）：
+//   sanitizeObservation 保留 { day, kind, summary, weight }；
+//   buildMessages 只渲染 `第${day}天 ${kind}：${summary}`。
+// 也就是说 **weight 与 actor 不进提示词**。前端 toObservationMemory 算出的
+// promise kept=+0.5 / broken=-0.6 目前是死数据，只能靠 summary 的自由文本
+// 传情。这条不是本脚本能修的（server/ 不归我改），但决定了对照只能做成
+// 「一段话 vs 另一段话」，不能做成「同一段话换个权重」。
+//
+// 顺带记录一个静默丢弃：现有 decide() 请求体里的 recentEvents 不在
+// sanitizeObservation 的白名单里，会被整个丢掉，模型从来没见过它。
+{
+  /** 服务端认可的记忆形状；weight 会被收下但不进提示词。 */
+  const mem = (day, kind, summary, weight = 0) => ({ day, kind, summary, weight });
+
+  const parseReply = (body) => {
+    let parsed = null;
+    try {
+      parsed = JSON.parse(String(body?.text ?? ''));
+    } catch {
+      return null;
+    }
+    const action = parsed?.action;
+    if (!action || typeof action.type !== 'string') return null;
+    return {
+      intent: action.type,
+      text: String(action.text ?? parsed.utterance ?? ''),
+      raw: String(body?.text ?? ''),
+    };
+  };
+
+  const askMemory = async (memory, tag) => {
+    const t0 = Date.now();
+    const res = await fetch(`${BASE}/api/npc/decide`, {
+      method: 'POST',
+      headers: { ...H, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        clientId: `verify-memory-${tag}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        observation: {
+          npcId: 'alin',
+          archetype: 'ally',
+          traits: { altruism: 0.8, pragmatism: 0.3, aggression: 0.05, loyalty: 0.9, caution: 0.4 },
+          memory,
+          relationship: { player: 40 },
+          goal: '守住这层线路',
+          mood: 0,
+          world: { day: 3, floor: 2, gameMinute: 600, night: false },
+          self: { floor: 2, x: 480, hp: 28 },
+          availableActions: ['dialogue', 'gift', 'refuse'],
+        },
+      }),
+    });
+    const ms = Date.now() - t0;
+    let body = null;
+    try {
+      body = await res.json();
+    } catch { /* ignore */ }
+    return { status: res.status, body, ms, reply: parseReply(body) };
+  };
+
+  // 三组对照。每一组只改 memory，其余字段逐字相同。
+  const CONTRASTS = [
+    {
+      label: '无记忆 vs 受助',
+      // 锚点必须是不可能被凭空生成的词，且只出现在记忆文本里。
+      anchors: ['银色绝缘胶带', '绝缘胶带'],
+      control: [],
+      treatment: [mem(2, 'help', '第2天你发高烧，玩家把整卷银色绝缘胶带留给了你，自己去堵漏风的门。', 0.6)],
+    },
+    {
+      label: '失约 vs 守约',
+      anchors: null,
+      control: [mem(2, 'promise', '玩家答应第2天带保险丝回来，结果一整夜没出现。', -0.6)],
+      treatment: [mem(2, 'promise', '玩家答应第2天带保险丝回来，第二天一早准时送到你手上。', 0.5)],
+    },
+    {
+      label: '被拒 vs 获赠',
+      anchors: null,
+      control: [mem(1, 'refusal', '玩家当面拒绝把木板借给你，让你自己想办法。', -0.5)],
+      treatment: [mem(1, 'help', '玩家主动把身上最后一块木板塞给了你，没要任何回报。', 0.6)],
+    },
+  ];
+
+  const hitAnchor = (reply, anchors) =>
+    !!reply && !!anchors && anchors.some((a) => reply.text.includes(a) || reply.raw.includes(a));
+
+  // 采样噪声基线：同一份记忆连发两次。差异率越高，说明「text 不同」越没信息量。
+  {
+    const m = CONTRASTS[0].treatment;
+    const a = await askMemory(m, 'noise-a');
+    const b = await askMemory(m, 'noise-b');
+    const sameText = a.reply && b.reply && a.reply.text === b.reply.text;
+    const sameIntent = a.reply && b.reply && a.reply.intent === b.reply.intent;
+    notes.push(
+      `采样噪声基线（同记忆同参数）：intent ${sameIntent ? '相同' : '不同'}｜text ${sameText ? '相同' : '不同'}`,
+    );
+    if (!sameText) {
+      notes.push('注意：text 在两次相同请求间已不同 —— 本段所有判据都不依赖 text 不等式，只依赖意图/锚点。');
+    }
+    check(
+      '同一记忆两次请求都成功（噪声基线可用）',
+      a.status === 200 && b.status === 200 && !!a.reply && !!b.reply,
+      `HTTP ${a.status}/${b.status}`,
+    );
+  }
+
+  const ROUNDS = 3;
+  let controlAnchorHits = 0;
+  let treatmentAnchorHits = 0;
+
+  for (const contrast of CONTRASTS) {
+    // 每轮各取一个样本，一旦出现差异就停，并如实记录用了几轮。
+    let moved = false;
+    let rounds = 0;
+    const samples = { control: [], treatment: [] };
+    for (let round = 1; round <= ROUNDS && !moved; round++) {
+      rounds = round;
+      const c = await askMemory(contrast.control, `c-${contrast.label}-${round}`);
+      const t = await askMemory(contrast.treatment, `t-${contrast.label}-${round}`);
+      if (!c.reply || !t.reply) break;
+      samples.control.push(c.reply);
+      samples.treatment.push(t.reply);
+      if (hitAnchor(c.reply, contrast.anchors)) controlAnchorHits += 1;
+      if (hitAnchor(t.reply, contrast.anchors)) treatmentAnchorHits += 1;
+      const intentMoved = c.reply.intent !== t.reply.intent;
+      const anchorMoved = !!contrast.anchors
+        && hitAnchor(t.reply, contrast.anchors)
+        && !hitAnchor(c.reply, contrast.anchors);
+      moved = intentMoved || anchorMoved;
+    }
+
+    const fmt = (rs) => rs.map((r) => `${r.intent}${contrast.anchors ? (hitAnchor(r, contrast.anchors) ? '+锚点' : '') : ''}`).join(',');
+    const detail = `${moved ? `第${rounds}轮命中` : `${rounds}轮未命中`}｜对照[${fmt(samples.control)}] 记忆[${fmt(samples.treatment)}]`;
+    check(`记忆改变决策：${contrast.label}`, moved, detail);
+    if (!moved) {
+      notes.push(
+        `未观察到差异的一组（${contrast.label}）原文：对照="${samples.control.at(-1)?.text ?? ''}" 记忆="${samples.treatment.at(-1)?.text ?? ''}"`,
+      );
+    }
+  }
+
+  // 锚点单独成判据：它证明模型真的读到了记忆正文，而不只是被措辞扰动。
+  check(
+    '记忆组出现锚点回响（模型读到记忆正文）',
+    treatmentAnchorHits > 0,
+    `命中 ${treatmentAnchorHits} 次`,
+  );
+  check(
+    '对照组零锚点（该词具备区分度）',
+    controlAnchorHits === 0,
+    `命中 ${controlAnchorHits} 次`,
+  );
+
+  // 结构性诊断：weight 被服务端收下但不进提示词。
+  // 这条只能靠读 npc-proxy.mjs 得出，HTTP 层观测不到，所以记为 NOTE 而不是 PASS/FAIL。
+  notes.push('服务端 buildMessages 只渲染 day/kind/summary，memory.weight 与 actor 不进提示词（见 npc-proxy.mjs:337）。');
+  notes.push('现有 decide() 请求体的 recentEvents 不在 sanitizeObservation 白名单内，会被静默丢弃。');
+}
+
 // ── 3. 真实模型决策（核心）──────────────────────────────────────────────────
 {
   const runs = [];
@@ -325,7 +501,12 @@ async function decide(clientId, extra = {}) {
 }
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────
+if (notes.length > 0) {
+  console.log('\n观测备注（不计入通过率）：');
+  for (const note of notes) console.log(`NOTE  ${note}`);
+}
 const passed = results.filter((r) => r.ok).length;
 console.log(`\n通过 ${passed}/${results.length}`);
 writeFileSync(`${OUT}/api-verify.json`, JSON.stringify(results, null, 2), 'utf-8');
+writeFileSync(`${OUT}/api-verify-notes.json`, JSON.stringify(notes, null, 2), 'utf-8');
 if (passed !== results.length) process.exitCode = 1;

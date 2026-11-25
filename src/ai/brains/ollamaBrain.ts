@@ -17,7 +17,7 @@ import type { NpcActionProposal, NpcBrain, NpcObservation } from '../types';
 export interface OllamaBrainOptions {
   /** Ollama 服务地址。默认本机；地址与模型名走配置/环境变量，不入库。 */
   baseUrl?: string;
-  /** 模型名，如 'qwen3:8b'。 */
+  /** 模型名，如 'qwen3:8b'。代理模式下忽略（模型由服务端固定）。 */
   model: string;
   /** 测试注入用；生产传全局 fetch。 */
   fetchImpl?: typeof fetch;
@@ -27,6 +27,16 @@ export interface OllamaBrainOptions {
   maxOutputTokens?: number;
   /** 关掉思维链。带 thinking 的模型必须为 true，否则会空 content。 */
   disableThinking?: boolean;
+  /**
+   * 走同域后端代理（公开部署形态）而非直连推理服务。
+   *
+   * 三件事一并改变：不发送 model/max_tokens（服务端固定，防止被当开放代理）、
+   * 不发送任何凭据（Key 只在服务端）、请求体是结构化观察对象而不是 prompt
+   * 文本（服务端自己拼 prompt，客户端无法注入指令）。
+   */
+  proxyMode?: boolean;
+  /** 代理模式下的会话标识；仅用于服务端限流，不含身份信息。 */
+  sessionId?: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 8000;
@@ -76,6 +86,10 @@ export class OllamaBrain implements NpcBrain {
   private readonly timeoutMs: number;
   private readonly maxOutputTokens: number | undefined;
   private readonly disableThinking: boolean;
+  private readonly proxyMode: boolean;
+  private readonly sessionId: string;
+  /** 最近一次决策的真实来源，供 UI 如实展示（不改 NpcBrain 接口）。 */
+  private lastSource: 'model' | 'rules-fallback' = 'rules-fallback';
 
   constructor(options: OllamaBrainOptions) {
     this.baseUrl = (options.baseUrl ?? 'http://127.0.0.1:11434').replace(/\/+$/, '');
@@ -86,11 +100,30 @@ export class OllamaBrain implements NpcBrain {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxOutputTokens = options.maxOutputTokens;
     this.disableThinking = options.disableThinking ?? true;
+    this.proxyMode = options.proxyMode ?? false;
+    this.sessionId = options.sessionId ?? 'local';
   }
 
+  /**
+   * 最近一次决策的来源。`model` 表示真的由模型给出，`rules-fallback`
+   * 表示这一轮已降级——UI 必须据此如实显示，不能永远标「AI」。
+   */
+  get decisionSource(): 'model' | 'rules-fallback' {
+    return this.lastSource;
+  }
+
+  /**
+   * 就绪探测。运行时在真正决策前会先问一次，探测失败就等于「没有主脑」，
+   * decide() 根本不会被调用——所以这个方法的 URL 必须和实际调用形态一致。
+   *
+   * 代理模式下运行时 health 打的是代理自己的 `/healthz`：`/api/tags` 是
+   * Ollama 原生端点，同源代理上不存在，请求会返回 404，于是「模型可用」
+   * 被永久误判成「不可用」，UI 永远显示降级文案、请求一次都发不出去。
+   */
   async health(): Promise<boolean> {
     try {
-      const res = await this.fetchImpl(`${this.baseUrl}/api/tags`, {
+      const probe = this.proxyMode ? `${this.baseUrl}/healthz` : `${this.baseUrl}/api/tags`;
+      const res = await this.fetchImpl(probe, {
         signal: AbortSignal.timeout(2000),
       });
       return res.ok;
@@ -100,7 +133,12 @@ export class OllamaBrain implements NpcBrain {
   }
 
   async decide(obs: NpcObservation): Promise<NpcActionProposal | null> {
+    // 代理模式：发结构化观察，由服务端拼 prompt 并决定模型。客户端不传
+    // 模型名、不传预算、不传凭据——这样即使前端被反编译也拿不到 Key。
+    if (this.proxyMode) return this.decideViaProxy(obs);
+
     try {
+      this.lastSource = 'rules-fallback';
       const body: Record<string, unknown> = {
         model: this.model,
         stream: false,
@@ -130,7 +168,10 @@ export class OllamaBrain implements NpcBrain {
         return null;
       }
       const proposal = parseProposal(content);
-      if (proposal) return proposal;
+      if (proposal) {
+        this.lastSource = 'model';
+        return proposal;
+      }
       // 有正文但截断在半句上（JSON 不完整）也值得放宽重试一次。
       if (wasTruncated(raw) && this.maxOutputTokens !== undefined) {
         return this.retryWithLargerBudget(obs);
@@ -138,6 +179,49 @@ export class OllamaBrain implements NpcBrain {
       return null;
     } catch {
       return null; // 超时/断网/坏 JSON：一律降级
+    }
+  }
+
+  /**
+   * 代理模式实现。
+   *
+   * 请求体只有两样东西：会话标识（服务端限流用）和观察对象（服务端逐字段
+   * 白名单校验）。服务端回 `decisionSource`，我们只认 `model`；任何其它来源
+   * 或非 2xx 都降级，绝不把「服务端说降级了」当成模型输出。
+   */
+  private async decideViaProxy(obs: NpcObservation): Promise<NpcActionProposal | null> {
+    this.lastSource = 'rules-fallback';
+    try {
+      const res = await this.fetchImpl(`${this.baseUrl}/api/npc/decide`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        signal: AbortSignal.timeout(this.timeoutMs),
+        body: JSON.stringify({
+          clientId: this.sessionId,
+          observation: {
+            npcId: obs.npcId,
+            archetype: obs.archetype,
+            goal: obs.goal,
+            traits: obs.traits,
+            mood: obs.mood,
+            world: obs.world,
+            relationship: obs.relationship,
+            memory: obs.memory,
+            availableActions: obs.availableActions,
+            // NPC 视角的自身事实（位置/血量）——服务端会逐字段校验。
+            self: obs.self,
+          },
+        }),
+      });
+      if (!res.ok) return null;
+      const payload = (await res.json()) as { ok?: boolean; text?: string; decisionSource?: string };
+      if (payload.ok !== true || payload.decisionSource !== 'model') return null;
+      if (typeof payload.text !== 'string' || payload.text.trim().length === 0) return null;
+      const proposal = parseProposal(payload.text);
+      if (proposal) this.lastSource = 'model';
+      return proposal;
+    } catch {
+      return null;
     }
   }
 
@@ -157,7 +241,10 @@ export class OllamaBrain implements NpcBrain {
       });
       if (raw === null) return null;
       const content = readAssistantText(raw);
-      return content === null || content.trim().length === 0 ? null : parseProposal(content);
+      if (content === null || content.trim().length === 0) return null;
+      const proposal = parseProposal(content);
+      if (proposal) this.lastSource = 'model';
+      return proposal;
     } catch {
       return null;
     }

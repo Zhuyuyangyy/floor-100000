@@ -13,6 +13,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test:e2e": "playwright test",
+    "test:live-proxy": "npm run build && playwright test -c playwright.live.config.ts",
     "electron": "electron .",
     "dist:win": "electron-packager . Floor100000 --platform=win32 --arch=x64 --out=release --overwrite --ignore=/node_modules/",
     "dist:installer": "electron-builder --win nsis"

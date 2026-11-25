@@ -33,6 +33,25 @@ describe('OllamaBrain：transport 层', () => {
     expect(await bad.health()).toBe(false);
   });
 
+  // 回归：代理模式下 health 曾打 /api/tags（Ollama 原生端点，同域代理上没有），
+  // 404 → 运行时认为「没有主脑」→ decide 一次都不调用 → UI 永远降级。
+  it('health：代理模式探测 /healthz，不打 Ollama 的 /api/tags', async () => {
+    const seen: string[] = [];
+    const brain = new OllamaBrain({
+      model: 'ignored',
+      baseUrl: '',
+      proxyMode: true,
+      sessionId: 's_x',
+      fetchImpl: (async (url: string) => {
+        seen.push(String(url));
+        return jsonResponse({ ok: true });
+      }) as unknown as typeof fetch,
+    });
+    expect(await brain.health()).toBe(true);
+    expect(seen).toEqual(['/healthz']);
+    expect(seen.some((u) => u.includes('/api/tags'))).toBe(false);
+  });
+
   it('decide：走原生 /api/chat，关掉 thinking 并强制 JSON', async () => {
     const fetchImpl = (async (url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
@@ -105,5 +124,85 @@ describe('OllamaBrain：transport 层', () => {
   it('decide：响应缺 message → null', async () => {
     const fetchImpl = (async () => jsonResponse({ error: 'model not found' })) as typeof fetch;
     expect(await new OllamaBrain({ model: 'm', fetchImpl }).decide(obs)).toBeNull();
+  });
+});
+describe('OllamaBrain：代理模式（公开部署）', () => {
+  /** 代理模式：请求同域 /api/npc/decide，体里只有会话标识与观察对象。 */
+  function proxyFetch(handler: (body: any, url: string, init?: RequestInit) => Response) {
+    const seen: Array<{ url: string; body: any; init?: RequestInit }> = [];
+    const impl = (async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      seen.push({ url, body, init });
+      return handler(body, url, init);
+    }) as typeof fetch;
+    return { impl, seen };
+  }
+
+  it('不发送 model / max_tokens / 任何凭据', async () => {
+    const { impl, seen } = proxyFetch(() =>
+      jsonResponse({ ok: true, text: '{"action":{"type":"dialogue","text":"早"},"confidence":0.9}', decisionSource: 'model' }));
+
+    const brain = new OllamaBrain({
+      model: 'should-not-be-sent',
+      baseUrl: '',
+      proxyMode: true,
+      sessionId: 'sess-1',
+      maxOutputTokens: 999,
+      fetchImpl: impl,
+    });
+    const proposal = await brain.decide(obs);
+
+    expect(proposal).toMatchObject({ action: { type: 'dialogue', text: '早' } });
+    expect(brain.decisionSource).toBe('model');
+
+    const call = seen[0];
+    expect(call.url).toBe('/api/npc/decide');
+    // 铁律：代理模式下这些字段一个都不能出现。
+    expect(call.body).not.toHaveProperty('model');
+    expect(call.body).not.toHaveProperty('max_tokens');
+    expect(call.body).not.toHaveProperty('messages');
+    expect(call.body).not.toHaveProperty('apiKey');
+    expect(JSON.stringify(call.body)).not.toContain('should-not-be-sent');
+    // 只应有会话标识与观察对象。
+    expect(Object.keys(call.body).sort()).toEqual(['clientId', 'observation']);
+    expect(call.body.clientId).toBe('sess-1');
+  });
+
+  it('请求头不带 Authorization', async () => {
+    const { impl, seen } = proxyFetch(() =>
+      jsonResponse({ ok: true, text: '{"action":{"type":"dialogue","text":"嗯"},"confidence":0.9}', decisionSource: 'model' }));
+    const brain = new OllamaBrain({ model: 'm', baseUrl: '', proxyMode: true, fetchImpl: impl });
+    await brain.decide(obs);
+    const headers = (seen[0].init?.headers ?? {}) as Record<string, string>;
+    expect(headers.Authorization).toBeUndefined();
+    expect(headers.authorization).toBeUndefined();
+  });
+
+  it('服务端说降级时不冒充模型输出', async () => {
+    const { impl } = proxyFetch(() =>
+      jsonResponse({ ok: false, reason: 'breaker_open', decisionSource: 'rules-fallback' }));
+    const brain = new OllamaBrain({ model: 'm', baseUrl: '', proxyMode: true, fetchImpl: impl });
+    expect(await brain.decide(obs)).toBeNull();
+    expect(brain.decisionSource).toBe('rules-fallback');
+  });
+
+  it('非 2xx、坏 JSON、超时都降级而不抛错', async () => {
+    const cases = [
+      (async () => ({ ok: false, status: 503, json: async () => ({}) }) as Response) as typeof fetch,
+      (async () => jsonResponse({ ok: true, text: 'not json', decisionSource: 'model' })) as typeof fetch,
+      (async () => { throw new Error('timeout'); }) as typeof fetch,
+    ];
+    for (const fetchImpl of cases) {
+      const brain = new OllamaBrain({ model: 'm', baseUrl: '', proxyMode: true, fetchImpl });
+      expect(await brain.decide(obs)).toBeNull();
+      expect(brain.decisionSource).toBe('rules-fallback');
+    }
+  });
+
+  it('服务端回 decisionSource 为 model 但正文为空 → 仍降级', async () => {
+    const { impl } = proxyFetch(() => jsonResponse({ ok: true, text: '   ', decisionSource: 'model' }));
+    const brain = new OllamaBrain({ model: 'm', baseUrl: '', proxyMode: true, fetchImpl: impl });
+    expect(await brain.decide(obs)).toBeNull();
+    expect(brain.decisionSource).toBe('rules-fallback');
   });
 });

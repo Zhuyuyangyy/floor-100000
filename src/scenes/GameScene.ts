@@ -3535,14 +3535,19 @@ export class GameScene extends Phaser.Scene {
     if (!cfg.enabled) return null;
     let runtime = this.aiRuntimes.get(npc.id);
     if (!runtime) {
+      // 三种模式：proxy（公开部署，同域后端持 Key）、ollama（直连本机/Spark）、
+      // offline（确定性规则人格）。proxy 与 ollama 只差传输层，裁决层不变。
+      const useModel = cfg.mode === 'ollama' || cfg.mode === 'proxy';
       runtime = {
-        brain: cfg.mode === 'ollama'
+        brain: useModel
           ? new OllamaBrain({
               baseUrl: cfg.baseUrl,
               model: cfg.model,
               timeoutMs: cfg.timeoutMs,
               maxOutputTokens: cfg.maxOutputTokens,
               disableThinking: cfg.disableThinking,
+              proxyMode: cfg.proxyMode,
+              sessionId: cfg.sessionId,
             })
           : new LocalPersonaBrain(),
         // 降级脑给该 NPC 自己的第一句问候——Spark 不可达时玩家看到的就是

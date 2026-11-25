@@ -11,7 +11,7 @@ import type { NpcDef } from '../data/npcs';
 
 export interface AiNpcConfig {
   enabled: boolean;
-  mode: 'off' | 'offline' | 'ollama';
+  mode: 'off' | 'offline' | 'ollama' | 'proxy';
   baseUrl: string;
   model: string;
   timeoutMs: number;
@@ -21,6 +21,10 @@ export interface AiNpcConfig {
   maxOutputTokens: number | undefined;
   /** 是否让模型跳过思维链；带 thinking 的模型必须为 true。 */
   disableThinking: boolean;
+  /** 公开部署：走同域后端代理，Key 不在前端。 */
+  proxyMode: boolean;
+  /** 代理模式下的会话标识（仅用于服务端限流）。 */
+  sessionId: string;
 }
 
 function envValue(key: string): string | undefined {
@@ -39,6 +43,28 @@ function queryValue(key: string): string | null {
   return new URLSearchParams(window.location.search).get(key);
 }
 
+/**
+ * 会话标识：只用于服务端限流，不含任何身份信息。
+ *
+ * 存 localStorage 而不是内存，是为了让「刷新页面」不重置限流桶——否则
+ * 按 F5 就能绕过单会话限额，限流形同虚设。
+ */
+function sessionId(): string {
+  const KEY = 'f100k-npc-session';
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const existing = localStorage.getItem(KEY);
+      if (existing && existing.length > 0 && existing.length <= 64) return existing;
+      const created = `s_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`.slice(0, 64);
+      localStorage.setItem(KEY, created);
+      return created;
+    }
+  } catch {
+    // 隐私模式/存储被禁用：退回进程内随机值，仍能限流同一会话。
+  }
+  return `s_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function aiNpcConfig(): AiNpcConfig {
   const model = (envValue('VITE_NPC_MODEL') ?? '').trim();
   const baseUrl = envValue('VITE_OLLAMA_URL') ?? 'http://127.0.0.1:11434';
@@ -47,22 +73,35 @@ export function aiNpcConfig(): AiNpcConfig {
   const thinkRaw = (envValue('VITE_NPC_THINK') ?? '').trim().toLowerCase();
   const forced = queryValue('ainpc') === '1';
   const disabled = queryValue('ainpc') === '0';
+  // 代理模式：显式配置，或「生产构建」默认开启。
+  //
+  // 生产构建（vite build）就是拿去公开部署的那一份，而公开部署唯一的正确
+  // 形态是同域代理——Key 在服务端。dev 构建默认直连本机 Ollama，方便开发时
+  // 用 Spark 调试。这样既不会忘记配置，也不会让本地开发被迫绕代理。
+  const proxyRaw = (envValue('VITE_NPC_PROXY') ?? '').trim().toLowerCase();
+  const prodBuild = (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true;
+  const proxyMode = proxyRaw === 'on' || proxyRaw === 'true' || proxyRaw === '1'
+    || (proxyRaw !== 'off' && proxyRaw !== 'false' && proxyRaw !== '0' && prodBuild);
   const enabled = !disabled && (forced || envValue('VITE_NPC_ENABLED') !== 'false');
   return {
     enabled,
-    mode: !enabled ? 'off' : model.length > 0 ? 'ollama' : 'offline',
-    baseUrl,
+    mode: !enabled ? 'off' : proxyMode ? 'proxy' : model.length > 0 ? 'ollama' : 'offline',
+    // 代理模式同域请求，baseUrl 留空即用当前源。
+    baseUrl: proxyMode ? '' : baseUrl,
     model,
     // 45s：Spark 实测 npc-qwen(17G) 冷启 ~33s。热推理在关掉思维链后只要
     // 2.5-3.5s（实测 5 次 2.45/2.57/2.85/2.70/2.94s）；保留长超时是为了
     // 冷启动那次加载，不是给思维链留时间。
-    timeoutMs: Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 45_000,
+    // 代理模式上限 20s：公网推理不该让玩家干等，超时就降级。
+    timeoutMs: Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : proxyMode ? 20_000 : 45_000,
     recallK: 6,
     // 关闭思维链时 96-192 足够吐一条提案；截断会自动放宽重试一次。
     maxOutputTokens: Number.isFinite(budgetRaw) && budgetRaw > 0 ? Math.floor(budgetRaw) : 192,
     // 默认关闭思维链：npc-qwen 走 /v1 时 reasoning 会吃掉全部预算并让
     // content 变空串（HTTP 200）。VITE_NPC_THINK=on 可显式打开。
     disableThinking: thinkRaw !== 'on' && thinkRaw !== 'true',
+    proxyMode,
+    sessionId: sessionId(),
   };
 }
 

@@ -257,7 +257,8 @@ ONLINE_BASE=http://127.0.0.1:7860 node tools/verify-online-api.mjs
 > 只给 `FORCE_WRITE` 不给 `SHOT_DIR` 会被拒绝（防止覆盖默认目录里的真产物）。
 
 > **门不止一道，而且最后一道和你拿没拿 token 无关。**
-> 目前共有五道，按引入顺序：
+> 判据共六条，`3609d16` 一个提交里加了两条（它标题写的那件 + message 里自称「顺带」的那件），
+> 所以下表同一提交出现两次——**漏掉一行会让人以为「采样内容」只有一道保护**：
 >
 > | 提交 | 判据 | 挡的是 |
 > |---|---|---|
@@ -265,9 +266,10 @@ ONLINE_BASE=http://127.0.0.1:7860 node tools/verify-online-api.mjs
 > | `a2918b3` | `FORCE_WRITE` 必须配 `SHOT_DIR` | 只给开关不给目录 |
 > | `215b210` | 不得解回默认目录 | `SHOT_DIR=output/online-verify` |
 > | `3609d16` | 不得解回仓库根 | `SHOT_DIR=.` |
+> | `3609d16` | **采样内容要有样本才写** | 无效 token 写出「三组全 `complete:false`」的假记忆证据 |
 > | `4290c43` | **目标目录已有 `api-verify.json` 且本轮 0 样本 → 拒绝** | 任何指向已有证据目录的写法 |
 >
-> **第五道是无条件的，不在 `FORCE_WRITE` 分支里。** 它挡的是这样一条路径：
+> **`4290c43` 那条是无条件的，不在 `FORCE_WRITE` 分支里。** 它挡的是这样一条路径：
 >
 > ```bash
 > MS_TOKEN=<拼错的> SHOT_DIR=artifacts/online-verify node tools/verify-online-api.mjs
@@ -284,8 +286,16 @@ ONLINE_BASE=http://127.0.0.1:7860 node tools/verify-online-api.mjs
 > `modelSamplesObserved: 0`、清单是 `PASS 0 / FAIL 26 / SKIP 14`，一读内容就露馅。
 > 危险在于**得先读内容才知道文件名骗了你**，而 `hasToken: true` 已经先把人劝住了。
 >
-> 前四道是黑名单（枚举「要保护哪个目录」），第五道是白名单（只问「这里已有证据吗」）。
-> 黑名单永远漏——`artifacts/online-verify` 就是这么漏过去的，它是唯一入库的权威源。
+> 「位置」的那三条是黑名单（枚举「要保护哪个目录」），`4290c43` 才换成白名单
+> （只问「这里已有证据吗」）。黑名单永远漏——`artifacts/online-verify` 就是这么漏过去的，
+> 它是唯一入库的权威源。`4290c43` 的判据式里没有目录名，只有
+> `OUT_HAS_EVIDENCE && modelSamplesObserved === 0` 两问，这就是它不用枚举的原因。
+>
+> **但更要紧的是「内容」这一轴：** 前面全过了也只证明「允许写」，不证明「有东西可写」。
+> 一份「允许写 + 什么都没测到」的文件结构合法、字段齐全，是最容易冒充证据的一种——
+> 所以 `samplingWritable()` 包住了三处采样落盘，没有样本就不写。
+> 复核：`grep -n 'samplingWritable(' tools/verify-online-api.mjs`
+> ——应命中 4 行：一处 `function` 定义 + 三处调用点。只剩定义就说明这道判据被摘了。
 
 `tools/verify-online-api.mjs` 是本项目的线上验收脚本，分两段：
 **基础段 32 条**（无条件执行）+ **记忆段**（同样无条件执行）。

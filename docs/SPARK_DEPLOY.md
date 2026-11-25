@@ -294,8 +294,14 @@ ONLINE_BASE=http://127.0.0.1:7860 node tools/verify-online-api.mjs
 > **但更要紧的是「内容」这一轴：** 前面全过了也只证明「允许写」，不证明「有东西可写」。
 > 一份「允许写 + 什么都没测到」的文件结构合法、字段齐全，是最容易冒充证据的一种——
 > 所以 `samplingWritable()` 包住了三处采样落盘，没有样本就不写。
-> 复核：`grep -n 'samplingWritable(' tools/verify-online-api.mjs`
-> ——应命中 4 行：一处 `function` 定义 + 三处调用点。只剩定义就说明这道判据被摘了。
+> 复核要看**形状，不要看行数**（注释里点一次这个名字，裸计数就会 +1）：
+>
+> ```bash
+> grep -cE '^function samplingWritable' tools/verify-online-api.mjs                     # 应为 1
+> grep -cE '^\s*(if|\} else if)\s*\(.*samplingWritable\(' tools/verify-online-api.mjs   # 应为 3
+> ```
+>
+> 只剩定义、没有调用，就说明这道判据被摘了。
 
 `tools/verify-online-api.mjs` 是本项目的线上验收脚本，分两段：
 **基础段 32 条**（无条件执行）+ **记忆段**（同样无条件执行）。

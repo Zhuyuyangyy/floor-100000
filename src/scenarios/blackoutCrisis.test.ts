@@ -1357,7 +1357,8 @@ describe('失信路径：接单不交货 → 门槛抬高 → 核料后才能修
     expect(alinStanceOf(game)).toBe('neutral');
 
     // 第 1 天答应，第 2 天还没交货。这是玩家最常犯的错：以为「答应了」就算完事。
-    game.day = 1 + BLACKOUT_PROMISE_DAYS + 1;
+    // 用增量而不是绝对赋值：将来改开局 day，这里不该跟着莫名变红。
+    game.day += BLACKOUT_PROMISE_DAYS + 1;
     syncBlackoutCrisis(game);
 
     expect(flagCount(game, BLACKOUT_FLAG.promiseBroken)).toBe(1);
@@ -1374,7 +1375,7 @@ describe('失信路径：接单不交货 → 门槛抬高 → 核料后才能修
 
   it('信任仍然够（85.4 > 65），所以拦下玩家的不是分数，是「先当面看见零件」这道程序', async () => {
     const game = await promisedAndWaiting();
-    game.day = 1 + BLACKOUT_PROMISE_DAYS + 1;
+    game.day += BLACKOUT_PROMISE_DAYS + 1;
     syncBlackoutCrisis(game);
     expect(alinStanceOf(game)).toBe('guarded');
 
@@ -1408,6 +1409,13 @@ describe('失信路径：接单不交货 → 门槛抬高 → 核料后才能修
     expect(
       loadCompetitionNpcMemory(game, 'alin').some((entry) => entry.kind === 'promise' && entry.status === 'kept'),
     ).toBe(true);
+    // 但「修好」不等于「失信被抹掉」：promiseBroken 仍然在，态度仍然是 guarded。
+    // 这一点很要紧——如果哪天有人为了「让玩家心情好一点」在修成时清掉这个 flag，
+    // 态度会立刻跳回 cooperative（前一天的送水记忆还在），这一句就从 +2 变成 +8，
+    // 玩家的帐上会多出 6 分他从没挣到的信任。实测：把 flag 清零，这条报
+    // `expected '…信任 +8。' to be '…信任 +2。'`。
+    expect(flagCount(game, BLACKOUT_FLAG.promiseBroken)).toBe(1);
+    expect(alinStanceOf(game)).toBe('guarded');
   });
 
   it('接单当天不误判失信：还没到期限就 sync，promiseBroken 不该被写', async () => {
@@ -1421,14 +1429,14 @@ describe('失信路径：接单不交货 → 门槛抬高 → 核料后才能修
     expect(observeBlackout(game).alinTrust).toBeCloseTo(90.2, 5);
 
     // 期限是「接单当天 + BLACKOUT_PROMISE_DAYS」，差一天都不能算过期。
-    game.day = 1 + BLACKOUT_PROMISE_DAYS;
+    game.day += BLACKOUT_PROMISE_DAYS;
     syncBlackoutCrisis(game);
     expect(flagCount(game, BLACKOUT_FLAG.promiseBroken)).toBe(0);
   });
 
   it('失信不是死局：修好之后隔天再点，是「已经有结果了」而不是重复扣料', async () => {
     const game = await promisedAndWaiting();
-    game.day = 1 + BLACKOUT_PROMISE_DAYS + 1;
+    game.day += BLACKOUT_PROMISE_DAYS + 1;
     syncBlackoutCrisis(game);
     giveAllRepairParts(game);
     verifyBlackoutMaterials(game);

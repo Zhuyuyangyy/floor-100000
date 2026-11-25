@@ -3332,7 +3332,16 @@ export class GameScene extends Phaser.Scene {
     // and a name left out of the list stays on screen after the panel closes.
     this.dialogueObjects.push(this.dialogueTitle, this.dialogueSource);
     this.dialogueMessage = this.add
-      .text(cx, top + 45, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: panelW - 44 } })
+      // useAdvancedWrap 不是排版偏好，是中文能不能折行的开关。
+      //
+      // Phaser 的 basicWordWrap 是 `text.split(' ')` 逐词累加：中文没有空格，
+      // 整句被当成**一个词**，而「词比整行还宽」的分支（Text.js basicWordWrap
+      // 里 `if (j > 0)`）在第一句时恰好不触发换行，于是它一个字都不折，直接
+      // 横向溢出。全仓 14 处 wordWrap、0 处 useAdvancedWrap，所以这不是个案。
+      //
+      // 这一处尤其致命：正文是模型现场生成的句子，长度不可控。演示时 NPC 说
+      // 第一句长台词就会冲出面板——前面所有 AI 工作会被这一眼毁掉。
+      .text(cx, top + 45, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: panelW - 44, useAdvancedWrap: true } })
       .setOrigin(0.5)
       .setDepth(depth + 7);
     this.dialogueObjects.push(this.dialogueMessage);

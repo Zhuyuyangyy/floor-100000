@@ -490,6 +490,78 @@ export const XIAOZHOU_COLORS: CharacterColors = {
   hair: rgb(PALETTE.shadow),
 };
 
+// ── the tower's other residents ─────────────────────────────────────────────
+//
+// The building is supposed to read as a place people still live in, not as a
+// corridor with two shopkeepers in it. These four are neighbours on the upper
+// floors; they talk, they trade, and they are the reason a floor looks occupied.
+//
+// They are baked procedurally from these palettes rather than shipped as
+// portraits, which is exactly what CharacterColors.bulk was built for: four
+// survivors on one skeleton with only a palette swap read as recolours, but a
+// heavier build and a slighter one do not. That is also why they need no new art
+// — the art pack only ever had one survivor's action frames to slice.
+//
+// Value separation is the rule that matters here (2D-art guide §3): every
+// resident's clothing sits on a ramp step that neither the stone wall (base
+// 0x2c3f4e / light 0x47657a) nor the player's teal jacket occupies, so a figure
+// standing in front of the wall still has an edge.
+
+// 老陈：楼里的门房，年纪最大。他的辨识度不靠颜色（灰蓝工装在冷色墙前本来
+// 就弱），而靠「瘦削佝偻 + 一头白发」：他是全场最窄的剪影，站在年轻人旁边
+// 立刻显出岁数。
+//
+// bulk 是这套骨架里唯一的体型变量，而一层站四个人只有四个可用档位。实测
+// 第 2 层四人的最优分配就是这里：老陈 0.6 / 小周 0.82 / 大刘 1.05 / 阿林 1.3，
+// 两两剪影最大重叠 0.925（此前把老陈和大刘都设成「壮」，撞到 0.975-0.99，
+// 一眼看过去就是同一个人换了件衣服）。
+export const LAOCHEN_COLORS: CharacterColors = {
+  ...PLAYER_COLORS,
+  bulk: 0.6,
+  cloth: rgb(PALETTE.stone),
+  clothDark: rgb(PALETTE.shadow),
+  clothLight: rgb(PALETTE.stoneLight),
+  trouser: rgb(PALETTE.ink),
+  skin: rgb(PALETTE.skin),
+  skinDark: rgb(PALETTE.skinDeep),
+  hair: rgb(PALETTE.dust),
+};
+
+// 阿珍：食堂的厨娘，围裙是暖色——这片冷色楼里唯一的暖块，所以一眼能找到。
+export const AZHEN_COLORS: CharacterColors = {
+  ...PLAYER_COLORS,
+  bulk: 1.12,
+  cloth: rgb(PALETTE.lightDeep),
+  clothDark: rgb(PALETTE.shadow),
+  clothLight: rgb(PALETTE.light),
+  trouser: rgb(PALETTE.stone),
+  hair: rgb(PALETTE.shadow),
+};
+
+// 大刘：搬货的，穿褪成灰白的旧布。bulk 1.05 落在阿林（1.3）和小周（0.82）
+// 之间，配合最亮的衣服——他是这层唯一穿浅色的人，所以最先被看见。
+export const DALIU_COLORS: CharacterColors = {
+  ...PLAYER_COLORS,
+  bulk: 1.05,
+  cloth: rgb(PALETTE.dust),
+  clothDark: rgb(PALETTE.stone),
+  clothLight: rgb(0xc7cdd3),
+  trouser: rgb(PALETTE.stone),
+  skin: rgb(PALETTE.skinDeep),
+  hair: rgb(PALETTE.ink),
+};
+
+// 小满：半大孩子，最瘦最矮的一个。深色衣服，站在成人旁边立刻显出年龄差。
+export const XIAOMAN_COLORS: CharacterColors = {
+  ...PLAYER_COLORS,
+  bulk: 0.7,
+  cloth: rgb(PALETTE.cloth),
+  clothDark: rgb(PALETTE.clothDeep),
+  clothLight: rgb(PALETTE.clothLight),
+  trouser: rgb(PALETTE.shadow),
+  hair: rgb(PALETTE.ink),
+};
+
 // The night threat is not a person, so it gets no skin: the husk palette is dark
 // enough that the silhouette reads as a shape moving in the dark rather than a
 // second survivor with different clothes.
@@ -967,7 +1039,18 @@ export function pickupAnimKey(who: CharacterKey): string {
   return `pickup-${who}`;
 }
 
-export const WALK_CHARACTERS: readonly CharacterKey[] = ['player', 'npc_alin', 'npc_xiaozhou', 'wanderer'];
+export const WALK_CHARACTERS: readonly CharacterKey[] = [
+  'player',
+  'npc_alin',
+  'npc_xiaozhou',
+  'wanderer',
+  // 楼上住户。没有对应 PNG，走 ProceduralColors 烘焙成走图——见上方
+  // LAOCHEN_COLORS 段的说明。
+  'npc_laochen',
+  'npc_azhen',
+  'npc_daliu',
+  'npc_xiaoman',
+];
 
 // Frames per second for the walk playback. The scene scales timeScale by the
 // player's actual speed, so this is the rate at top speed — 4Hz matches the
@@ -1027,12 +1110,23 @@ export function bakeWalkSheets(scene: Phaser.Scene): void {
   }
 }
 
-const COLORS: Record<CharacterKey, CharacterColors> = {
+// The palette each character is baked with. Exported because it stopped being a
+// private detail the moment residents without painted sheets were added: the
+// roster test needs it to prove two residents on one floor do not share a
+// silhouette, and tools/bake-walk.ts uses the same table to render review frames
+// (it used to keep its own copy, which silently went stale).
+export const CHARACTER_PALETTES: Record<CharacterKey, CharacterColors> = {
   player: PLAYER_COLORS,
   npc_alin: ALIN_COLORS,
   npc_xiaozhou: XIAOZHOU_COLORS,
   wanderer: WANDERER_COLORS,
+  npc_laochen: LAOCHEN_COLORS,
+  npc_azhen: AZHEN_COLORS,
+  npc_daliu: DALIU_COLORS,
+  npc_xiaoman: XIAOMAN_COLORS,
 };
+
+const COLORS = CHARACTER_PALETTES;
 
 // Registers the walk, idle and the W5 one-shot animations once. Guarded because
 // a scene restart re-runs create() while the global animation manager keeps

@@ -29,7 +29,7 @@ import {
 } from '../ai/competitionRules';
 import { hashCompetitionWorldState, serializeCompetitionWorldState } from '../ai/competitionTrace';
 import type { GameState, InventoryStack, ItemId } from '../core/gameTypes';
-import { NPC_FLOOR, getNpc, type NpcId } from '../data/npcs';
+import { NPCS, getNpc, type NpcId } from '../data/npcs';
 import { createNpcState } from '../data/npcPersonalities';
 import { getItem } from '../data/items';
 import { loadNpcState, recordMemory, saveNpcState } from '../systems/NpcMemory';
@@ -41,8 +41,14 @@ import {
 import { loadNpcInventory, saveNpcInventory } from '../systems/NpcInventory';
 import { INTERACT_DISTANCE } from '../core/constants';
 
-/** 两个常驻居民；顺序稳定，便于快照与 trace 对齐。 */
-export const SOCIAL_NPC_IDS: readonly NpcId[] = ['alin', 'xiaozhou'] as const;
+/**
+ * 全部常驻居民；顺序稳定（等同 data/npcs.ts 的楼层顺序），便于快照与 trace 对齐。
+ *
+ * 原来固定为 ['alin','xiaozhou']：楼里只有两个人时这没毛病，但住户扩到六人以后，
+ * 新居民走赠礼会在这里找不到自己的记录——快照里 `npcs` 没有他，executor 的
+ * 「谁被改了」也就落空，表现是赠礼静默失败。所以改成从名单派生。
+ */
+export const SOCIAL_NPC_IDS: readonly NpcId[] = NPCS.map((npc) => npc.id);
 
 export type SocialScenarioStatus = 'executed' | 'blocked' | 'planning_failed' | 'exhausted';
 
@@ -84,7 +90,8 @@ function npcSnapshot(game: GameState, npcId: NpcId): CompetitionNpcStateSnapshot
   const def = getNpc(npcId);
   return {
     npcId,
-    position: { floor: NPC_FLOOR, x: def.x },
+    // 每个人用自己的楼层：楼上住户不住第 2 层，写死会让距离校验永远 too_far。
+    position: { floor: def.floor, x: def.x },
     // 民用 NPC 的 HP/饥饿不在 GameState 建模；这里的 0 是契约占位符，
     // 本模块从不写回，避免伪造数值。
     hp: 0,
@@ -92,7 +99,7 @@ function npcSnapshot(game: GameState, npcId: NpcId): CompetitionNpcStateSnapshot
     trust: trustOf(game, npcId),
     affinity: 0,
     tension: 0,
-    status: game.currentFloor === NPC_FLOOR ? 'available' : 'absent',
+    status: game.currentFloor === def.floor ? 'available' : 'absent',
     goal: { goalId: `${npcId}-social`, kind: 'custom', sinceDay: 1, status: 'active' },
     memory: loadCompetitionNpcMemory(game, npcId),
     lastAction: null,
@@ -134,7 +141,7 @@ function observationFor(
     observationId: `${world.seed}:${world.day}:${world.gameMinute}:${npcId}:${sequence}`,
     world,
     focus: { kind: 'npc', npcId },
-    availableActions: world.currentFloor === NPC_FLOOR ? ['observe', 'give'] : ['observe'],
+    availableActions: world.currentFloor === getNpc(npcId).floor ? ['observe', 'give'] : ['observe'],
     recentFacts: [
       `${name}信任:${npc?.trust ?? COMPETITION_TRUST_BASE}`,
       `${name}库存种类:${npc?.inventory.length ?? 0}`,
@@ -304,7 +311,7 @@ export async function runSocialGiftScenario(
   options: SocialGiftOptions = {},
 ): Promise<SocialScenarioResult> {
   const npcName = getNpc(npcId).name;
-  if (game.currentFloor !== NPC_FLOOR) {
+  if (game.currentFloor !== getNpc(npcId).floor) {
     const before = socialWorldSnapshot(game);
     const observation = observationFor(before, npcId, 0);
     const hash = await hashCompetitionWorldState(before);

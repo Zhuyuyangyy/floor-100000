@@ -28,16 +28,25 @@ const server = createServer((req, res) => {
   let raw = '';
   req.on('data', (chunk) => (raw += chunk));
   req.on('end', () => {
-    appendFileSync(
-      LOG,
-      JSON.stringify({
-        at: new Date().toISOString(),
-        method: req.method,
-        url: req.url,
-        authorization: req.headers.authorization ?? null,
-        body: raw,
-      }) + '\n',
-    );
+    // 证据落盘失败不能把上游打死。这里原来直接 appendFileSync：目录被清掉
+    // （test-results/ 是生成物，随时可能被 rm -rf）时抛 ENOENT，进程整个退出，
+    // 表现却是「webServer 启动超时」——排查时会一路怀疑代理和端口，而真正
+    // 的原因在几十行之外的日志写入。证据是附加品，服务才是必需品。
+    try {
+      mkdirSync(dirname(LOG), { recursive: true });
+      appendFileSync(
+        LOG,
+        JSON.stringify({
+          at: new Date().toISOString(),
+          method: req.method,
+          url: req.url,
+          authorization: req.headers.authorization ?? null,
+          body: raw,
+        }) + '\n',
+      );
+    } catch (err) {
+      console.warn(`[fake-upstream] 证据写入失败（不影响服务）：${err.code ?? err.message}`);
+    }
 
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(

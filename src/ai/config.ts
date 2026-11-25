@@ -3,11 +3,12 @@
 // 无模型配置时使用离线规则人格脑；显式配置 VITE_NPC_MODEL 后才请求
 // 项目自有的本地 Ollama。VITE_NPC_ENABLED=false 或 ?ainpc=0 可关闭两者。
 
-import { ARCHETYPES } from '../data/npcPersonalities';
+import { ARCHETYPES, NPC_PROFILES } from '../data/npcPersonalities';
 import type { NpcFact } from './rulesExecutor';
 import type { NpcArchetype } from './types';
 import type { InventoryStack, ItemId } from '../core/gameTypes';
 import type { NpcDef } from '../data/npcs';
+import type { NpcId } from '../data/npcs';
 
 export interface AiNpcConfig {
   enabled: boolean;
@@ -107,8 +108,16 @@ export function aiNpcConfig(): AiNpcConfig {
 
 // ── NPC 事实构建 ────────────────────────────────────────────────────────────
 
-/** 居民 id → 人格原型。wanderer 是夜间事件，暂无 NpcDef，预留 hostile。 */
+/**
+ * 居民 id → 人格原型。wanderer 是夜间事件，暂无 NpcDef，预留 hostile。
+ *
+ * 先查个体档（楼里六个人各有自己的原型），再退回原型表的兜底，最后 neutral。
+ * 顺序不能反：先查原型会让老陈、大刘、阿珍、小满全部落到 neutral，
+ * 五个人对玩家说出同一种语气，而调用方看不出任何异常。
+ */
 export function archetypeForNpcId(npcId: string): NpcArchetype {
+  const profile = NPC_PROFILES[npcId as NpcId];
+  if (profile) return profile.archetype;
   for (const def of Object.values(ARCHETYPES)) {
     if (def.npcId === npcId) return def.archetype;
   }
@@ -132,7 +141,9 @@ export function npcFactFromDef(npc: NpcDef, hp = 30): NpcFact {
   return {
     id: npc.id,
     archetype: archetypeForNpcId(npc.id),
-    floor: 2, // NPC_FLOOR；此处不 import 常量，避免配置模块牵连场景层
+    // 居民的楼层现在来自数据表：楼上住户不住在第 2 层，硬编码 2 会让
+    // 「不在同一层」的距离校验永远算错。
+    floor: npc.floor,
     x: npc.x,
     hp,
     inventory: npcInventoryFromDef(npc),

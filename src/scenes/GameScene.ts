@@ -147,14 +147,14 @@ import {
 import { getItem } from '../data/items';
 import { HUD_LAYOUT, hudClockLabel } from '../render/hudLayout';
 import { RECIPES, getRecipe, type UpgradeId } from '../data/recipes';
-import { NPCS, NPC_FLOOR, getNpc, type NpcDef, type NpcId } from '../data/npcs';
+import { getNpc, npcsOnFloor, type NpcDef, type NpcId } from '../data/npcs';
 import { ALIN_REPAIR_MATERIALS, closedFloorGateForTransition, isAlinRepairGateOpen } from '../data/floorGates';
 import { trade } from '../systems/TradeSystem';
-import { aiNpcConfig, archetypeForNpcId, npcFactFromDef } from '../ai/config';
+import { aiNpcConfig, npcFactFromDef } from '../ai/config';
 import { OllamaBrain } from '../ai/brains/ollamaBrain';
 import { LocalPersonaBrain } from '../ai/brains/localPersonaBrain';
 import { OptionTreeBrain } from '../ai/brains/optionTreeBrain';
-import { createNpcState } from '../data/npcPersonalities';
+import { createNpcState, createNpcStateFor } from '../data/npcPersonalities';
 import { loadNpcState, recordMemory, saveNpcState } from '../systems/NpcMemory';
 import { decideNpcAction, isDialogueFresh, type DialogueSession, type NpcRuntimeConfig } from '../systems/NpcRuntime';
 import { runAlinRepairScenario, type AlinRepairScenarioResult } from '../scenarios/alinRepairDemo';
@@ -675,7 +675,8 @@ export class GameScene extends Phaser.Scene {
       this.drawBed();
       this.drawWorkbench();
     }
-    if (floor === NPC_FLOOR) this.drawNpcs();
+    // Any floor with residents gets them drawn; drawNpcs() filters by floor.
+    if (npcsOnFloor(floor).length > 0) this.drawNpcs();
     // OVERHAUL: the floor's question marks go up last, above the room.
     this.buildEncounterSpots();
 
@@ -892,7 +893,9 @@ export class GameScene extends Phaser.Scene {
     // their radii would hijack the key (measured: it silently broke the NPC
     // trade and the journey specs), so each spot is nudged clear first.
     const taken: number[] = [UP_EXIT_X, DOWN_EXIT_X, ...this.floorView.containers.map((c) => c.x)];
-    if (state.currentFloor === NPC_FLOOR) taken.push(...NPCS.map((n) => n.x));
+    // Residents on THIS floor. Using the whole roster would let a 5th-floor
+    // resident push a 2nd-floor question mark out of the way for no reason.
+    taken.push(...npcsOnFloor(state.currentFloor).map((n) => n.x));
     // OVERHAUL Wave C1: the trader joins the taken list so nothing lands on
     // top of him, and he is drawn after the spots so he reads above them.
     // The player arrives at ENTRY_X on every floor, so a trader placed there
@@ -3177,8 +3180,11 @@ export class GameScene extends Phaser.Scene {
 
   // ── NPCs & dialogue ─────────────────────────────────────────────────────
   private drawNpcs(): void {
-    for (const npc of NPCS) {
-      const who = npc.id === 'alin' ? 'npc_alin' : 'npc_xiaozhou';
+    // Every resident standing on this floor. The sprite comes from the data row:
+    // it used to be a hard-coded `id === 'alin' ? 'npc_alin' : 'npc_xiaozhou'`
+    // ternary, which silently drew every resident added after 小周 as 小周.
+    for (const npc of npcsOnFloor(getGame().currentFloor)) {
+      const who = npc.sprite;
       const sprite = this.add
         .sprite(npc.x, PLAYER_FEET_Y, walkSheetKey(who))
         .setOrigin(0.5, 1)
@@ -3191,14 +3197,33 @@ export class GameScene extends Phaser.Scene {
       // Same contact shadow as the player, so an NPC stands on the floor rather
       // than hovering a few pixels above it.
       const shadow = addContactShadow(this, npc.x, PLAYER_FEET_Y + 2, 26, 2, 0.5);
-      const nameLabel = this.add.text(npc.x, FLOOR_HEIGHT - 68, npc.name, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5);
+      // The name plate needs two things the sprite does not: a depth above the
+      // wall dressing and the dust haze, and a backing plate.
+      //
+      // Measured before this: the label was created with the default depth 0, so
+      // it sat UNDER the wall art (1-3) and the haze (25) and read as a ghost —
+      // technically visible, practically unreadable. Two residents made that easy
+      // to miss; four standing shoulder to shoulder made it obvious. Same
+      // treatment the trader's label already gets, and for the same reason.
+      const nameLabel = this.add
+        .text(npc.x, FLOOR_HEIGHT - 68, npc.name, {
+          fontFamily: FONT_FAMILY,
+          fontSize: '22px',
+          color: hex(TEXT.primary),
+          backgroundColor: '#0b0f12cc',
+          padding: { x: 4, y: 2 },
+        })
+        .setOrigin(0.5)
+        .setDepth(ACTOR_DEPTH + 1);
       this.floorObjects.push(...shadow, sprite, nameLabel);
     }
   }
 
   private nearestNpc(state: GameState): NpcDef | null {
-    if (state.currentFloor !== NPC_FLOOR) return null;
-    for (const npc of NPCS) {
+    // Residents only exist on their own floor now, so the old `floor === NPC_FLOOR`
+    // guard became "is there anyone here at all".
+    const residents = npcsOnFloor(state.currentFloor);
+    for (const npc of residents) {
       if (Math.abs(npc.x - state.player.x) <= INTERACT_DISTANCE) return npc;
     }
     return null;
@@ -3565,7 +3590,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private npcStateFor(npc: NpcDef): NpcPersistedState {
-    return loadNpcState(getGame(), npc.id) ?? createNpcState(archetypeForNpcId(npc.id));
+    // Individual profile first: two residents sharing an archetype must not share
+    // a personality, or every neutral neighbour speaks in the same voice.
+    return loadNpcState(getGame(), npc.id) ?? createNpcStateFor(npc.id);
   }
 
   /** 当前对话的保鲜键；没有打开的对话时为 null。 */

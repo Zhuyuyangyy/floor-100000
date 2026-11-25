@@ -27,7 +27,11 @@ function pngSize(dir: string, file: string): { width: number; height: number } {
 }
 
 const furniture = Object.entries(FURNITURE_FILES).map(([key, file]) => ({ key, ...pngSize(ART, file) }));
-const characters = Object.entries(CHARACTER_FILES).map(([key, file]) => ({ key, ...pngSize(ART, file) }));
+// Only the painted characters have a PNG; the residents added later are baked
+// from palettes (see CHARACTER_FILES), so they are not part of this measurement.
+const characters = Object.entries(CHARACTER_FILES)
+  .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+  .map(([key, file]) => ({ key, ...pngSize(ART, file) }));
 
 // The player's height is the unit everything else is measured against. All four
 // share one canvas, so they must agree — that is the foot-baseline rule.
@@ -43,7 +47,8 @@ describe('character canvas', () => {
   });
 
   it('has a file for each of them', () => {
-    for (const c of characters) expect(existsSync(join(ART, CHARACTER_FILES[c.key as keyof typeof CHARACTER_FILES]))).toBe(true);
+    expect(characters.length, 'no painted characters left to measure').toBeGreaterThan(0);
+    for (const c of characters) expect(existsSync(join(ART, CHARACTER_FILES[c.key as keyof typeof CHARACTER_FILES]!))).toBe(true);
   });
 });
 

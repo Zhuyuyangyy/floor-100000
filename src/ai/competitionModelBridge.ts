@@ -60,6 +60,10 @@ function memoryText(npc: CompetitionNpcStateSnapshot | null): string {
 const NPC_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   alin: '阿林',
   xiaozhou: '小周',
+  laochen: '老陈',
+  daliu: '大刘',
+  azhen: '阿珍',
+  xiaoman: '小满',
   wanderer: '流浪者',
 };
 

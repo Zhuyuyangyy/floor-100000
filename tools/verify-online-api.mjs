@@ -299,22 +299,30 @@ async function decide(clientId, extra = {}) {
   // 不会想到「token 无效」——而这一整轮花在「让失败原因说人话」上的功夫
   // （见 `99c7b7c`）就漏在这一处。
   //
-  // 解析失败时 b 为 null。**下面两条判据必须显式处理 null**——原来的写法是
-// `b.aiConfigured === true`，b 为 null 时不是「自然判 FAIL」，是抛 TypeError
-// 把脚本再崩一次（实测：`TypeError: Cannot read properties of null`）。
-// 所以「包个 try/catch 就行」是错的，得让后面读 b 的地方能接受 null。
-  // 用 `b?.x` 而不是 `b.x`：b 为 null 时得到 undefined，`undefined === true` 是
-  // false，判 FAIL，这才是「没拿到健康报告」该有的表达。
-  let b = null;
-  try { b = await r.json(); } catch { /* 响应体不是 JSON，按没拿到健康报告处理 */ }
+  // ⚠️ 兜底必须是 `{}` 而不是 `null`。这是实测踩出来的第二层：
+  //   `try/catch` 只兜住「解析失败」，没兜住「解析失败之后的每一次使用」。
+  //   b 为 null 时 `b.aiConfigured` 不是宽松比较，是**属性访问**——实测抛
+  //   `TypeError: Cannot read properties of null (reading 'aiConfigured')`，
+  //   只是把崩溃位置往后挪了十几行，等于没修。
+  //   写成 `{}` 之后四处语义全对，且不用改任何一条判据：
+  //     b.aiConfigured → undefined，`=== true` 判 FAIL（没拿到报告 ≠ AI 已配置）
+  //     b.breakerOpen  → undefined，`=== false` 判 FAIL
+  //     健康检查不泄 Key 的 `'aiConfigured' in b` → false，判 SKIP
+  //     JSON.stringify({}) → "{}"，detail 读起来是「空报告」而不是 "null"
+  //   `?? {}` 再多兜一层「响应体字面就是 null」的情况，防御性，不是必需。
+  //
+  // 这条与整个文件的主题同形：**拦住一个入口不等于后面安全。** 加门时要想
+  // 「这道门放过去的东西，下游每一处都用对了吗」，不能只想着「入口堵住了」。
+  let b = {};
+  try { b = await r.json() ?? {}; } catch { /* 响应体不是 JSON，按没拿到健康报告处理 */ }
   check('/healthz 200', r.status === 200, JSON.stringify(b));
-  check('AI 已配置（Key 生效）', b?.aiConfigured === true, `aiConfigured=${b?.aiConfigured}`);
-  check('熔断未打开', b?.breakerOpen === false, `breakerOpen=${b?.breakerOpen}`);
+  check('AI 已配置（Key 生效）', b.aiConfigured === true, `aiConfigured=${b.aiConfigured}`);
+  check('熔断未打开', b.breakerOpen === false, `breakerOpen=${b.breakerOpen}`);
   // 「不泄 Key」在 401 时也成立，因为错误体里本来就没有 ms-。必须要求 200
   // 且响应体真是一份健康报告，这条才有意义。
   checkIfMeasured(
     '健康检查不泄 Key',
-    r.status === 200 && b && typeof b === 'object' && 'aiConfigured' in b,
+    r.status === 200 && typeof b === 'object' && 'aiConfigured' in b,
     !JSON.stringify(b).includes('ms-'),
     JSON.stringify(b),
     `HTTP ${r.status}，没拿到健康报告`,

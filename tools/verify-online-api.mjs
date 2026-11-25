@@ -370,6 +370,9 @@ async function decide(clientId, extra = {}) {
   const ROUNDS = 3;
   let controlAnchorHits = 0;
   let treatmentAnchorHits = 0;
+  // 完整证据（含每组原文、意图、锚点命中、用了多少轮）单独落盘。
+  // 评委看的是「记忆进了提示词之后模型说了什么」，不是一句 PASS。
+  const evidence = [];
 
   for (const contrast of CONTRASTS) {
     // 每轮各取一个样本，一旦出现差异就停，并如实记录用了几轮。
@@ -395,6 +398,14 @@ async function decide(clientId, extra = {}) {
     const fmt = (rs) => rs.map((r) => `${r.intent}${contrast.anchors ? (hitAnchor(r, contrast.anchors) ? '+锚点' : '') : ''}`).join(',');
     const detail = `${moved ? `第${rounds}轮命中` : `${rounds}轮未命中`}｜对照[${fmt(samples.control)}] 记忆[${fmt(samples.treatment)}]`;
     check(`记忆改变决策：${contrast.label}`, moved, detail);
+    evidence.push({
+      contrast: contrast.label,
+      rounds,
+      moved,
+      memorySent: contrast.treatment,
+      control: samples.control,
+      treatment: samples.treatment,
+    });
     if (!moved) {
       notes.push(
         `未观察到差异的一组（${contrast.label}）原文：对照="${samples.control.at(-1)?.text ?? ''}" 记忆="${samples.treatment.at(-1)?.text ?? ''}"`,
@@ -418,6 +429,8 @@ async function decide(clientId, extra = {}) {
   // 这条只能靠读 npc-proxy.mjs 得出，HTTP 层观测不到，所以记为 NOTE 而不是 PASS/FAIL。
   notes.push('服务端 buildMessages 只渲染 day/kind/summary，memory.weight 与 actor 不进提示词（见 npc-proxy.mjs:337）。');
   notes.push('现有 decide() 请求体的 recentEvents 不在 sanitizeObservation 白名单内，会被静默丢弃。');
+
+  writeFileSync(`${OUT}/memory-evidence.json`, JSON.stringify(evidence, null, 2), 'utf-8');
 }
 
 // ── 3. 真实模型决策（核心）──────────────────────────────────────────────────

@@ -1192,9 +1192,21 @@ if (!CAN_WRITE_CHECKLIST && FORCED_WITHOUT_DIR) {
   // 而「这一轮到底有没有拿到数据」只有跑完才知道。所以它只能在落盘前判。
   //
   // 为什么这条比 FORCE_WRITE 那条更要紧：FORCE_WRITE 事故里 meta 写着
-  // forceWrite: true，读者能看见「这不是证据」。这一条路径 meta 写的是
-  // hasToken: true / forceWrite: false，与真证据完全一致——实测无效 token
-  // 覆盖后，旧文件从 cb827d5a… 变成 414d46c0…，没有任何字段能反推出来。
+  // forceWrite: true，读者能看见「这不是证据」。
+  //
+  // ⚠️ 下面这句曾经写成「meta 与真证据完全一致，没有任何字段能反推出来」，
+  // 现在只对**事故当时**成立，别照字面理解：
+  //   - 414d46c0 那次覆盖发生在 `modelSamplesObserved` 进 meta 之前，当时
+  //     无效 token 产出的 meta 与真证据**字段集合相同、值也相同**，确实无从分辨。
+  //   - 现在 meta 里有 `modelSamplesObserved: 0` 与 `modelRepliesOutsideSampling`，
+  //     打开文件是能看出这次一条观测都没有的。
+  // 但「能看出」不等于「看得出」：第一眼会看的是 `hasToken: true`，那个字段
+  // 读起来就是「一次带凭证的正式运行」；要分辨必须读到采样那两个字段，也就是
+  // **得先打开文件、先怀疑文件名，才可能发现文件名骗了你**。a7 实测时指出过
+  // 这一点：它写的是「不是整份 meta 无法分辨，而是只看 hasToken 看不出」。
+  //
+  // 所以判据不能建立在「读者会读到第三个字段」上——落盘前拦住，比落盘后
+  // 靠字段自证可靠。这也是这条门放在落盘前、而不是只往 meta 里多写一个字段的原因。
   console.log(`拒绝覆盖：${OUT_EVIDENCE_PATH} 已经存在，而这一轮采样段 0 次模型回复。`);
   if (modelRepliesOutsideSampling > 0) {
     // 分节失败：token 是好的，只有采样段挂了。这条必须与「token 无效」分开说，
@@ -1203,7 +1215,8 @@ if (!CAN_WRITE_CHECKLIST && FORCED_WITHOUT_DIR) {
     console.log('  但采样内容仍然一条都没有，写出去就是一份没有观测的「证据」，所以照样拒绝。');
   } else {
     console.log('  0 次回复说明拿不到数据（token 拼错/过期/带空格、private、上游 503），');
-    console.log('  不是被测产品不合格。拿它覆盖旧证据会把真数据换成假数据，且 meta 看不出来。');
+    console.log('  不是被测产品不合格。拿它覆盖旧证据，会把一份有观测的文件换成一份没有观测的，');
+    console.log('  而 meta 第一眼看不出（hasToken: true 读起来像「带凭证的正式运行」）。');
   }
   console.log('  要留档请指一个空目录（或干脆不落盘，控制台的 PASS/SKIP/FAIL 三行就是判据条数）。');
   process.exitCode = 1;

@@ -340,3 +340,40 @@ describe('场景层：维修提交只走 executeCompetitionProposal', () => {
     expect(SCENARIO_SRC).toContain('export async function runAzhenExchange(');
   });
 });
+
+// ── P0-c：nextStep 真的被消费了吗 ───────────────────────────────────────────
+//
+// 这一组是上一轮「接线假绿」的翻版：`nextStep` 早就在 `runBlackoutRepair` 里
+// 算出来了，`blackoutSupplyHint` / `blackoutRepairNarration` 也有单测证明它们
+// 逻辑正确——但纯函数测试**证明不了有人调用它们**。把 GameScene 里那一行
+// 删掉，上面所有用例照样全绿，玩家看到的仍然是「还缺保险丝、电线」然后没有
+// 下文。所以这里读源码，钉死「装配存在」。
+
+describe('P0-c 装配层：被拒后的指路真的进了对话框', () => {
+  it('runBlackoutRepairPlan 用的是 blackoutRepairNarration，而不是裸 result.message', () => {
+    // 取 runBlackoutRepairPlan 的函数体（到下一个同类缩进的方法定义为止）。
+    //
+    // `\r?` 不是笔误：仓库里这两个源文件是 CRLF 换行（Windows + autocrlf），
+    // 只写 `\n` 会让整个 match 返回 null，断言变成「找不到函数体」的假红。
+    const body = SCENE_SRC.match(/private async runBlackoutRepairPlan\([\s\S]*?\r?\n  \}/);
+    expect(body, '找不到 runBlackoutRepairPlan 的函数体，断言本身失效了').not.toBeNull();
+    const src = body![0];
+
+    // 赋值那一行必须是 narration，不是 result.message。
+    // 只断言「函数体里出现过 blackoutRepairNarration」是不够的：把它算出来
+    // 却赋给一个临时变量，同样命中；玩家还是看不到指路。
+    expect(src).toMatch(/d\.message = blackoutRepairNarration\(state, result\)/);
+  });
+
+  it('供料提示的两个来源都查数据，不许把「4 层电箱」写死在文案里', () => {
+    // 写死地点的问题在于它不会报错：楼层表一改，玩家就按着提示白跑一趟。
+    // 断言函数体里出现了 FLOOR_TEMPLATES 与小周库存查询。
+    const body = SCENARIO_SRC.match(/export function blackoutSupplyHint\([\s\S]*?\r?\n\}\r?\n/);
+    expect(body, '找不到 blackoutSupplyHint 的函数体').not.toBeNull();
+    const src = body![0];
+    expect(src).toContain('FLOOR_TEMPLATES');
+    expect(src).toContain("loadNpcInventory(game, 'xiaozhou')");
+    // 反面对照：写死在模板字符串里的「4 层电箱」不该出现。
+    expect(src).not.toContain('4 层电箱');
+  });
+});

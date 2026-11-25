@@ -62,6 +62,7 @@ import {
   type BlackoutStage,
 } from '../data/blackoutCrisis';
 import { ALIN_REPAIR_GATE_ID, isAlinRepairGateOpen } from '../data/floorGates';
+import { FLOOR_TEMPLATES } from '../data/floorTemplates';
 import { countItem, removeItem, addItem } from '../systems/InventorySystem';
 import { loadNpcState, recordMemory, saveNpcState } from '../systems/NpcMemory';
 import { loadNpcInventory, saveNpcInventory } from '../systems/NpcInventory';
@@ -1349,6 +1350,81 @@ function repairMessage(status: BlackoutRepairStatus, detail: BlackoutDetailCode,
     case 'materials_unverified': return '他上次等了你一场空，这次要先当面看见零件。';
     default: return '这次没提交任何改动。';
   }
+}
+
+/**
+ * 缺料时告诉玩家**下一站在哪**。
+ *
+ * 为什么要有这条：`repairMessage` 的 `missing_item` 分支说到「还缺保险丝、
+ * 电线」就停了——玩家知道少了什么，却不知道去哪找。首章的地理是「2 层住人、
+ * 4 层维修、5 层食堂」，还没走遍塔楼的新玩家没有任何线索能把「保险丝」和
+ * 「4 层」联系起来。反馈止于「你缺东西」而不指向行动，等于把探索变成盲试。
+ *
+ * 两个来源都是**查出来**的，不是写在文案里的：
+ * - 容器来源扫 `FLOOR_TEMPLATES` 里 `guaranteed: true` 的条目。写死「4 层
+ *   电箱」会在楼层表一改时立刻变成假话，而这种错不会抛异常，只会让玩家白跑。
+ * - 小周来源查他**当前库存**。卖完了还叫玩家去找他，就是把人支去空跑一趟。
+ *
+ * 返回空串表示「这一趟我给不出有效指路」——调用方此时只显示原句，不硬凑。
+ */
+export function blackoutSupplyHint(game: GameState, missing: readonly ItemId[]): string {
+  if (missing.length === 0) return '';
+
+  // 地点 → 该地点稳定产出的缺失物品名。Map 保持楼层遍历顺序，输出稳定。
+  const byPlace = new Map<string, string[]>();
+  for (const template of Object.values(FLOOR_TEMPLATES)) {
+    for (const container of template.containers) {
+      const names: string[] = [];
+      for (const entry of container.loot) {
+        if (!entry.guaranteed) continue;
+        if (!missing.includes(entry.itemId)) continue;
+        names.push(getItem(entry.itemId).displayName);
+      }
+      if (names.length === 0) continue;
+      const place = `${template.floorNumber} 层${container.label}`;
+      byPlace.set(place, [...new Set([...(byPlace.get(place) ?? []), ...names])]);
+    }
+  }
+
+  const xiaozhouStock = loadNpcInventory(game, 'xiaozhou');
+  const trades: string[] = [];
+  for (const itemId of missing) {
+    const offer = BLACKOUT_XIAOZHOU_OFFERS.find((candidate) => candidate.partId === itemId);
+    // 库存不足就不提这桩买卖：提示必须是他此刻真能成交的，否则更伤人。
+    if (!offer || countItemArray(xiaozhouStock, itemId) < offer.quantity) continue;
+    trades.push(`${getItem(offer.price.itemId).displayName}×${offer.price.quantity} 换${getItem(itemId).displayName}`);
+  }
+
+  const clauses: string[] = [];
+  for (const [place, names] of byPlace) {
+    // 一处就能凑齐时不再罗列物品名——上一句刚点过名，重复读着像复读机。
+    clauses.push(names.length === missing.length ? `${place}能凑齐` : `${place}有${names.join('、')}`);
+  }
+  if (trades.length > 0) clauses.push(`小周那儿也能换：${trades.join('，')}`);
+  if (clauses.length === 0) return '';
+  return `${clauses.join('；')}。`;
+}
+
+/**
+ * 玩家点完「接回主线」后，对话框里那一整段话。
+ *
+ * 拼在这里而不是拼在 GameScene，是为了能在 node 环境里逐字断言——场景类依赖
+ * Phaser，单测 import 不了。`repairMessage` 的原句一个字不动（A2-03 拿它做
+ * 断言），这里只决定「要不要补一句缺什么」以及「往哪补」。
+ *
+ * 补缺料这句话的必要性来自 `low_trust` / `materials_unverified` 两个分支：
+ * 它们的原句只说信任或核料，一个字都没提零件，但此时 `nextStep.missing` 里
+ * 可能确实有缺的东西。只接地点提示会造成「他还不信你。4 层电箱有保险丝」
+ * 这种断档——先补「还缺什么」，地点才接得上。
+ */
+export function blackoutRepairNarration(game: GameState, result: BlackoutRepairResult): string {
+  const base = result.message;
+  const missing = result.nextStep?.missing ?? [];
+  if (missing.length === 0) return base;
+  // 原句已经点过名（missing_item 分支）就不再重复。
+  const alreadyNamed = missing.every((itemId) => base.includes(getItem(itemId).displayName));
+  const lead = alreadyNamed ? '' : `还缺${missing.map((itemId) => getItem(itemId).displayName).join('、')}。`;
+  return `${base}${lead}${blackoutSupplyHint(game, missing)}`;
 }
 
 // ── 小工具（库存数组）──────────────────────────────────────────────────────

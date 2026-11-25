@@ -164,6 +164,7 @@ import { runAlinGiftScenario, type AlinGiftScenarioResult } from '../scenarios/a
 import { runSocialGiftScenario, type SocialScenarioResult } from '../scenarios/socialNpcDemo';
 import {
   blackoutAlinOptionLabel,
+  blackoutRepairNarration,
   dispatchBlackoutAlin,
   dispatchBlackoutTrade,
   observeBlackout,
@@ -4129,7 +4130,16 @@ export class GameScene extends Phaser.Scene {
       if (!isDialogueFresh(this.currentDialogueSession(), captured)) return;
       const d = this.dialogue;
       if (!d) return;
-      d.message = result.message;
+      // 被拒时补一句「去哪拿」。
+      //
+      // `result.message`（来自 repairMessage）说到「还缺保险丝、电线」就停了：
+      // 玩家知道了少了什么，但首章的地理是 2 层住人 / 4 层维修 / 5 层食堂，
+      // 新玩家没有任何线索能把「保险丝」和「4 层电箱」连起来。缺料提示必须
+      // 落在一个具体动作上，否则玩家只能在楼里上上下下盲试。
+      //
+      // 拼接逻辑放在场景层做纯函数：这里 import 不了 Phaser，单测只能靠源码
+      // 结构断言，而「文案该长什么样」值得被逐字钉住。
+      d.message = blackoutRepairNarration(state, result);
       d.messageSource = result.decisionSource === 'model' ? 'ollama' : 'competition-offline';
       if (result.status === 'executed') playSfx('goal');
       d.revision += 1;

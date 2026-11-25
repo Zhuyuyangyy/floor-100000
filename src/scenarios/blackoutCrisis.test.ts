@@ -24,7 +24,7 @@ import { CONTRACT_INTENTS } from '../ai/actionContract';
 import { COMPETITION_TRUST_BASE } from '../ai/competitionRules';
 import { ALIN_REPAIR_GATE_FLAG, isAlinRepairGateOpen } from '../data/floorGates';
 import { countItem } from '../systems/InventorySystem';
-import { loadNpcInventory } from '../systems/NpcInventory';
+import { loadNpcInventory, saveNpcInventory } from '../systems/NpcInventory';
 import { loadCompetitionNpcMemory } from '../systems/CompetitionNpcMemoryStore';
 import { loadNpcState, saveNpcState } from '../systems/NpcMemory';
 import { flagCount, setFlag } from '../systems/WorldFlags';
@@ -33,6 +33,8 @@ import { runAlinRepairScenario } from './alinRepairDemo';
 import {
   acceptAzhenThanks,
   alinStanceOf,
+  blackoutRepairNarration,
+  blackoutSupplyHint,
   giveWaterToAzhen,
   observeBlackout,
   requestBlackoutHelp,
@@ -1088,5 +1090,100 @@ describe('阿珍的模型端口：模型决定给水，回礼按她存货封顶'
     const second = await runAzhenExchange(game, { proposeWithModel: give });
     expect(second.status).not.toBe('executed');
     expect(countItem(game.player.inventory, 'clean_water')).toBe(waterAfterFirst);
+  });
+});
+
+// ── P0-c：被拒之后玩家知道下一站在哪 ────────────────────────────────────────
+//
+// 这一组盯的是「反馈有没有落到动作上」。`repairMessage` 说到「还缺保险丝、
+// 电线」为止，玩家知道缺什么，但首章的地理是 2 层住人 / 4 层维修 / 5 层食堂，
+// 新玩家没有任何线索能把「保险丝」和「4 层」连起来。缺料提示如果不指向具体
+// 地点，探索成本就变成了在楼里上下盲试。
+
+describe('P0-c 缺料提示：把「缺什么」接成「去哪拿」', () => {
+  it('缺两样零件时，提示点名 4 层电箱与小周，且价格来自数据而不是硬编码', () => {
+    const game = crisisGame();
+    const hint = blackoutSupplyHint(game, ['fuse', 'wire']);
+
+    // 地点来自 FLOOR_TEMPLATES：写死会在楼层表一改时变成假话。
+    expect(hint).toContain('4 层电箱');
+    // 小周的报价来自 BLACKOUT_XIAOZHOU_OFFERS：改价时提示必须跟着变。
+    expect(hint).toContain('压缩口粮×1 换保险丝');
+    expect(hint).toContain('净水×2 换电线');
+  });
+
+  it('小周把货卖光之后，提示不再把玩家支去空跑一趟', () => {
+    const game = crisisGame();
+    // 他的库存是开危机时铺的，这里直接清空来模拟「两样都被换走了」。
+    saveNpcInventory(game, 'xiaozhou', []);
+
+    const hint = blackoutSupplyHint(game, ['fuse', 'wire']);
+
+    // 4 层电箱这条永远成立：它是保底来源，不依赖任何人。
+    expect(hint).toContain('4 层电箱');
+    // 但小周那条必须消失——他已经没货了，让他出现就是骗玩家跑一趟。
+    expect(hint).not.toContain('小周');
+  });
+
+  it('只缺一样时，提示只报那一样，不把两样都念一遍', () => {
+    const game = crisisGame();
+    const hint = blackoutSupplyHint(game, ['fuse']);
+
+    expect(hint).toContain('保险丝');
+    expect(hint).not.toContain('电线');
+  });
+
+  it('不缺料时返回空串，调用方只显示原句（不硬凑一句废话）', () => {
+    const game = crisisGame();
+    expect(blackoutSupplyHint(game, [])).toBe('');
+  });
+
+  it('low_trust 分支：原句只提信任，必须补「还缺什么」再接地点，否则读起来断档', async () => {
+    const game = crisisGame();
+    // 40 + 接单的 help(+12) = 52，仍差 neutral 门槛 55 三分 → 走 low_trust，
+    // 而不是缺料。这一步必须踩准：给 45 的话 57 就过线了，会变成 missing_item。
+    setAlinTrust(game, 40);
+    requestBlackoutHelp(game, 'alin');
+
+    const result = await runBlackoutRepair(game);
+    expect(result.detail).toBe('low_trust');
+    // 原句一个字没改：它是 A2-03 的断言对象。
+    expect(result.message).toBe('他还不信你（52/55）。');
+
+    const narration = blackoutRepairNarration(game, result);
+    // 顺序必须是 原句 → 缺什么 → 去哪拿。少中间那一句就是
+    // 「他还不信你。4 层电箱能凑齐」，主语和宾语接不上。
+    expect(narration.startsWith('他还不信你（52/55）。')).toBe(true);
+    expect(narration).toContain('还缺保险丝、电线');
+    expect(narration).toContain('4 层电箱');
+    expect(narration.indexOf('还缺保险丝、电线')).toBeLessThan(narration.indexOf('4 层电箱'));
+  });
+
+  it('missing_item 分支：原句已经点过名，不再重复一遍「还缺」', async () => {
+    const game = crisisGame();
+    // 60 过得了 neutral 门槛，但手上没零件 → 走到 missing_item 而不是 low_trust。
+    setAlinTrust(game, 60);
+    requestBlackoutHelp(game, 'alin');
+
+    const result = await runBlackoutRepair(game);
+    expect(result.detail).toBe('missing_item');
+    expect(result.message).toContain('还缺保险丝、电线');
+
+    const narration = blackoutRepairNarration(game, result);
+    // 「还缺」只出现一次：原文一次，不能再补一次。
+    expect(narration.match(/还缺/g)).toHaveLength(1);
+    expect(narration).toContain('4 层电箱');
+  });
+
+  it('维修成功时不追加任何指路：事情已经做完了', async () => {
+    const game = crisisGame();
+    setAlinTrust(game, 60);
+    requestBlackoutHelp(game, 'alin');
+    giveAllRepairParts(game);
+
+    const result = await runBlackoutRepair(game);
+    expect(result.status).toBe('executed');
+    expect(result.nextStep).toBeNull();
+    expect(blackoutRepairNarration(game, result)).toBe(result.message);
   });
 });

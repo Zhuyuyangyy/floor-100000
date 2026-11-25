@@ -1,115 +1,285 @@
 # 第100000层：末日宿舍
 
-> 2D 横版像素生存游戏。在一座看不见底的十万层末日宿舍塔里，你从最底层的一张床醒来，靠探索楼层、搜刮物资、与邻居交易活下去，然后一路向上——直到有机会决定整座塔的命运。
+> 一座看不见底的十万层末日塔楼。玩家从最底层的一张床醒来往上爬。
+> 楼上住着六个人，他们**由大模型提议、由游戏规则裁决**，决定信不信你、给不给你东西、开不开门。
 
-技术栈：**Phaser 4.2.1** + **TypeScript（strict）** + **Vite**；单测 **Vitest**，浏览器 E2E **Playwright**，桌面版 **Electron**。核心规则是可测试的纯 TypeScript，Phaser 只负责渲染与输入。
+**播放器里 3 秒能看懂的一句话**：这不是"像素生存游戏加个对话框"——NPC 的对白不改变数值，
+但它的**决策会真的改变库存、信任和门禁状态**，而模型永远无权绕过规则层。
 
----
-
-## 游戏画面
+Phaser 4.2.1 · TypeScript strict · Vite · 82 个单测文件 + 2 个服务端测试文件 · 当前可玩 **第 1–5 层**
 
 ![标题界面](docs/img/title.png)
 
-![宿舍（白天）](docs/img/dorm.png)
+---
 
-<details>
-<summary>更多截图：选人、二楼邻居、食堂火盆、漏水、搜刮、背包</summary>
+## 试玩
 
-| 选人 | 二楼：三个角色同屏 |
-| --- | --- |
-| ![选人](docs/img/select.png) | ![二楼](docs/img/floor2.png) |
+| | |
+|---|---|
+| 在线试玩 | `https://a1578804454-floor-100000.ms.show` — **当前为 private（需登录魔搭账号）**，公开访问待开放 |
+| 离线运行 | 见下方[本地运行](#本地运行)。不需要任何模型配置即可完整游玩 |
+| 演示脚本 | [`docs/competition/DEMO_SCRIPT.md`](docs/competition/DEMO_SCRIPT.md) — 操作提纲，**尚未录制** |
 
-| 食堂：火盆在烧 | 漏水：天花板在滴水 |
-| --- | --- |
-| ![食堂](docs/img/canteen.png) | ![漏水](docs/img/leak.png) |
-
-| 搜刮容器 | 背包 |
-| --- | --- |
-| ![搜刮](docs/img/search.png) | ![背包](docs/img/inventory.png) |
-</details>
-
-## 这个游戏是什么
-
-不是「宿舍版横版冒险」，也不是模拟经营。它是**巨型塔楼探索 × 近景生存 × 宿舍基地建设 × 阶级与权力**。
-
-一昼夜的循环：
-
-```
-06:00 醒来 → 看补给与状态 → 决定今天上到第几层
-      → 走路 / 搜刮容器 / 开问号点 / 打遭遇战 / 和邻居做交易
-      → 东西装不下就得取舍，天黑前赶回宿舍
-      → 喝水、吃饭、在工作台制作、升级家具
-      → 20:00 后睡觉 → 新一天，资源更紧，目标重 roll
-```
-
-- **起点**：第 1 层，最底层的贫民宿舍。
-- **终点**：第 100000 层，统治核心。正式版本的胜利条件是**抵达塔顶**，不是熬到某一天。
-- **失败**：生命归零。死因可解释（脱水 / 饥饿 / 伤势）。
-- **当前可玩范围**：第 1–5 层，构成第一个完整生存章节。
-
-## 角色与动画
-
-四个可操作角色全部由**代码骨架（rig）驱动**，不是逐帧手绘：一份 SVG 骨架定义骨骼与配色，一份 `rig_anim.v1` JSON 定义关键帧与两骨 IK，工具负责渲染、落地检查与打包。所以脚步不会打滑——着地那只脚在世界坐标里恒定，接触报告量出 **0.0px 漂移**。
-
-![走路循环](docs/img/walk-strip.png)
-
-![四个角色](docs/img/cast.png)
-
-每个角色 20 帧、7 段动画：行走（6）· 待机（2）· 攻击（3）· 受击（2）· 搜刮（2）· 死亡（3）· 拾取（2）。骨架文件在 [`art-src/rigs/`](art-src/rigs/)，装配工具是 [`tools/assemble-rig-sheet.py`](tools/assemble-rig-sheet.py)。
-
-| 角色 | 识别特征 |
-| --- | --- |
-| **幸存者** | 青绿连帽衫，大帆布背包（铺盖卷 + 压缩带） |
-| **阿林** | 宽肩、灰白短须、钢蓝背带裤，腰上挂着扳手 |
-| **小周** | 约十二岁：头大身窄，琥珀色大外套长过臀 |
-| **流浪者** | 夜里追你的东西：尖顶兜帽、没有脸、窄身长手长腿，5 色暗红黑 |
+> 为什么如实标注 private：私有创空间需要魔搭登录态才能进。参赛材料的"公开可访问"
+> 要求还没满足，写在这里而不是藏在脚注里。
 
 ---
 
-## 现在做到哪了
+## 游戏截图
 
-| 里程碑 | 内容 | 状态 |
-| --- | --- | --- |
-| **M1 可玩原型** | B2 + B3：五层范围内探索、搜集、制作、交易、睡觉、存档，无软锁 | 🔵 机制层已完成，**待人工试玩判定「好不好玩」** |
-| **M2 首个完整章节** | B4 + B5 + B6：世界生成、资源经济、NPC 关系 | ⬜ 未开始 |
-| **M3 正式游戏** | B7–B10：阶级与权力、多路线终局、内容与发行 | ⬜ 未开始 |
+| 第 2 层：四位邻居同屏 | 第 5 层：食堂 |
+|---|---|
+| ![第2层](docs/img/floor2.png) | ![食堂](docs/img/canteen.png) |
 
-| 阶段 | 一句话 | 状态 |
-| --- | --- | --- |
-| B2 塔楼世界与导航 | 十万层可查看、可规划、不可乱传 | ✅ 已实现，待验收 |
-| B3 首个完整生存章节 | 第 1–5 层能玩完一段完整循环 | 🔵 进行中 |
-| B4 十万层世界生成 | 100 个区段可复现、按需生成 | ⬜ |
-| B5 资源经济与基地建设 | 同一物资兼具生存价值与经济价值 | ⬜ |
-| B6 NPC 与关系网络 | 居民有身份、需求和记忆 | ⬜ |
-| B7–B10 | 阶级与权力、多路线终局、内容、发行 | ⬜ |
+<details>
+<summary>更多截图：选人、宿舍、搜刮、背包、漏水、死亡结算</summary>
 
-已知的两个待解问题（不是 bug，是内容量问题）：**一天里仍有约 8 小时无事可做**；**五层内容是一次性的**，回取一趟之后再无上楼理由。详见 [`docs/M1_PLAYTEST.md`](docs/M1_PLAYTEST.md)。
+| 出发前选人 | 宿舍（白天） |
+|---|---|
+| ![选人](docs/img/select.png) | ![宿舍](docs/img/dorm.png) |
 
-## 玩法系统
+| 搜刮容器 | 背包 |
+|---|---|
+| ![搜刮](docs/img/search.png) | ![背包](docs/img/inventory.png) |
 
-23 个纯逻辑模块都在 `src/systems/`，一行 Phaser 代码都没有——所以能毫秒级跑测试。
+| 天花板漏水 | 死亡结算 |
+|---|---|
+| ![漏水](docs/img/leak.png) | ![死亡](docs/img/death.png) |
 
-| 系统 | 玩家看到什么 | 模块 |
-| --- | --- | --- |
-| **生存** | 饥饿 / 口渴 / 精力三条槽随时间下降，归零掉血 | `SurvivalSystem` |
-| **时间** | 时钟 1 真实秒 = 3 游戏分钟；搜刮、制作、交易各花 20/30/15 游戏分钟 | `SurvivalSystem` |
-| **背包** | 12 格，装满会常驻警告，可合并的堆才能进包 | `InventorySystem` |
-| **搜刮** | 容器与地面物品，掉落按种子决定，关键道具保底 | `LootSystem`、`data/floorTemplates` |
-| **制作** | 在宿舍工作台旁按配方造物品、升级家具 | `CraftingSystem` |
-| **交易** | 跟邻居以物易物，守价守恒 | `TradeSystem` |
-| **遭遇** | 问号点：战利品 / 伏击 / 商人 / 便条 / 补给箱 / 守门人 | `encounters`、`encounterSpots` |
-| **战斗** | 回合制，攻击 / 防御 / 逃跑；15 种怪 7 种行为 | `combat`、`monsters` |
-| **每日目标** | 每天 06:00 roll 一个（补水 / 搜刮 / 建造 / 爬楼），完成给分和口粮 | `dailyGoals` |
-| **停留压力** | 在同一层待越久，出现的客人越不友好 | `dwellPressure` |
-| **遗物与模式** | 5 件按深度解锁的遗物；3 档难度（快速跑 / 冒险 / 简单） | `relics`、`modes` |
-| **存档** | 自动存到 LocalStorage，坏档可恢复 | `SaveSystem` |
-| **世界标记** | 「这事发生过吗」统一走一张 flag 表 | `WorldFlags` |
+</details>
 
-## NPC AI 试玩
+> 截图为 1280×720 实机画面。中文像素字体（Ark Pixel 10px）在部分 HUD 位置的
+> 抗锯齿会产生轻微重影，这是已知的显示瑕疵，不影响可读性。
 
-无需账号、模型下载或网络服务：新游戏到第 2 层后，靠近阿林或小周并按 **E**，对话框会标明“本地行为 AI · 规则驱动”。它依据角色类型、昼夜、玩家关系和已记录的交易记忆，选择一条短回应；这是确定性的本地规则脑，**不是大模型自由生成**。交易、战斗与生存数值仍完全由游戏规则执行。
+---
 
-如开发时已运行项目自有的 Ollama，可设置 `VITE_NPC_MODEL`（及可选的 `VITE_OLLAMA_URL`）切到本地大模型对白；不设置时完全离线可玩。用 `VITE_NPC_ENABLED=false` 或 URL 参数 `?ainpc=0` 可关闭 NPC AI。试玩说明见 [`docs/COMPETITION_AI_DEMO.md`](docs/COMPETITION_AI_DEMO.md)。
+## AI NPC：三层闭环
+
+这是整个作品的技术主张。**模型只提议，规则裁决，执行器落库。**
+
+```mermaid
+flowchart TB
+    subgraph WORLD["世界状态 GameState"]
+        W1["玩家 HP / 饥饿 / 口渴 / 背包"]
+        W2["居民 信任 / 关系 / 记忆"]
+        W3["门禁 关闭 / 开放 / 材料"]
+    end
+
+    OBS["① 观察<br/>buildObservation() · 记忆召回 top-K"]
+    MODEL["② 模型提议（不可信）<br/>OllamaBrain /api/chat<br/>think:false · format:json"]
+    BRIDGE["competitionModelBridge<br/>翻译成白名单提案<br/>翻译失败一律 null"]
+    FALLBACK["降级脑<br/>LocalPersonaBrain / OptionTreeBrain"]
+
+    V{"③ 规则裁决 Validator<br/>competitionRules<br/>拥有唯一否决权"}
+    REJ["拒绝原因<br/>missing_item · low_trust · too_far<br/>too_late · too_dangerous<br/>insufficient_hp · invalid_target"]
+    EXEC["④ 执行器落库<br/>competitionExecutor<br/>原子提交 + 事前事后哈希"]
+    MEM["⑤ 记忆回写<br/>fact / promise / event · 有界"]
+
+    W1 --> OBS
+    W2 --> OBS
+    W3 --> OBS
+    OBS --> MODEL
+    MODEL -->|"有正文"| BRIDGE
+    MODEL -->|"空正文 / 超时 / 不可达"| FALLBACK
+    BRIDGE --> V
+    FALLBACK --> V
+    V -->|"accepted"| EXEC
+    V -->|"rejected"| REJ
+    REJ -.->|"原因回灌 → 重新观察"| OBS
+    EXEC --> W1
+    EXEC --> W2
+    EXEC --> W3
+    EXEC --> MEM
+    MEM -.->|"下一轮进 prompt"| OBS
+
+    style MODEL fill:#2f6b5e,color:#fff
+    style BRIDGE fill:#2f6b5e,color:#fff
+    style FALLBACK fill:#8a4a1e,color:#fff
+    style V fill:#47657a,color:#fff
+    style EXEC fill:#47657a,color:#fff
+```
+
+完整版（含代理层与三种部署形态）：[`docs/AI_ARCHITECTURE.md`](docs/AI_ARCHITECTURE.md)
+
+### 这三条约束是架构不变量，不是愿望
+
+**① 模型不能凭空创造物资。**
+
+`competitionRules` 检查的是 `npcInventoryFromDef()` 从**报价表**推导出的持有物
+（`src/ai/config.ts:131`）。模型说「我有木材」但报价表里没有 → `missing_item`，提案作废。
+维修材料清单来自 `ALIN_REPAIR_MATERIALS` 常量（`src/data/floorGates.ts:10`：
+木材×2 + 胶带×1），**不由模型生成**。
+
+**② 规则层独立于模型。**
+
+七条拒绝原因（`src/ai/competition-contract.ts:186-194`）全部由纯 TypeScript 判定，
+不看模型说了什么，只看世界状态与提案内容。即使模型 100% 恶意，
+它也开不了门——门槛是 `trust >= 70` + 材料齐备 + 同层 + 距离内。
+
+**③ 降级不是补丁，是主路径之一。**
+
+模型超时 / 空正文 / 不可达 → 确定性规则脑。玩家看到的是「降级句先显示，AI 句后到」；
+对话关了结果就丢弃。**推理挂了游戏完全可玩。**
+
+### ⚠️ 当前的真实缺口（不美化）
+
+| 缺口 | 具体现状 | 影响 |
+|---|---|---|
+| 只覆盖阿林一条线 | 第二、第三个 NPC 未接入同一闭环 | 泛化性未证明 |
+| 记忆影响决策无端到端证据 | 记忆已持久化且有导出；桥接层已不丢字段 | 能证明"prompt 里有"，不能证明"决策因此改变" |
+| 模型质量未评估 | 只证明"能拿到合法提案且状态真会变" | 见 [`docs/BENCHMARK_REPORT.md`](docs/BENCHMARK_REPORT.md) 的 `【待实测】` |
+
+**已接通的两条（2026-11-25）**，留在这里是为了让"改了什么"可查：
+
+- 维修入口不再走确定性函数。`runAlinRepairScenario(game, { proposeWithModel })`
+  把「修不修」交给模型，validator 仍独立裁决「能不能修」；`decisionSource`
+  只在模型产出提案且提交成功时才标 `model`。
+- 线上实测（`tools/verify-online-api.mjs`，32/32 全过）里，缺料时模型回的是
+  `request_help` 并准确说出缺 `tape×1`，而不是声称能修。这是"失败后改变计划"
+  的第一份线上证据，不是本地夹具。
+
+**换句话说：三层闭环的代码、契约、裁决、执行器、可审计导出全部存在且被测试覆盖，
+维修这条路上"模型决策 → 正式游戏入口"已经打通；赠礼与交易仍在离线场景里。**
+
+---
+
+## 六位居民
+
+不是两个商店老板，是一栋还有人住的楼。分散在玩家真正会走的三层
+（`src/data/npcs.ts`）。
+
+| 居民 | 楼层 | 身份 | 原型 | bulk | 他在意什么 |
+|---|---:|---|---|---:|---|
+| 老陈 | 2 | 门房，坐了十几年 | neutral | 0.60 | 守住楼门，把还能住人的楼层记下来 |
+| 阿林 | 2 | 维修工 | ally | 1.30 | 守住这层楼的线路，换维修材料 |
+| 小周 | 2 | 门边收货的 | neutral | 0.82 | 换到口粮和净水，安稳过天 |
+| 大刘 | 2 | 搬货的 | neutral | 1.05 | 把剩下的货搬完，换够吃的 |
+| 小满 | 3 | 半大孩子 | neutral | 0.70 | 在三层捡够东西，等家里人回来 |
+| 阿珍 | 5 | 食堂厨娘 | ally | 1.12 | 让食堂的灶别熄，来的人都有口热的 |
+
+第 4 层（维修层）**故意没有居民**：那层是漆黑区域，加人前要先处理光照，
+否则只是在黑暗里多几个看不见的名字。
+
+**六人里有四位没有手绘图。** 老陈、阿珍、大刘、小满只有调色板 + 体型系数 `bulk`，
+20 帧动画在运行时烘焙出来。阿林和小周是早期就有的手绘四角色之二
+（`CHARACTER_FILES` 里只有 `player` / `npc_alin` / `npc_xiaozhou` / `wanderer` 四个 PNG）。
+
+同层任意两人的剪影 IoU 必须 < 0.96（`src/tests/npcRoster.test.ts:110`），
+否则看起来就是同一个人换了件衣服。第 2 层四人的实测最大重叠是 **0.925**。
+
+想让楼里再多一个人？看 [`docs/npc-sdk-example/ADD_A_RESIDENT.md`](docs/npc-sdk-example/ADD_A_RESIDENT.md)——
+改 4 个文件、跑 1 条测试，不需要任何美术资源。
+
+---
+
+## 已完成 / 进行中
+
+评委最反感吹牛。所以分成两栏，只写有证据的。
+
+### ✅ 已完成（有测试或运行记录）
+
+| 项 | 证据 |
+|---|---|
+| 第 1–5 层完整生存循环：探索、搜刮、交易、制作、睡觉、存档 | `npm run test`；`e2e/survivalJourney.spec.ts` |
+| 规则与渲染彻底分离：`systems/` 不 import Phaser | `src/systems/` 32 个纯逻辑模块 |
+| 全项目禁用 `Math.random()`，一律 `deriveSeed()` | `src/core/rng.ts`；`src/tests/rng.test.ts` |
+| 六位居民，各有独立人格档与体型 | `src/tests/npcRoster.test.ts` 18 项断言 |
+| 三层闭环：契约 / 裁决 / 执行 / 记忆 / 可审计导出 | `src/ai/competition-*.ts` |
+| 赠礼改变真实库存、信任与记忆 | `src/scenarios/alinGiftDemo.test.ts`；`e2e/competitionAiNpc.spec.ts` |
+| 维修门闭环：信任 70 + 木材×2 + 胶带×1 → 材料消耗 + 门禁开启 | `src/scenarios/alinRepairDemo.test.ts`；`src/data/floorGates.test.ts` |
+| 软锁防护：第 2 层保底材料箱；制作入口预留维修材料 | `src/tests/craftingSystem.test.ts`；`src/tests/ShelterSystem.test.ts`；`e2e/shelter.spec.ts` |
+| 离线回放确定性：3 seed × 3 场景 = 9/9 逐位一致 | `artifacts/benchmark/competition-replay-default-seeds.json` |
+| 魔搭 Docker 创空间已部署并 Running | `Dockerfile`；`output/online-verify/api-verify.json` |
+| 线上 API 验收 25/25（含真实模型推理 3/3、均值 5359ms） | `output/online-verify/api-verify.json` |
+| 同源代理：Key 在服务端、单会话限流、每日预算、熔断 | `server/npc-proxy.mjs`；`server/npc-proxy.test.mts` |
+| DGX Spark 真机推理 6/6 合法提案、中位 3830ms | `artifacts/spark-runs/npc-qwen_latest-2026-11-25T09-52-05-090Z.json` |
+| 竖屏适配与触控移动 | `docs/B3-UI-07_MOBILE_PORTRAIT.md`；`e2e/portraitTouch.spec.ts` |
+| 桌面版打包 | `npm run dist:win` |
+
+### 🔵 进行中 / 未完成
+
+| 项 | 现状 |
+|---|---|
+| **模型决策接入正式游戏入口** | 维修路径**已接通**（2026-11-25）；赠礼/交易仍在离线场景 |
+| **CI 修复** | 已修：`Build` 前移到单测之前（代理测试真 spawn 服务、静态根是 `dist/`），本地复现「无 dist → 明确报错而非 404」 |
+| 单测现状 | 2026-11-25 实测 **1110 通过 / 6 跳过**（1121 项，81 文件）；其中 5 条红在 `blackoutCrisis.test.ts`，该文件正在施工 |
+| 公开试玩 | 创空间 Running 但 **private** |
+| 演示视频 | 未录制 |
+| 多 seed benchmark | 全部 `【待实测】`，见 `docs/BENCHMARK_REPORT.md` |
+| 真人试玩 | 未做。自动化测试不能代替"好不好玩" |
+| 第二 NPC 接入闭环 | 只覆盖阿林 |
+| 跨天记忆影响决策 | 无端到端证据 |
+| 一天里约 8 小时无事可做 | `docs/M1_PLAYTEST.md` 实测，内容量问题 |
+| 五层内容是一次性的 | 回取一趟之后再无上楼理由 |
+| 代码许可证 | **未定。** `LICENSE` 是草稿，待权利人确认 |
+| 美术素材再分发条款 | **权利人未声明**。公开仓库会授予访问者一份可能并不想给的许可 |
+
+---
+
+## 本地运行
+
+需要 Node.js 20+（CI 用 20 与 22，本地开发在 22 上验证）。
+
+```bash
+npm install
+npm run dev
+```
+
+然后打开终端提示的地址（默认 http://localhost:5173）。
+
+**不需要任何模型配置即可完整游玩。** 默认 NPC 是确定性规则脑，
+对话标签显示「本地行为 AI · 规则驱动」——这是诚实标注，不是模型生成。
+
+### 可用脚本（`package.json` 实际内容）
+
+| 命令 | 作用 |
+|---|---|
+| `npm run dev` | 启动开发服务器 |
+| `npm run typecheck` | `tsc --noEmit`，TypeScript strict |
+| `npm run test` | Vitest 单测（`vitest run`） |
+| `npm run build` | `tsc && vite build`，产出 `dist/` |
+| `npm run preview` | 本地预览生产构建 |
+| `npm run test:e2e` | Playwright 浏览器测试 |
+| `npm run test:live-proxy` | 先 build，再跑针对真实构建产物的 live 测试 |
+| `npm run competition:benchmark` | 离线回放基准（确定性，不需要模型） |
+| `npm run electron` | 以桌面窗口运行（需先 build） |
+| `npm run dist:win` | 打包 Windows 可执行版 |
+| `npm run dist:installer` | electron-builder 生成 NSIS 安装程序 |
+
+### 启用真实模型（可选）
+
+```bash
+cp .env.example .env.local
+# 编辑 .env.local：VITE_OLLAMA_URL / VITE_NPC_MODEL / VITE_NPC_THINK=off
+```
+
+详见 [`docs/SPARK_DEPLOY.md`](docs/SPARK_DEPLOY.md)（含直连与同源代理两种形态、
+排障顺序、以及一个只有真机能抓到的坑）。
+
+### 复现测试
+
+- `?seed=42` 固定种子开跑（QA 固定种子：1 / 42 / 2026）
+- `?devfloor=3` 直达指定楼层（仅开发模式）
+- `?ainpc=0` 关闭 NPC AI
+
+---
+
+## 操作
+
+| 键 | 作用 |
+|---|---|
+| **A / D** 或 **← / →** | 左右移动 |
+| **E** | 交互（开容器、对话、上下楼、床边睡觉） |
+| **I** | 背包（← → 选择，Enter 使用） |
+| **C** | 制作台（需在宿舍工作台旁） |
+| **Q** | 切换武器外观（仅视觉） |
+| **ESC** | 暂停菜单 |
+
+**生存节奏**：口渴每小时掉 3 点、饥饿 2 点（`config/game-balance.json`）。
+搜刮一个容器花 20 游戏分钟、制作 30、交易 15。背包 12 格。
+所以"多搜一个箱子"和"天黑前回得去"是冲突的——这就是游戏。
+
+---
 
 ## 技术架构
 
@@ -117,129 +287,137 @@
 
 | 层 | 职责 | 体量 |
 | --- | --- | ---: |
-| `scenes/` | 场景、输入、面板、动画调度 | 4,984 行 |
-| `systems/` | 游戏规则，纯函数，只吃 `GameState` | 3,147 行 |
-| `core/` | 状态结构、时钟、常量、seeded RNG、开发夹具 | 894 行 |
-| `data/` + `config/` | 物品、配方、楼层模板、平衡数值 | 365 行 |
-| `tests/` | 单元测试，**比场景代码还多** | 6,730 行 |
+| `scenes/` | 场景、输入、面板、动画调度 | ~6.9k 行 |
+| `ai/` | 契约、裁决、执行、模型桥、记忆、可审计导出 | ~2.6k 行 |
+| `systems/` | 游戏规则，纯函数，只吃 `GameState` | ~4.9k 行 |
+| `core/` + `data/` + `config/` | 状态、常量、seeded RNG、物品/配方/楼层 | — |
+| `tests/` | 单元测试，**比场景代码还多** | ~12k 行 |
 
-三条刻意的技术决定：
+**三条刻意的技术决定**：
 
-1. **规则与渲染彻底分开**：`systems/` 不 import Phaser，757 个单测用例无需浏览器也能独立运行。
-2. **随机必须可复现**：全项目禁用 `Math.random()`，一律用 `deriveSeed(seed, day, 用途)` 派生。同种子必然同结果。
-3. **不用物理引擎**：连 Phaser 自带的 Arcade Physics 都没开。移动是手写的速度斜坡（`stepHorizontalSpeed`），2D 横版不需要刚体。
+1. **规则与渲染彻底分开**：`systems/` 不 import Phaser，78 个单测文件无需浏览器。
+2. **随机必须可复现**：全项目禁用 `Math.random()`，一律 `deriveSeed(seed, day, 用途)`。
+   同种子必然同结果——这是离线回放基准能工作的前提。
+3. **不用物理引擎**：连 Arcade Physics 都没开。移动是手写的速度斜坡，2D 横版不需要刚体。
 
-## 质量与测试
+### 质量门槛
 
 | 关卡 | 规模 | 命令 |
-| --- | --- | --- |
-| 类型检查 | TypeScript strict，零 `any` 滥用 | `npm run typecheck` |
-| 单元测试 | 58 个文件 / **757 个用例**；当前全套通过 | `npm run test` |
-| 浏览器测试 | 28 个 Playwright 文件 / 93 个用例，含夹具回归与真实输入旅程 | `npm run test:e2e` |
-| CI | push / PR 运行 typecheck、单测、build、浏览器安装及 E2E | `.github/workflows/ci.yml` |
+|---|---|---|
+| 类型检查 | TypeScript strict，`noUnusedLocals` / `noImplicitOverride` | `npm run typecheck` |
+| 单元测试 | `src/` 78 个 + `server/` 1 个（`vitest.config.ts` 的 include）；按最新记录 **937 通过 / 6 跳过**（见 [`docs/B3-20_RESIDENT_ROSTER.md`](docs/B3-20_RESIDENT_ROSTER.md) §6，本次未重跑） | `npm run test` |
+| 浏览器测试 | 34 个 E2E spec + 2 个 live spec | `npm run test:e2e` |
+| CI | push / PR 跑 typecheck、单测、build（确定性门槛）；E2E 为观测项不阻断 | `.github/workflows/ci.yml` |
 
-浏览器测试能读到真实的游戏状态，靠的是 `src/main.ts` 里一个只在开发模式挂载的 `window.__PHASER_GAME__`——生产构建里没有。
+> **CI 状态如实**：`verify` job（typecheck + 单测 + build）是确定性门槛。
+> `e2e` job 设了 `continue-on-error`，因为 Phaser 实时循环下的时序抖动会让
+> 个别 spec 在同一 commit 上忽绿忽红（69-72/72 浮动）。
+> 当前另有 2 项代理静态资源测试在 CI 上失败，正在修。
 
-部分 E2E 会改写状态作为局部规则夹具，不能代替无注入的真实旅程，更不能代替真人试玩。M1 当前集成结论见[集成审查](docs/M1_INTEGRATION_REVIEW.md)；三名试玩者的空白记录表见[真人试玩协议](docs/M1_PLAYTEST_PROTOCOL.md)。未通过集成门槛的构建不应标为已验收候选版。
+浏览器测试能读到真实游戏状态，靠 `src/main.ts` 里一个只在开发模式挂载的
+`window.__PHASER_GAME__`——生产构建里没有。
 
-## 本地运行（干净环境）
+---
 
-需要 Node.js 20+。
+## 开源与复用
 
-```bash
-npm install
-npm run dev
-```
+| 资源 | 内容 |
+|---|---|
+| **[加一位新居民](docs/npc-sdk-example/ADD_A_RESIDENT.md)** | 改 4 个文件的最小完整示例。含 `bulk` 选择方法、剪影 IoU 实测对照表、7 个常见错误 |
+| **[AI 架构](docs/AI_ARCHITECTURE.md)** | 三张 Mermaid 图：三层闭环、含代理层的数据流、三种部署形态 |
+| **[Spark 部署](docs/SPARK_DEPLOY.md)** | 模型、环境变量、启动命令、验证命令、排障顺序 |
+| **[Benchmark 报告](docs/BENCHMARK_REPORT.md)** | 指标定义与实测值（大量 `【待实测】` 占位，已填部分均标注来源文件） |
+| **[第三方声明](THIRD_PARTY_NOTICES.md)** | 逐项许可证核查，含"已核实 / 声称 / 查不到"三档标注 |
+| **[LICENSE](LICENSE)** | **草稿，待权利人确认。** 未正式采用 |
 
-然后按终端提示打开浏览器（默认 http://localhost:5173）。
+**许可证现状（必须知道）**：仓库此前无 `LICENSE`、`package.json` 无 `license` 字段。
+`THIRD_PARTY_NOTICES.md` 曾把代码描述为 "MIT-shaped original work"——那是描述不是授权。
+现在放了一份 MIT 草稿，但它**待权利人签字**。美术素材（`public/assets/artpack/`、
+`env/`、`title/`、`weapons/`）的再分发条款**权利人尚未声明**。
 
-## 可用脚本
+---
 
-| 命令 | 作用 |
-| --- | --- |
-| `npm run dev` | 启动开发服务器 |
-| `npm run typecheck` | TypeScript 严格类型检查（`tsc --noEmit`） |
-| `npm run test` | Vitest 单元测试（纯逻辑：生存、制作、交易、存档、RNG 等） |
-| `npm run build` | 类型检查 + 生产构建，输出到 `dist/` |
-| `npm run preview` | 本地预览生产构建 |
-| `npm run test:e2e` | Playwright 浏览器端到端测试（Chromium） |
-| `npm run electron` | 以桌面窗口运行（需先 `build`） |
-| `npm run dist:win` | 打包 Windows 可执行版 |
+## 素材与授权
 
-## 操作
+| 类别 | 来源 | 许可证 | 核查状态 |
+|---|---|---|---|
+| 字体 | Ark Pixel Font（TakWolf） | SIL OFL 1.1，全文在 `public/assets/fonts/OFL.txt` | ✅ 已核实 |
+| 选择箭头 | Kenney Pixel UI Pack | CC0 1.0 | ⚠️ 上游 URL 未离线复核 |
+| 特效图集 | pixelfx（Patch Pixel / Hugo Duprez） | MIT | ⚠️ 哪些图来自 pixelfx 未逐文件记录 |
+| 角色/家具/图标/环境/标题 | 项目负责人提供 | **权利人未声明** | ❌ 待确认 |
+| 音效 | 无文件，全部 Web Audio 运行时合成（`src/render/audio.ts`） | — | ✅ 已核实（构建产物无音频文件） |
+| 角色骨架 | `art-src/rigs/`，项目代码生成 | — | 版权人未记录 |
 
-- **A / D** 或 **← / →**：左右移动
-- **E**：交互（开容器、对话、上下楼、在宿舍床边睡觉）
-- **I**：背包（← → 选择，Enter 使用消耗品）
-- **Q**：切换武器外观（仅视觉；不影响伤害、计分、装备或存档）
-- **C**：制作台（在宿舍工作台旁）
-- **ESC**：暂停菜单（继续 / 重新开始 / 返回标题）
+**逐项依据与"查不到"清单**：[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
 
-生存的关键节奏：口渴掉得比饥饿快（每小时 3 点 vs 2 点），睡一觉也会消耗（按静息代谢减半计）。所以**天黑前回家**不只是躲巡游体，也是在省第二天的水。
-
-## 存档与种子
-
-- 存档保存在浏览器 LocalStorage（key：`floor100000.save.v1`），睡觉、切楼、制作/交易后自动保存；坏档会提示并可开始新游戏。
-- 复现测试：在网址后加 `?seed=42` 可用固定种子开跑（QA 固定种子：1 / 42 / 2026）。
-- 开发夹具：`?devfloor=` 直达指定楼层，`?devwin=1` 打开已废弃的旧胜利条件。两者都只在开发模式生效。
+---
 
 ## 目录结构
 
 ```
 src/
   main.ts            入口（含开发模式下的 E2E 状态钩子）
-  scenes/            Boot / Menu / MetaSelect / Game / TowerOverview / End
-  core/              GameState、类型、常量、seeded RNG、塔楼模型、存档序列化
-  systems/           23 个纯逻辑模块（生存、战斗、遭遇、交易、flag…）
-  render/            像素美术生成、行走循环、光照、音效合成、UI 组件
-  data/              物品表、配方、楼层模板、NPC、对话
-  tests/             单元测试（含多日生存可行性模拟）
-config/              平衡参数（game-balance.json）
-art-src/rigs/        角色与道具的代码骨架（SVG）+ 动画关键帧（JSON）
-tools/               美术流水线：骨架装配、切片、素材报表
-e2e/                 Playwright 浏览器测试与截图
-素材库/              美术设定集 + 收集素材库（见该目录 README）
-docs/                设计、路线图、任务、验收与各阶段报告
+  scenes/            Boot / Menu / MetaSelect / Game / End
+  ai/                契约、裁决、执行、模型桥、记忆、可审计导出、brains/
+  core/              GameState、类型、常量、seeded RNG、塔楼模型、存档
+  systems/           32 个纯逻辑模块
+  render/            程序化像素美术、走图烘焙、光照、Web Audio 合成、UI
+  data/              物品、配方、楼层模板、六位居民、人格档
+  scenarios/         赠礼 / 维修场景（离线确定性）
+  tests/             单元测试
+server/
+  npc-proxy.mjs      同源代理：静态托管 + 决策代理 + 健康检查
+e2e/                 Playwright 测试（开发服务器）
+e2e-live/            Playwright 测试（真实构建产物）
+tools/               美术流水线、剪影审计、真机运行记录、线上验收
+art-src/rigs/        角色骨架（SVG）+ 动画关键帧（JSON）
+docs/                设计、路线图、竞赛材料、架构、benchmark
 ```
+
+---
 
 ## 文档索引
 
-入口是这三份，顺序不能反：
+**给评委 / 外部开发者：**
 
 | 文档 | 作用 |
-| --- | --- |
-| [`docs/GAME_DESIGN_LOCK.md`](docs/GAME_DESIGN_LOCK.md) | **核心玩法设计冻结，最高权威**。与其它文档冲突时以它为准 |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 里程碑、阶段拆解、验收标准 |
+|---|---|
+| [`docs/AI_ARCHITECTURE.md`](docs/AI_ARCHITECTURE.md) | 三层闭环 + 代理层 + 部署形态 |
+| [`docs/BENCHMARK_REPORT.md`](docs/BENCHMARK_REPORT.md) | 指标定义与实测值 |
+| [`docs/SPARK_DEPLOY.md`](docs/SPARK_DEPLOY.md) | 模型部署与验证 |
+| [`docs/npc-sdk-example/ADD_A_RESIDENT.md`](docs/npc-sdk-example/ADD_A_RESIDENT.md) | 扩展示例 |
+| [`docs/COMPETITION_CREATOR_NOTE_DRAFT.md`](docs/COMPETITION_CREATOR_NOTE_DRAFT.md) | 创作手记（含 `【待补】` 清单） |
+| [`docs/COMPETITION_SUBMISSION_CHECKLIST.md`](docs/COMPETITION_SUBMISSION_CHECKLIST.md) | 提交清单与证据索引 |
+| [`docs/competition/IMPLEMENTATION_STATUS.md`](docs/competition/IMPLEMENTATION_STATUS.md) | AI 集成逐项状态，含失败与未测项 |
 | [`docs/03_TASKS.md`](docs/03_TASKS.md) | 任务编号与完成状态 |
 
-其他常看的：
+**开发约束：**
 
-| 文档 | 内容 |
-| --- | --- |
-| [`docs/01_GDD.md`](docs/01_GDD.md) | 早期设计基线（部分已被冻结文档取代，保留作历史） |
-| [`docs/02_TECH_SPEC.md`](docs/02_TECH_SPEC.md) | 技术规格 |
-| [`docs/M1_PLAYTEST.md`](docs/M1_PLAYTEST.md) | 自动试玩实测：时间预算、背包压力、空闲窗口 |
-| [`docs/OVERNIGHT_FINAL.md`](docs/OVERNIGHT_FINAL.md) | 一个通宵把战斗/遗物/经济补齐的作战与结果 |
+| 文档 | 作用 |
+|---|---|
 | [`CLAUDE.md`](CLAUDE.md) | 开发 Agent 的长期约束（流程、质量门槛、范围边界） |
+| [`docs/GAME_DESIGN_LOCK.md`](docs/GAME_DESIGN_LOCK.md) | 核心玩法设计冻结，与其它文档冲突时以它为准 |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | 里程碑与验收标准 |
+| [`docs/B3-20_RESIDENT_ROSTER.md`](docs/B3-20_RESIDENT_ROSTER.md) | 从 2 人到 6 人的完整记录，含四个静默缺陷 |
 
-## 素材与授权
-
-- **美术设定集**：[`素材库/`](素材库/README.md) —— 已做进游戏的美术、待做方向的参考、素材从哪来、以及现在的缺口清单。**它不是运行目录**，游戏读的是 `public/assets/`。
-- **授权台账**：[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。目前含两笔：Kenney 的 CC0 选择箭头（`public/assets/ui/marker.png`），以及项目负责人提供的美术包（`public/assets/artpack/`，物品图标 / 角色立绘 / 家具 / 横幅）。
-- 其余美术为**程序化生成或代码绘制**；音效全部由 Web Audio 在运行时合成，**构建产物里没有任何音频文件**。
-- 角色骨架、动画与装配工具均为本项目代码生成（code-drawn，无图像模型参与）。渲染器与素材报表工具来自 `agent-sprite-forge`，其源码按各自许可单独存放，**不进入本仓库**。
+---
 
 ## 部署
 
-`npm run build` 生成纯静态站点（`dist/`），可部署到任意静态托管。**公开部署需项目负责人另行许可**，不得默认推送到线上服务。
+`npm run build` 生成纯静态站点（`dist/`），可部署到任意静态托管。
+
+公开部署时**必须**用同源代理形态（`server/npc-proxy.mjs`），否则模型 API Key
+会打进前端产物、公开给每个访客。这不是建议，是安全边界。
+
+容器构建与魔搭创空间配置见 [`docs/SPARK_DEPLOY.md`](docs/SPARK_DEPLOY.md) §3。
+
+---
 
 ## 桌面版（Electron）
-
-打包成 Windows 可执行版本：
 
 ```bash
 npm run build       # 先构建 dist/
 npm run dist:win    # 输出 release/Floor100000-win32-x64/Floor100000.exe
 ```
 
-以桌面窗口直接运行（需先 `npm run build`）：`npm run electron`。打包使用本机已缓存的 Electron，无需联网下载。
+以桌面窗口直接运行（需先 build）：`npm run electron`。

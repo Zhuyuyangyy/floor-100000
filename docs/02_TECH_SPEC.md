@@ -7,9 +7,11 @@
 - Vite：本地开发/生产构建；使用 Phaser 官方原生 Vite + TypeScript 模板，不引入 React/Vue，除非有明确必要。
 - Vitest：逻辑测试。Playwright：浏览器可玩性 Smoke/E2E。GitHub Actions：PR CI（环境允许时）。
 - 存档：LocalStorage（首版数据很小）；未来数据增长后评估 IndexedDB。
-- 不使用服务器、实时后端、数据库、外部 AI/模型 API。
+- 核心玩法不依赖服务器与数据库：存档走 LocalStorage，无持久化后端。
 
-  > 边界（2026-11-11 ADR-001）：唯一例外是**本项目自有的 DGX Spark 局域网推理**（Ollama HTTP，无云服务、无账号、无付费、无联机依赖），且仅在 `feat/ai-npc-spark-integration` 分支内生效。推理不可达时游戏必须完全可玩。云 API 依旧禁止。
+  > 边界（2026-11-11 ADR-001）：研发侧推理使用**本项目自有的 DGX Spark 局域网推理**（Ollama HTTP，无账号、无付费、无联机依赖），仅在 `feat/ai-npc-spark-integration` 分支内生效。推理不可达时游戏必须完全可玩。
+  >
+  > 线上例外（2026-11-25 ADR-002）：比赛提交所用的魔搭创空间使用**平台托管的模型服务**（`api-inference.modelscope.cn`），因为评委从公网访问时无法到达局域网 Spark。该例外仅限线上创空间形态，且必须满足：决策来源三态可审计（`model` / 离线降级）、来源在玩家可见处标注、上游不可达时游戏完全可玩。详见 `docs/ADR-002-online-model-hosting.md`。**不需要模型的玩法逻辑仍不得依赖任何网络请求。**
 
 依赖版本以项目建立时兼容、稳定、可安装的版本为准，生成并提交 lockfile。禁止随意使用尚未稳定的主版本。Phaser 官方模板参考：`npm create @phaserjs/game@latest`（交互选择 Web Bundler + Vite + TypeScript）。
 

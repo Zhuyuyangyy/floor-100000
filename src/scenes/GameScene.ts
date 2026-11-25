@@ -4119,16 +4119,7 @@ export class GameScene extends Phaser.Scene {
     this.blackoutInFlight = true;
     try {
       const state = getGame();
-      // 「点维修」就是「我答应帮你修」。
-      //
-      // 接单原先没有任何 UI 入口：`requestBlackoutHelp` 在场景里零引用，
-      // 于是 `materials_needed` 阶段进不去，`syncBlackoutCrisis` 里那段
-      // 「承诺过期记一笔失信」的代码也永远没有作用对象（promiseDay 恒为 0）。
-      // 而菜单只有四项且 E2E 依赖这些位置，不该为它加第五项——玩家按下
-      // 这个动作的语义本来就包含了应承。
-      //
-      // 放在维修之前：接单会把 stage 推到 materials_needed，之后的信任判定
-      // （含 help 带来的 +12）才和玩家看到的一句话对得上。
+      // 点「接回主线」就是应承。语义与幂等细节见 ensureBlackoutHelpRequested。
       ensureBlackoutHelpRequested(state);
       const result = await runBlackoutRepair(state, {
         proposeWithModel: this.buildBlackoutRepairPort(npc),
@@ -4142,15 +4133,7 @@ export class GameScene extends Phaser.Scene {
       if (!isDialogueFresh(this.currentDialogueSession(), captured)) return;
       const d = this.dialogue;
       if (!d) return;
-      // 被拒时补一句「去哪拿」。
-      //
-      // `result.message`（来自 repairMessage）说到「还缺保险丝、电线」就停了：
-      // 玩家知道了少了什么，但首章的地理是 2 层住人 / 4 层维修 / 5 层食堂，
-      // 新玩家没有任何线索能把「保险丝」和「4 层电箱」连起来。缺料提示必须
-      // 落在一个具体动作上，否则玩家只能在楼里上上下下盲试。
-      //
-      // 拼接逻辑放在场景层做纯函数：这里 import 不了 Phaser，单测只能靠源码
-      // 结构断言，而「文案该长什么样」值得被逐字钉住。
+      // 被拒时补一句「去哪拿」。文案怎么拼见 blackoutRepairNarration。
       d.message = blackoutRepairNarration(state, result);
       d.messageSource = result.decisionSource === 'model' ? 'ollama' : 'competition-offline';
       if (result.status === 'executed') playSfx('goal');

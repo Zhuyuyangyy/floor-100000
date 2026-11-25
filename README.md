@@ -126,7 +126,7 @@ flowchart TB
 | 缺口 | 具体现状 | 影响 |
 |---|---|---|
 | 只覆盖阿林一条线 | 第二、第三个 NPC 未接入同一闭环 | 泛化性未证明 |
-| 记忆影响决策无端到端证据 | 记忆已持久化且有导出；桥接层已不丢字段 | 能证明"prompt 里有"，不能证明"决策因此改变" |
+| 记忆影响决策无端到端证据 | **名场面 A「记忆改变行动」的线上验证尚未完成。** 记忆验收段已实现于 `tools/verify-online-api.mjs`（按段落标题「2.6 记忆影响决策」定位，不按行号；含锚点回响、意图分布、`weight` 分级三组对照 + 采样噪声基线），但**线上实例仍为 private，平台层就挡住了**（实测 `GET /` 与 `/healthz` 均 401、门户站 403，连静态首页都要身份），该段**从未在线上执行** | 能证明"prompt 里有"，不能证明"决策因此改变"。现有记忆证据仅来自离线桩，用于验证判据有效性，**不构成线上行为证据** |
 | 模型质量未评估 | 只证明"能拿到合法提案且状态真会变" | 见 [`docs/BENCHMARK_REPORT.md`](docs/BENCHMARK_REPORT.md) 的 `【待实测】` |
 
 **已接通的两条（2026-11-25）**，留在这里是为了让"改了什么"可查：
@@ -134,9 +134,9 @@ flowchart TB
 - 维修入口不再走确定性函数。`runAlinRepairScenario(game, { proposeWithModel })`
   把「修不修」交给模型，validator 仍独立裁决「能不能修」；`decisionSource`
   只在模型产出提案且提交成功时才标 `model`。
-- 线上实测（`tools/verify-online-api.mjs`，32/32 全过）里，缺料时模型回的是
+- 线上实测（`tools/verify-online-api.mjs`，32 项全过）里，缺料时模型回的是
   `request_help` 并准确说出缺 `tape×1`，而不是声称能修。这是"失败后改变计划"
-  的第一份线上证据，不是本地夹具。
+  的第一份线上证据，不是本地夹具。（该项属维修任务契约判据，与记忆无关。）
 
 **换句话说：三层闭环的代码、契约、裁决、执行器、可审计导出全部存在且被测试覆盖，
 维修这条路上"模型决策 → 正式游戏入口"已经打通；赠礼与交易仍在离线场景里。**
@@ -189,8 +189,8 @@ flowchart TB
 | 维修门闭环：信任 70 + 木材×2 + 胶带×1 → 材料消耗 + 门禁开启 | `src/scenarios/alinRepairDemo.test.ts`；`src/data/floorGates.test.ts` |
 | 软锁防护：第 2 层保底材料箱；制作入口预留维修材料 | `src/tests/craftingSystem.test.ts`；`src/tests/ShelterSystem.test.ts`；`e2e/shelter.spec.ts` |
 | 离线回放确定性：3 seed × 3 场景 = 9/9 逐位一致 | `artifacts/benchmark/competition-replay-default-seeds.json` |
-| 魔搭 Docker 创空间已部署并 Running | `Dockerfile`；`output/online-verify/api-verify.json` |
-| 线上 API 验收 25/25（含真实模型推理 3/3、均值 5359ms） | `output/online-verify/api-verify.json` |
+| 魔搭 Docker 创空间已部署并 Running | `Dockerfile`；`artifacts/online-verify/api-verify.json` |
+| 线上 API 验收 32 项全过（**2026-11-25 23:36 那次，带 token**；含真实模型推理 3/3、均值 5316ms） | `artifacts/online-verify/api-verify.json`（数组 32 条，逐条 `ok: true`，md5 `cb827d5a…`；`real-model-runs.json` 同目录）。⚠️ 此后实例回到 private，**同一脚本现在跑出的数不能与这份并列**。覆盖静态产物完整性、同源代理、密钥不泄漏、维修任务契约、真实模型决策、注入防护、限流与熔断、路径穿越。**不覆盖记忆相关判据**——见下方"进行中"。 |
 | 同源代理：Key 在服务端、单会话限流、每日预算、熔断 | `server/npc-proxy.mjs`；`server/npc-proxy.test.mts` |
 | DGX Spark 真机推理 6/6 合法提案、中位 3830ms | `artifacts/spark-runs/npc-qwen_latest-2026-11-25T09-52-05-090Z.json` |
 | 竖屏适配与触控移动 | `docs/B3-UI-07_MOBILE_PORTRAIT.md`；`e2e/portraitTouch.spec.ts` |
@@ -202,13 +202,13 @@ flowchart TB
 |---|---|
 | **模型决策接入正式游戏入口** | 维修路径**已接通**（2026-11-25）；赠礼/交易仍在离线场景 |
 | **CI 修复** | 已修：`Build` 前移到单测之前（代理测试真 spawn 服务、静态根是 `dist/`），本地复现「无 dist → 明确报错而非 404」 |
-| 单测现状 | 2026-11-25 实测 **1110 通过 / 6 跳过**（1121 项，81 文件）；其中 5 条红在 `blackoutCrisis.test.ts`，该文件正在施工 |
+| 单测现状 | 2026-11-26 05:39 实测 **1201 通过 / 6 跳过 / 0 失败**（1207 项，86 文件）；复现命令 `npx vitest run` |
 | 公开试玩 | 创空间 Running 但 **private** |
 | 演示视频 | 未录制 |
 | 多 seed benchmark | 全部 `【待实测】`，见 `docs/BENCHMARK_REPORT.md` |
 | 真人试玩 | 未做。自动化测试不能代替"好不好玩" |
 | 第二 NPC 接入闭环 | 只覆盖阿林 |
-| 跨天记忆影响决策 | 无端到端证据 |
+| 跨天记忆影响决策 | **无端到端证据。** 记忆验收段已实现于 `tools/verify-online-api.mjs`（按段落标题「2.6 记忆影响决策」定位，不按行号；含锚点回响、意图分布、weight 分级三组对照 + 采样噪声基线），但**线上实例仍为 private，平台层就挡住了**（`GET /` 与 `/healthz` 均 401、门户站 403），**该段从未在线上执行**。现有记忆证据仅来自离线桩，用于验证判据有效性，不构成线上行为证据 |
 | 一天里约 8 小时无事可做 | `docs/M1_PLAYTEST.md` 实测，内容量问题 |
 | 五层内容是一次性的 | 回取一趟之后再无上楼理由 |
 | 代码许可证 | **未定。** `LICENSE` 是草稿，待权利人确认 |
@@ -295,7 +295,7 @@ cp .env.example .env.local
 
 **三条刻意的技术决定**：
 
-1. **规则与渲染彻底分开**：`systems/` 不 import Phaser，78 个单测文件无需浏览器。
+1. **规则与渲染彻底分开**：`systems/` 不 import Phaser，84 个单测文件无需浏览器。
 2. **随机必须可复现**：全项目禁用 `Math.random()`，一律 `deriveSeed(seed, day, 用途)`。
    同种子必然同结果——这是离线回放基准能工作的前提。
 3. **不用物理引擎**：连 Arcade Physics 都没开。移动是手写的速度斜坡，2D 横版不需要刚体。
@@ -305,7 +305,7 @@ cp .env.example .env.local
 | 关卡 | 规模 | 命令 |
 |---|---|---|
 | 类型检查 | TypeScript strict，`noUnusedLocals` / `noImplicitOverride` | `npm run typecheck` |
-| 单元测试 | `src/` 78 个 + `server/` 1 个（`vitest.config.ts` 的 include）；按最新记录 **937 通过 / 6 跳过**（见 [`docs/B3-20_RESIDENT_ROSTER.md`](docs/B3-20_RESIDENT_ROSTER.md) §6，本次未重跑） | `npm run test` |
+| 单元测试 | `src/` 84 个 + `server/` 2 个 = 86 个测试文件（`vitest.config.ts` 的 include）；2026-11-26 05:39 实测 **1201 通过 / 6 跳过 / 0 失败**（1207 项） | `npx vitest run` |
 | 浏览器测试 | 34 个 E2E spec + 2 个 live spec | `npm run test:e2e` |
 | CI | push / PR 跑 typecheck、单测、build（确定性门槛）；E2E 为观测项不阻断 | `.github/workflows/ci.yml` |
 

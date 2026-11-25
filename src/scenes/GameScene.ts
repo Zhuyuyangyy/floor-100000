@@ -162,6 +162,22 @@ import { parseRepairIntent, type RepairIntentDecision } from '../ai/repairIntent
 import { COMPETITION_TRUST_THRESHOLDS } from '../ai/competitionRules';
 import { runAlinGiftScenario, type AlinGiftScenarioResult } from '../scenarios/alinGiftDemo';
 import { runSocialGiftScenario, type SocialScenarioResult } from '../scenarios/socialNpcDemo';
+import {
+  blackoutAlinOptionLabel,
+  dispatchBlackoutAlin,
+  dispatchBlackoutTrade,
+  observeBlackout,
+  runAzhenExchange,
+  runBlackoutRepair,
+  runXiaozhouTrade,
+  syncBlackoutCrisis,
+  type BlackoutModelPort,
+  type BlackoutRepairResult,
+  type BlackoutTradeModelPort,
+  type BlackoutTradeRunResult,
+} from '../scenarios/blackoutCrisis';
+import { blackoutStageOf } from '../data/blackoutCrisis';
+import { proposeWithBrain } from '../ai/competitionModelBridge';
 import { serializeAlinGiftRun, serializeAlinRepairRun, serializeSocialGiftRun } from '../ai/competitionRunExport';
 import {
   createWandererDecisionConfig,
@@ -430,6 +446,34 @@ export class GameScene extends Phaser.Scene {
    * 服务端分不清「重复提交」和「重复意图」。
    */
   private repairInFlight = false;
+  /**
+   * 停电危机的「上次已同步到的状态」。
+   *
+   * 危机推进每帧都会被问到，但 `syncBlackoutCrisis` 内部要读 flag、铺库存、
+   * 写过期判定——每帧都跑纯属浪费，而且每次都会返回同一句台词反复 flash。
+   * 这里只记住 `${stage}:${day}`，变了才真正调用。用字段而不是 flag，是因为
+   * 它只是「这一帧要不要问」的缓存，不是剧情事实，不该进存档（存档里已经
+   * 有单调 stage 兜底，重开会重新走一遍初始判定）。
+   */
+  private blackoutSyncedKey = '';
+  /**
+   * 最近一次停电危机维修结果。
+   *
+   * 与 `lastAlinRepairResult` / `lastAlinGiftResult` 一样是 public：E2E 通过
+   * `window.__PHASER_GAME__.scene.getScene('Game')` 读它来断言「危机期确实走
+   * 的是危机场景」。这是既有的集成测试约定，不要改成 private。
+   */
+  lastBlackoutRepairResult?: BlackoutRepairResult;
+  /** 最近一次小周/阿珍的危机交易结果，同样供 E2E 断言走的是哪条路径。 */
+  lastBlackoutTradeResult?: BlackoutTradeRunResult;
+  /**
+   * 停电危机流程的重入锁。
+   *
+   * 与 `repairInFlight` 同因：模型回话期间玩家连按会让整个 propose→validate→
+   * execute 循环并发两遍。维修那条已经证明「靠下游状态恰好变了兜住」不可靠，
+   * 这里从一开始就把锁加上。
+   */
+  private blackoutInFlight = false;
   /** Last gift result, exposed like the repair result for browser integration diagnostics. */
   lastAlinGiftResult?: AlinGiftScenarioResult;
   /** 最近一次赠礼结果；阿林走单 NPC 场景，小周走多 NPC 场景。 */
@@ -3543,8 +3587,13 @@ export class GameScene extends Phaser.Scene {
     if (d.level === 'main') {
       // 位置 1/2/3 被 E2E 依赖（询问=1、交易=2），所以只把位置 0 换掉：
       // 阿林是「赠礼」，小周从「问候」改成「赠礼」，「询问/交易/退出」不动。
+      //
+      // 首章：危机进行中时，阿林位置 1 的实际行为换成「接回主线」，标签也
+      // 必须跟着换——否则玩家看到「维修门计划」却被送进主线剧情，读不懂。
+      // 位置不变（仍是索引 1），E2E 对位置的依赖不受影响。
+      const alinLabel = blackoutAlinOptionLabel(getGame());
       const labels = d.npc === 'alin'
-        ? ['赠礼', '维修门计划', '交易', '退出']
+        ? ['赠礼', alinLabel, '交易', '退出']
         : ['赠礼', '询问', '交易', '退出'];
       return labels.map((label) => ({ label }));
     }
@@ -3799,7 +3848,15 @@ export class GameScene extends Phaser.Scene {
           break;
         case 1:
           if (npc.id === 'alin') {
-            void this.runAlinRepairPlan(npc, { sessionId: d.sessionId, revision: d.revision });
+            // 首章：危机已经启动（且未了结）时，阿林说的是「接回主线」，
+            // 走停电危机场景；否则保持原来的通用维修门计划。
+            // 两条路都以 executeCompetitionProposal 为唯一提交入口。
+            // 判定与分发都在 blackoutCrisis 里（纯函数，单测直接断言调了哪个）。
+            const session = { sessionId: d.sessionId, revision: d.revision };
+            dispatchBlackoutAlin(getGame(), {
+              blackout: () => { void this.runBlackoutRepairPlan(npc, session); },
+              legacy: () => { void this.runAlinRepairPlan(npc, session); },
+            });
             return;
           }
           d.message = npc.asks[d.lineToggle % npc.asks.length];
@@ -3815,6 +3872,19 @@ export class GameScene extends Phaser.Scene {
           return;
       }
     } else if (d.selected < npc.offers.length) {
+      // 首章：危机期间小周/阿珍的交易走「模型选价 → 规则结算」。
+      // 危机之外仍是下面这条通用交易，玩家体验不变。
+      //
+      // 为什么选中的那一项不再作为参数传下去：危机里这两位的价目表由场景数据
+      // 统一持有（小周要按库存报，阿珍要按她的存货封顶回礼），玩家点哪一项
+      // 只表示「我要谈」，真正成交哪一笔由模型挑、由规则复核。硬把 UI 那一项
+      // 透下去，会在价目表与场景数据不一致时造成「界面说换 A、实际换 B」。
+      const session = { sessionId: d.sessionId, revision: d.revision };
+      const tradeRoute = dispatchBlackoutTrade(getGame(), npc.id, {
+        blackout: () => { void this.runBlackoutTrade(npc, session); },
+        legacy: () => { /* 下面走原来的通用交易 */ },
+      });
+      if (tradeRoute === 'blackout') return;
       const offer = npc.offers[d.selected];
       const result = trade(getGame(), offer);
       d.message = result.ok
@@ -3951,6 +4021,197 @@ export class GameScene extends Phaser.Scene {
         // 材料永远照服务端配方申请，不采信模型报的数。
         materials: input.materials.map((stack) => ({ ...stack })),
       };
+    };
+  }
+
+  // ── 停电危机（首章）──────────────────────────────────────────────────────
+
+  /**
+   * 每帧被问一次「危机要不要推进」。
+   *
+   * 只在 `${stage}:${day}` 变化时真正调用 `syncBlackoutCrisis`——它内部虽然
+   * 幂等，但每帧跑会反复铺库存判定、反复 flash 同一句台词。缓存键里带上
+   * `day` 是因为「断电持续到第几天」会改变判定，跨天必须重新问一次。
+   *
+   * 刻意不占用 `state.worldEvents.activeEvent` 那个单事件槽位：危机是贯穿
+   * 首章的**独立剧情线**，不是今夜随机事件。抢槽位会让夜晚事件与危机互相
+   * 把对方顶掉（`updateDwellPressure` 里有 `if (activeEvent) return`）。
+   */
+  private syncBlackoutOnTick(state: GameState): void {
+    const key = `${blackoutStageOf(state)}:${state.day}`;
+    if (key === this.blackoutSyncedKey) return;
+    this.blackoutSyncedKey = key;
+    const transition = syncBlackoutCrisis(state);
+    if (transition.ok && transition.message) this.flash(transition.message);
+  }
+
+  /**
+   * 停电危机启动后，玩家和阿林说话时走的那条路。
+   *
+   * 与 `runAlinRepairPlan` 并存而不是替换它：危机是**首章剧情**，触发条件
+   * 是「维修门已开 + 危机已推进」；没触发时玩家遇到的仍是原来那个通用维修
+   * 演示场景。两条路都收口到 `executeCompetitionProposal`（前者在场景内部，
+   * 后者在 alinRepairDemo 内部），只是外层的叙事不同。
+   */
+  private async runBlackoutRepairPlan(npc: NpcDef, captured: DialogueSession): Promise<void> {
+    if (this.blackoutInFlight) return;
+    this.blackoutInFlight = true;
+    try {
+      const state = getGame();
+      const result = await runBlackoutRepair(state, {
+        proposeWithModel: this.buildBlackoutRepairPort(npc),
+      });
+      this.lastBlackoutRepairResult = result;
+
+      // 提交已经发生，必须落盘——哪怕玩家已经关掉对话。这跟 alinRepairPlan
+      // 的「先存再判会话」是同一个道理：状态变了就不该等 UI。
+      saveToStorage(state);
+      this.refreshInventory();
+      if (!isDialogueFresh(this.currentDialogueSession(), captured)) return;
+      const d = this.dialogue;
+      if (!d) return;
+      d.message = result.message;
+      d.messageSource = result.decisionSource === 'model' ? 'ollama' : 'competition-offline';
+      if (result.status === 'executed') playSfx('goal');
+      d.revision += 1;
+      this.refreshDialogue();
+    } finally {
+      this.blackoutInFlight = false;
+    }
+  }
+
+  /**
+   * 小周/阿珍在危机期间走模型决策的交易。
+   *
+   * 为什么不复用下面那个通用 `dialogue.level === 'trade'` 分支：那条路直接
+   * 调 `trade(getGame(), offer)`，一步改完状态，没有「模型提议 → 规则裁决」
+   * 的过程。危机期间这两位的成交要展示 AI 原生能力，所以走 `runCompetitionStep`。
+   * 危机之外仍是原来的通用交易，玩家体验不变。
+   */
+  private async runBlackoutTrade(npc: NpcDef, captured: DialogueSession): Promise<void> {
+    if (this.blackoutInFlight) return;
+    this.blackoutInFlight = true;
+    try {
+      const state = getGame();
+      const port = this.buildBlackoutTradePort(npc);
+      const result = npc.id === 'xiaozhou'
+        ? await runXiaozhouTrade(state, { proposeWithModel: port })
+        : await runAzhenExchange(state, { proposeWithModel: port });
+      this.lastBlackoutTradeResult = result;
+      if (result.status === 'executed') saveToStorage(state);
+      this.refreshInventory();
+      if (!isDialogueFresh(this.currentDialogueSession(), captured)) return;
+      const d = this.dialogue;
+      if (!d) return;
+      d.message = result.action?.message ?? '他没有接这个话头。';
+      d.messageSource = result.decisionSource === 'model' ? 'ollama' : 'competition-offline';
+      if (result.status === 'executed' && result.action?.ok) {
+        playSfx('trade');
+        this.chargeTime(ACTION_COSTS.trade);
+        this.recordNpcTrade(npc, result.action.message);
+      }
+      d.revision += 1;
+      this.refreshDialogue();
+    } finally {
+      this.blackoutInFlight = false;
+    }
+  }
+
+  /**
+   * 阿林维修的模型端口。
+   *
+   * 结构照抄 `buildRepairProposalPort`（那条路径已经跑通并验收过），三条边界
+   * 完全一致：模型不能决定成败（只是提案）、模型说不动就真的不动、模型挂了
+   * 由场景自己的 fallback 接管。
+   */
+  private buildBlackoutRepairPort(npc: NpcDef): BlackoutModelPort | undefined {
+    const runtime = this.getAiRuntime(npc);
+    if (!runtime) return undefined;
+    const cfg = aiNpcConfig();
+    if (cfg.mode !== 'ollama' && cfg.mode !== 'proxy') return undefined;
+    const brain = runtime.brain;
+    if (typeof brain.decideTask !== 'function') return undefined;
+
+    return async (input) => {
+      const profile = NPC_PROFILES[npc.id];
+      const trust = input.observation.world.npcs[0]?.trust ?? 35;
+      const rejection = input.previousFeedback?.validation;
+      const previousRejectedReason = rejection && !rejection.accepted
+        ? (rejection.reason === 'missing_item' ? '材料不足'
+          : rejection.reason === 'low_trust' ? '信任不足'
+            : (rejection.detailCode ?? rejection.reason))
+        : undefined;
+
+      const result = await brain.decideTask!({
+        task: 'repair',
+        repair: {
+          gateId: input.gateId,
+          npcName: npc.name,
+          traits: { ...(profile?.traits ?? { altruism: 0.5, pragmatism: 0.5, aggression: 0.1, loyalty: 0.5, caution: 0.5 }) },
+          trust,
+          // 本章门槛按态度分档，不能让模型误以为还是 demo 的 70。
+          trustThreshold: observeBlackout(getGame()).alinTrust,
+          materials: input.materials.map((stack) => ({ itemId: stack.itemId, quantity: stack.quantity })),
+          playerHas: input.observation.world.player.inventory.map((stack: { itemId: string; quantity: number }) => ({ itemId: stack.itemId, quantity: stack.quantity })),
+          ...(previousRejectedReason ? { previousRejectedReason } : {}),
+        },
+      });
+
+      if (!result || result.source !== 'model') return null;
+      const decision = parseRepairIntent(result.text);
+      if (!decision) return null;
+      if (decision.intent !== 'repair_gate') {
+        this.lastRepairIntentNote = decision;
+        return null;
+      }
+      this.lastRepairIntentNote = decision;
+      // 模型说的目标要真的用上：首章修的是塔楼主线，不是通行门。
+      // 丢 target 会在将来出现第二个可修目标时「说修 A、实际修 B」且不报错。
+      return {
+        kind: 'repair_gate',
+        gateId: decision.target ?? input.gateId,
+        // 材料永远照服务端配方申请，不采信模型报的数。
+        materials: input.materials.map((stack) => ({ ...stack })),
+      };
+    };
+  }
+
+  /**
+   * 小周/阿珍的模型端口。
+   *
+   * 为什么不用 `decideTask`：`NpcBrainTask` 目前只有 `'repair'` 一个值，
+   * `NpcBrainTaskRequest` 也只有 `repair?` 一个字段。为了交易去扩这个联合
+   * 类型，会连带影响服务端 `sanitizeRepair` 的白名单——那是另一层面的改动，
+   * 不在本次范围内。
+   *
+   * 所以走 `proposeWithBrain`（旧契约路径，产出 `NpcActionProposal` → 翻译成
+   * `trade`）。它天然能吐 trade：`ARCHETYPE_ACTIONS` 里 neutral / ally 都含
+   * trade，翻译层 `translateModelAction` 的 trade 分支会把双边方向与库存
+   * 都核一遍，缺任何一边就返回 null——不会替模型编造一次不存在的交换。
+   *
+   * 显式传 `availableActions: ['trade']`：这个阶段玩家点的是「交易」，场景
+   * 最清楚接通了什么，不该让桥接层按原型猜。
+   */
+  private buildBlackoutTradePort(npc: NpcDef): BlackoutTradeModelPort | undefined {
+    const runtime = this.getAiRuntime(npc);
+    if (!runtime) return undefined;
+    const cfg = aiNpcConfig();
+    if (cfg.mode !== 'ollama' && cfg.mode !== 'proxy') return undefined;
+    const brain = runtime.brain;
+
+    return async (input) => {
+      const translated = await proposeWithBrain(brain, input.observation, {
+        availableActions: ['trade'],
+      });
+      if (!translated) return null;
+      // 双保险：翻译层理论上只会吐 trade 或 observe，但这里只认 trade——
+      // 「观察」在本场景等价于「这轮不谈」，交给 fallback 判断，不冒充成交。
+      if (translated.proposal.kind !== 'trade') return null;
+      // 只接受这位居民的报价：桥接层不知道场景价目表，可能产出一个
+      // 场景里根本不存在的组合；runXiaozhouTrade/runAzhenExchange 会以
+      // 报价 id 复核并如实拒绝，这里先挡一道，避免无谓的 execute 尝试。
+      if (translated.proposal.npcId !== npc.id) return null;
+      return translated.proposal;
     };
   }
 
@@ -4865,6 +5126,10 @@ export class GameScene extends Phaser.Scene {
       if (rolled.event.type === 'wanderer') playSfx('danger');
       this.flash(rolled.event.message);
     }
+    // 首章：停电危机。放在夜晚事件之后、dwell pressure 之前——它要在时间推进
+    // 之后才知道要不要跨天过期，又必须早于 dwell 的「单事件槽位」判定，才能
+    // 保证自己是独立剧情线、不去抢 `worldEvents.activeEvent`。
+    this.syncBlackoutOnTick(state);
     // B3-15: dwell pressure — the longer the player lingers on one floor, the
     // more likely the next roll is teeth. Runs after the night roll so a night
     // event already occupying the day's slot suppresses the prowler (an

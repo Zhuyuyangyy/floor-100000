@@ -495,7 +495,9 @@ async function decide(clientId, extra = {}) {
       asserted: contrast.assert,
       rounds: ROUNDS,
       expectation: contrast.expect,
-      criterion: { polarityGapMin: 0.5, requireDirection: true, anchorAlternative: true },
+      // 阈值从常量取，不写死。这里曾写死 0.5，而判据实际用 1.0——证据文件
+      // 记录的阈值比真实判据松一半，事后拿它复核的人会算出完全不同的结论。
+      criterion: { polarityGapMin: POLARITY_GAP_MIN, requireDirection: true, anchorAlternative: true },
       complete,
       polarityControl: mC,
       polarityTreatment: mT,
@@ -660,16 +662,61 @@ async function decide(clientId, extra = {}) {
     }
 
     // 原文全量落盘：评委要看的是模型在三个档位各说了什么。
+    //
+    // 只在带 token 时写。无 token 时这里必然全是空数组（采样一条都没成功），
+    // 写下去会得到一份 polarity 全 null、groups 全 [] 的文件，文件名却叫
+    // 「证据」。`600c450` 只拦住了 api-verify.json / real-model-runs.json，
+    // 记忆这两份漏了——实测无 token 空跑仍会产出 2564B 的 memory-evidence.json，
+    // 内容是「三组全部 complete:false」，任何人看到都会以为判据跑过且失败了。
+    if (TOKEN.length > 0) {
+      writeFileSync(
+        `${OUT}/memory-weight-evidence.json`,
+        JSON.stringify(
+          {
+            summary: SUMMARY,
+            samplesPerGroup: SAMPLES,
+            criterion: { polarityGapMin: 1.0, requireMonotone: true },
+            polarity: { base: mBase, pos: mPos, neg: mNeg, gap: polarityGap, monotone },
+            groups: collected,
+            distributions: { base: dBase, pos: dPos, neg: dNeg },
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      );
+    }
+  }
+
+  // 结构性诊断（读 npc-proxy.mjs 得出，HTTP 层观测不到，故记 NOTE 而非 PASS/FAIL）。
+  notes.push('服务端 buildMessages 渲染 day/kind/weight强度词/summary；memory.actor 不进提示词（sanitizeObservation 未保留它）。');
+  notes.push('现有 decide() 请求体的 recentEvents 不在 sanitizeObservation 白名单内，会被静默丢弃。');
+
+  // 同 memory-weight-evidence：无 token 时这里只有「三组 complete:false」，
+  // 写出去就是一份看着像证据、实则一条样本都没有的文件。只在带 token 时写。
+  if (TOKEN.length > 0) {
     writeFileSync(
-      `${OUT}/memory-weight-evidence.json`,
+      `${OUT}/memory-evidence.json`,
       JSON.stringify(
         {
-          summary: SUMMARY,
-          samplesPerGroup: SAMPLES,
-          criterion: { polarityGapMin: 1.0, requireMonotone: true },
-          polarity: { base: mBase, pos: mPos, neg: mNeg, gap: polarityGap, monotone },
-          groups: collected,
-          distributions: { base: dBase, pos: dPos, neg: dNeg },
+          // 联合判据的结论必须和逐组证据写在一起，否则半年后有人只翻这个文件，
+          // 会看到三组 moved:true 就下结论，看不见其中一组可能是 4% 概率的噪声
+          // 误判——联合判据才是能对外下结论的那条。
+          united: {
+            passed: united,
+            allContrastsMoved: allMoved,
+            polarityGainTotal: totalPolarityGain,
+            polarityGainMin: 1.5,
+            allComplete,
+            note: '联合判据的假阳性率（随机意图、完全不读记忆的桩，30 万次模拟）约 0.0043%。逐组 PASS 单看有约 4% 误判率，引用单组结论前先看这里。',
+          },
+          criterion: {
+            rounds: ROUNDS,
+            polarityGapMin: POLARITY_GAP_MIN,
+            anchorAlternative: true,
+            sampling: '固定轮数，不早停',
+          },
+          contrasts: evidence,
         },
         null,
         2,
@@ -677,39 +724,6 @@ async function decide(clientId, extra = {}) {
       'utf-8',
     );
   }
-
-  // 结构性诊断（读 npc-proxy.mjs 得出，HTTP 层观测不到，故记 NOTE 而非 PASS/FAIL）。
-  notes.push('服务端 buildMessages 渲染 day/kind/weight强度词/summary；memory.actor 不进提示词（sanitizeObservation 未保留它）。');
-  notes.push('现有 decide() 请求体的 recentEvents 不在 sanitizeObservation 白名单内，会被静默丢弃。');
-
-  writeFileSync(
-    `${OUT}/memory-evidence.json`,
-    JSON.stringify(
-      {
-        // 联合判据的结论必须和逐组证据写在一起，否则半年后有人只翻这个文件，
-        // 会看到三组 moved:true 就下结论，看不见其中一组可能是 4% 概率的噪声
-        // 误判——联合判据才是能对外下结论的那条。
-        united: {
-          passed: united,
-          allContrastsMoved: allMoved,
-          polarityGainTotal: totalPolarityGain,
-          polarityGainMin: 1.5,
-          allComplete,
-          note: '联合判据的假阳性率（随机意图、完全不读记忆的桩，30 万次模拟）约 0.0043%。逐组 PASS 单看有约 4% 误判率，引用单组结论前先看这里。',
-        },
-        criterion: {
-          rounds: ROUNDS,
-          polarityGapMin: POLARITY_GAP_MIN,
-          anchorAlternative: true,
-          sampling: '固定轮数，不早停',
-        },
-        contrasts: evidence,
-      },
-      null,
-      2,
-    ),
-    'utf-8',
-  );
 }
 
 // ── 3. 真实模型决策（核心）──────────────────────────────────────────────────

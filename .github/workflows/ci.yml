@@ -31,7 +31,13 @@ jobs:
       - name: Build
         run: npm run build
       - name: Unit tests
-        run: npm run test
+        run: npm run test:ci
+      # 这一步守的是另一件事：测试集合没有被静默缩小。测试是否通过已经由
+      # 上一行的退出码表达，它红了这里根本不会跑。所以这里只比数字——文件数
+      # 与用例数都取下限，加测试照常绿，删测试（或把 vitest.config.ts 的
+      # include 收窄、把 test 脚本改成带 --exclude）必须过不去。
+      - name: Test collection floor
+        run: npm run test:collection
 
   # Browser regression suite. Observability, not the merge gate.
   #

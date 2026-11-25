@@ -20,6 +20,11 @@ function jsonResponse(body: unknown, ok = true): Response {
   return { ok, json: async () => body } as Response;
 }
 
+/** 原生 /api/chat 形状：content 与 thinking 分开。 */
+function nativeChat(content: string, extra: Record<string, unknown> = {}) {
+  return jsonResponse({ message: { content, thinking: '' }, done_reason: 'stop', eval_count: 50, ...extra });
+}
+
 describe('OllamaBrain：transport 层', () => {
   it('health：/api/tags 200 → true，异常 → false', async () => {
     const good = new OllamaBrain({ model: 'm', fetchImpl: (async () => jsonResponse({})) as typeof fetch });
@@ -28,16 +33,58 @@ describe('OllamaBrain：transport 层', () => {
     expect(await bad.health()).toBe(false);
   });
 
-  it('decide：透传模型 content 并解析成建议', async () => {
-    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+  it('decide：走原生 /api/chat，关掉 thinking 并强制 JSON', async () => {
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
+      expect(url).toContain('/api/chat');
       expect(body.model).toBe('qwen3:8b');
       expect(body.messages).toHaveLength(2);
-      return jsonResponse({ choices: [{ message: { content: '{"action":{"type":"dialogue","text":"早"},"confidence":0.9}' } }] });
+      // 这两项是空回复的根因修复，必须钉住。
+      expect(body.think).toBe(false);
+      expect(body.format).toBe('json');
+      return nativeChat('{"action":{"type":"dialogue","text":"早"},"confidence":0.9}');
     }) as typeof fetch;
     const brain = new OllamaBrain({ model: 'qwen3:8b', fetchImpl });
     const p = await brain.decide(obs);
     expect(p?.action).toEqual({ type: 'dialogue', text: '早' });
+  });
+
+  it('decide：正文为空但 thinking 有内容 → null（不能把思维链当提案）', async () => {
+    const fetchImpl = (async () => jsonResponse({
+      message: { content: '', thinking: '{"action":{"type":"dialogue","text":"这是思维链里的假 JSON"}}' },
+      done_reason: 'length',
+    })) as typeof fetch;
+    expect(await new OllamaBrain({ model: 'm', fetchImpl }).decide(obs)).toBeNull();
+  });
+
+  it('decide：content 为空且未配置预算 → null，不重试', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => { calls += 1; return jsonResponse({ message: { content: '' } }); }) as typeof fetch;
+    expect(await new OllamaBrain({ model: 'm', fetchImpl }).decide(obs)).toBeNull();
+    expect(calls).toBe(1);
+  });
+
+  it('decide：预算耗尽被截断 → 放宽 num_predict 重试一次并成功', async () => {
+    const budgets: number[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      budgets.push(body.options?.num_predict);
+      return budgets.length === 1
+        ? jsonResponse({ message: { content: '' }, done_reason: 'length', eval_count: 160 })
+        : nativeChat('{"action":{"type":"dialogue","text":"重试成功"},"confidence":0.8}');
+    }) as typeof fetch;
+    const brain = new OllamaBrain({ model: 'm', fetchImpl, maxOutputTokens: 160 });
+    const p = await brain.decide(obs);
+    expect(p?.action).toEqual({ type: 'dialogue', text: '重试成功' });
+    expect(budgets).toEqual([160, 512]);
+  });
+
+  it('decide：兼容 OpenAI 形状（/v1 代理）正文', async () => {
+    const fetchImpl = (async () => jsonResponse({
+      choices: [{ message: { content: '{"action":{"type":"dialogue","text":"旧形状"},"confidence":0.5}', reasoning: 'ignored' } }],
+    })) as typeof fetch;
+    const p = await new OllamaBrain({ model: 'm', fetchImpl }).decide(obs);
+    expect(p?.action).toEqual({ type: 'dialogue', text: '旧形状' });
   });
 
   it('decide：HTTP 非 2xx → null', async () => {
@@ -51,11 +98,11 @@ describe('OllamaBrain：transport 层', () => {
   });
 
   it('decide：模型返回非契约内容 → null', async () => {
-    const fetchImpl = (async () => jsonResponse({ choices: [{ message: { content: '你好呀朋友' } }] })) as typeof fetch;
+    const fetchImpl = (async () => nativeChat('你好呀朋友')) as typeof fetch;
     expect(await new OllamaBrain({ model: 'm', fetchImpl }).decide(obs)).toBeNull();
   });
 
-  it('decide：响应缺 choices → null', async () => {
+  it('decide：响应缺 message → null', async () => {
     const fetchImpl = (async () => jsonResponse({ error: 'model not found' })) as typeof fetch;
     expect(await new OllamaBrain({ model: 'm', fetchImpl }).decide(obs)).toBeNull();
   });

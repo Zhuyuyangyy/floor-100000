@@ -17,6 +17,10 @@ export interface AiNpcConfig {
   timeoutMs: number;
   /** 进 prompt 的记忆条数 */
   recallK: number;
+  /** 单次输出 token 上限；undefined 表示不限。 */
+  maxOutputTokens: number | undefined;
+  /** 是否让模型跳过思维链；带 thinking 的模型必须为 true。 */
+  disableThinking: boolean;
 }
 
 function envValue(key: string): string | undefined {
@@ -39,6 +43,8 @@ export function aiNpcConfig(): AiNpcConfig {
   const model = (envValue('VITE_NPC_MODEL') ?? '').trim();
   const baseUrl = envValue('VITE_OLLAMA_URL') ?? 'http://127.0.0.1:11434';
   const timeoutRaw = Number(envValue('VITE_NPC_TIMEOUT_MS') ?? '');
+  const budgetRaw = Number(envValue('VITE_NPC_MAX_TOKENS') ?? '');
+  const thinkRaw = (envValue('VITE_NPC_THINK') ?? '').trim().toLowerCase();
   const forced = queryValue('ainpc') === '1';
   const disabled = queryValue('ainpc') === '0';
   const enabled = !disabled && (forced || envValue('VITE_NPC_ENABLED') !== 'false');
@@ -47,11 +53,16 @@ export function aiNpcConfig(): AiNpcConfig {
     mode: !enabled ? 'off' : model.length > 0 ? 'ollama' : 'offline',
     baseUrl,
     model,
-    // 45s：Spark 实测 npc-qwen(17G) 冷启 ~33s、热推理 21-32s（RFC §8）。
-    // 异步设计下超时不阻塞交互——降级句先显示，模型到了再替换；
-    // 对话已关则丢弃结果。3s 只适用于 8B 以下小模型。
+    // 45s：Spark 实测 npc-qwen(17G) 冷启 ~33s。热推理在关掉思维链后只要
+    // 2.5-3.5s（实测 5 次 2.45/2.57/2.85/2.70/2.94s）；保留长超时是为了
+    // 冷启动那次加载，不是给思维链留时间。
     timeoutMs: Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 45_000,
     recallK: 6,
+    // 关闭思维链时 96-192 足够吐一条提案；截断会自动放宽重试一次。
+    maxOutputTokens: Number.isFinite(budgetRaw) && budgetRaw > 0 ? Math.floor(budgetRaw) : 192,
+    // 默认关闭思维链：npc-qwen 走 /v1 时 reasoning 会吃掉全部预算并让
+    // content 变空串（HTTP 200）。VITE_NPC_THINK=on 可显式打开。
+    disableThinking: thinkRaw !== 'on' && thinkRaw !== 'true',
   };
 }
 

@@ -63,12 +63,17 @@ describe('巡游体自治 AI 配置', () => {
     vi.stubEnv('VITE_NPC_MODEL', 'qwen3:8b');
     vi.stubEnv('VITE_NPC_ENABLED', '');
     const requests: string[] = [];
-    vi.stubGlobal('fetch', (async (input: RequestInfo | URL) => {
+    const chatBodies: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       requests.push(url);
       if (url.endsWith('/api/tags')) return jsonResponse({});
+      chatBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      // 原生 /api/chat：正文在 message.content，思维链在 message.thinking。
       return jsonResponse({
-        choices: [{ message: { content: '{"action":{"type":"attack"},"confidence":0.9}' } }],
+        message: { content: '{"action":{"type":"attack"},"confidence":0.9}', thinking: '' },
+        done_reason: 'stop',
+        eval_count: 40,
       });
     }) as typeof fetch);
 
@@ -87,7 +92,10 @@ describe('巡游体自治 AI 配置', () => {
     expect(decision.intent).toBe('attack');
     expect(requests).toEqual([
       `${config.baseUrl}/api/tags`,
-      `${config.baseUrl}/v1/chat/completions`,
+      `${config.baseUrl}/api/chat`,
     ]);
+    // 防回归：走 /v1 且不关 thinking 时，带思维链的模型会返回空正文。
+    expect(chatBodies[0]?.think).toBe(false);
+    expect(chatBodies[0]?.format).toBe('json');
   });
 });

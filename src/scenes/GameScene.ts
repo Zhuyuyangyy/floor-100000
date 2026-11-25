@@ -3516,7 +3516,13 @@ export class GameScene extends Phaser.Scene {
     if (!runtime) {
       runtime = {
         brain: cfg.mode === 'ollama'
-          ? new OllamaBrain({ baseUrl: cfg.baseUrl, model: cfg.model, timeoutMs: cfg.timeoutMs })
+          ? new OllamaBrain({
+              baseUrl: cfg.baseUrl,
+              model: cfg.model,
+              timeoutMs: cfg.timeoutMs,
+              maxOutputTokens: cfg.maxOutputTokens,
+              disableThinking: cfg.disableThinking,
+            })
           : new LocalPersonaBrain(),
         // 降级脑给该 NPC 自己的第一句问候——Spark 不可达时玩家看到的就是
         // 改造前那一句，这是护栏 2 的场景侧落地。

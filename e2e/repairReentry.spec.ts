@@ -280,6 +280,20 @@ test('维修进行中按 ESC 关掉对话后锁会释放，第二次维修仍能
   // 先确认这条路真的是 legacy：否则后面所有断言都在测一个不由本函数驱动的字段。
   await assertLegacyRepairRoute(page);
   expect(first.repairAttempts, `第一次维修应该真的跑过（attempts=${first.repairAttempts}）`).toBeGreaterThan(0);
+  // 用例的前提，也是「第二次和第一次条件相同」的保证：
+  // 初始信任 35 低于维修门槛 70，validator 必然拒绝 → 门不开 → 世界状态不变。
+  // 一旦哪天平衡改动让第一次维修成功，门在同一天内就会打开（88fb4c9 起不再等
+  // 跨天），停电危机立刻启动，第二次维修就改走 `runBlackoutRepairPlan`——那时
+  // 本用例断言的 `repairInFlight` / `lastAlinRepairResult` 都不会再被写入，
+  // 判据会退化成恒真的真空断言。
+  //
+  // 所以把前提写成显式断言：前提破了就红在这里，而不是变成一条看起来还绿、
+  // 实际什么都没测的用例。
+  expect(
+    ['blocked', 'exhausted', 'planning_failed'],
+    `前提：第一次维修必须被拒（门不能开），实际 status=${String(first.repairStatus)}。`
+      + '若变成 executed/already_open，本用例的第二次维修会走停电危机路径，判据失效。',
+  ).toContain(first.repairStatus);
 
   // ── 第二次维修：锁没卡住，就该重新跑一遍并落到结论 ──────────────────
   //

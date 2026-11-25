@@ -1,0 +1,63 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+release/
+release-installer/
+
+# test / tooling artifacts
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+e2e/screenshots/
+
+# local verification screenshots and one-off probe scripts
+output/
+
+# local env / os
+*.local
+.DS_Store
+
+# brainstorming mockups
+.superpowers/
+
+# extracted third-party references (pixelfx, agent-sprite-forge, gamedev skills)
+re/_ref/
+
+# intermediate rig renders - the assembled sheets in src/assets are the output
+re/*-v[0-9]*/
+re/prop-locker/
+re/*-clips/
+re/_rigtest/
+re/rigtest/
+re/frames/
+
+# diagnostic screenshots and one-off probe scripts from the art rounds.
+# re/ keeps only its reusable tools (re/run-forge.py, re/assemble-*.py).
+re/*.png
+re/*.log
+re/*.txt
+re/audit/
+re/check-*.py
+re/cmp.py
+re/dark.py
+re/lift.py
+re/marg.py
+re/v8.py
+re/dbg-*.py
+re/probe*.mjs
+re/add-clips.py
+
+# incoming art drops and the one-off scripts that normalised them
+re/incoming/
+re/shots*.mjs
+re/strips.py
+re/verify-v3.py
+re/lift-v3.py
+re/binarise-v3.py
+re/feet-v3.py
+re/redo-wanderer.py
+re/wcol.py
+re/alpha.py

@@ -1,0 +1,314 @@
+import Phaser from 'phaser';
+
+import { PALETTE } from './palette.ts';
+
+// OVERHAUL Art Pass: the lighting layer — the fix for "everything is the same
+// grey-dark".
+//
+// Measured before (re/art-dorm.png): 40% of pixels under luminance 40, 3% above
+// 120, saturation 0.26 with every hue in one grey-blue. No focal point, no
+// colour bias — a flat wash, which is what reads as ugly.
+//
+// The first attempt stacked ADD-blended rectangles and measured +4 luminance:
+// Phaser's premultiplied alpha eats additive colour over a dark base, so the
+// pools never showed. This version draws the pools as concentric circles with a
+// Graphics object, warm at the core and transparent at the rim, redrawn each
+// frame so they can breathe. It measures as +14 luminance in the pools, 10x the
+// ambient, and the warm hue the palette lacked.
+//
+// Everything is procedural: no asset is touched, the pool list is data, and a
+// floor declares its own lights.
+//
+// PHASER 4 GOTCHA, learned the hard way here: add.rectangle() ignores the
+// fillAlpha positional argument — every rectangle this module creates is fully
+// opaque unless setAlpha() is called on it. The first version of this file
+// painted an opaque blue sheet over the whole floor, which is exactly the
+// "everything is one flat colour" symptom it was written to fix. Any new
+// rectangle in this project needs .setAlpha(), never the 6th argument.
+
+export interface LightPool {
+  x: number;
+  y: number;
+  radius: number;
+  /** 0..1 */
+  strength: number;
+  color: number;
+}
+
+// Tight radii on purpose: a pixel-art pool that covers the floor is a wash, not
+// a light. These sit at the places the player works — the stairwells, the bed,
+// the workbench — so the floor has places to be.
+const STAIR_LIGHTS: readonly LightPool[] = [
+  { x: 40, y: 300, radius: 88, strength: 1, color: 0xf4b66a },
+  { x: 1240, y: 300, radius: 88, strength: 1, color: 0xf4b66a },
+];
+
+const BED_LIGHT: LightPool = { x: 1120, y: 286, radius: 86, strength: 0.95, color: 0xf4b66a };
+const BENCH_LIGHT: LightPool = { x: 480, y: 286, radius: 86, strength: 0.95, color: 0xf4b66a };
+
+// The ambient wash biases the unlit floor cold, so the warm pools have
+// something to fight. Drawn as a normal-alpha fill, not additive.
+//
+// Art pass: this used to be one full-canvas rectangle at alpha 0.42, and the
+// measurement showed what that did — it flattened the wall PNG into a single
+// (36,53,65), burying the directional light, the peeling paint and the stains
+// the asset was drawn with. Now the wash is three bands with a hole in the
+// middle: strongest at the very bottom (the floor, where a cold wash reads as
+// depth), lighter up the wall, and nothing at all across the top band where the
+// wall art carries its own light.
+// ── depth contract ────────────────────────────────────────────────────────
+// The night overlay used to sit at depth 0, which put it UNDER the wall
+// dressing (1), the aerial haze (2) and every prop (5) - so night measured
+// exactly as bright as day (mean luminance 43.7 vs 43.8). These four constants
+// are the fix, and they are the contract the whole scene now follows:
+//
+//   0-3    background: wall art, dressing, haze
+//   5      props, characters
+//   23     NIGHT - above the world, so night actually darkens the world
+//   24     LIGHT - above the night, so lamps cut through the dark
+//   26     foreground silhouette
+//   90+    HUD and panels
+export const NIGHT_DEPTH = 23;
+export const LIGHT_DEPTH = 24;
+export const DUST_DEPTH = 25;
+// The neighbouring floors in the cross-section. They sit behind everything on
+// the player's own floor — below the wall art (0-3) — because they are context
+// seen through the building, not surfaces the player stands among. A negative
+// depth is what puts them there; Phaser sorts ascending.
+export const STACK_DEPTH = -10;
+// Anything that acts: the player, the NPCs, the trader, the wanderer. Above the
+// wall dressing (1-2), the haze (2) and the floor clutter (3), below the night
+// overlay (23) so night darkens the actors too.
+export const ACTOR_DEPTH = 5;
+
+const AMBIENT_COLOR = 0x24405e;
+const AMBIENT_FLOOR_ALPHA = 0.4;
+const AMBIENT_WALL_ALPHA = 0.16;
+
+// ── per-floor ambience ────────────────────────────────────────────────────
+// One ambient colour for every floor made the tower feel like one corridor
+// repeated five times - which, mechanically, it is, so the art has to do the
+// work of making each level a different place. Each floor gets its own ambient
+// hue and strength: home is neutral, the worker housing is cold, the store room
+// is a green darkness, maintenance is cyan steel, and the canteen - the floor
+// that used to be social, and the one with the guardian on it - is warm and
+// wrong. The values are deliberately restrained; an ambient strong enough to
+// name itself would fight the warm lamps.
+export interface FloorAmbience {
+  color: number;
+  wallAlpha: number;
+  floorAlpha: number;
+}
+
+export const FLOOR_AMBIENCE: Record<number, FloorAmbience> = {
+  1: { color: 0x2a3348, wallAlpha: 0.12, floorAlpha: 0.3 }, // home: soft neutral blue
+  2: { color: 0x24405e, wallAlpha: 0.16, floorAlpha: 0.4 }, // worker housing: cold
+  3: { color: 0x1e3a34, wallAlpha: 0.2, floorAlpha: 0.44 }, // store room: green dark
+  4: { color: 0x1a3a48, wallAlpha: 0.18, floorAlpha: 0.42 }, // maintenance: cyan steel
+  5: { color: 0x4a2a22, wallAlpha: 0.16, floorAlpha: 0.38 }, // canteen: warm and wrong
+};
+
+export function ambienceFor(floor: number): FloorAmbience {
+  return FLOOR_AMBIENCE[floor] ?? FLOOR_AMBIENCE[2];
+}
+/** the fraction of the canvas height where the wall art keeps its own light */
+const AMBIENT_CLEAR_TOP = 0.16;
+
+// Stepped vignette bands, not a smooth gradient: a pixel game should not have a
+// filter-looking gradient anywhere.
+const VIGNETTE_COLOR = 0x0b0f12;
+const VIGNETTE_BANDS: readonly number[] = [0.36, 0.24, 0.13, 0.06];
+const VIGNETTE_BAND_H = 26;
+
+// A single warm glow at an arbitrary point — the shared language for "there is
+// a light here". Scenes use this for window spill, lamps and anything else that
+// emits, so every light on screen is the same soft radial falloff instead of
+// three different hand-rolled shapes.
+export function addGlow(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  radius: number,
+  alpha = 0.5,
+  depth = 4,
+): Phaser.GameObjects.Image {
+  const size = Math.max(8, Math.round(radius * 2));
+  ensureGlowTexture(scene, size);
+  return scene.add.image(x, y, glowKey(size)).setBlendMode(Phaser.BlendModes.ADD).setAlpha(alpha).setDepth(depth);
+}
+
+export interface LightLayer {
+  update(time: number, delta?: number): void;
+  destroy(): void;
+}
+
+// One soft glow texture, baked once per size.
+//
+// The previous version drew concentric Graphics circles, and the owner
+// screenshotted the result: a solid tan disc about 180px across with the ten
+// steps visible as rings. It read as an object lying on the floor, not as
+// light, and it was the ugliest thing on screen.
+//
+// Light has to fall off per pixel. This bakes a real radial gradient into a
+// canvas texture and adds it with ADD blending: ADD brightens the wall without
+// covering it, which is the whole difference between "a lamp is lit here" and
+// "a beige ball is here".
+const glowKey = (size: number): string => `glow-${size}`;
+
+function ensureGlowTexture(scene: Phaser.Scene, size: number): void {
+  const key = glowKey(size);
+  if (scene.textures.exists(key)) return;
+  const tex = scene.textures.createCanvas(key, size, size);
+  if (!tex) return;
+  const ctx = tex.getContext();
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  // Warm at the core, gone by the rim. The stops ARE the falloff curve.
+  g.addColorStop(0, 'rgba(255,230,186,0.95)');
+  g.addColorStop(0.22, 'rgba(255,206,144,0.52)');
+  g.addColorStop(0.5, 'rgba(247,180,108,0.2)');
+  g.addColorStop(0.78, 'rgba(232,152,82,0.05)');
+  g.addColorStop(1, 'rgba(220,140,70,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  tex.refresh();
+}
+
+export function buildLightLayer(
+  scene: Phaser.Scene,
+  opts: {
+    width: number;
+    height: number;
+    isDorm: boolean;
+    hasUpExit: boolean;
+    hasDownExit: boolean;
+    /** overrides the default cold wash; see FLOOR_AMBIENCE */
+    ambience?: FloorAmbience;
+  },
+): LightLayer {
+  const { width, height, isDorm } = opts;
+  const amb = opts.ambience ?? { color: AMBIENT_COLOR, wallAlpha: AMBIENT_WALL_ALPHA, floorAlpha: AMBIENT_FLOOR_ALPHA };
+  const owned: Phaser.GameObjects.GameObject[] = [];
+
+  const pools: LightPool[] = [];
+  if (opts.hasUpExit) pools.push(STAIR_LIGHTS[0]);
+  if (opts.hasDownExit) pools.push(STAIR_LIGHTS[1]);
+  if (isDorm) pools.push(BED_LIGHT, BENCH_LIGHT);
+
+  // Depth rule: the ambient wash is at depth 0 — the same as the room art, added
+  // after it — so it tints the WALL and the floor but leaves the props and the
+  // player at full colour. At depth 6 it also washed over the player, who then
+  // read as a dark blob; a cold tint belongs to the room, not to the character.
+  //
+  // The glows are at depth 4 (ABOVE the props and the player) on purpose: an
+  // additive glow over the character is what makes standing in a lamp pool look
+  // like standing in a lamp pool. The vignette stays at 8, above everything.
+  const poolImages: Array<{ img: Phaser.GameObjects.Image; base: number; phase: number }> = [];
+  for (const pool of pools) {
+    const size = Math.round(pool.radius * 2);
+    ensureGlowTexture(scene, size);
+    // `strength` is the peak alpha now, not a multiplicative factor: at 1.0 an
+    // ADD glow washes the wall to white, so the pools sit around 0.5.
+    const base = pool.strength * 0.5;
+    const img = scene.add.image(pool.x, pool.y, glowKey(size)).setBlendMode(Phaser.BlendModes.ADD).setAlpha(base).setDepth(LIGHT_DEPTH);
+    poolImages.push({ img, base, phase: pool.x * 0.7 % 10 });
+    owned.push(img);
+  }
+
+  // Banded ambient, not one rectangle: the top band keeps the wall PNG's own
+  // light, the wall band takes a light cold wash, the floor band a strong one.
+  const clearY = height * AMBIENT_CLEAR_TOP;
+  const floorTop = height * 0.62;
+  owned.push(
+    scene.add.rectangle(width / 2, (clearY + floorTop) / 2, width, floorTop - clearY, amb.color).setAlpha(amb.wallAlpha).setDepth(0),
+  );
+  owned.push(
+    scene.add.rectangle(width / 2, (floorTop + height) / 2, width, height - floorTop, amb.color).setAlpha(amb.floorAlpha).setDepth(0),
+  );
+
+  for (let i = 0; i < VIGNETTE_BANDS.length; i++) {
+    const a = VIGNETTE_BANDS[i];
+    const inset = i * VIGNETTE_BAND_H;
+    const mk = (x: number, y: number, w: number, h: number): void => {
+      owned.push(scene.add.rectangle(x, y, w, h, VIGNETTE_COLOR).setAlpha(a).setDepth(8));
+    };
+    mk(width / 2, inset + VIGNETTE_BAND_H / 2, width, VIGNETTE_BAND_H);
+    mk(width / 2, height - inset - VIGNETTE_BAND_H / 2, width, VIGNETTE_BAND_H);
+    mk(inset + VIGNETTE_BAND_H / 2, height / 2, VIGNETTE_BAND_H, height);
+    mk(width - inset - VIGNETTE_BAND_H / 2, height / 2, VIGNETTE_BAND_H, height);
+  }
+
+  // Each pool breathes on its own offset, so the light is alive — a lit room in
+  // an abandoned tower is never perfectly steady.
+
+  const redraw = (time: number): void => {
+    for (const p of poolImages) {
+      // A slow breath: a lit room in an abandoned tower is never perfectly
+      // steady, and a still glow reads as a decal.
+      const t = 0.5 + 0.5 * Math.sin((time / 2600) * Math.PI * 2 + p.phase);
+      p.img.setAlpha(p.base * (0.82 + 0.36 * t));
+    }
+  };
+  redraw(0);
+
+  // ── dust in the light ────────────────────────────────────────────────────
+  // The world was completely still apart from the glows breathing. Dust motes
+  // drifting through the lit pools is the cheapest way to make a room feel
+  // inhabited: it is motion the eye catches without being told about, and it
+  // reads as "there is air in here" rather than as an effect.
+  //
+  // Each mote belongs to a pool, so it only exists where there is light to catch
+  // it - motes in the dark would be invisible anyway. Deterministic from the
+  // pool position, so a floor's dust is the same every time it is entered.
+  interface Mote {
+    rect: Phaser.GameObjects.Rectangle;
+    baseX: number;
+    baseY: number;
+    speed: number;
+    sway: number;
+    phase: number;
+  }
+  const motes: Mote[] = [];
+  for (let i = 0; i < pools.length; i++) {
+    const pool = pools[i];
+    const count = 7;
+    for (let m = 0; m < count; m++) {
+      const seed = pool.x * 0.37 + m * 17.3;
+      const h = (n: number) => {
+        const v = Math.sin(seed + n) * 10000;
+        return v - Math.floor(v);
+      };
+      const rx = (h(1) - 0.5) * pool.radius * 1.1;
+      const ry = (h(2) - 0.5) * pool.radius * 0.9;
+      const rect = scene.add
+        .rectangle(pool.x + rx, pool.y + ry, h(3) > 0.7 ? 2 : 1, 1, PALETTE.lightHot)
+        .setAlpha(0.35 + h(4) * 0.3)
+        .setDepth(DUST_DEPTH);
+      motes.push({
+        rect,
+        baseX: pool.x + rx,
+        baseY: pool.y + ry,
+        speed: 3 + h(5) * 6,
+        sway: 2 + h(6) * 5,
+        phase: h(7) * Math.PI * 2,
+      });
+      owned.push(rect);
+    }
+  }
+
+  return {
+    update(time, delta) {
+      redraw(time);
+      // Motes drift upward and wrap inside their pool, so the field never
+      // empties and never escapes into unlit space.
+      const dt = Math.min(delta ?? 16, 50) / 1000;
+      for (const m of motes) {
+        m.rect.y -= m.speed * dt;
+        if (m.rect.y < m.baseY - 18) m.rect.y = m.baseY + 18;
+        m.rect.x = m.baseX + Math.sin(time / 1400 + m.phase) * m.sway;
+      }
+    },
+    destroy() {
+      for (const o of owned) o.destroy();
+    },
+  };
+}

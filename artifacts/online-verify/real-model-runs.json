@@ -1,0 +1,32 @@
+{
+  "avgMs": 5316,
+  "runs": [
+    {
+      "status": 200,
+      "body": {
+        "ok": true,
+        "text": "{\"action\":{\"type\":\"dialogue\",\"text\":\"站住。这一层的线路不能出乱子。如果你不是来添乱的，就把来意说清楚，我可以考虑帮你一把。\"},\"confidence\":0.8}",
+        "decisionSource": "model"
+      },
+      "ms": 3932
+    },
+    {
+      "status": 200,
+      "body": {
+        "ok": true,
+        "text": "{\"action\":{\"type\":\"dialogue\",\"text\":\"这层的线路我来守。你若有麻烦，靠近些再说，别乱跑。\"},\"confidence\":0.7}",
+        "decisionSource": "model"
+      },
+      "ms": 3713
+    },
+    {
+      "status": 200,
+      "body": {
+        "ok": true,
+        "text": "{\"action\":{\"type\":\"dialogue\",\"text\":\"线路还在抖，我不能走。你若肯帮忙，就站在通道口附近，别让它安静太久。\"},\"confidence\":0.65}",
+        "decisionSource": "model"
+      },
+      "ms": 8302
+    }
+  ]
+}

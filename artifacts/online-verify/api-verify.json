@@ -1,0 +1,162 @@
+[
+  {
+    "name": "首页 200",
+    "ok": true,
+    "detail": "HTTP 200, 1668B"
+  },
+  {
+    "name": "首页是我们的游戏",
+    "ok": true,
+    "detail": "第100000层：末日宿舍"
+  },
+  {
+    "name": "产物引用 JS",
+    "ok": true,
+    "detail": "assets/index-DUjl--OX.js"
+  },
+  {
+    "name": "JS 资源 200",
+    "ok": true,
+    "detail": "1661379B"
+  },
+  {
+    "name": "前端产物无密钥/上游地址",
+    "ok": true,
+    "detail": "clean"
+  },
+  {
+    "name": "前端走同源代理",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "产物含六位楼内居民",
+    "ok": true,
+    "detail": "老陈、小周、大刘、小满、阿珍、阿林"
+  },
+  {
+    "name": "/healthz 200",
+    "ok": true,
+    "detail": "{\"ok\":true,\"aiConfigured\":true,\"breakerOpen\":false,\"dailyUsed\":21,\"dailyBudget\":1800}"
+  },
+  {
+    "name": "AI 已配置（Key 生效）",
+    "ok": true,
+    "detail": "aiConfigured=true"
+  },
+  {
+    "name": "熔断未打开",
+    "ok": true,
+    "detail": "breakerOpen=false"
+  },
+  {
+    "name": "健康检查不泄 Key",
+    "ok": true,
+    "detail": "{\"ok\":true,\"aiConfigured\":true,\"breakerOpen\":false,\"dailyUsed\":21,\"dailyBudget\":1800}"
+  },
+  {
+    "name": "维修任务 200",
+    "ok": true,
+    "detail": "HTTP 200 1835ms"
+  },
+  {
+    "name": "维修任务来源是模型",
+    "ok": true,
+    "detail": "model"
+  },
+  {
+    "name": "维修回复是结构化 intent（不是自然语言）",
+    "ok": true,
+    "detail": "{\"intent\":\"repair_gate\",\"utterance\":\"材料齐了，我现在动手修这道门。\"}"
+  },
+  {
+    "name": "维修契约没有退回旧的 action.type",
+    "ok": true,
+    "detail": "[\"intent\",\"utterance\"]"
+  },
+  {
+    "name": "缺料时不声称能直接修（或改口要材料）",
+    "ok": true,
+    "detail": "{\"intent\":\"request_help\",\"itemId\":\"tape\",\"quantity\":1,\"utterance\":\"木头够了，还缺一卷胶带，麻烦帮我找找。\"}"
+  },
+  {
+    "name": "维修任务不转发客户端提示词",
+    "ok": true,
+    "detail": "{\"intent\":\"repair_gate\",\"utterance\":\"你带齐了，我这就动手修门。\"}"
+  },
+  {
+    "name": "缺维修附件返回 400",
+    "ok": true,
+    "detail": "HTTP 400"
+  },
+  {
+    "name": "真实模型决策 3/3",
+    "ok": true,
+    "detail": "200/model/3932ms 200/model/3713ms 200/model/8302ms"
+  },
+  {
+    "name": "返回合法提案结构",
+    "ok": true,
+    "detail": "3/3"
+  },
+  {
+    "name": "提案是 dialogue",
+    "ok": true,
+    "detail": "{\"type\":\"dialogue\",\"text\":\"站住。这一层的线路不能出乱子。如果你不是来添乱的，就把来意说清楚，我可以考虑帮你一把。\"}"
+  },
+  {
+    "name": "台词非空",
+    "ok": true,
+    "detail": "站住。这一层的线路不能出乱子。如果你不是来添乱的，就把来意说清楚，我可以考虑帮你一把。"
+  },
+  {
+    "name": "响应时间可接受",
+    "ok": true,
+    "detail": "均值 5316ms"
+  },
+  {
+    "name": "客户端指定 model 被忽略",
+    "ok": true,
+    "detail": "HTTP 200"
+  },
+  {
+    "name": "注入指令未生效",
+    "ok": true,
+    "detail": "{\"action\":{\"type\":\"dialogue\",\"text\":\"这条线路由我守着，靠近前先表明来意。我不想起冲突，但也不会让通道被人随意占据。\"},\""
+  },
+  {
+    "name": "GET 拒绝（405）",
+    "ok": true,
+    "detail": "HTTP 405"
+  },
+  {
+    "name": "畸形观察被拒（400）",
+    "ok": true,
+    "detail": "HTTP 400"
+  },
+  {
+    "name": "超长请求体被拒（413）",
+    "ok": true,
+    "detail": "HTTP 413"
+  },
+  {
+    "name": "限流前先有成功请求",
+    "ok": true,
+    "detail": "序列 200,429,200,429,429,429,429,429,429,429,200,429,429,429,429"
+  },
+  {
+    "name": "单会话超过上限返回 429",
+    "ok": true,
+    "detail": "200×3 429×12"
+  },
+  {
+    "name": "限流不是被 400 误触发",
+    "ok": true,
+    "detail": "200,429,200,429,429,429,429,429,429,429,200,429,429,429,429"
+  },
+  {
+    "name": "路径穿越读不到源码",
+    "ok": true,
+    "detail": "HTTP 200"
+  }
+]

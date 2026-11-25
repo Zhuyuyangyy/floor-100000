@@ -9,7 +9,7 @@
     "dev": "vite",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:ci": "vitest run --reporter=default --reporter=json --outputFile=test-results/vitest-report.json",
+    "test:ci": "vitest run --reporter=default --reporter=json --outputFile=output/vitest-report.json",
     "test:collection": "node tools/check-test-collection.mjs",
     "competition:benchmark": "node tools/competition-replay-benchmark.mjs",
     "build": "tsc && vite build",

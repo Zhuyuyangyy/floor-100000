@@ -14,9 +14,14 @@
 //
 // 它是下限不是等值：加测试照常绿，删测试必须过不去。真要删，就同步改下面的
 // 常量，让「测试变少了」这件事在 diff 里留下痕迹，而不是悄悄发生。
+// 产物路径刻意不放 test-results/：那是 Playwright 的默认 outputDir，而
+// createRemoveOutputDirsTask 每次跑测试都会 removeFolders 整个目录。把报告
+// 放那儿，本地跑一次任何 Playwright 探针（A3 的日常操作）就会把它删掉，接着
+// 本脚本报「读不到报告」——测试集合其实没动过。误报比不报更糟，它教人忽略告警。
+// output/ 已在 .gitignore:17，且没有任何工具会清它。
 import { readFileSync } from 'node:fs';
 
-const REPORT = process.env.VITEST_REPORT ?? 'test-results/vitest-report.json';
+const REPORT = process.env.VITEST_REPORT ?? 'output/vitest-report.json';
 const MIN_FILES = 86;
 const MIN_TESTS = 1204;
 

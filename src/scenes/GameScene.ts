@@ -415,6 +415,21 @@ export class GameScene extends Phaser.Scene {
   private lastAlinRepairResult?: AlinRepairScenarioResult;
   /** 最近一次模型对维修表达的意图（含拒绝），供对话文案如实显示。 */
   private lastRepairIntentNote?: RepairIntentDecision;
+  /**
+   * 维修流程重入锁。
+   *
+   * 一次维修要等模型回话，中间有几百毫秒到几秒的空窗；这段时间里玩家连按
+   * 交互键会把 `runAlinRepairPlan` 再跑一遍。实测并发两次的后果不算灾难
+   * （第二次观测到门已开、材料已扣，自己 exhausted），但那是**靠下游状态
+   * 恰好变了**兜住的，不是这条路径本身防住了——一旦哪天两次调用读到同一份
+   * 观测，材料就会被扣两遍。
+   *
+   * 锁挂在场景实例上、不进存档：它防的是「同一瞬间的两次点击」，属于 UI
+   * 层的事实，不该污染 `GameState`。也不要改成持久幂等（用 flags 记 opId）
+   * ——那会让「同一分钟故意送两份同样的礼」这种合法操作被当成重复吞掉，
+   * 服务端分不清「重复提交」和「重复意图」。
+   */
+  private repairInFlight = false;
   /** Last gift result, exposed like the repair result for browser integration diagnostics. */
   lastAlinGiftResult?: AlinGiftScenarioResult;
   /** 最近一次赠礼结果；阿林走单 NPC 场景，小周走多 NPC 场景。 */
@@ -3923,9 +3938,16 @@ export class GameScene extends Phaser.Scene {
         return null;
       }
       this.lastRepairIntentNote = decision;
+      // 模型说的目标要真的用上。
+      //
+      // 这里原先写死 `gateId: input.gateId`，`decision.target` 被丢掉。当前
+      // 场景只有一个可修目标，所以看不出问题；但首章的停电危机修的是塔楼
+      // 主线（`tower-main-power`），借的正是 repair_gate 的语义。只要一个
+      // 场景里出现第二个可修目标，丢 target 就等于「模型说修 A、系统修 B」，
+      // 而且不报错。模型的 target 缺省时才回落到场景给的那个。
       return {
         kind: 'repair_gate',
-        gateId: input.gateId,
+        gateId: decision.target ?? input.gateId,
         // 材料永远照服务端配方申请，不采信模型报的数。
         materials: input.materials.map((stack) => ({ ...stack })),
       };
@@ -3935,6 +3957,10 @@ export class GameScene extends Phaser.Scene {
   private async runAlinRepairPlan(npc: NpcDef, captured: DialogueSession): Promise<void> {
     const current = this.dialogue;
     if (!current || current.npc !== npc.id) return;
+    // 上一次还没跑完就不再进第二遍（见 `repairInFlight` 的注释）。
+    // 静默返回而不是弹提示：玩家连点两下时，本来就只该看到一次结果。
+    if (this.repairInFlight) return;
+    this.repairInFlight = true;
     current.messageSource = 'competition-offline';
     current.message = '只读观察 → 结构化提案 → 校验…';
     this.refreshDialogue();
@@ -3984,6 +4010,10 @@ export class GameScene extends Phaser.Scene {
       current.message = 'offline-fallback｜规划失败｜游戏状态未改变';
       current.revision += 1;
       this.refreshDialogue();
+    } finally {
+      // 放锁必须走 finally：try 里有 `return`（对话已关闭时会提前退出），
+      // 漏了这一步就等于把维修功能永久锁死。
+      this.repairInFlight = false;
     }
   }
 

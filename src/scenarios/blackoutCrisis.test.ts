@@ -1308,3 +1308,137 @@ describe('P0-c 点维修即接单：materials_needed 有入口，失信逻辑有
     ).toBe(true);
   });
 });
+
+// ── 失信路径：从玩家入口走一遍失败后替代行动 ────────────────────────────────
+//
+// 上面那条（`承诺过期记失信`）验证的是「跨天之后确实进了 guarded」，但它从
+// `crisisGame()` 夹具进——信任是干净的、门是 setFlag 打开的、许诺是直接调的。
+// 那段代码在真实世界里长什么样，取决于**玩家真的按下那个按钮**。
+//
+// 这一组从 `createNewGame` 起步，只允许玩家做游戏里做得到的事：送礼、修门、
+// 跨天、搬零件、当面核料。它守的是评分点 A2-03 的另一半——
+// 「失败之后换个办法继续」：接单 → 失信 → 门槛抬高 + 程序性前置 → 核料 → 还是修成了。
+//
+// 数字链（阿林 loyalty 0.7 → 放大系数 0.5 + 0.7 = 1.2）：
+//   开局 35 → 3 件礼物 3×(0.6×20×1.2=14.4) = 78.2
+//   接单 help  0.5×20×1.2 = +12  → 90.2
+//   失信 refusal -0.2×20×1.2 = -4.8 → 85.4
+
+describe('失信路径：接单不交货 → 门槛抬高 → 核料后才能修（玩家入口全链路）', () => {
+  /** 真实起点走到「危机已启动、阿林已接单、正等人交货」这一步。 */
+  async function promisedAndWaiting(seed = 2026): Promise<GameState> {
+    const game = createNewGame(seed);
+    game.currentFloor = NPC_FLOOR;
+    game.player.x = getNpc('alin').x;
+
+    // 3 件礼物把信任从 35 抬到 78.2（修门门槛 70）。
+    for (const itemId of ['ration_pack', 'ration_pack', 'clean_water'] as const) {
+      expect((await runAlinGiftScenario(game, itemId, 1)).status).toBe('executed');
+    }
+    expect((await runAlinRepairScenario(game)).status).not.toBe('executed'); // 没材料，先失败
+    givePart(game, 'wood', 2);
+    givePart(game, 'tape', 1);
+    expect((await runAlinRepairScenario(game)).status).toBe('executed');
+    expect(isAlinRepairGateOpen(game)).toBe(true);
+
+    // 门开了，危机才敢启动（否则要求玩家去拿物理上取不到的零件）。
+    expect(syncBlackoutCrisis(game).stage).toBe('investigating');
+    expect(observeBlackout(game).alinTrust).toBeCloseTo(78.2, 5);
+
+    // 玩家按下「接回主线」——这一步在场景层被 `ensureBlackoutHelpRequested` 接住。
+    expect(ensureBlackoutHelpRequested(game)?.ok).toBe(true);
+    expect(blackoutStageOf(game)).toBe('materials_needed');
+    expect(observeBlackout(game).alinTrust).toBeCloseTo(90.2, 5);
+    return game;
+  }
+
+  it('接单后拖着不交货：跨天记失信、态度转谨慎、门槛从 55 抬到 65', async () => {
+    const game = await promisedAndWaiting();
+    expect(alinStanceOf(game)).toBe('neutral');
+
+    // 第 1 天答应，第 2 天还没交货。这是玩家最常犯的错：以为「答应了」就算完事。
+    game.day = 1 + BLACKOUT_PROMISE_DAYS + 1;
+    syncBlackoutCrisis(game);
+
+    expect(flagCount(game, BLACKOUT_FLAG.promiseBroken)).toBe(1);
+    expect(alinStanceOf(game)).toBe('guarded');
+    // 门槛真的抬了：这正是「失败会改变计划」在数值上的表现。
+    expect(BLACKOUT_TRUST_FOR_STANCE.neutral).toBe(55);
+    expect(BLACKOUT_TRUST_FOR_STANCE.guarded).toBe(65);
+    // 失信要落成记忆，不是只留个 flag——跨天之后读的还是它。
+    const broken = loadCompetitionNpcMemory(game, 'alin').filter((entry) => entry.kind === 'promise' && entry.status === 'broken');
+    expect(broken).toHaveLength(1);
+    // 失信本身也要扣信任：refusal 权重 -0.2 → -0.2×20×1.2 = -4.8。
+    expect(observeBlackout(game).alinTrust).toBeCloseTo(85.4, 5);
+  });
+
+  it('信任仍然够（85.4 > 65），所以拦下玩家的不是分数，是「先当面看见零件」这道程序', async () => {
+    const game = await promisedAndWaiting();
+    game.day = 1 + BLACKOUT_PROMISE_DAYS + 1;
+    syncBlackoutCrisis(game);
+    expect(alinStanceOf(game)).toBe('guarded');
+
+    // 材料齐了——从分数上看他该答应，但谨慎的人不听口头保证。
+    giveAllRepairParts(game);
+    const refused = await runBlackoutRepair(game);
+
+    expect(refused.status).toBe('blocked');
+    expect(refused.detail).toBe('materials_unverified');
+    expect(refused.message).toBe('他上次等了你一场空，这次要先当面看见零件。');
+    // 被拒时什么都没发生：没通电、没扣料。
+    expect(flagCount(game, BLACKOUT_FLAG.power)).toBe(0);
+    expect(countItem(game.player.inventory, 'fuse')).toBe(1);
+
+    // 这就是「失败后替代行动」：不是原样再点一次，而是换一个动作（当面核料）。
+    const verified = verifyBlackoutMaterials(game);
+    expect(verified.ok).toBe(true);
+    expect(verified.detail).toBe('ok');
+    // 核料落在当天，跨天要重做——这个日期就是判据。
+    expect(flagCount(game, BLACKOUT_FLAG.verifiedDay)).toBe(game.day);
+
+    const repaired = await runBlackoutRepair(game);
+    expect(repaired.status).toBe('executed');
+    expect(repaired.detail).toBe('ok');
+    expect(flagCount(game, BLACKOUT_FLAG.power)).toBeGreaterThan(0);
+    expect(blackoutStageOf(game)).toBe('resolved_repair');
+    // 谨慎档的谢意是克制的：+2，不是中立 +4、合作 +8。
+    expect(repaired.message).toBe('主线接回去了，整栋楼恢复供电。阿林信任 +2。');
+    expect(observeBlackout(game).alinTrust).toBeCloseTo(87.4, 5);
+    // 承诺最终被记成 kept，不是继续挂着 broken。
+    expect(
+      loadCompetitionNpcMemory(game, 'alin').some((entry) => entry.kind === 'promise' && entry.status === 'kept'),
+    ).toBe(true);
+  });
+
+  it('接单当天不误判失信：还没到期限就 sync，promiseBroken 不该被写', async () => {
+    const game = await promisedAndWaiting();
+    // 同一天里反复 sync（换层、开关面板都会触发）：不该把「刚答应」当成「已失信」。
+    syncBlackoutCrisis(game);
+    syncBlackoutCrisis(game);
+
+    expect(flagCount(game, BLACKOUT_FLAG.promiseBroken)).toBe(0);
+    expect(alinStanceOf(game)).toBe('neutral');
+    expect(observeBlackout(game).alinTrust).toBeCloseTo(90.2, 5);
+
+    // 期限是「接单当天 + BLACKOUT_PROMISE_DAYS」，差一天都不能算过期。
+    game.day = 1 + BLACKOUT_PROMISE_DAYS;
+    syncBlackoutCrisis(game);
+    expect(flagCount(game, BLACKOUT_FLAG.promiseBroken)).toBe(0);
+  });
+
+  it('失信不是死局：修好之后隔天再点，是「已经有结果了」而不是重复扣料', async () => {
+    const game = await promisedAndWaiting();
+    game.day = 1 + BLACKOUT_PROMISE_DAYS + 1;
+    syncBlackoutCrisis(game);
+    giveAllRepairParts(game);
+    verifyBlackoutMaterials(game);
+    expect((await runBlackoutRepair(game)).status).toBe('executed');
+
+    game.day += 1;
+    const again = await runBlackoutRepair(game);
+    expect(again.status).toBe('already_resolved');
+    expect(again.detail).toBe('crisis_resolved');
+    // 已经修好了，不会再扣一次料。
+    expect(countItem(game.player.inventory, 'fuse')).toBe(0);
+  });
+});

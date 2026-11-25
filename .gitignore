@@ -12,9 +12,34 @@ playwright-report/
 blob-report/
 .playwright/
 e2e/screenshots/
+# e2e-audit/ 下的探针截图目录。截图是**过程产物**：真正进版本库的是
+# docs/img/audit-*/ 里挑过的那十几张，以及 UI_AUDIT_R3.md 里的实测数字。
+# _shots/ 里躺的是同一次运行的原始输出（例如 inv-empty-slot-overflow.png），
+# 600KB 一张，和已入库的那张重复。
+e2e-audit/_shots/
+# docs/img/audit-*/_zoom*/ 是放大取证图的**工作副本**。已入库的 _zoom/ 里
+# 只有 UI_AUDIT_R3.md 真正引用的那些；_zoom2/ 是第二轮重裁，文档一处没引，
+# 属于中间产物。用通配是为了下一轮 _zoom3/ 不再需要改这里。
+docs/img/audit-*/_zoom2/
 
 # local verification screenshots and one-off probe scripts
 output/
+
+# 临时工作目录：`tmp/`、`.tmp-*`、`npc-sdk-example` 这类一次性的东西。
+#
+# 为什么这条要写在这里：`tmp/` 里有四份离线桩的 api-verify.json（honors /
+# summary / ignores / random），它们是**判据有效性对照实验**的原料，
+# `artifacts/online-verify/README.md` 里那张「5/7 是假绿历史证据」的表就是从
+# 它们算出来的。谁一次 `git add -A` 就会把四份桩的「验收结果」提交进版本库——
+# 它们长得和真证据一模一样（同样的文件名、同样的 JSON 结构），只是全 401。
+# 这正是 artifacts/ 存在的意义所在：**只留线上真迹**。
+#
+# 注意 `.tmp-gate/`、`.tmp-s3/`、`.tmp-ok/` 是各人跑脚本时临时建的，
+# 前者曾被 A5 在 02:05 前后用于跑门禁，跑完没删。用通配而不是逐个列举，
+# 因为下一个人一定会建出第五个名字。
+tmp/
+.tmp-*/
+.tmp-*
 
 # local env / os
 *.local

@@ -67,15 +67,47 @@ const DEFAULT_OUT = resolve(REPO_ROOT, 'output/online-verify');
 // 对本仓库够用：默认目录不是软链。若以后变成软链，这里要换 realpathSync。
 const FORCED_ONTO_DEFAULT = FORCE_WRITE && Boolean(process.env.SHOT_DIR)
   && resolve(process.env.SHOT_DIR) === DEFAULT_OUT;
+// 落到仓库根（含 `.`、`..`、`./`、以及任何解析后等于 REPO_ROOT 的写法）。
+//
+// 这一条是实测补的：`FORCE_WRITE=1 SHOT_DIR=.` 不覆盖默认目录，所以上一道
+// 判据放行，但它把 api-verify*.json 写进了仓库根——而这三个文件名不在
+// .gitignore 里（`output/` 才在），`git status` 里会以未跟踪文件出现，
+// 一次 `git add -A` 就进仓库了。不是数据损坏，是把垃圾提交上去。
+const FORCED_INTO_ROOT = FORCE_WRITE && Boolean(process.env.SHOT_DIR)
+  && resolve(process.env.SHOT_DIR) === REPO_ROOT;
 // 注意 `&& !FORCED_ONTO_DEFAULT` 不是多余的：没有它，下面那个拒绝分支永远
 // 进不去（CAN_WRITE_CHECKLIST 已经是 true，第一层 if 就吃不中）。判据要
 // 改在「许可」这里，不能只在事后拦——否则又是一句劝告。
 const CAN_WRITE_CHECKLIST = TOKEN.length > 0
-  || (FORCE_WRITE && Boolean(process.env.SHOT_DIR) && !FORCED_ONTO_DEFAULT);
+  || (FORCE_WRITE && Boolean(process.env.SHOT_DIR) && !FORCED_ONTO_DEFAULT && !FORCED_INTO_ROOT);
+
+// ── 采样内容另有一道门：不看 token 字符串，看这一轮有没有真的拿到样本 ──
+//
+// 上面那些判据问的是「许可不允许写」，这一道问的是「有没有东西可写」。
+// 两件事必须分开，因为 `TOKEN.length > 0` 只证明「有人填了个字符串」，不证明
+// 它有效。实测三条路径都会让它放行、却一条样本都拿不到：
+//   - token 拼错 / 复制时带了空格 / 过期  → 魔搭网关照样 401
+//   - 创空间是 private，任何 token 都过不去（当前状态）
+//   - 上游 503（熔断 / 预算耗尽），healthz 仍是 200
+// 这三种情况下写出来的文件，结构完全合法、JSON 能解析、字段齐全，唯独
+// 一条观测都没有——文件名却叫「证据」。a5 实测过：无效 token 一轮写出六份，
+// `meta` 里写着 `hasToken: true, forceWrite: false`，一个拒绝分支都没触发。
+// 那比 FORCE_WRITE 事故更危险，因为它的自述是「我是真证据」。
+//
+// 所以采样内容的判据是「样本数 > 0」，token 只是必要条件之一。
+// 不用「必须采满」：上游偶发失败时 `complete: false` 本身是有信息量的观测，
+// 该留；但「一条都没有」不是观测，是没跑。
+function samplingWritable(sampleCount) {
+  return CAN_WRITE_CHECKLIST && sampleCount > 0;
+}
 
 const results = [];
 // 观测到但无法用 PASS/FAIL 表达的结论（例如需要读服务端源码才能确认的字段丢弃）。
 const notes = [];
+// 这一轮真的拿到几次模型回复（200 + decisionSource=model）。0 表示整轮空转。
+// 与 hasToken 放在一起看才有意义：hasToken 说「填了字符串」，这个说「字符串能用」。
+// 只填字符串不产生样本时，产出的文件是空壳，meta 必须能自证这一点。
+let modelSamplesObserved = 0;
 // FAIL 分两类，只加不混：
 //   gated=false —— 判据跑了，被测对象不合格。这是产品的问题。
 //   gated=true  —— 判据根本没跑（前置条件不成立，例如首页 401 取不到产物）。
@@ -792,7 +824,11 @@ async function decide(clientId, extra = {}) {
     // 「证据」。`600c450` 只拦住了 api-verify.json / real-model-runs.json，
     // 记忆这两份漏了——实测无 token 空跑仍会产出 2564B 的 memory-evidence.json，
     // 内容是「三组全部 complete:false」，任何人看到都会以为判据跑过且失败了。
-    if (TOKEN.length > 0) {
+    //
+    // 门槛从 `TOKEN.length > 0` 换成「真的采到样本」：前者只证明填了个字符串，
+    // 无效 token 也能通过。见文件头部 samplingWritable 的说明。
+    const weightSamples = collected.base.length + collected.pos.length + collected.neg.length;
+    if (samplingWritable(weightSamples)) {
       writeFileSync(
         `${OUT}/memory-weight-evidence.json`,
         JSON.stringify(
@@ -817,8 +853,12 @@ async function decide(clientId, extra = {}) {
   notes.push('现有 decide() 请求体的 recentEvents 不在 sanitizeObservation 白名单内，会被静默丢弃。');
 
   // 同 memory-weight-evidence：无 token 时这里只有「三组 complete:false」，
-  // 写出去就是一份看着像证据、实则一条样本都没有的文件。只在带 token 时写。
-  if (TOKEN.length > 0) {
+  // 写出去就是一份看着像证据、实则一条样本都没有的文件。只在真的采到样本时写。
+  const contrastSamples = evidence.reduce(
+    (s, e) => s + (e.control?.length ?? 0) + (e.treatment?.length ?? 0),
+    0,
+  );
+  if (samplingWritable(contrastSamples)) {
     writeFileSync(
       `${OUT}/memory-evidence.json`,
       JSON.stringify(
@@ -881,6 +921,8 @@ async function decide(clientId, extra = {}) {
   // 「均值 < 30s」只在真的跑到模型时才有意义。401 只花 67ms，快到必然通过，
   // 这是「错误越早越好」被误读成「性能达标」。要求三次都 200 + 来源是模型。
   const measuredRuns = runs.filter((d) => d.status === 200 && d.body?.decisionSource === 'model');
+  // 记进全局：这是「token 到底能不能用」唯一的实证。见 meta.modelSamplesObserved。
+  modelSamplesObserved = measuredRuns.length;
   checkIfMeasured(
     '响应时间可接受',
     measuredRuns.length === runs.length,
@@ -892,7 +934,10 @@ async function decide(clientId, extra = {}) {
   // 只在带 token 时落盘：无 token 时这三次请求必然 401，写下去就是拿一份
   // 全 401 的结果覆盖掉真跑过的那份。真实事故：output/ 里的 999B 被覆盖成
   // 852B，只能靠 artifacts/ 的副本救回。见文件末尾同一处判断。
-  if (TOKEN.length > 0) {
+  //
+  // 判据是「三次里至少有一次真拿到模型回复」，不是「填了 token」。
+  // measuredRuns 上面已经算好（200 + decisionSource=model），直接复用。
+  if (samplingWritable(measuredRuns.length)) {
     writeFileSync(`${OUT}/real-model-runs.json`, JSON.stringify({ avgMs: avg, runs }, null, 2), 'utf-8');
   }
 }
@@ -998,14 +1043,25 @@ if (skipped > 0) {
 const meta = {
   base: BASE,
   isDefaultBase: BASE === 'https://studio-a1578804454-floor-100000.api-inference.modelscope.net',
+  // ⚠️ hasToken 只说明「填了个非空字符串」，**不说明它有效**。判断这份文件
+  // 是不是证据，要看 modelSamplesObserved。实测 token 拼错/过期/带空格时，
+  // hasToken 为 true 但一次模型回复都拿不到，六个文件照样写出来、结构全合法。
+  // 保留这个字段是因为它仍有诊断价值（区分「根本没填」和「填了但没用」）。
   hasToken: TOKEN.length > 0,
+  // 这一轮真的拿到几次模型回复。0 = 整轮空转，产出的文件不是证据。
+  // 这是唯一能同时识别「没填 token」「token 无效」「private 过不去」
+  // 「上游 503」四种情况的字段——它们的原因不同，但结果都是「没有观测」。
+  modelSamplesObserved,
   // 无 token 却仍然落了盘，说明是 FORCE_WRITE 强制留档的，不是证据。
   // 这个字段让「这份文件是真是假」不再需要靠「40 条里 7 条通过」反推。
   forceWrite: !TOKEN.length && FORCE_WRITE,
   startedAt: new Date().toISOString(),
   node: process.version,
 };
-console.log(`\n目标 ${meta.base}${meta.hasToken ? '' : '（无 token）'}`);
+console.log(
+  `\n目标 ${meta.base}${meta.hasToken ? '' : '（无 token）'}`
+  + (meta.modelSamplesObserved === 0 ? '｜本轮 0 次模型回复：token 无效、或平台网关挡住了，或上游不可用' : `｜模型回复 ${meta.modelSamplesObserved} 次`),
+);
 
 // 无 token 时不能照写。真实事故：默认 OUT 下空跑一次，output/ 里的
 // real-model-runs.json 从 999B 被覆盖成 852B（3 条 401），只能靠 artifacts/
@@ -1043,6 +1099,13 @@ if (!CAN_WRITE_CHECKLIST && FORCED_WITHOUT_DIR) {
   console.log(`  SHOT_DIR=${process.env.SHOT_DIR}  →  ${resolve(process.env.SHOT_DIR)}`);
   console.log('强制留档必须落到别处，例如：FORCE_WRITE=1 SHOT_DIR=/tmp/verify-xxx node tools/verify-online-api.mjs');
   process.exitCode = 1;
+} else if (!CAN_WRITE_CHECKLIST && FORCED_INTO_ROOT) {
+  // 落在仓库根：不覆盖默认目录，但会留下三个不被 .gitignore 覆盖的文件名，
+  // `git status` 里以未跟踪出现，`git add -A` 就提交上去了。
+  console.log('SHOT_DIR 解析后是仓库根：拒绝（会留下未跟踪文件，容易被误提交）。');
+  console.log(`  SHOT_DIR=${process.env.SHOT_DIR}  →  ${REPO_ROOT}`);
+  console.log('强制留档请落到仓库外的临时目录，例如：FORCE_WRITE=1 SHOT_DIR=/tmp/verify-xxx node tools/verify-online-api.mjs');
+  process.exitCode = 1;
 } else if (!CAN_WRITE_CHECKLIST) {
   console.log('未带 MS_TOKEN：私有创空间接口必然 401，本次结果不作为证据，不写入文件。');
   console.log('如需强制留档（例如只想看判据条数），两个一起给：FORCE_WRITE=1 SHOT_DIR=/tmp/xxx');
@@ -1051,16 +1114,27 @@ if (!CAN_WRITE_CHECKLIST && FORCED_WITHOUT_DIR) {
   writeFileSync(`${OUT}/api-verify.json`, JSON.stringify(results, null, 2), 'utf-8');
   writeFileSync(`${OUT}/api-verify-notes.json`, JSON.stringify(notes, null, 2), 'utf-8');
   writeFileSync(`${OUT}/api-verify-meta.json`, JSON.stringify(meta, null, 2), 'utf-8');
-  // 强制留档的产物必须自我标明，否则它会和真证据一样躺在目录里被人引用。
-  // 上面那次事故的收尾难点就在这里：文件结构完全合法，只能靠「40 条里 7 条
-  // 通过」反推没带 token——那是要靠人算的，不可靠。
+  // 落盘了但整轮没拿到一次模型回复，必须当场说清楚是哪一种情况。
+  //
+  // 这三段以前只区分「有没有填 token」，填了无效 token 时一个字都不打，
+  // 而 meta 里写着 hasToken: true——读者据此会认为这是真证据。现在判据是
+  // 「有没有观测」，所以这条警告能覆盖 token 拼错、过期、private 挡住、
+  // 上游 503 四种情况，而不是只管第一种。
   if (!meta.hasToken) {
     // 必须说清哪些没写。强制留档只覆盖判据清单，采样内容（real-model-runs /
-    // memory-evidence / memory-weight-evidence）仍只认 MS_TOKEN。只说「已强制
+    // memory-evidence / memory-weight-evidence）仍只认真样本。只说「已强制
     // 留档」会让人以为这个目录里是完整的一套，回头找不到记忆证据再怀疑脚本坏了。
     console.log(`已强制留档到 ${OUT}：只有判据清单三份，不含采样内容。`);
-    console.log('（real-model-runs / memory-evidence / memory-weight-evidence 仍需 MS_TOKEN，本次未写。）');
+    console.log('（real-model-runs / memory-evidence / memory-weight-evidence 需真的采到样本，本次未写。）');
     console.log('这些文件不是证据：api-verify-meta.json 里 forceWrite: true 可查，不要引用进参赛材料。');
+  } else if (meta.modelSamplesObserved === 0) {
+    // 填了 token 却一次都没拿到回复。这是最容易被误读成「证据」的一种：
+    // meta.hasToken 为 true、forceWrite 为 false、六份文件结构齐全，
+    // 唯一不对的是里面没有任何观测。实测无效 token 会走到这里。
+    console.log(`\n⚠️  填了 MS_TOKEN，但整轮 0 次模型回复：采样内容全部未写。`);
+    console.log('    常见原因：token 拼错/过期/复制时带了空格；创空间仍为 private（网关直接 401）；上游 503。');
+    console.log('    判据清单写出来了，但它记录的是「拿不到数据」，不是「产品不合格」。');
+    console.log('    拿这份去覆盖已有证据会毁掉真数据——api-verify-meta.json 里 modelSamplesObserved: 0 可查。');
   }
   if (passed !== results.length) process.exitCode = 1;
 }

@@ -83,8 +83,55 @@ describe('prompt 构造', () => {
     const user = buildUserPrompt(obs);
     expect(user).toContain('第2天');
     expect(user).toContain('夜间');
-    expect(user).toContain('获赠：赠送电池×1');
+    expect(user).toContain('获赠［较重］：赠送电池×1');
     expect(user).toContain('dialogue, trade, gift, refuse');
+  });
+
+  // 记忆必须带分量。这条断言的作用不是「测一个新功能」，是钉住两条链路的
+  // 语义一致：同一条记忆，走服务端代理（server/npc-proxy.mjs 的 buildMessages）
+  // 和走 Spark 直连（这里的 fmtMemory）渲染出的强度词必须一样。
+  //
+  // 实测过的不一致：服务端会渲成「第3天 attack［严重负面］」，直连链路渲成
+  // 「第3天 相遇」——weight 被整个丢掉，负向记忆和中性记忆长得一模一样。
+  // 那正是「记忆能存、但影响不到决策」的断点，而且只在一条链路上有。
+  it('记忆带强度词：正负分量在提示词里可区分', () => {
+    const mem = (weight: number) => ([{
+      id: 'm1', day: 3, minute: 600, kind: 'promise', actor: 'player',
+      summary: '答应修门', weight,
+    }]);
+    // 五档边界与 server/npc-proxy.mjs 的 weightWord 必须逐档一致。
+    // 两处各有一份实现（.mjs 无法 import .ts），只能靠断言对齐。
+    //
+    // 注意档位不是对称的：负向用 `>` 不是 `>=`，所以 -0.35 归「偏负面」、
+    // -0.75 归「严重负面」，两个端点都往更重的一档落。写边界用例时不能
+    // 想当然按 |w| 对称来推——这条我第一次就写错了，是靠跑测试才发现的。
+    const cases: Array<[number, string]> = [
+      [0.8, '极重'], [0.75, '极重'], [0.749, '较重'],
+      [0.35, '较重'], [0.349, '一般'],
+      [0, '一般'], [-0.349, '一般'],
+      [-0.35, '偏负面'], [-0.749, '偏负面'],
+      [-0.75, '严重负面'], [-0.9, '严重负面'],
+    ];
+    for (const [w, word] of cases) {
+      const user = buildUserPrompt(observation({ memory: mem(w) }));
+      expect(user, `weight=${w} 应渲染为「${word}」`).toContain(`［${word}］`);
+    }
+    // 正负必须长得不一样——这是「记忆影响决策」的前提。
+    const pos = buildUserPrompt(observation({ memory: mem(0.8) }));
+    const neg = buildUserPrompt(observation({ memory: mem(-0.9) }));
+    expect(pos).not.toBe(neg);
+    expect(neg).not.toContain('极重');
+  });
+
+  // 回归防线：weight 一旦被丢掉，上面那条会因为找不到［…］而红。
+  // 但还有一种退化方式——括号在、里面是空的或固定值。所以单独钉一次「正文也在」。
+  it('记忆正文与强度词同时出现，不是只留其一', () => {
+    const user = buildUserPrompt(observation({
+      memory: [{ id: 'm1', day: 4, minute: 600, kind: 'attack', actor: 'player', summary: '被玩家打伤', weight: -0.9 }],
+    }));
+    expect(user).toContain('被玩家打伤');
+    expect(user).toContain('严重负面');
+    expect(user).toContain('遭袭');
   });
 
   it('无记忆时明说「尚无共同经历」而不是留空', () => {

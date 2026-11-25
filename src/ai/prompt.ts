@@ -25,10 +25,29 @@ function fmtRelationship(obs: NpcObservation): string {
   return entries.map(([actor, v]) => `${actor}:${v}`).join('，');
 }
 
+/** 记忆的分量译成强度词。-1（仇）..1（恩）→ 五档中文。
+ *
+ *  ⚠️ 这段逻辑在 `server/npc-proxy.mjs` 的 `buildMessages` 里有一份**必须一致**的
+ *  副本（搜 `weightWord`）。两条链路不共享代码（服务端是 .mjs、无构建步骤，
+ *  不能 import 这个 .ts 文件），所以只能靠两边各自的测试钉住同样的五档边界。
+ *  改这里就要同步改那里，否则「同一条记忆在两条链路上分量不同」——
+ *  那比现在这样「一边有一边没有」更难发现，因为它不会报错，只是判断悄悄变了。
+ *
+ *  不直接印数字：0.5 对模型没有直观含义，而且会诱导它在提示词里做算术
+ *  （铁律里明确禁止提数值）。原始 weight 仍留在 observation 里供程序使用。
+ */
+function weightWord(w: number): string {
+  if (w >= 0.75) return '极重';
+  if (w >= 0.35) return '较重';
+  if (w > -0.35) return '一般';
+  if (w > -0.75) return '偏负面';
+  return '严重负面';
+}
+
 function fmtMemory(obs: NpcObservation): string {
   if (obs.memory.length === 0) return '（尚无共同经历）';
   return obs.memory
-    .map((m) => `第${m.day}天 ${m.kind === 'gift' ? '获赠' : m.kind === 'attack' ? '遭袭' : m.kind === 'trade' ? '交易' : m.kind === 'refusal' ? '被拒' : m.kind === 'help' ? '受助' : '相遇'}：${m.summary}`)
+    .map((m) => `第${m.day}天 ${m.kind === 'gift' ? '获赠' : m.kind === 'attack' ? '遭袭' : m.kind === 'trade' ? '交易' : m.kind === 'refusal' ? '被拒' : m.kind === 'help' ? '受助' : '相遇'}［${weightWord(m.weight)}］：${m.summary}`)
     .join('；');
 }
 

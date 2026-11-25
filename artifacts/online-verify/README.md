@@ -355,7 +355,21 @@ const OUT = process.env.SHOT_DIR || resolve(REPO_ROOT, 'output/online-verify');
 > 空目录那次写出三份 json。
 >
 > 复核这五道门是否都在：
-> `for v in FORCED_WITHOUT_DIR FORCED_ONTO_DEFAULT FORCED_INTO_ROOT OUT_HAS_EVIDENCE; do grep -c "$v" tools/verify-online-api.mjs; done`
+>
+> ```bash
+> for v in TOKEN.length FORCED_WITHOUT_DIR FORCED_ONTO_DEFAULT FORCED_INTO_ROOT OUT_HAS_EVIDENCE; do
+>   printf "%-22s %s\n" "$v" "$(grep -c "$v" tools/verify-online-api.mjs)"
+> done
+> ```
+>
+> **循环里为什么有个不像变量名的 `TOKEN.length`：** 第一道门（`600c450`）的判据是
+> `TOKEN.length > 0`，它没有捏成 `FORCED_*` 那样的具名常量，所以只能按原文去 grep。
+> 少写这一项的话，跑完只出四个数，读者会以为五道门里有一道是虚的——**这道门恰好
+> 是最容易被绕过的那个**（见上一段：带一个拼错的 token 就能短路掉所有 `FORCE_WRITE &&`
+> 判据）。
+>
+> `grep -c` 数的是**命中行数**，不是出现次数；数值本身没有意义，**只要不是 0 就说明
+> 这个标识符还在脚本里**。这也是不写行号的原因：脚本改得比文档快，行号活不过一次提交。
 
 > **`FORCE_WRITE` 逃生口：两个一起给，只给 `SHOT_DIR` 不写。**
 > 没 token 时脚本**一律不落盘**，只给提示；这是有意的，防止 401 空跑的结果

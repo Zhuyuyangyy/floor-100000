@@ -34,9 +34,20 @@ mkdirSync(OUT, { recursive: true });
 const results = [];
 // 观测到但无法用 PASS/FAIL 表达的结论（例如需要读服务端源码才能确认的字段丢弃）。
 const notes = [];
-function check(name, ok, detail = '') {
-  results.push({ name, ok, detail });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ' :: ' + detail : ''}`);
+// FAIL 分两类，只加不混：
+//   gated=false —— 判据跑了，被测对象不合格。这是产品的问题。
+//   gated=true  —— 判据根本没跑（前置条件不成立，例如首页 401 取不到产物）。
+//                 这不是产品不合格，是环境不允许测量，必须与上一种分开表达。
+// 混成一种的后果：`通过 28/34` 里少掉的那 6 条没人会去数，而其中一条是
+// 「前端产物无密钥」这类安全底线——它压根没跑，报告里连 FAIL 都看不见。
+function check(name, ok, detail = '', { gated = false } = {}) {
+  results.push({ name, ok, detail, gated: gated && !ok });
+  console.log(`${ok ? 'PASS' : gated ? 'SKIP' : 'FAIL'}  ${name}${detail ? ' :: ' + detail : ''}`);
+}
+
+/** 前置条件不成立时显式记账，代替「整段 if 不成立、里面的判据静默消失」。 */
+function checkSkipped(name, why) {
+  check(name, false, `未执行（${why}）`, { gated: true });
 }
 
 const H = { Authorization: `Bearer ${TOKEN}` };
@@ -111,6 +122,15 @@ async function decide(clientId, extra = {}) {
       missing.length === 0,
       missing.length ? `缺 ${missing.join(',')}` : residents.join('、'),
     );
+  } else {
+    // 首页取不到产物时，上面那 4 条一条都不会进 results。后果不是「少了 4 条」，
+    // 是其中最要紧的那条——`前端产物无密钥/上游地址`——压根没跑，而报告里
+    // 连 FAIL 都没有。看到「通过 28/34」的人会去数少了哪几条，不会想到
+    // 安全底线那条从来没执行过。
+    checkSkipped('JS 资源 200', '首页未取到 JS 引用');
+    checkSkipped('前端产物无密钥/上游地址', '首页未取到 JS 引用');
+    checkSkipped('前端走同源代理', '首页未取到 JS 引用');
+    checkSkipped('产物含六位楼内居民', '首页未取到 JS 引用');
   }
 }
 
@@ -748,6 +768,10 @@ async function decide(clientId, extra = {}) {
   if (parsed[0]) {
     check('提案是 dialogue', parsed[0].action?.type === 'dialogue', JSON.stringify(parsed[0].action).slice(0, 120));
     check('台词非空', String(parsed[0].action?.text ?? '').trim().length > 0, parsed[0].action?.text ?? '');
+  } else {
+    // 同上：真实模型一次都没返回可解析的提案时，这两条不该静默消失。
+    checkSkipped('提案是 dialogue', '三次调用均无合法提案');
+    checkSkipped('台词非空', '三次调用均无合法提案');
   }
   const avg = Math.round(runs.reduce((a, d) => a + d.ms, 0) / runs.length);
   check('响应时间可接受', avg < 30_000, `均值 ${avg}ms`);
@@ -817,7 +841,15 @@ if (notes.length > 0) {
   for (const note of notes) console.log(`NOTE  ${note}`);
 }
 const passed = results.filter((r) => r.ok).length;
-console.log(`\n通过 ${passed}/${results.length}`);
+const skipped = results.filter((r) => r.gated).length;
+// 三种数分别打。混成一个「通过 7/40」会让人以为有 33 条不合格，其实其中
+// 一部分是根本没能执行——「测了但不过」和「没测」对读者的行动指引完全不同：
+// 前者要修产品，后者要改环境。
+if (skipped > 0) {
+  console.log(`\n通过 ${passed}/${results.length}（其中 ${skipped} 条未执行，非产品不合格）`);
+} else {
+  console.log(`\n通过 ${passed}/${results.length}`);
+}
 
 // ── 这份结果打的是谁 ───────────────────────────────────────────────────────
 // 加这三行是有代价换来的教训：本仓库里曾经同时存在两套 api-verify.json，
@@ -842,9 +874,14 @@ console.log(`\n目标 ${meta.base}${meta.hasToken ? '' : '（无 token）'}`);
 //
 // 也不静默跳过：跑的人需要知道「这次没写」以及为什么。所以打一行说明、
 // 退出码置 1（无 token = 验收不完整），但不落盘。
-if (!meta.hasToken) {
+// 这一行本身也是被实测推翻过的。原文写的是「如需强制留档，显式设置 SHOT_DIR
+// 指向一个临时目录后重跑」——**那句话是假的**：SHOT_DIR 只改落盘位置，不改
+// 「要不要落盘」，写完这一版之前的实现里 token 判断在 SHOT_DIR 之后，所以设了
+// 也一个字节都不写（实测 SHOT_DIR=/tmp/probe-shot，退出 1，目录为空）。
+// 留档开关现在是真的：谁要强制看数字就显式加 FORCE_WRITE=1。
+if (!meta.hasToken && process.env.FORCE_WRITE !== '1') {
   console.log('未带 MS_TOKEN：私有创空间接口必然 401，本次结果不作为证据，不写入文件。');
-  console.log(`如需强制留档，显式设置 SHOT_DIR 指向一个临时目录后重跑。`);
+  console.log('如需强制留档（例如只想看判据条数），加 FORCE_WRITE=1 并配 SHOT_DIR 指向临时目录。');
   process.exitCode = 1;
 } else {
   writeFileSync(`${OUT}/api-verify.json`, JSON.stringify(results, null, 2), 'utf-8');

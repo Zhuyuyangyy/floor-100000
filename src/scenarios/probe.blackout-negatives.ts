@@ -1,6 +1,5 @@
 import { createNewGame } from '../core/gameState';
-import { setFlag, flagCount } from '../systems/WorldFlags';
-import { ALIN_REPAIR_GATE_FLAG } from '../data/floorGates';
+import { flagCount } from '../systems/WorldFlags';
 import { getNpc } from '../data/npcs';
 import { countItem } from '../systems/InventorySystem';
 import {
@@ -12,10 +11,8 @@ import {
 import { runAlinGiftScenario } from './alinGiftDemo';
 import { runAlinRepairScenario } from './alinRepairDemo';
 import {
-  alinStanceOf,
   ensureBlackoutHelpRequested,
   observeBlackout,
-  requestBlackoutHelp,
   runBlackoutRepair,
   syncBlackoutCrisis,
   verifyBlackoutMaterials,

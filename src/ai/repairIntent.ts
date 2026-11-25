@@ -25,20 +25,21 @@
 
 import type { ItemId, InventoryStack } from '../core/gameTypes';
 import { ITEMS } from '../data/items';
-import { MAX_UTTERANCE } from './rulesExecutor';
+import { extractContractJson, validateContractShape } from './actionContract';
 
 /** 模型可以为维修这件事表达的意图。刻意很小。 */
 export const REPAIR_INTENTS = ['repair_gate', 'observe', 'request_help', 'refuse'] as const;
 export type RepairIntent = (typeof REPAIR_INTENTS)[number];
 
 /**
- * 单次请求的最大数量，与 `actionContract.ts` 的 `MAX_CONTRACT_QUANTITY` 同值。
+ * 单次请求的最大数量已上移到 `actionContract.ts` 的共享校验层（上界取
+ * `min(MAX_CONTRACT_QUANTITY, maxStack)`）。本文件不再另立一个数字——
+ * 同一个约束只能有一个来源，否则两条解析路径迟早漂移。
  *
- * 上界存在的理由不是防模型「要太多」（validator 会拒），而是不让这种提案
- * 进入 trace：Judge Mode 里出现「NPC 索要 99 个净水」会让评审读起来像系统
- * 失控，而实际只是模型随口写了个大数。
+ * 保留这段说明是因为数字本身容易被人「顺手加回来」：上界存在的理由不是
+ * 防模型要太多（validator 会拒），而是不让这种提案进入 trace——Judge Mode
+ * 里出现「NPC 索要 99 个净水」会让评审读起来像系统失控。
  */
-const MAX_REQUEST_QUANTITY = 9;
 
 export interface RepairIntentDecision {
   readonly intent: RepairIntent;
@@ -49,78 +50,53 @@ export interface RepairIntentDecision {
   readonly quantity?: number;
 }
 
-function clampUtterance(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  // 上限取执行器的权威值，不在这里另立一个数。
-  // 曾经这里是 80（执行器是 60）：模型说得稍长一点，解析层放过去了，
-  // 执行器再截一刀，玩家看到的话被砍在半句上。同一个约束只能有一个来源。
-  return trimmed.length > MAX_UTTERANCE ? trimmed.slice(0, MAX_UTTERANCE) : trimmed;
-}
-
 function isIntent(value: unknown): value is RepairIntent {
   return typeof value === 'string' && (REPAIR_INTENTS as readonly string[]).includes(value);
-}
-
-function isKnownItem(value: unknown): value is ItemId {
-  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(ITEMS, value);
 }
 
 /**
  * 从模型原始正文里解析维修意图。任何形状不符都返回 null（→ 走降级），
  * 不做猜测、不做关键词兜底。
  *
+ * 形状与字段域判定全部交给 `validateContractShape`（唯一真源），本函数只负责
+ * 维修场景特有的两件事：意图白名单收窄到 `REPAIR_INTENTS`，以及把通用形状
+ * 归一成 `RepairIntentDecision`。这样同一份模型输出在两条路径上的合法性判定
+ * 不会漂移——一致性测试 `contractConsistency.test.ts` 锁住了这一点。
+ *
  * 接受三种形态，按宽松到严格排列：
  *   1. 纯 JSON：{"intent":"repair_gate","utterance":"..."}
  *   2. 包在 ```json 代码块里
  *   3. 前后有解释性文字，中间一段 JSON（模型很爱这么干）
+ *
+ * **不接受数组**：`[{"intent":"observe"}]` 返回 null。模型一次给出多条意图是
+ * 违约事实，静默从容器里捞第一个对象会掩盖它——全局契约同样是判负，两条路
+ * 必须一致。`extractContractJson` 已含这条判断。
  */
 export function parseRepairIntent(raw: string): RepairIntentDecision | null {
   if (typeof raw !== 'string' || !raw.trim()) return null;
 
-  const candidates: string[] = [];
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced?.[1]) candidates.push(fenced[1].trim());
-  candidates.push(raw.trim());
-  // 最后再试一次「取第一个 { 到最后一个 }」——放宽到这一步就到此为止，
-  // 不再往下钻（再宽就等于在猜了）。
-  const first = raw.indexOf('{');
-  const last = raw.lastIndexOf('}');
-  if (first >= 0 && last > first) candidates.push(raw.slice(first, last + 1));
+  const shape = validateContractShape(extractContractJson(raw));
+  if (!shape) return null;
+  // 场景白名单：维修回合只认这四个意图。模型在此处冒出 propose_trade 之类
+  // 的合法意图，也不算维修决策——它不是契约违约，只是跑题。
+  if (!isIntent(shape.intent)) return null;
 
-  for (const candidate of candidates) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(candidate);
-    } catch {
-      continue;
-    }
-    if (!parsed || typeof parsed !== 'object') continue;
-    const obj = parsed as Record<string, unknown>;
-    if (!isIntent(obj.intent)) continue;
-
-    const decision: { -readonly [K in keyof RepairIntentDecision]: RepairIntentDecision[K] } = {
-      intent: obj.intent,
-    };
-    const utterance = clampUtterance(obj.utterance);
-    if (utterance) decision.utterance = utterance;
-    if (obj.intent === 'request_help') {
-      if (!isKnownItem(obj.itemId)) continue; // 缺什么说不清，就不算有效请求
-      // 数量必须显式给出且合法。
-      //
-      // 这里原来「缺省当 1」——但那等于替模型编了一个它没说的数字。玩家按
-      // 1 个去凑，模型下次又改口要 2 个，责任在谁？宁可整条作废（→ 降级到
-      // 规则脑），也不替模型补它没表达的量。A1 的契约层对 request_help 也是
-      // 这个口径，两处必须一致，否则同一条模型输出在两条路径上结局不同。
-      const q = obj.quantity;
-      if (typeof q !== 'number' || !Number.isInteger(q) || q < 1 || q > MAX_REQUEST_QUANTITY) continue;
-      decision.itemId = obj.itemId;
-      decision.quantity = q;
-    }
-    return decision;
+  const decision: { -readonly [K in keyof RepairIntentDecision]: RepairIntentDecision[K] } = {
+    intent: shape.intent,
+  };
+  if (shape.utterance) decision.utterance = shape.utterance;
+  if (shape.intent === 'request_help') {
+    // 缺什么说不清就不算有效请求；数量必须显式给出。
+    //
+    // 这里原来「缺省当 1」——但那等于替模型编了一个它没说的数字。玩家按
+    // 1 个去凑，模型下次又改口要 2 个，责任在谁？宁可整条作废（→ 降级到
+    // 规则脑），也不替模型补它没表达的量。共享校验层已按 maxStack 与上界
+    // 挡掉非法数量，这里只需确认字段存在。
+    if (!shape.itemRequest) return null;
+    decision.itemId = shape.itemRequest.itemId;
+    decision.quantity = shape.itemRequest.quantity;
   }
-  return null;
+  return decision;
 }
 
 function fmtMaterials(materials: readonly InventoryStack[]): string {

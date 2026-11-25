@@ -43,7 +43,7 @@ export type ContractIntent = (typeof CONTRACT_INTENTS)[number];
  */
 export const MAX_CONTRACT_QUANTITY = 9;
 
-/** utterance 上限与规则执行器的 MAX_UTTERANCE 对齐，超长截断而不是丢弃。 */
+/** utterance 上限。与 rulesExecutor.MAX_UTTERANCE 同值；一致性测试锁死两者相等。 */
 const MAX_UTTERANCE = 60;
 
 /** 物品数量描述。契约里所有带物品的意图都复用这一形状。 */
@@ -145,6 +145,85 @@ function readItemRequest(value: unknown): ContractItemRequest | null {
 }
 
 /**
+ * 契约的公共形状（所有意图共有）。`validateContractShape` 的产物类型。
+ *
+ * 这里只描述「任何意图都必须成立」的部分——是不是对象、intent 在不在白名单、
+ * utterance/confidence 是否在域内。至于「这个 intent 还需要哪些字段」，由各
+ * 解析器（parseContract / parseRepairIntent）自己叠加，因为维修场景只认四个
+ * 意图，全局契约认七个，两者的合法性判定本来就该分开。
+ */
+export interface ContractShape {
+  readonly intent: ContractIntent;
+  readonly utterance?: string;
+  readonly confidence: number;
+  /** 扁平物品请求（request_help / accept_gift 用）。非法则为 null。 */
+  readonly itemRequest: ContractItemRequest | null;
+  /** propose_trade 的两侧；任一非法则为 null。 */
+  readonly tradeWants: ContractItemRequest | null;
+  readonly tradeOffers: ContractItemRequest | null;
+  /** refuse 的理由、repair_gate 的目标门；仅原样搬运并截断。 */
+  readonly reason?: string;
+  readonly target?: string;
+}
+
+/**
+ * 共享形状校验：唯一真源。
+ *
+ * 为什么必须只有一个真源：`repairIntent.ts` 与 `actionContract.ts` 是两个解析器，
+ * 同一份模型输出分别经过它们。只要「什么算合法」有两套实现，就会出现一份输出
+ * 在全局路径降级、在维修路径放行的分歧——现象是「同一个模型怎么有时候听懂了」，
+ * 几乎无法排查。所以域判定（形状、白名单、数量上界、maxStack）全部集中在这里，
+ * 两个解析器都调它；分歧只剩「本场景收不收这个意图」，那是设计意图。
+ *
+ * 只做形状与字段域判定，**不做意图分类路由**，也不做 proposal 映射——那些属于
+ * 各解析器的场景职责。
+ */
+export function validateContractShape(obj: unknown): ContractShape | null {
+  if (!isRecord(obj)) return null;
+
+  const intent = obj.intent;
+  if (!isContractIntent(intent)) return null;
+
+  // confidence 是契约的一部分：显式给出时必须落在 0..1，越界即违约。
+  // 缺省 0.5 —— 模型不表态不代表它反对，给中性值。
+  if (obj.confidence !== undefined) {
+    if (typeof obj.confidence !== 'number' || !Number.isFinite(obj.confidence) || obj.confidence < 0 || obj.confidence > 1) {
+      return null;
+    }
+  }
+  const confidence = obj.confidence === undefined ? 0.5 : obj.confidence;
+
+  const utterance = clampUtterance(obj.utterance);
+
+  // 物品字段一律按「给了就必须合法」处理：非法视为整条违约，而不是当成没给。
+  // 否则模型写 quantity:0 会被当成「未指定」，绕过上界校验。
+  const hasItemField = obj.itemId !== undefined || obj.quantity !== undefined;
+  const itemRequest = hasItemField ? readItemRequest(obj) : null;
+  if (hasItemField && itemRequest === null) return null;
+
+  const hasTrade = obj.wants !== undefined || obj.offers !== undefined;
+  const tradeWants = obj.wants !== undefined ? readItemRequest(obj.wants) : null;
+  const tradeOffers = obj.offers !== undefined ? readItemRequest(obj.offers) : null;
+  if (hasTrade && (tradeWants === null || tradeOffers === null)) return null;
+
+  const reason =
+    typeof obj.reason === 'string' && obj.reason.trim().length > 0 ? obj.reason.trim().slice(0, MAX_UTTERANCE) : undefined;
+  const target =
+    typeof obj.target === 'string' && obj.target.trim().length > 0 ? obj.target.trim().slice(0, MAX_UTTERANCE) : undefined;
+
+  return {
+    intent,
+    confidence,
+    itemRequest,
+    tradeWants,
+    tradeOffers,
+    ...(utterance ? { utterance } : {}),
+    ...(reason ? { reason } : {}),
+    ...(target ? { target } : {}),
+  };
+}
+
+/**
  * 模型正文 → 契约提案。形状不符一律 null。
  *
  * 这里刻意**没有**任何关键词分支：`intent` 是唯一的意图来源。所以「我不能
@@ -153,51 +232,31 @@ function readItemRequest(value: unknown): ContractItemRequest | null {
  */
 export function parseContract(raw: string): ContractProposal | null {
   const data = extractContractJson(raw);
-  if (!isRecord(data)) return null;
+  const shape = validateContractShape(data);
+  if (!shape) return null;
 
-  const intent = data.intent;
-  if (!isContractIntent(intent)) return null;
-
-  const confidence =
-    data.confidence === undefined
-      ? 0.5
-      : typeof data.confidence === 'number' && Number.isFinite(data.confidence) && data.confidence >= 0 && data.confidence <= 1
-        ? data.confidence
-        : null;
-  if (confidence === null) return null;
-
-  const utterance = clampUtterance(data.utterance);
-  const common = { confidence, ...(utterance ? { utterance } : {}) };
+  const { intent, confidence } = shape;
+  const common = { confidence, ...(shape.utterance ? { utterance: shape.utterance } : {}) };
 
   switch (intent) {
     case 'observe':
       return { intent, ...common };
     case 'wait':
       return { intent, ...common };
-    case 'refuse': {
+    case 'refuse':
       // reason 只用于展示；不参与任何裁决。缺失也合法——「不」本身就是完整表达。
-      const reason = typeof data.reason === 'string' && data.reason.trim().length > 0 ? data.reason.trim().slice(0, MAX_UTTERANCE) : undefined;
-      return { intent, ...common, ...(reason ? { reason } : {}) };
-    }
-    case 'request_help': {
-      const request = readItemRequest(data);
-      return request ? { intent, ...common, ...request } : null;
-    }
-    case 'accept_gift': {
-      const request = readItemRequest(data);
-      return request ? { intent, ...common, ...request } : null;
-    }
+      return { intent, ...common, ...(shape.reason ? { reason: shape.reason } : {}) };
+    case 'request_help':
+      return shape.itemRequest ? { intent, ...common, ...shape.itemRequest } : null;
+    case 'accept_gift':
+      return shape.itemRequest ? { intent, ...common, ...shape.itemRequest } : null;
     case 'propose_trade': {
-      const wants = readItemRequest(data.wants);
-      const offers = readItemRequest(data.offers);
       // 双向缺一不可：只有「我要什么」没有「我给什么」等于索要，不是交易。
-      if (!wants || !offers) return null;
-      return { intent, ...common, wants, offers };
+      if (!shape.tradeWants || !shape.tradeOffers) return null;
+      return { intent, ...common, wants: shape.tradeWants, offers: shape.tradeOffers };
     }
-    case 'repair_gate': {
-      const target = typeof data.target === 'string' && data.target.trim().length > 0 ? data.target.trim().slice(0, MAX_UTTERANCE) : undefined;
-      return { intent, ...common, ...(target ? { target } : {}) };
-    }
+    case 'repair_gate':
+      return { intent, ...common, ...(shape.target ? { target: shape.target } : {}) };
   }
 }
 

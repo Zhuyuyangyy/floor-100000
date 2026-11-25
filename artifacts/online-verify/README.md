@@ -345,10 +345,21 @@ const OUT = process.env.SHOT_DIR || resolve(REPO_ROOT, 'output/online-verify');
 > | `FORCE_WRITE=1 SHOT_DIR=/tmp/空目录` | 放行（写出三份）|
 >
 > 第二行是最危险的：`TOKEN.length > 0` 会把所有 `FORCE_WRITE &&` 判据短路掉，
-> 连开关都不用开；而写出来的产物自述是 `hasToken: true / forceWrite: false`，
-> **与真证据逐字段一致，meta 里看不出任何异常**。
-> 「有 token 就可信」是这里最自然的错误直觉，实测结果恰好相反——
-> 带 token 走错的后果比不带 token 更隐蔽，因为后者至少会在 meta 里留 `forceWrite: true`。
+> 连开关都不用开；而写出来的产物自述是 `hasToken: true / forceWrite: false`。
+> **`hasToken: true` 与不带 token 的强制留档（`forceWrite: true`）正好相反**，
+> 它读起来就是「这是一次带凭证的正式运行」。
+>
+> 但这**不等于「和真证据逐字段一致」**——我实测过无效 token 产出的 meta，
+> 它有 8 个字段（多出 `modelSamplesObserved: 0` / `modelRepliesOutsideSampling` /
+> `forceWrite: false`），而本目录那份真证据的 meta 只有 6 个字段、**是事后补写的**，
+> 连 `forceWrite` 都没有。两份文件的字段集合本来就不同版本。
+> 所以说「看不出异常」指的是**只看 `hasToken` 这一个字段**看不出，不是说整份 meta 无法分辨。
+> 能分辨的还有内容本身：`modelSamplesObserved: 0`，以及清单里一条 PASS 都没有
+> （我实测两轮无有效 token 都是 `PASS 0 / FAIL 26 / SKIP 14`）。
+> 问题在于**得先读内容才知道文件名骗了你**，而 `hasToken: true` 已经先把人劝住了。
+>
+> 所以真正的教训不是「meta 不可信」，而是：**`hasToken` 只证明「有人填了个字符串」，
+> 它从来不是「这份文件是证据」的凭据。判断证据要看内容有没有观测。**
 >
 > 三条都是我实测的（`4290c43` 之后，2026-11-26 04:1x）：
 > 两次拒绝后 `artifacts/online-verify/api-verify.json` 的 md5 都是 `cb827d5a…` 未变，

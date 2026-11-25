@@ -275,8 +275,14 @@ ONLINE_BASE=http://127.0.0.1:7860 node tools/verify-online-api.mjs
 > ```
 >
 > `TOKEN.length > 0` 会把所有 `FORCE_WRITE &&` 判据短路掉，所以这条**连开关都不用开**；
-> 而写出来的产物自述是 `hasToken: true / forceWrite: false`，**和真证据逐字段一样**。
+> 而写出来的产物自述是 `hasToken: true / forceWrite: false`——这是「带凭证的正式运行」
+> 那个模样，与不带 token 强制留档的 `forceWrite: true` 正好相反。
 > **「有 token 就可信」在这里恰好反了**——带 token 走错的后果比不带 token 更隐蔽。
+>
+> 说清楚限度：`hasToken: true` 本身**不是**证据标记，它只证明「有人填了个字符串」。
+> 但也不是「整份 meta 无法分辨」——那几轮无效 token 的产物里
+> `modelSamplesObserved: 0`、清单是 `PASS 0 / FAIL 26 / SKIP 14`，一读内容就露馅。
+> 危险在于**得先读内容才知道文件名骗了你**，而 `hasToken: true` 已经先把人劝住了。
 >
 > 前四道是黑名单（枚举「要保护哪个目录」），第五道是白名单（只问「这里已有证据吗」）。
 > 黑名单永远漏——`artifacts/online-verify` 就是这么漏过去的，它是唯一入库的权威源。

@@ -50,6 +50,28 @@ describe('对话框布局：面板按台词推导，选项区永远在消息井�
     expect(src).not.toMatch(/(?:const|let)\s+\w*(?:RAW_MAX|MAX_LEN|UTTERANCE_MAX)\w*\s*=\s*\d+/);
   });
 
+  it('前提条件：对话框正文必须开着 useAdvancedWrap，否则上面的字/行除法全部失效', () => {
+    // 这个函数算的是「若会折行，一行放几个汉字」。Phaser 默认的 basicWordWrap
+    // 是 `text.split(' ')` 逐词累加，中文整句算一个词，而「词比整行宽」那条
+    // 分支（Text.js 里 `if (j > 0)`）在首词时不触发 → 一个字都不折。
+    //
+    // 撤掉这个开关，`floor(416/24)=17` 就变成「假设折 17 字、实际不折」：
+    // 面板按 4 行算高，正文却单行 900+px 横向冲出面板。这条断言把它钉成
+    // 前提条件，而不是可配参数——「不折行」不是一种合法运行状态，是 bug。
+    const src = readFileSync(new URL('./GameScene.ts', import.meta.url), 'utf8');
+    const start = src.indexOf('private buildDialoguePanel(');
+    expect(start, '找不到 buildDialoguePanel，方法被改名或删除').toBeGreaterThan(-1);
+    // 截到下一个方法定义为止：区域要够大能覆盖整段 wordWrap 配置，又不能
+    // 大到把别处的 useAdvancedWrap 也算进来（那样撤掉正文的那个也测不出来）。
+    const nextMethod = src.indexOf('\n  private ', start + 10);
+    const body = nextMethod > start ? src.slice(start, nextMethod) : src.slice(start);
+    // 精确到「正文这一处」：同一段里 dialogueMessage 的 text() 调用带上了它。
+    const msgBlock = body.match(/this\.dialogueMessage\s*=\s*this\.add[\s\S]*?setDepth\(/);
+    expect(msgBlock, '找不到 dialogueMessage 的创建块').not.toBeNull();
+    expect(msgBlock![0]).toMatch(/useAdvancedWrap:\s*true/);
+    expect(msgBlock![0]).toMatch(/wordWrap:\s*\{[^}]*width:\s*wrapW/);
+  });
+
   it('结构不重叠：选项区顶部严格大于消息井底部（桌面 / 竖屏 / 窄屏都成立）', () => {
     for (const panelWidth of [DESKTOP_PANEL_W, PORTRAIT_PANEL_W, NARROW_PANEL_W]) {
       const layout = layoutFor(panelWidth);

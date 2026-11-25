@@ -7,7 +7,7 @@
 //
 // 浏览器层面的交互（角色移动、对话 UI、存档）已在 e2e-live/ 用同一份构建
 // 产物验证过；这里补的是「线上那一份」独有的东西。
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -36,10 +36,10 @@ mkdirSync(OUT, { recursive: true });
 // 落盘许可。两类产物、两道门，不是同一个东西，不能合并成一个 if。
 //
 // ── 第一类：判据清单（api-verify*.json）──
-// 记的是「跑了哪些条、哪条没过、哪条根本没跑」。无 token 时它依然有信息量：
-// 40 条里 7 条通过、6 条 SKIP，正是在验证 SKIP 分类本身。
+// 记的是「跑了哪些条、哪条没过、哪条根本没跑」。
 //   有 MS_TOKEN                          → 允许写（真证据）
 //   FORCE_WRITE=1 **且** SHOT_DIR 非空   → 允许写（只用于检查脚本自身）
+// 再加上第 1140 行那道「0 样本不许覆盖已有产物」——三层，每层回答一个不同的问题。
 //
 // ── 第二类：采样内容（real-model-runs / memory-evidence / memory-weight-evidence）──
 // 记的是「模型具体说了什么」。无 token 时一条样本都没有，写出来就是一份
@@ -48,7 +48,7 @@ mkdirSync(OUT, { recursive: true });
 //
 // FORCE_WRITE 为什么必须同时要求 SHOT_DIR：不加这个限制时，
 // `FORCE_WRITE=1 node tools/verify-online-api.mjs` 会安静地把
-// output/online-verify/ 里的真产物覆盖成「40 条里 7 条通过、其余全 401」——
+// output/online-verify/ 里的真产物覆盖成「无 token 空跑的那份 0 PASS」——
 // 正是 600c450 花力气堵掉的那起事故，又开了一条缝。实测复现过：api-verify.json
 // 的 md5 从 cb827d5a957974ea382672f07469c804 变成 703cd608f6d2c8db2c0ea20ac38cb99b。
 // 原来那句提示写的是「加 FORCE_WRITE=1 并配 SHOT_DIR」——但「并配」只是一句
@@ -75,6 +75,24 @@ const FORCED_ONTO_DEFAULT = FORCE_WRITE && Boolean(process.env.SHOT_DIR)
 // 一次 `git add -A` 就进仓库了。不是数据损坏，是把垃圾提交上去。
 const FORCED_INTO_ROOT = FORCE_WRITE && Boolean(process.env.SHOT_DIR)
   && resolve(process.env.SHOT_DIR) === REPO_ROOT;
+// ── 「覆盖已有证据」需要第二道门：许可 + 观测 ──────────────────────────────
+//
+// 上面那些 `FORCED_*` 只回答「许可不允许写」，它们全部在跑之前就定了。
+// 但「能不能覆盖一份已经存在的证据」还取决于**这一轮有没有拿到东西**，
+// 而那个数要跑完才知道（modelSamplesObserved 在最后一节才赋值）。
+//
+// 所以这一层必须在落盘前判，不能在文件头判。实测证据：
+//   MS_TOKEN=sk-invalid-typo SHOT_DIR=<已有 api-verify.json 的目录>
+//   → TOKEN.length > 0 让上面所有判据短路放行
+//   → 目录里的 cb827d5a… 被覆盖成 414d46c0…（0 PASS 的假产物）
+// 加 token 本来是「更可信」的动作，结果比 FORCE_WRITE 更危险——因为
+// FORCE_WRITE 至少会在 meta 里写 forceWrite: true，而这条路径写的是
+// hasToken: true / forceWrite: false，没有任何字段提示这份文件不是证据。
+//
+// 判据：目标目录里已有 api-verify.json 时，只有真的采到样本才允许覆盖。
+// 空目录不在此列——那里没有东西可毁，0 样本的产物自带 modelSamplesObserved: 0。
+const OUT_EVIDENCE_PATH = resolve(OUT, 'api-verify.json');
+const OUT_HAS_EVIDENCE = existsSync(OUT_EVIDENCE_PATH);
 // 注意 `&& !FORCED_ONTO_DEFAULT` 不是多余的：没有它，下面那个拒绝分支永远
 // 进不去（CAN_WRITE_CHECKLIST 已经是 true，第一层 if 就吃不中）。判据要
 // 改在「许可」这里，不能只在事后拦——否则又是一句劝告。
@@ -1053,7 +1071,7 @@ const meta = {
   // 「上游 503」四种情况的字段——它们的原因不同，但结果都是「没有观测」。
   modelSamplesObserved,
   // 无 token 却仍然落了盘，说明是 FORCE_WRITE 强制留档的，不是证据。
-  // 这个字段让「这份文件是真是假」不再需要靠「40 条里 7 条通过」反推。
+  // 这个字段让「这份文件是真是假」不再需要靠「通过几条」反推。
   forceWrite: !TOKEN.length && FORCE_WRITE,
   startedAt: new Date().toISOString(),
   node: process.version,
@@ -1076,11 +1094,16 @@ console.log(
 //   那句话是假的——判定只看 token，SHOT_DIR 只改落盘位置。照做的人拿到空目录。
 //   教训：**提示语里承诺的每一个开关，都必须真的接在判据上。**
 //
-//   第二次（就是这次）：加了 FORCE_WRITE=1 之后，`FORCE_WRITE=1 node tools/...`
-//   不配 SHOT_DIR 会直接写进默认 OUT，把真产物覆盖成 40 条里 7 条通过、其余
-//   全 401 的那份。实测 md5 从 cb827d5a… 变成 703cd608…。600c450 堵的洞
+//   第二次：加了 FORCE_WRITE=1 之后，`FORCE_WRITE=1 node tools/...`
+//   不配 SHOT_DIR 会直接写进默认 OUT，把真产物覆盖成无 token 空跑的那份 0 PASS
+//   结果。实测 md5 从 cb827d5a… 变成 703cd608…。600c450 堵的洞
 //   又开了，而且这次更隐蔽：600c450 挡的是「忘记带 token 的人」，这一版挡不住
 //   「看到提示照做的人」。教训：**加了逃生门就要想清楚它通向哪。**
+//
+//   第三次：SHOT_DIR 指向 artifacts/online-verify（权威源），或带无效 token
+//   跑进任何已有产物的目录，都能把真数据覆盖成 0 PASS 的假产物。前两次的
+//   判据都在问「许可不允许写」，第三次问的是「这一轮有没有东西可写」——
+//   那是跑完才知道的事，只能在落盘前判。见第 1140 行。
 //
 // 所以现在的形状是：强制留档必须同时满足两个条件——显式开开关，且显式指定
 // 落到别处。只写 FORCE_WRITE=1 不给目录，视为误用，仍然不写。
@@ -1109,6 +1132,25 @@ if (!CAN_WRITE_CHECKLIST && FORCED_WITHOUT_DIR) {
 } else if (!CAN_WRITE_CHECKLIST) {
   console.log('未带 MS_TOKEN：私有创空间接口必然 401，本次结果不作为证据，不写入文件。');
   console.log('如需强制留档（例如只想看判据条数），两个一起给：FORCE_WRITE=1 SHOT_DIR=/tmp/xxx');
+  process.exitCode = 1;
+} else if (OUT_HAS_EVIDENCE && modelSamplesObserved === 0) {
+  // 最后一道门，也是前三次事故共同的形状：**允许写 ≠ 该写**。
+  //
+  // 走到这里说明「许可」全过了。但这一轮 0 次模型回复——token 可能是拼错的、
+  // 过期的、复制时带了空格的，也可能创空间还是 private、上游 503。四种原因
+  // 都让结果变成「一屏 401」，而四种原因都不该拿它去覆盖一份有数据的旧文件。
+  //
+  // 为什么不复用上面那些判据：上面那些在跑之前就定了（看环境变量），
+  // 而「这一轮到底有没有拿到数据」只有跑完才知道。所以它只能在落盘前判。
+  //
+  // 为什么这条比 FORCE_WRITE 那条更要紧：FORCE_WRITE 事故里 meta 写着
+  // forceWrite: true，读者能看见「这不是证据」。这一条路径 meta 写的是
+  // hasToken: true / forceWrite: false，与真证据完全一致——实测无效 token
+  // 覆盖后，旧文件从 cb827d5a… 变成 414d46c0…，没有任何字段能反推出来。
+  console.log(`拒绝覆盖：${OUT_EVIDENCE_PATH} 已经存在，而这一轮 0 次模型回复。`);
+  console.log('  0 次回复说明拿不到数据（token 拼错/过期/带空格、private、上游 503），');
+  console.log('  不是被测产品不合格。拿它覆盖旧证据会把真数据换成假数据，且 meta 看不出来。');
+  console.log('  要留档请指一个空目录（或干脆不落盘，控制台的 PASS/SKIP/FAIL 三行就是判据条数）。');
   process.exitCode = 1;
 } else {
   writeFileSync(`${OUT}/api-verify.json`, JSON.stringify(results, null, 2), 'utf-8');

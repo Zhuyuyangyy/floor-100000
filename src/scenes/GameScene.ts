@@ -159,7 +159,8 @@ import { loadNpcState, recordMemory, saveNpcState } from '../systems/NpcMemory';
 import { decideNpcAction, isDialogueFresh, type DialogueSession, type NpcRuntimeConfig } from '../systems/NpcRuntime';
 import { runAlinRepairScenario, type AlinRepairScenarioResult } from '../scenarios/alinRepairDemo';
 import { runAlinGiftScenario, type AlinGiftScenarioResult } from '../scenarios/alinGiftDemo';
-import { serializeAlinGiftRun, serializeAlinRepairRun } from '../ai/competitionRunExport';
+import { runSocialGiftScenario, type SocialScenarioResult } from '../scenarios/socialNpcDemo';
+import { serializeAlinGiftRun, serializeAlinRepairRun, serializeSocialGiftRun } from '../ai/competitionRunExport';
 import {
   createWandererDecisionConfig,
   decideWandererIntent,
@@ -412,11 +413,13 @@ export class GameScene extends Phaser.Scene {
   private lastAlinRepairResult?: AlinRepairScenarioResult;
   /** Last gift result, exposed like the repair result for browser integration diagnostics. */
   lastAlinGiftResult?: AlinGiftScenarioResult;
+  /** 最近一次赠礼结果；阿林走单 NPC 场景，小周走多 NPC 场景。 */
+  lastGiftResult?: AlinGiftScenarioResult | SocialScenarioResult;
   private judgePanel?: HTMLElement;
   private judgePanelContent?: HTMLPreElement;
   private judgeExportButton?: HTMLButtonElement;
   private judgeExpanded = false;
-  private judgeLatestResult?: AlinGiftScenarioResult | AlinRepairScenarioResult;
+  private judgeLatestResult?: AlinGiftScenarioResult | AlinRepairScenarioResult | SocialScenarioResult;
   // Offline persona brain is the default. A configured local Ollama opts into
   // model-generated lines; the original greeting remains the fallback.
   private aiRuntimes = new Map<string, NpcRuntimeConfig>();
@@ -3389,16 +3392,21 @@ export class GameScene extends Phaser.Scene {
       execution: event.execution?.status ?? 'not-executed',
     }));
     const repair = 'decisionSource' in result;
+    // 赠礼既可能来自阿林（单 NPC 场景），也可能来自小周（多 NPC 场景）。
+    // 面板必须报真实焦点，不能把两个人的记录都标成阿林。
+    const focusNpcId = 'focusNpcId' in result ? result.focusNpcId : 'alin';
+    const focusName = getNpc(focusNpcId).name;
     const actualStateDelta = result.execution?.status === 'completed' ? result.execution.actualStateDelta : null;
     const replan = result.feedback.some((event) => event.outcome === 'executed' &&
       result.feedback.some((prior) => prior.attempt < event.attempt &&
         (prior.outcome === 'validation_rejected' || prior.outcome === 'execution_failed') &&
         prior.proposal !== undefined && JSON.stringify(prior.proposal) !== JSON.stringify(event.proposal)));
+    const focusSnapshot = result.after.npcs.find((npc) => npc.npcId === focusNpcId);
     const evidence = {
       mode: repair ? result.decisionSource : 'offline-fallback',
       seed: result.before.seed,
-      npc: '阿林',
-      target: result.observation.world.npcs.find((npc) => npc.npcId === 'alin')?.goal ?? null,
+      npc: focusName,
+      target: focusSnapshot?.goal ?? null,
       status: result.status,
       attempts: result.attempts,
       observation: result.observation,
@@ -3412,8 +3420,8 @@ export class GameScene extends Phaser.Scene {
         ? '未提交：没有已完成的 execution / actual state delta'
         : { committed: true, delta: actualStateDelta, after: result.after },
       memoryAndEventFeedback: {
-        before: result.before.npcs.find((npc) => npc.npcId === 'alin')?.memory ?? [],
-        after: result.after.npcs.find((npc) => npc.npcId === 'alin')?.memory ?? [],
+        before: result.before.npcs.find((npc) => npc.npcId === focusNpcId)?.memory ?? [],
+        after: focusSnapshot?.memory ?? [],
         events: feedback,
       },
       replan,
@@ -3430,7 +3438,11 @@ export class GameScene extends Phaser.Scene {
     const result = this.judgeLatestResult;
     if (!result) return;
     // Export only the scenario's redacted, allow-listed projection, never GameState.
-    const serialized = 'decisionSource' in result ? serializeAlinRepairRun(result) : serializeAlinGiftRun(result);
+    const isRepair = 'decisionSource' in result;
+    const isSocial = 'focusNpcId' in result;
+    const serialized = isRepair
+      ? serializeAlinRepairRun(result)
+      : isSocial ? serializeSocialGiftRun(result) : serializeAlinGiftRun(result);
     const safeRun = JSON.parse(serialized) as {
       world?: { stateBefore?: unknown; stateAfter?: unknown };
       hashes?: unknown;
@@ -3451,7 +3463,8 @@ export class GameScene extends Phaser.Scene {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `alin-${'decisionSource' in result ? 'repair' : 'gift'}-seed-${result.before.seed}.json`;
+    const name = isRepair ? 'alin-repair' : isSocial ? `social-${result.focusNpcId}-gift` : 'alin-gift';
+    anchor.download = `${name}-seed-${result.before.seed}.json`;
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -3459,10 +3472,14 @@ export class GameScene extends Phaser.Scene {
   // Label + icon key per dialogue option. The icon is the item the player
   // RECEIVES (the trade's output), matching how the crafting list shows outputs;
   // 问候/询问/退出/返回 are not items and get no icon.
-  private giftableAlinStacks() {
+  //
+  // 阿林有维修门需求，所以修门材料要从赠礼列表里留出来（否则玩家会把自己
+  // 刚攒好的材料送出去、门再也修不成）。小周没有配方需求，全部可赠。
+  private giftableStacks(npcId: NpcId) {
     const game = getGame();
     const slots = game.player.inventory.slots;
     const giftable = slots.filter((stack) => stack.meta === undefined);
+    if (npcId !== 'alin') return giftable;
     if (isAlinRepairGateOpen(game)) return giftable;
 
     const required = new Map(ALIN_REPAIR_MATERIALS.map((stack) => [stack.itemId, stack.quantity]));
@@ -3480,11 +3497,15 @@ export class GameScene extends Phaser.Scene {
     const d = this.dialogue;
     if (!d) return [];
     if (d.level === 'main') {
-      const labels = d.npc === 'alin' ? ['赠礼', '维修门计划', '交易', '退出'] : ['问候', '询问', '交易', '退出'];
+      // 位置 1/2/3 被 E2E 依赖（询问=1、交易=2），所以只把位置 0 换掉：
+      // 阿林是「赠礼」，小周从「问候」改成「赠礼」，「询问/交易/退出」不动。
+      const labels = d.npc === 'alin'
+        ? ['赠礼', '维修门计划', '交易', '退出']
+        : ['赠礼', '询问', '交易', '退出'];
       return labels.map((label) => ({ label }));
     }
     if (d.level === 'gift') {
-      const stacks = this.giftableAlinStacks();
+      const stacks = this.giftableStacks(d.npc);
       if (stacks.length === 0) return [{ label: '背包没有可赠送物品' }, { label: '返回' }];
       const start = this.dialogueGiftPage * 3;
       const visible = stacks.slice(start, start + 3);
@@ -3683,7 +3704,7 @@ export class GameScene extends Phaser.Scene {
     d.messageSource = 'script';
     const npc = getNpc(d.npc);
     if (d.level === 'gift') {
-      const stacks = this.giftableAlinStacks();
+      const stacks = this.giftableStacks(d.npc);
       if (stacks.length === 0) {
         if (d.selected === 1) {
           d.level = 'main';
@@ -3699,14 +3720,14 @@ export class GameScene extends Phaser.Scene {
       if (d.selected < visibleCount) {
         const stack = stacks[start + d.selected];
         if (stack) {
-          void this.runAlinGiftPlan(npc, { sessionId: d.sessionId, revision: d.revision }, stack.itemId);
+          void this.runGiftPlan(npc, { sessionId: d.sessionId, revision: d.revision }, stack.itemId);
           return;
         }
       } else if (d.selected === visibleCount) {
         if (start + 3 < stacks.length) {
           this.dialogueGiftPage += 1;
           d.selected = 0;
-          d.message = '选择一件赠送给阿林的物品';
+          d.message = `选择一件赠送给${npc.name}的物品`;
         } else {
           d.level = 'main';
           this.dialogueGiftPage = 0;
@@ -3720,15 +3741,10 @@ export class GameScene extends Phaser.Scene {
     if (d.level === 'main') {
       switch (d.selected) {
         case 0:
-          if (npc.id === 'alin') {
-            d.level = 'gift';
-            this.dialogueGiftPage = 0;
-            d.selected = 0;
-            d.message = '选择一件赠送给阿林的物品';
-          } else {
-            d.message = npc.greetings[d.lineToggle % npc.greetings.length];
-            d.lineToggle++;
-          }
+          d.level = 'gift';
+          this.dialogueGiftPage = 0;
+          d.selected = 0;
+          d.message = `选择一件赠送给${npc.name}的物品`;
           break;
         case 1:
           if (npc.id === 'alin') {
@@ -3769,16 +3785,21 @@ export class GameScene extends Phaser.Scene {
     this.refreshDialogue();
   }
 
-  private async runAlinGiftPlan(npc: NpcDef, captured: DialogueSession, itemId: ItemId): Promise<void> {
+  private async runGiftPlan(npc: NpcDef, captured: DialogueSession, itemId: ItemId): Promise<void> {
     const current = this.dialogue;
-    if (!current || current.npc !== npc.id || npc.id !== 'alin' || this.dialogueGiftPending) return;
+    if (!current || current.npc !== npc.id || this.dialogueGiftPending) return;
     this.dialogueGiftPending = true;
     current.messageSource = 'competition-offline';
     current.message = '赠礼提案 → 规则校验 → 状态提交…';
     this.refreshDialogue();
     try {
-      const result = await runAlinGiftScenario(getGame(), itemId, 1);
-      this.lastAlinGiftResult = result;
+      // 阿林走既有的单 NPC 场景（保留其修门材料与门禁语义）；小周走多 NPC
+      // 场景，两者共用同一条「提案 → 校验 → 执行 → 落盘」链路。
+      const result = npc.id === 'alin'
+        ? await runAlinGiftScenario(getGame(), itemId, 1)
+        : await runSocialGiftScenario(getGame(), npc.id, itemId, 1);
+      if (npc.id === 'alin') this.lastAlinGiftResult = result;
+      this.lastGiftResult = result;
       this.judgeLatestResult = result;
       this.refreshJudgeModePanel();
       // Persist the committed state even if the player closed the dialogue while
@@ -3786,7 +3807,7 @@ export class GameScene extends Phaser.Scene {
       saveToStorage(getGame());
       this.refreshInventory();
       if (!isDialogueFresh(this.currentDialogueSession(), captured)) return;
-      const trust = result.after.npcs[0]?.trust ?? 35;
+      const trust = result.after.npcs.find((entry) => entry.npcId === npc.id)?.trust ?? 35;
       current.message = result.status === 'executed'
         ? `赠送${getItem(itemId).displayName}×1成功｜信任${trust}`
         : result.reason;

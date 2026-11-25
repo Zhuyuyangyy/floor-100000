@@ -3303,7 +3303,35 @@ export class GameScene extends Phaser.Scene {
   private buildDialoguePanel(): void {
     const { width, height } = this.viewSize();
     const panelW = this.panelWidthFor(460);
-    const panelH = 260;
+    // ── the panel is sized by the speech, not by a round number ───────────────
+    //
+    // Turning useAdvancedWrap on (bac96ae) fixed the horizontal overflow but
+    // created a vertical one: `dialogueMessage` sits at `top + 45` with a
+    // 0.5/0.5 origin, and a 4-line reply is 100px tall, so its bottom edge lands
+    // at top+95 while the first option row starts at top+74. Measured in
+    // e2e-audit/dialogue-fit-probe.spec.ts: 21px of text sitting on the first
+    // option, and 33px hanging out of the speech well.
+    //
+    // So the height is derived from the longest line the product can produce:
+    //   60 Han   = ai/rulesExecutor MAX_UTTERANCE (the hard truncation ceiling)
+    //   24px Han = measured glyph advance (e2e-audit/wrap-inventory-probe)
+    //   25px     = measured rendered line height at 24px
+    // Desktop wrap is 416px → 17 Han/line → 4 lines. Portrait wrap is 265px →
+    // 11 Han/line → 6 lines. Both are computed, so widening the panel or
+    // raising MAX_UTTERANCE keeps the layout honest instead of silently
+    // re-breaking it.
+    const LINE_H = 25;
+    const MAX_LINES = 6;
+    const RAW_MAX = 60; // mirrors MAX_UTTERANCE; see ai/rulesExecutor
+    const wrapW = panelW - 44;
+    const hanPerLine = Math.max(1, Math.floor(wrapW / TYPE.body));
+    const messageLines = Math.min(MAX_LINES, Math.ceil(RAW_MAX / hanPerLine));
+    const WELL_TOP = 28;
+    const WELL_H = messageLines * LINE_H + 8;
+    const OPTIONS_TOP = WELL_TOP + WELL_H + 12;
+    const OPTION_PITCH = 30;
+    const FOOTER_H = 40;
+    const panelH = OPTIONS_TOP + 4 * OPTION_PITCH + FOOTER_H;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -3335,7 +3363,13 @@ export class GameScene extends Phaser.Scene {
       .text(left + panelW - 14, top + 10, '基础对白', { fontFamily: FONT_FAMILY, fontSize: '14px', color: hex(PALETTE.clothHigh), align: 'right' })
       .setOrigin(1, 0.5)
       .setDepth(depth + 6);
-    this.dialogueObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 34, depth + 5));
+    this.dialogueObjects.push(...buildPanelHeader(this, left, top, panelW, '', UI.good, depth + 5));
+
+    // The speech well is as tall as the longest reply can get, and the message
+    // is anchored to its TOP — not to a fixed offset with a 0.5 origin. With a
+    // centre anchor a 1-line and a 4-line reply grow in both directions, which
+    // is what put long lines through the option list.
+    this.dialogueObjects.push(...buildPanelWell(this, left + 12, top + WELL_TOP, panelW - 24, WELL_H, depth + 5));
     // dialogueTitle MUST be in the list: closeDialogue() hides everything in it,
     // and a name left out of the list stays on screen after the panel closes.
     this.dialogueObjects.push(this.dialogueTitle, this.dialogueSource);
@@ -3349,14 +3383,14 @@ export class GameScene extends Phaser.Scene {
       //
       // 这一处尤其致命：正文是模型现场生成的句子，长度不可控。演示时 NPC 说
       // 第一句长台词就会冲出面板——前面所有 AI 工作会被这一眼毁掉。
-      .text(cx, top + 45, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: panelW - 44, useAdvancedWrap: true } })
+      .text(cx, top + WELL_TOP + WELL_H / 2, '……', { fontFamily: FONT_FAMILY, fontSize: `${TYPE.body}px`, color: hex(TEXT.primary), align: 'center', wordWrap: { width: wrapW, useAdvancedWrap: true } })
       .setOrigin(0.5)
       .setDepth(depth + 7);
     this.dialogueObjects.push(this.dialogueMessage);
 
     this.dialogueBands = [];
     for (let i = 0; i < 4; i++) {
-      const rowY = top + 74 + i * 30;
+      const rowY = top + OPTIONS_TOP + i * OPTION_PITCH;
       // A selection band per row, the same language as every other list: a wash
       // plus a 2px accent rule. Toggled in refreshDialogue.
       const band = this.add.rectangle(left + 12, rowY, panelW - 24, 26, UI.accent).setOrigin(0, 0).setAlpha(0).setDepth(depth + 5);
@@ -4046,16 +4080,24 @@ export class GameScene extends Phaser.Scene {
   /**
    * 每帧被问一次「危机要不要推进」。
    *
-   * 只在 `${stage}:${day}` 变化时真正调用 `syncBlackoutCrisis`——它内部虽然
-   * 幂等，但每帧跑会反复铺库存判定、反复 flash 同一句台词。缓存键里带上
-   * `day` 是因为「断电持续到第几天」会改变判定，跨天必须重新问一次。
+   * 只在「阶段 / 天数 / 维修门是否已开」三者任一变化时真正调用
+   * `syncBlackoutCrisis`——它内部虽然幂等，但每帧跑会反复铺库存判定、
+   * 反复 flash 同一句台词。缓存键里带上 `day` 是因为「断电持续到第几天」
+   * 会改变判定，跨天必须重新问一次。
+   *
+   * 键里还必须有门开状态，这一项不是优化而是正确性：
+   * 开局第 1 天第一次 tick 时门是关的，键被写成 `initial:1:false`，同时
+   * flash 「维修门还关着」；玩家随后真把门修开，`stage` 仍是 `initial`、
+   * `day` 仍是 1，如果键里不含门开状态，键不变 → 直接 return，当天再也
+   * 不会重新判定，危机要拖到跨天才启动。玩家看到的是「我修好了门，却什么
+   * 都没发生」——首章的第一个正反馈直接断掉。
    *
    * 刻意不占用 `state.worldEvents.activeEvent` 那个单事件槽位：危机是贯穿
    * 首章的**独立剧情线**，不是今夜随机事件。抢槽位会让夜晚事件与危机互相
    * 把对方顶掉（`updateDwellPressure` 里有 `if (activeEvent) return`）。
    */
   private syncBlackoutOnTick(state: GameState): void {
-    const key = `${blackoutStageOf(state)}:${state.day}`;
+    const key = `${blackoutStageOf(state)}:${state.day}:${isAlinRepairGateOpen(state)}`;
     if (key === this.blackoutSyncedKey) return;
     this.blackoutSyncedKey = key;
     const transition = syncBlackoutCrisis(state);

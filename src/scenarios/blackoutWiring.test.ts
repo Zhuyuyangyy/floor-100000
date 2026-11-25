@@ -236,6 +236,25 @@ describe('装配层：GameScene 真的接上了停电危机（源码结构断言
     expect(SCENE_SRC).toMatch(/blackoutStageOf\([\s\S]{0,200}state\.day/);
   });
 
+  it('缓存键必须含「维修门是否已开」：否则修好门当天不会启动危机', () => {
+    // 这是一个真实断点，不是理论风险：
+    //   第 1 天第一次 tick，门还关着 → 键写成 `initial:1`，flash「门还关着」；
+    //   玩家随后修开门，stage 仍是 initial、day 仍是 1 → 键不变 → return；
+    //   当天再也不会重新判定，危机只能等跨天才启动。
+    // 玩家感受是「我把门修好了，什么都没发生」——首章第一个正反馈断掉。
+    //
+    // 断言方式：把 syncBlackoutOnTick 的函数体截出来，要求那一条 key 的
+    // 模板字符串里同时出现 stage、day 和门开查询。只在函数体里随便找个
+    // isAlinRepairGateOpen 不算——别处也可能调用它做别的事。
+    const body = SCENE_SRC.match(/private syncBlackoutOnTick\([^)]*\)[\s\S]{0,1200}?\n  \}/);
+    expect(body, '找不到 syncBlackoutOnTick 的函数体，断言本身失效了').not.toBeNull();
+    const keyLine = body![0].split('\n').find((line) => line.includes('const key ='));
+    expect(keyLine, 'syncBlackoutOnTick 里没有 `const key =` 这一行').toBeDefined();
+    expect(keyLine).toMatch(/blackoutStageOf\(/);
+    expect(keyLine).toMatch(/state\.day/);
+    expect(keyLine).toMatch(/isAlinRepairGateOpen\(/);
+  });
+
   it('三个处理器都不是空实现：模型端口真的被构造出来传给场景函数', () => {
     // 「接线」包括把模型端口接进去。只调 runBlackoutRepair(game) 而不传
     // proposeWithModel，等于退回纯规则，AI 原生能力那栏又空一天。

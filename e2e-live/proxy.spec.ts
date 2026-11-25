@@ -15,7 +15,10 @@ type WindowProbe = Window & {
   __PHASER_GAME__?: {
     scene: { getScenes: (r?: boolean) => Array<{ scene: { key: string } }>; getScene: (k: string) => any };
   };
+  // 生产包里 getState() 是深拷贝快照：读得到，但写它不会回到游戏。
   __PHASER_SESSION__?: { getState: () => any };
+  // 写入口单独一个名字。生产包只通过它改状态，读路径保持只读。
+  __PHASER_TEST_MUTATE__?: (mutator: (state: any) => void) => void;
 };
 
 async function waitForScene(page: Page, key: string): Promise<void> {
@@ -37,8 +40,9 @@ async function visibleTexts(page: Page): Promise<string[]> {
 /** 把玩家瞬移到指定楼层与横坐标，省掉手动走位。 */
 async function teleport(page: Page, x: number): Promise<void> {
   await page.evaluate((tx) => {
-    const s = (window as WindowProbe).__PHASER_SESSION__?.getState();
-    if (s) s.player.x = tx;
+    // 生产包里 getState() 是快照，写它无效——必须走变异入口才真的落到游戏。
+    const w = window as WindowProbe;
+    w.__PHASER_TEST_MUTATE__?.((s) => { s.player.x = tx; });
   }, x);
   await page.waitForFunction(
     (tx) => {

@@ -64,8 +64,8 @@ async function readState(page: Page): Promise<State> {
 
 async function setX(page: Page, x: number): Promise<void> {
   await page.evaluate((v) => {
-    const s = (window as unknown as { __PHASER_SESSION__?: { getState: () => State | null } }).__PHASER_SESSION__?.getState();
-    if (s) s.player.x = v;
+    // 生产包的 getState() 是深拷贝快照：读得到，写不回。改状态走专用入口。
+    window.__PHASER_TEST_MUTATE__?.((s) => { s.player.x = v; });
   }, x);
 }
 

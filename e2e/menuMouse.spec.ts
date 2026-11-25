@@ -1,6 +1,35 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 
+/**
+ * 等到菜单条目真的可点，再开始用鼠标。
+ *
+ * waitForScene('Menu') 只证明场景**激活**了——它在 create() 跑完之前就为真。
+ * 而 MenuScene 把每个条目的 alpha 从 0 补间到 1（350ms + i*140ms 的延迟），
+ * Phaser 的 inputCandidate 要求 willRender() 为真才接受命中，alpha=0 的条目
+ * 直接不被考虑。于是在淡入窗口内移鼠标/点下去都是空操作：
+ *
+ *   实测 alpha=0 时 hitTest 命中 0 个对象，悬停后 selected 仍是 0；
+ *   alpha=1 时同一坐标命中 1 个对象，悬停后 selected 变成 1。
+ *
+ * 这不是游戏缺陷（玩家看不见的东西不该可点），是探针问早了一步：用例断言
+ * 「鼠标能操作菜单」，前提是菜单已经呈现给玩家。等 alpha 到位再问。
+ */
+async function waitForMenuReady(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const game = (window as unknown as {
+        __PHASER_GAME__?: { scene: { getScene: (key: string) => { children: { list: Array<{ type: string; text?: string; alpha: number; visible: boolean }> } } | null } };
+      }).__PHASER_GAME__;
+      const list = game?.scene.getScene('Menu')?.children.list ?? [];
+      const entries = list.filter((o) => o.type === 'Text' && o.visible && (o.text === '开始新游戏' || o.text === '开始 AI NPC 试玩' || o.text === '继续游戏' || o.text === '操作说明'));
+      return entries.length > 0 && entries.every((o) => o.alpha >= 1);
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+}
+
 async function waitForScene(page: Page, key: string): Promise<void> {
   await page.waitForFunction(
     (wanted) => {
@@ -124,6 +153,7 @@ const VALID_SAVE = JSON.stringify({
 test('title menu mouse hover and clicks work with no save', async ({ page }) => {
   await page.goto('/?seed=42');
   await waitForScene(page, 'Menu');
+  await waitForMenuReady(page);
   await expect.poll(() => hasVisibleText(page, '开始新游戏')).toBe(true);
   expect(await hasVisibleText(page, '操作说明')).toBe(true);
   expect(await hasVisibleText(page, '继续游戏')).toBe(false);
@@ -158,6 +188,7 @@ test('title menu mouse click continues an existing save', async ({ page }) => {
   await page.addInitScript((save) => localStorage.setItem('floor100000.save.v1', save), VALID_SAVE);
   await page.goto('/?seed=42');
   await waitForScene(page, 'Menu');
+  await waitForMenuReady(page);
   expect(await hasVisibleText(page, '开始新游戏')).toBe(true);
   expect(await hasVisibleText(page, '继续游戏')).toBe(true);
   expect(await hasVisibleText(page, '操作说明')).toBe(true);
@@ -171,6 +202,7 @@ test('title menu mouse click continues an existing save', async ({ page }) => {
 test('a first-time player can finish character selection with the mouse', async ({ page }) => {
   await page.goto('/?seed=42');
   await waitForScene(page, 'Menu');
+  await waitForMenuReady(page);
   await clickMenuText(page, '开始新游戏');
   await waitForScene(page, 'MetaSelect');
   await page.waitForTimeout(250);
@@ -191,6 +223,7 @@ test('a first-time player can finish character selection with the mouse', async 
 test('moving from the selected survivor to start does not select locked rows on the way', async ({ page }) => {
   await page.goto('/?seed=42');
   await waitForScene(page, 'Menu');
+  await waitForMenuReady(page);
   await clickMenuText(page, '开始新游戏');
   await waitForScene(page, 'MetaSelect');
 

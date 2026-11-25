@@ -44,6 +44,34 @@ describe('competitionRules: sealed NPC demo domain validation', () => {
     expect(knownButNotImplemented.accepted).toBe(false);
     if (!knownButNotImplemented.accepted) expect(knownButNotImplemented.expectedStateDelta.inventory).toEqual([]);
   });
+  // 白名单里有、但 demo 执行器不支持的 kind，必须落在固定的 detailCode 上。
+  //
+  // 这条分支原先只有产生点、没有任何断言：`action_not_supported_by_demo_executor`
+  // 全仓 grep 只能搜到 competitionRules.ts 里那一行。写了但没人证伪的分支，
+  // 下次有人「顺手」把它合并成 action_not_whitelisted、或者给 MUTATION_KINDS
+  // 加上 ask，都不会有任何测试变红。
+  //
+  // ask 是最容易踩的那个：契约层会把 request_help 译成它（actionContract.ts），
+  // 而正常路径上 runtime 已经在 validate 之前就按 availableActions 丢弃了它，
+  // 所以这条兜底永远不会在生产里被触发 —— 正因如此它才需要一条直接的测试。
+  it('夹具外的合法 kind（ask/inspect/pickup）落在 action_not_supported_by_demo_executor', () => {
+    for (const kind of ['ask', 'inspect', 'pickup'] as const) {
+      const checked = validateCompetitionProposal(state(), { kind });
+      expect(checked.accepted).toBe(false);
+      if (!checked.accepted) {
+        expect(checked.detailCode).toBe('action_not_supported_by_demo_executor');
+        // 拒绝必须是零副作用：连 expectedStateDelta 都必须是空的。
+        expect(checked.expectedStateDelta.inventory).toEqual([]);
+        expect(checked.expectedStateDelta.gateStatus).toEqual([]);
+      }
+      // 也不能被误记成「不认识这个 kind」——那是 action_not_whitelisted 的语义。
+      const executed = executeCompetitionProposal(state(), { kind }, { operationId: `unsupported-${kind}` });
+      expect(executed.status).toBe('rejected');
+      if (executed.status === 'rejected') {
+        expect(executed.validation.detailCode).toBe('action_not_supported_by_demo_executor');
+      }
+    }
+  });
   it('validates directions, trust threshold, item possession, and exact repair recipe', () => {
     expect(validateCompetitionProposal(state(), give).accepted).toBe(true);
     const trust39 = state({ npcs: [{ ...state().npcs[0]!, trust: 39 }] });

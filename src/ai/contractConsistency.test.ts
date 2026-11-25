@@ -15,8 +15,19 @@
 //   none         = 不改变世界（observe / wait / refuse / request_help）
 //   rejected     = 判为不合法契约（null）
 //
-// `request_help` 归入 none 是刻意的：它译成 ask，竞赛层的 executor 不支持 ask
-// （competitionRules.MUTATION_KINDS 不含它），validator 会拒绝，世界不变。
+// `request_help` 归入 none 是刻意的，但依据要说准：
+// 它译成 ask，而 runtime 在 validate 之前就会丢弃它 ——
+// `competitionRuntime` 会先查 observation.availableActions 是否含 proposal.kind，
+// 四个场景的动作全集里都没有 ask，于是它被当成 proposal_unavailable 直接丢弃，
+// **validator 根本不会被调用**（competitionRuntime.test.ts 有一条用例把这个
+// 行为钉死了：fallback 返回 {kind:'ask'}，断言 validationCount 与 executionCount
+// 都是 0）。
+//
+// 所以「世界不变」的结论对，但原因不是 validator 拒了它。别照着旧理由去改
+// competitionRules.MUTATION_KINDS —— 加不加 ask 都不影响这条路径。
+//
+// validator 那层（MUTATION_KINDS 不含 ask → action_not_supported_by_demo_executor）
+// 只是兜底，不经 runtime 直接调 validateCompetitionProposal 时才碰得到。
 
 import { describe, expect, it } from 'vitest';
 import { parseRepairIntent } from './repairIntent';

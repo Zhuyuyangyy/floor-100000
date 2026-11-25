@@ -183,3 +183,66 @@ describe('competitionExecutor: no rejected side effects, atomic exchanges, idemp
     expect(JSON.stringify({ player: demo.player.inventory, npc: demo.npcs[0]?.inventory, trust: demo.npcs[0]?.trust })).toBe(afterFirst);
   });
 });
+
+// 信任门槛必须可按场景配置。
+//
+// 首章的停电危机要按交情分档（合作 / 中立 / 谨慎三档门槛不同），而原先
+// `COMPETITION_TRUST_THRESHOLDS.repairGate = 70` 是模块级常量，两处硬编码。
+// 场景层拿不到口子就只能自己写一套裁决逻辑，规则分裂成两份。
+//
+// 这里锁住三件事：
+//   1. 不传 trustThresholds 时行为与改动前完全一致（向后兼容）
+//   2. 传了之后门槛真的按传入值生效（不是被忽略）
+//   3. give 的门槛与 trade 共用 transaction 缺省值，不因 kind 改名而取到 undefined
+describe('competitionRules: 信任门槛可按 policy 配置', () => {
+  it('不传 trustThresholds 时沿用 40/70，行为与改动前一致', () => {
+    // 修门：trust 69 不够，70 够。
+    const at69 = state({ npcs: [{ ...state().npcs[0]!, trust: 69 }] });
+    expect(validateCompetitionProposal(at69, repair, repairPolicy).accepted).toBe(false);
+    const at70 = state({ npcs: [{ ...state().npcs[0]!, trust: 70 }] });
+    expect(validateCompetitionProposal(at70, repair, repairPolicy).accepted).toBe(true);
+    // 交易：trust 39 不够，40 够。
+    const t39 = state({ npcs: [{ ...state().npcs[0]!, trust: 39 }] });
+    expect(validateCompetitionProposal(t39, trade).accepted).toBe(false);
+    const t40 = state({ npcs: [{ ...state().npcs[0]!, trust: 40 }] });
+    expect(validateCompetitionProposal(t40, trade).accepted).toBe(true);
+  });
+
+  it('传入更低门槛后，原本被拒的场景能通过', () => {
+    const at50 = state({ npcs: [{ ...state().npcs[0]!, trust: 50 }] });
+    // 50 低于缺省 70，先确认基线是拒的。
+    expect(validateCompetitionProposal(at50, repair, repairPolicy).accepted).toBe(false);
+    // 合作态门槛 40：同一份状态应该通过。
+    const cooperative = { ...repairPolicy, trustThresholds: { repair_gate: 40 } };
+    expect(validateCompetitionProposal(at50, repair, cooperative).accepted).toBe(true);
+  });
+
+  it('传入更高门槛后，原本能过的场景被拒', () => {
+    const at70 = state({ npcs: [{ ...state().npcs[0]!, trust: 70 }] });
+    expect(validateCompetitionProposal(at70, repair, repairPolicy).accepted).toBe(true);
+    const guarded = { ...repairPolicy, trustThresholds: { repair_gate: 75 } };
+    const checked = validateCompetitionProposal(at70, repair, guarded);
+    expect(checked.accepted).toBe(false);
+    if (!checked.accepted) expect(checked.reason).toBe('low_trust');
+  });
+
+  it('give 与 trade 都能单独覆盖，且未被覆盖的那个仍用 40', () => {
+    const at38 = state({ npcs: [{ ...state().npcs[0]!, trust: 38 }] });
+    // 只把 trade 降到 35：trade 该过，NPC 主动 give 仍按 40 拒。
+    const onlyTrade = { trustThresholds: { trade: 35 } };
+    expect(validateCompetitionProposal(at38, trade, onlyTrade).accepted).toBe(true);
+    const npcGift: CompetitionActionProposal = {
+      kind: 'give', transfer: { from: { kind: 'npc', npcId: 'alin' }, to: 'player', itemId: 'battery', quantity: 1 },
+    };
+    expect(validateCompetitionProposal(at38, npcGift, onlyTrade).reason).toBe('low_trust');
+  });
+
+  it('门槛配成非有限数时不被吞掉，回落到缺省值', () => {
+    const at50 = state({ npcs: [{ ...state().npcs[0]!, trust: 50 }] });
+    // NaN 不能变成 0（那等于谁都能修），必须回落 70 → 仍然拒。
+    const broken = { ...repairPolicy, trustThresholds: { repair_gate: Number.NaN } };
+    const checked = validateCompetitionProposal(at50, repair, broken);
+    expect(checked.accepted).toBe(false);
+    if (!checked.accepted) expect(checked.reason).toBe('low_trust');
+  });
+});

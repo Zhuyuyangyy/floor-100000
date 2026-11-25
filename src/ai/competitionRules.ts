@@ -55,6 +55,38 @@ export interface CompetitionRulesPolicy {
   /** Optional because the read-only contract snapshot has no slot-count field. */
   readonly inventorySlotLimit?: number;
   readonly trustDeltas?: Partial<Readonly<Record<CompetitionMutationKind, number>>>;
+  /**
+   * 各动作的信任门槛；缺省回落 `COMPETITION_TRUST_THRESHOLDS`。
+   *
+   * 为什么门槛需要可配：`repairGate: 70` 是竞赛 demo 的单一数值，但首章的
+   * 停电危机要按玩家与这位居民的交情分档（合作 / 中立 / 谨慎三档门槛不同），
+   * 那不是一个 demo 常量能表达的。之前因为没有这个口子，场景层只能自己写一套
+   * 裁决逻辑，规则就分裂成了两份。
+   *
+   * 门槛是「这位居民愿不愿意跟你一起干」的事，本来就该由场景给，不是全局常量。
+   * 不传时行为与之前完全一致，所以现有调用方无需改动。
+   */
+  readonly trustThresholds?: Partial<Readonly<Record<CompetitionMutationKind, number>>>;
+}
+
+/** 解析单条规则的门槛：policy 优先，否则用 demo 缺省值。
+ *
+ * `COMPETITION_TRUST_THRESHOLDS` 的键（transaction / repairGate）与
+ * `CompetitionMutationKind`（give / trade / repair_gate）不是同一套命名，
+ * 所以这里显式映射，而不是拿 kind 直接索引常量——直接索引会拿到 undefined，
+ * 表现为「门槛消失、谁都能交易」，而且 TypeScript 不报错。
+ */
+function defaultThresholdOf(kind: CompetitionMutationKind): number {
+  return kind === 'repair_gate'
+    ? COMPETITION_TRUST_THRESHOLDS.repairGate
+    : COMPETITION_TRUST_THRESHOLDS.transaction;
+}
+
+function thresholdFor(policy: CompetitionRulesPolicy, kind: CompetitionMutationKind): number {
+  const configured = policy.trustThresholds?.[kind];
+  return typeof configured === 'number' && Number.isFinite(configured)
+    ? configured
+    : defaultThresholdOf(kind);
 }
 
 const EMPTY_DELTA: CompetitionStateDelta = Object.freeze({
@@ -210,7 +242,7 @@ export function validateCompetitionProposal(
     // Trust gates what an NPC is willing to hand over, not whether it can accept
     // a player's voluntary gift. The demo starts at trust 35 and explicitly
     // requires the player to be able to give before reaching the 40 threshold.
-    if (!playerToNpc && npc.trust < COMPETITION_TRUST_THRESHOLDS.transaction) return reject('low_trust');
+    if (!playerToNpc && npc.trust < thresholdFor(policy, 'give')) return reject('low_trust');
     const delta = configuredDelta(policy, 'give');
     if (delta === null || !Number.isFinite(npc.trust + delta)) return reject('invalid_target', 'invalid_trust_policy');
     const itemId = transfer.itemId as ItemId, quantity = transfer.quantity as number;
@@ -252,7 +284,7 @@ export function validateCompetitionProposal(
   if (!Number.isFinite(npc.trust)) return reject('invalid_target', 'invalid_npc_trust');
 
   if (value.kind === 'trade') {
-    if (npc.trust < COMPETITION_TRUST_THRESHOLDS.transaction) return reject('low_trust');
+    if (npc.trust < thresholdFor(policy, 'trade')) return reject('low_trust');
     const give = value.playerGives, receive = value.playerReceives;
     if (!validTransfer(give) || !validTransfer(receive)) return reject('invalid_target', 'invalid_trade_transfer');
     if ((give as { from: unknown }).from !== 'player' || actorNpcId((give as { to: unknown }).to) !== npc.npcId ||
@@ -282,7 +314,7 @@ export function validateCompetitionProposal(
   const gate = state.gates.find((item) => item.gateId === value.gateId);
   if (!gate || gate.floor !== state.currentFloor || (gate.status !== 'closed' && gate.status !== 'blocked')) return reject('invalid_target', 'gate_not_repairable');
   if (!policy.repairNpcByGate?.[gate.gateId]) return reject('invalid_target', 'repair_npc_unconfigured');
-  if (npc.trust < COMPETITION_TRUST_THRESHOLDS.repairGate) return reject('low_trust');
+  if (npc.trust < thresholdFor(policy, 'repair_gate')) return reject('low_trust');
   if (!policy.repairMaterials) return reject('invalid_target', 'repair_materials_unconfigured');
   if (!validMaterialsEqual(value.materials as InventoryStack[], policy.repairMaterials)) return reject('invalid_target', 'repair_materials_mismatch');
   for (const material of policy.repairMaterials) {

@@ -1450,3 +1450,68 @@ describe('失信路径：接单不交货 → 门槛抬高 → 核料后才能修
     expect(countItem(game.player.inventory, 'fuse')).toBe(0);
   });
 });
+
+// ── 阿珍的负向记忆：这一章除了阿林的承诺失信，唯一的 refusal 触达点 ──
+//
+// 两个理由留在测试里，不是为了凑数：
+//   1. `KIND_WEIGHT` 六种负向（refusal/insult/attack 等）在停电危机里只用到
+//      refusal，而且只有「死线到期」这一条路会写。没有测试钉住它，整条负向
+//      通道可以静默消失而全绿。
+//   2. `appendMemory` 首次写记忆时用 `?? 0` 会把「没记过」当成信任 0（P0-a），
+//      阿珍开局 relationship.player 是 undefined，正好是这条修复的哨兵。
+//
+// 数值链（阿珍 loyalty 0.6，倍数 0.5+0.6=1.1；基线 COMPETITION_TRUST_BASE=35）：
+//   送水 gift 0.6×20×1.1 = +13.2 → 48.2；死线 refusal -0.2×20×1.1 = -4.4 → 43.8
+//   不送水直接死线：35 - 4.4 = 30.6
+describe('阿珍：送水与死线对信任和存货的影响（玩家入口）', () => {
+  const azhenTrust = (game: GameState) => loadNpcState(game, 'azhen')?.relationship.player;
+  const breadStock = (game: GameState) => loadNpcInventory(game, 'azhen')
+    .filter((stack) => stack.itemId === 'bread')
+    .reduce((n, stack) => n + stack.quantity, 0);
+
+  function azhenCrisisGame(): GameState {
+    const game = createNewGame(2026);
+    game.currentFloor = NPC_FLOOR;
+    game.player.x = getNpc('alin').x;
+    setFlag(game, ALIN_REPAIR_GATE_FLAG, 1);
+    expect(syncBlackoutCrisis(game).stage).toBe('investigating');
+    game.currentFloor = getNpc('azhen').floor;
+    game.player.x = getNpc('azhen').x;
+    return game;
+  }
+
+  it('送水后死线：信任 35→48.2→43.8，存货只坏 1 份，且 refusal 记忆确实写入', () => {
+    const game = azhenCrisisGame();
+    expect(azhenTrust(game)).toBeUndefined(); // 开局根本没记过关系，不是 0
+    expect(breadStock(game)).toBe(4);
+
+    const watered = giveWaterToAzhen(game);
+    expect(watered.ok).toBe(true);
+    expect(azhenTrust(game)).toBeCloseTo(48.2, 5);
+    expect(breadStock(game)).toBe(2);
+
+    game.day += BLACKOUT_DEADLINE_DAYS;
+    expect(syncBlackoutCrisis(game).stage).toBe('resolved_fail');
+    expect(azhenTrust(game)).toBeCloseTo(43.8, 5);
+    expect(flagCount(game, BLACKOUT_FLAG.foodSpoiled)).toBe(BLACKOUT_SPOIL_WITH_WATER);
+    expect(breadStock(game)).toBe(1);
+
+    const kinds = loadNpcState(game, 'azhen')?.memory.map((m) => m.kind) ?? [];
+    expect(kinds).toContain('gift');
+    expect(kinds).toContain('refusal');
+  });
+
+  it('不送水直死线：35→30.6，存货坏 3 份，只有一条 refusal 记忆', () => {
+    const game = azhenCrisisGame();
+    expect(azhenTrust(game)).toBeUndefined();
+
+    game.day += BLACKOUT_DEADLINE_DAYS;
+    expect(syncBlackoutCrisis(game).stage).toBe('resolved_fail');
+    expect(azhenTrust(game)).toBeCloseTo(30.6, 5);
+    expect(flagCount(game, BLACKOUT_FLAG.foodSpoiled)).toBe(BLACKOUT_SPOIL_WITHOUT_WATER);
+    expect(breadStock(game)).toBe(1);
+
+    expect(loadNpcState(game, 'azhen')?.memory.map((m) => m.kind)).toEqual(['refusal']);
+    expect(observeBlackout(game).parties.find((p) => p.npcId === 'azhen')?.status).toBe('refuse');
+  });
+});

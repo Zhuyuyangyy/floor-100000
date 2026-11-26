@@ -2804,7 +2804,13 @@ export class GameScene extends Phaser.Scene {
     // (20 Han characters, 480px at 24px) — needs three lines of 25px once the
     // wrap is on, and three lines plus a 30px title and a 20px meta line do
     // not fit in 130px. 150px holds all of it with room to spare.
-    const DETAIL_H = this.portraitMode ? 66 : 150;
+    //
+    // Portrait needs its own number: the copy is 13px there (260px natural
+    // width) and the wrap box is 224px, so it wraps to **two** lines of 14px.
+    // 66px held exactly one line, so the second line had nowhere to go and the
+    // whole sentence rode 28px past the well's right edge (measured at
+    // 360×900: body x[32..292] vs well x[24..264]). 80px holds both lines.
+    const DETAIL_H = this.portraitMode ? 80 : 150;
     this.invObjects.push(...buildPanelWell(this, DETAIL_X, DETAIL_Y, DETAIL_W, DETAIL_H, depth + 5));
     // Three rows at 8 / 44 / 68. They used to be at 10 / 48 / 76, which only
     // worked because SimSun's glyphs sit inside a much smaller ink box than the
@@ -2825,9 +2831,14 @@ export class GameScene extends Phaser.Scene {
         // useAdvancedWrap breaks a too-long line **by character**. Phaser's
         // default wrap only breaks on spaces, and Chinese has none, so the
         // 20-character empty-slot copy stayed on one 480px line and sailed
-        // 238px past the panel's right edge. Portrait keeps the default wrap:
-        // its 13px copy is exactly as wide as its wrap box and already fits.
-        wordWrap: { width: DETAIL_W - 16, useAdvancedWrap: !this.portraitMode },
+        // 238px past the panel's right edge.
+        //
+        // Portrait needs it too: there the copy is 13px (260px natural width)
+        // against a 224px wrap box, so the default wrap left it on one line
+        // that rode 28px past the well's right edge (measured at 360×900).
+        // The "it already fits" claim was true only for the 4-character effect
+        // text that was measured back then, not for the empty-slot copy.
+        wordWrap: { width: DETAIL_W - 16, useAdvancedWrap: true },
       })
       .setDepth(depth + 7);
     this.invObjects.push(this.invDetailName, this.invDetailMeta, this.invDetailBody);

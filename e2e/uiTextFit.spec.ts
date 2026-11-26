@@ -42,6 +42,8 @@ interface Layout {
   text: TextProbe;
   well: Rect;
   panelRight: number;
+  /** 按钮带的上沿（竖屏用：详情井不能压到按钮）。 */
+  buttonsTop?: number;
 }
 
 /** 页面里跑的测量器：给一个 Phaser Text，返回它的排版事实。 */
@@ -192,6 +194,93 @@ test('背包详情：空槽文案折行后既不冲出面板，也不顶出详�
   // 每一折行都得真的画出来。
   expect(m.paintedLines.every(Boolean), '每一折行都必须画出来').toBe(true);
   expect(m.drawnLines, '绘制行数不得少于折行数').toBeGreaterThanOrEqual(m.wrappedLines.length);
+});
+
+test('背包详情（竖屏 360×900）：空槽文案折行后不冲出详情井', async ({ page }) => {
+  // 竖屏必须单独测：面板窄、字号小（13px）、井矮（66px），折行宽与行高都不同。
+  // 桌面那条绿了不代表竖屏绿——竖屏的折行盒只有 224px，而那 20 字文案在 13px 下
+  // 也有 260px 自然宽，不开按字符折行就会整行冲出井外。
+  await page.setViewportSize({ width: 360, height: 900 });
+  await startGame(page, 42);
+
+  await page.evaluate(() => {
+    const state = window.__PHASER_SESSION__?.getState();
+    if (!state) throw new Error('no session state');
+    state.player.inventory.slots.push({ itemId: 'bread', quantity: 1 });
+  });
+
+  await page.keyboard.press('i');
+  await page.waitForFunction(() =>
+    Boolean((window.__PHASER_GAME__?.scene.getScene('Game') as unknown as { inventoryOpen?: boolean } | null)?.inventoryOpen),
+  );
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(60);
+  }
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(400);
+
+  const layout = await page.evaluate(
+    ({ measureSrc }: { measureSrc: string }) => {
+      const scene = window.__PHASER_GAME__!.scene.getScene('Game') as unknown as {
+        children: { list: Array<Record<string, unknown>> };
+      };
+      const list = scene.children.list as unknown as Array<{
+        type: string;
+        text?: string;
+        visible: boolean;
+        x: number;
+        fillColor?: number;
+        width: number;
+        getBounds: () => DOMRect;
+      }>;
+      const body = list.find((o) => o.type === 'Text' && String(o.text ?? '').startsWith('空格子'));
+      if (!body) return null;
+      const well = list.find((o) => o.type === 'Rectangle' && o.fillColor === 0x080c0f && o.width > 100 && o.visible);
+      if (!well) return null;
+      const wb = well.getBounds();
+      // 竖屏面板只有 ~288px 宽，而 HUD 右侧那块元素也是 ~380px 宽、也压在详情井
+      // 的竖向区间里——按「与井同区间」筛会把它当成面板右沿（实测得到 1206 的
+      // 假值）。所以竖屏**不比面板右沿**，改用两条更硬的界：详情井右沿（更紧）
+      // 与可见画布右沿。桌面的面板右沿断言在桌面那条用例里，它的面板宽 440，
+      // HUD 挤不进去，那边的口径是准的。
+      const view = (window as unknown as { __PHASER_GAME__?: { canvas: { width: number } } }).__PHASER_GAME__?.canvas;
+      const measure = eval(measureSrc) as (o: unknown) => Omit<TextProbe, 'bounds'> & { bounds: Rect };
+      // 按钮带的上沿：详情井不能压到「使用 / 关闭」上。
+      const buttonLabels = list
+        .filter((o) => o.type === 'Text' && (o.text === '使用' || o.text === '关闭'))
+        .map((o) => o.getBounds().top);
+      return {
+        text: measure(body),
+        well: { left: Math.round(wb.left), right: Math.round(wb.right), top: Math.round(wb.top), bottom: Math.round(wb.bottom), width: Math.round(wb.width), height: Math.round(wb.height) },
+        panelRight: view ? view.width : Math.round(wb.right),
+        buttonsTop: buttonLabels.length ? Math.round(Math.min(...buttonLabels)) : Number.POSITIVE_INFINITY,
+      };
+    },
+    { measureSrc: MEASURE },
+  );
+
+  expect(layout, '竖屏下空槽正文应已渲染').not.toBeNull();
+  const v = layout as Layout;
+  const m = v.text;
+
+  console.log(
+    `[竖屏背包空槽] wrap=${m.wrapWidth} 自然宽=${m.naturalWidth} 渲染最宽行=${m.maxLineWidth} ` +
+      `折行=${m.wrappedLines.length} 行 绘制=${m.drawnLines} 行 已画=${m.paintedLines.join(',')} | 正文 x[${m.bounds.left}..${m.bounds.right}] ` +
+      `y[${m.bounds.top}..${m.bounds.bottom}] | 井 x[${v.well.left}..${v.well.right}] y[${v.well.top}..${v.well.bottom}] ` +
+      `| 面板右沿 ${v.panelRight} | 按钮带 ${v.buttonsTop}`,
+  );
+
+  // 竖屏同样要按字符折行：折行盒装不下整句时，不折就是横向溢出。
+  expect(m.wrappedLines.length, '竖屏下空槽文案必须真的折行').toBeGreaterThan(1);
+  expect(m.maxLineWidth, '竖屏：每一行都必须在折行盒内').toBeLessThanOrEqual(m.wrapWidth);
+  expect(m.bounds.right, '竖屏：正文右沿不得越过详情井右沿').toBeLessThanOrEqual(v.well.right);
+  expect(m.bounds.right, '竖屏：正文右沿不得越过可见画布右沿').toBeLessThanOrEqual(v.panelRight);
+  expect(m.bounds.bottom, '竖屏：正文底不得越过详情井底').toBeLessThanOrEqual(v.well.bottom);
+  // 井加高之后也不能压到按钮带。
+  expect(v.well.bottom, '竖屏：详情井底不得压到按钮带').toBeLessThanOrEqual(v.buttonsTop ?? Number.POSITIVE_INFINITY);
+  expect(m.paintedLines.every(Boolean), '竖屏：每一折行都必须画出来').toBe(true);
+  expect(m.drawnLines, '竖屏：绘制行数不得少于折行数').toBeGreaterThanOrEqual(m.wrappedLines.length);
 });
 
 test('夜宿压力行：引用日记时整句都在，第三行被画出来且不冲出压力井', async ({ page }) => {

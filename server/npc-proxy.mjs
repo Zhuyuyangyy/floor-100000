@@ -507,7 +507,16 @@ const MIME = {
 
 /** 目录穿越防护：解析后必须仍在 dist 内。 */
 function safePath(urlPath) {
-  const decoded = decodeURIComponent(urlPath.split('?')[0].split('#')[0]);
+  // 畸形百分号编码（如 GET /%）会让 decodeURIComponent 抛 URIError。
+  // 此前这里裸奔，异常穿过 serveStatic 与 createServer 的 async 回调，
+  // 全文件又没有 unhandledRejection 兜底 —— 一个 GET 就能让进程退出。
+  // 解码失败按「路径不安全」处理，复用调用方既有的 403 分支，不新增响应形态。
+  let decoded;
+  try {
+    decoded = decodeURIComponent(urlPath.split('?')[0].split('#')[0]);
+  } catch {
+    return null;
+  }
   const candidate = resolve(join(DIST_ROOT, normalize(decoded)));
   if (candidate !== DIST_ROOT && !candidate.startsWith(DIST_ROOT + sep)) return null;
   return candidate;

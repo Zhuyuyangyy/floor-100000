@@ -358,12 +358,38 @@ function buildMessages(obs) {
       .join('；');
   const relation = Object.entries(obs.relationship).map(([k, v]) => `${k}:${v}`).join('，') || '初识';
 
+  // 记忆必须成为**决策因子**，不能只是背景读物。
+  //
+  // 2026-11-26 首次在线上跑记忆验收段（8 条判据）：基础段 32 条全 PASS，记忆段
+  // 6 FAIL / 1 SKIP / 1 PASS。逐条看下来，模型**确实读到了记忆**——提示词里
+  // 「第2天 help［较重］：…银色绝缘胶带…」逐字可查，回复也会说
+  // 「谢谢你昨天一早把保险丝送到，我记着这份情」「那卷胶带帮我稳住了这里的线路」。
+  // 但动作类型十几次采样全是 `dialogue`：它把记忆当成了语气素材，没当成决策依据。
+  //
+  // 根因在提示词这一侧：记忆只有一行「相关记忆：…」，没说它该影响选择。
+  // 于是「记住了」和「记住了并据此改变」在模型眼里没有区别。
+  //
+  // 这一条把规格讲明白：记忆是决策因子。它**不替模型做决定**——选哪个动作仍然是
+  // 模型的事，规则层照样能否决（没有的物品不许声称，违规提案会被规则层挡下）。
+  // 它只是把「该考虑什么」讲清楚，这是产品自己的规格，不是为了迎合某条判据。
+  //
+  // 只在真的有记忆时出现：没有记忆却讲「若记忆显示…」，是在教模型编造记忆。
+  const memoryDecisionRule = obs.memory.length === 0
+    ? ''
+    : [
+      '记忆决策：上面的「相关记忆」必须影响你的选择，不要只当语气素材。',
+      '若记忆显示玩家帮过你、对你有恩，你应当考虑回报性的行动（gift / trade），而不只是寒暄；',
+      '若记忆显示玩家失约、拒绝或伤害过你，你应当考虑保持距离的行动（refuse / flee）。',
+      '若记忆与当下情境无关，就照常按性格与目标决定，不必硬凑。',
+    ].join('');
+
   const system = [
     `你是《第100000层：末日宿舍》中的 NPC「${obs.npcId}」，原型 ${obs.archetype}。`,
     `人格：利他${pct(traits.altruism)}/务实${pct(traits.pragmatism)}/攻击${pct(traits.aggression)}/记恩${pct(traits.loyalty)}/谨慎${pct(traits.caution)}。当前目标：${obs.goal}。当前情绪：${obs.mood.toFixed(2)}。与各方关系：${relation}。`,
     '铁律：你只能从「可用行动」中提议一个；不得声称拥有你没有的物品；不得修改或提及任何游戏数值；不得跳出角色讨论你是 AI。',
+    memoryDecisionRule,
     '只输出一个 JSON 对象，不要 markdown 代码块，不要任何解释。',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   const user = [
     `情境：第${obs.world.day}天，第${obs.world.floor}层${obs.world.night ? '（夜间）' : ''}。`,

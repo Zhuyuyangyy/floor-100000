@@ -101,7 +101,12 @@ describe('NPC 代理：安全边界', () => {
         // 一进来就把它吃光，后面的「畸形观察被拒」「超长请求体 413」全部
         // 拿到 429 —— 那两条不是产品坏了，是被前面的测试饿死了。
         // 限流本身另有专门的 describe 用显式计数验证，不靠这个数字。
-        NPC_DAILY_BUDGET: '20',
+        //
+        // 20 → 26：新增「记忆是决策因子」那组断言要发 2 次上游请求
+        // （有记忆 / 无记忆各一次），都记在同一个每日预算上。
+        // 预算不够的症状很隐蔽：后面的用例先拿到 429，看起来像「产品坏了」，
+        // 其实是被前面的测试饿死了。
+        NPC_DAILY_BUDGET: '26',
         NPC_BREAKER_THRESHOLD: '2',
         NPC_BREAKER_COOLDOWN_MS: '60000',
       },
@@ -216,6 +221,49 @@ describe('NPC 代理：安全边界', () => {
     // 4. 没有记忆时要有明确说法，而不是留空让模型自己编
     const none = await ask('mem-none', []);
     expect(none).toContain('尚无共同经历');
+  });
+
+  // 记忆必须被写成**决策因子**，而不只是背景读物。
+  //
+  // 2026-11-26 首次在线上跑记忆验收段（8 条判据）：模型确实读到了记忆——
+  // 提示词里「第2天 help［较重］：…银色绝缘胶带…」逐字可查，回复也会说
+  // 「谢谢你昨天一早把保险丝送到，我记着这份情」「那卷胶带帮我稳住了这里的线路」。
+  // 但动作类型十几次采样全是 `dialogue`：记忆只改了语气，没改选择。
+  // 根因在提示词这一侧——记忆只有一行「相关记忆：…」，从没被告知它该影响决策。
+  //
+  // 这条断言守的是**规格写进了提示词**。它**不能**证明模型真的改了动作：
+  // 那要重新部署空间、再跑一次线上验收才知道。它守的是另一件事——
+  // 别哪天有人把这条规格删掉，而测试还全绿。
+  it('有记忆时提示词写明记忆是决策因子；没有记忆时不写这条', async () => {
+    const ask = async (clientId, memory) => {
+      upstreamCalls.length = 0;
+      await fetch(`${baseUrl}/api/npc/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId, observation: validObservation({ memory }) }),
+      });
+      return {
+        system: String(upstreamCalls[0]?.body?.messages?.[0]?.content ?? ''),
+        user: String(upstreamCalls[0]?.body?.messages?.[1]?.content ?? ''),
+      };
+    };
+
+    const withMemory = await ask('mem-decision', [
+      { day: 2, kind: 'help', summary: '玩家把绝缘胶带留给了我', weight: 0.6 },
+    ]);
+    // 1. 规格必须出现在系统提示里。
+    expect(withMemory.system).toContain('记忆决策');
+    expect(withMemory.system).toContain('必须影响你的选择');
+    // 2. 两个方向都要写明：正向记忆指向回报，负向记忆指向保持距离。
+    expect(withMemory.system).toContain('gift');
+    expect(withMemory.system).toContain('refuse');
+    // 3. 记忆正文仍然在用户消息里（上一条断言守的是这个，两条一起看才完整）。
+    expect(withMemory.user).toContain('玩家把绝缘胶带留给了我');
+
+    // 4. 没有记忆时不写这条——否则是在教模型编造记忆。
+    const noMemory = await ask('mem-decision-none', []);
+    expect(noMemory.system).not.toContain('记忆决策');
+    expect(noMemory.user).toContain('尚无共同经历');
   });
 
   it('记忆条数与摘要长度按 LIMITS 截断，防止撑爆提示词', async () => {

@@ -63,6 +63,12 @@ export interface NpcObservation {
   self: { floor: number; x: number; hp: number };
   /** NPC 当前可执行的合法动作菜单（选项树降级路径的并集） */
   availableActions: NpcActionKind[];
+  /**
+   * 已知限制：当前无消费端。`src/ai/prompt.ts` 与 `server/npc-proxy.mjs`
+   * 都不读取此字段，`sanitizeObservation` 的白名单里也没有它，所以
+   * `NpcRuntime.ts` / `competitionModelBridge.ts` 算出的值会被静默丢弃。
+   * 接线时必须同时扩展该白名单并更新提示词契约，否则线上行为与本地不一致。
+   */
   recentEvents: string[];
   /** Optional high-signal context for autonomous hostile NPC decisions. */
   situation?: {

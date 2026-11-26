@@ -37,11 +37,17 @@ function fmtRelationship(obs: NpcObservation): string {
  *  （铁律里明确禁止提数值）。原始 weight 仍留在 observation 里供程序使用。
  */
 function weightWord(w: number): string {
-  if (w >= 0.75) return '极重';
-  if (w >= 0.35) return '较重';
+  // ⚠️ 2026-11-26 改过：旧映射**不对称**——负向两档明说「负面」（偏负面/严重负面），
+  // 正向两档只说「重」（极重/较重），不带褒贬。于是提示词里「守约」（+0.5）和「未决」（0）
+  // 只差在分量上，而「毁约」（-0.6）明写着负面：模型只学得到一个方向「负面 → 戒备」。
+  // 线上实测正是如此——负向记忆 5/5 全 `refuse`，正向记忆动不了（weight 段三档
+  // 全是 `gift`，极性差 0.00）。正向两档因此补上性质词，旧词保留为前缀，
+  // 两处既有断言都不受影响。**服务端那份同步改了，两边必须一致。**
+  if (w >= 0.75) return '极重·恩情';
+  if (w >= 0.35) return '较重·恩情';
   if (w > -0.35) return '一般';
-  if (w > -0.75) return '偏负面';
-  return '严重负面';
+  if (w > -0.75) return '偏负面·记恨';
+  return '严重负面·记恨';
 }
 
 function fmtMemory(obs: NpcObservation): string {

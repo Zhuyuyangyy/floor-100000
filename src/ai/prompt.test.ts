@@ -83,7 +83,7 @@ describe('prompt 构造', () => {
     const user = buildUserPrompt(obs);
     expect(user).toContain('第2天');
     expect(user).toContain('夜间');
-    expect(user).toContain('获赠［较重］：赠送电池×1');
+    expect(user).toContain('获赠［较重·恩情］：赠送电池×1');
     expect(user).toContain('dialogue, trade, gift, refuse');
   });
 
@@ -106,11 +106,11 @@ describe('prompt 构造', () => {
     // -0.75 归「严重负面」，两个端点都往更重的一档落。写边界用例时不能
     // 想当然按 |w| 对称来推——这条我第一次就写错了，是靠跑测试才发现的。
     const cases: Array<[number, string]> = [
-      [0.8, '极重'], [0.75, '极重'], [0.749, '较重'],
-      [0.35, '较重'], [0.349, '一般'],
+      [0.8, '极重·恩情'], [0.75, '极重·恩情'], [0.749, '较重·恩情'],
+      [0.35, '较重·恩情'], [0.349, '一般'],
       [0, '一般'], [-0.349, '一般'],
-      [-0.35, '偏负面'], [-0.749, '偏负面'],
-      [-0.75, '严重负面'], [-0.9, '严重负面'],
+      [-0.35, '偏负面·记恨'], [-0.749, '偏负面·记恨'],
+      [-0.75, '严重负面·记恨'], [-0.9, '严重负面·记恨'],
     ];
     for (const [w, word] of cases) {
       const user = buildUserPrompt(observation({ memory: mem(w) }));
@@ -121,6 +121,14 @@ describe('prompt 构造', () => {
     const neg = buildUserPrompt(observation({ memory: mem(-0.9) }));
     expect(pos).not.toBe(neg);
     expect(neg).not.toContain('极重');
+    // 2026-11-26 补的一条：正负两侧都要带**性质**词。
+    // 旧映射只有负向说「负面」，正向只说「重」——模型因此只学得到「负面 → 戒备」
+    // 一个方向（线上实测：负向记忆 5/5 全 refuse，正向记忆动不了）。
+    // 性质词按产品真正产出的记忆种类选：守约/获赠是恩情，毁约/被拒是记恨。
+    expect(pos).toContain('恩情');
+    expect(neg).toContain('记恨');
+    expect(pos).not.toContain('记恨');
+    expect(neg).not.toContain('恩情');
   });
 
   // 回归防线：weight 一旦被丢掉，上面那条会因为找不到［…］而红。

@@ -218,6 +218,15 @@ describe('NPC 代理：安全边界', () => {
     expect(broken).toContain('偏负面');
     expect(broken).not.toContain('较重');
 
+    // 3b. 2026-11-26 补的一条：正负两侧都要带**性质**词。
+    // 旧映射只有负向说「负面」，正向只说「重」——模型因此只学得到「负面 → 戒备」
+    // 一个方向（线上实测：负向记忆 5/5 全 refuse，正向记忆动不了）。
+    // 性质词按产品真正产出的记忆种类选：守约/获赠是恩情，毁约/被拒是记恨。
+    expect(kept).toContain('恩情');
+    expect(broken).toContain('记恨');
+    expect(kept).not.toContain('记恨');
+    expect(broken).not.toContain('恩情');
+
     // 4. 没有记忆时要有明确说法，而不是留空让模型自己编
     const none = await ask('mem-none', []);
     expect(none).toContain('尚无共同经历');

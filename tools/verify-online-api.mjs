@@ -601,33 +601,58 @@ async function decide(clientId, extra = {}) {
     };
   };
 
-  const askMemory = async (memory, tag) => {
-    const t0 = Date.now();
-    const res = await fetch(`${BASE}/api/npc/decide`, {
-      method: 'POST',
-      headers: { ...H, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        clientId: `verify-memory-${tag}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        observation: {
-          npcId: 'alin',
-          archetype: 'ally',
-          traits: { altruism: 0.8, pragmatism: 0.3, aggression: 0.05, loyalty: 0.9, caution: 0.4 },
-          memory,
-          relationship: { player: 40 },
-          goal: '守住这层线路',
-          mood: 0,
-          world: { day: 3, floor: 2, gameMinute: 600, night: false },
-          self: { floor: 2, x: 480, hp: 28 },
-          availableActions: ['dialogue', 'gift', 'refuse'],
-        },
-      }),
-    });
-    const ms = Date.now() - t0;
-    let body = null;
-    try {
-      body = await res.json();
-    } catch { /* ignore */ }
-    return { status: res.status, body, ms, reply: parseReply(body) };
+  // 每个样本最多试几次。
+  //
+  // 上游偶发失败（ModelScope 推理侧的 503/超时）会让「采样不全」直接否掉整条
+  // 联合判据——2026-11-26 那轮线上跑就因为 1 次失败把「三组合一」判成 FAIL，
+  // 而那一轮的三组对照**其实全部成立**。所以补一个**传输层**重试：
+  // 只在「一条都没采到」时重试，且**不看采到的内容**（不是「一看到差异就停」
+  // 那种早停），所以不会影响分布；重试次数记进 notes 与证据文件，不藏。
+  const SAMPLE_ATTEMPTS = 3;
+  let sampleRetries = 0;
+
+  // observation 的额外字段。默认空——记忆段三组对照走的是「玩家身上没有、
+  // NPC 手上也没有」的场景，正向动作（gift/trade）本来就不可达，那是另一条
+  // 判据要测的东西，不在这里塞物品。weight 段是唯一需要它的（见下）。
+  const askMemory = async (memory, tag, extraObservation = {}) => {
+    const attemptOnce = async () => {
+      const t0 = Date.now();
+      const res = await fetch(`${BASE}/api/npc/decide`, {
+        method: 'POST',
+        headers: { ...H, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          clientId: `verify-memory-${tag}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          observation: {
+            npcId: 'alin',
+            archetype: 'ally',
+            traits: { altruism: 0.8, pragmatism: 0.3, aggression: 0.05, loyalty: 0.9, caution: 0.4 },
+            memory,
+            relationship: { player: 40 },
+            goal: '守住这层线路',
+            mood: 0,
+            world: { day: 3, floor: 2, gameMinute: 600, night: false },
+            self: { floor: 2, x: 480, hp: 28 },
+            availableActions: ['dialogue', 'gift', 'refuse'],
+            ...extraObservation,
+          },
+        }),
+      });
+      const ms = Date.now() - t0;
+      let body = null;
+      try {
+        body = await res.json();
+      } catch { /* ignore */ }
+      return { status: res.status, body, ms, reply: parseReply(body) };
+    };
+
+    let last = null;
+    for (let attempt = 1; attempt <= SAMPLE_ATTEMPTS; attempt++) {
+      last = await attemptOnce();
+      if (last.reply) return last;
+      if (attempt < SAMPLE_ATTEMPTS) sampleRetries += 1;
+    }
+    // 三次都没采到 → 记为该组的一次失败（由调用方计数）。
+    return last;
   };
 
   // 三组对照：改的是 summary（记忆正文），断言「决策确实变了」。
@@ -873,7 +898,35 @@ async function decide(clientId, extra = {}) {
 // 极性差 >= 1.0 的口径更硬：均匀随机的意图分布下，4×2 个样本的均值差
 // 标准差约 0.5，要求 1.0 相当于两个标准差，假阳性率降到个位数百分比。
   {
-    const SUMMARY = '玩家答应第2天带保险丝回来。';
+    // ── 这段的文本改过一次，原因记在这里，别当成「本来就该这么写」 ──────────
+    //
+    // 2026-11-26 第一次线上跑这段（带 token，真实模型 Qwen3.8-Flash-Next）：
+    //   base{dialogue:3} 0.00 / pos{refuse:1,dialogue:3} -0.25 / neg{refuse:4} -1.00
+    //   → 极性差 0.75（需 ≥1.00），且 pos < base，单调性不成立 → FAIL。
+    //
+    // 两个**结构性** confound，不是模型不听话：
+    //
+    // ① **文本本身带极性。** 旧 SUMMARY 是「玩家答应第2天带保险丝回来。」——
+    //    一句**没有兑现的承诺**，内容本身就是负向的。把它标成 +0.9（极重），
+    //    模型读到的是「一个很重的、可能落空的承诺」，而不是「一次很重的帮助」。
+    //    于是 pos 侧也没有理由变正，而 neg 侧照样拒绝——测到的其实是**文本的极性**，
+    //    不是 weight 的作用。这一段要测的是「同文本只翻 weight」，那文本就必须
+    //    **本身是中性的**。改成一句中性的既成事实：「玩家第2天拿来了保险丝。」
+    //    （事实在正负两侧一模一样，只有 weight 的正负不同。）
+    //
+    // ② **正向动作没有可达路径。** 观察里 NPC 的物品是空的（`你的物品：（空）`），
+    //    而正向动作只有 `gift`/`trade`——两者都要给出**真实存在的物品**，
+    //    产品的铁律又是「不得声称拥有你没有的物品」。所以一个守规矩的模型
+    //    在这组观察里**根本没法表达正极性**：能表达的只有 dialogue(0) 和 refuse(-1)。
+    //    这不是「模型没学会」，是判据在「无库存」这一前提下不可满足。
+    //    修法：给 weight 段的观察加一件 NPC 真的有的东西（保险丝 ×1）。
+    //    这样 pos 侧可以用 `gift{fuse,1}` 合法地回报，neg 侧用 `refuse` 戒备，
+    //    两端都可达。
+    //
+    // ⚠️ **阈值、样本数、单调性、采样完整性判据一律没动**：仍是 4 样本、
+    //    极性差 ≥1.0、要求 pos ≥ base ≥ neg、三组必须采满。改的只有
+    //    「输入是什么」，改的理由与旧输入都写在这里。
+    const SUMMARY = '玩家第2天拿来了保险丝。';
     // 每组 4 个样本。每次请求用独立 clientId（askMemory 内已带时间戳+随机后缀），
     // 不撞服务端 12 次/分钟的单会话限流。
     const SAMPLES = 4;
@@ -884,10 +937,13 @@ async function decide(clientId, extra = {}) {
     // 证据复核会算出相反结论。所以判据、文案、落盘全部引用这个常量。
     const WEIGHT_POLARITY_GAP_MIN = 1.0;
     const groups = {
-      base: [mem(2, 'promise', SUMMARY, 0)],
-      pos: [mem(2, 'promise', SUMMARY, 0.9)],
-      neg: [mem(2, 'promise', SUMMARY, -0.9)],
+      base: [mem(2, 'fact', SUMMARY, 0)],
+      pos: [mem(2, 'fact', SUMMARY, 0.9)],
+      neg: [mem(2, 'fact', SUMMARY, -0.9)],
     };
+    // NPC 手上有一样东西，正向动作（gift）才是一条合法路径。
+    // 只给这一段——记忆段三组对照的观察保持「双方都没有物品」不变。
+    const WEIGHT_INVENTORY = [{ itemId: 'fuse', quantity: 1 }];
 
     const collected = { base: [], pos: [], neg: [] };
     // 采不到的样本必须计数，不能像以前那样 `if (r.reply)` 静默丢掉。
@@ -900,7 +956,7 @@ async function decide(clientId, extra = {}) {
     const failures = { base: 0, pos: 0, neg: 0 };
     for (const [name, memory] of Object.entries(groups)) {
       for (let i = 0; i < SAMPLES; i++) {
-        const r = await askMemory(memory, `w-${name}-${i}`);
+        const r = await askMemory(memory, `w-${name}-${i}`, { inventory: WEIGHT_INVENTORY });
         if (r.reply) collected[name].push(r.reply);
         else failures[name] += 1;
       }
@@ -975,11 +1031,16 @@ async function decide(clientId, extra = {}) {
         JSON.stringify(
           {
             summary: SUMMARY,
+            memoryKind: 'fact',
+            // 这段观察里 NPC 手上的东西。记进证据，是因为「正极性动作可达」
+            // 依赖它：没有物品，gift/trade 都是违规提案，正极性根本无从表达。
+            inventory: WEIGHT_INVENTORY,
             samplesPerGroup: SAMPLES,
             criterion: { polarityGapMin: WEIGHT_POLARITY_GAP_MIN, requireMonotone: true },
             polarity: { base: mBase, pos: mPos, neg: mNeg, gap: polarityGap, monotone },
             groups: collected,
             distributions: { base: dBase, pos: dPos, neg: dNeg },
+            sampleRetries,
           },
           null,
           2,
@@ -992,6 +1053,9 @@ async function decide(clientId, extra = {}) {
   // 结构性诊断（读 npc-proxy.mjs 得出，HTTP 层观测不到，故记 NOTE 而非 PASS/FAIL）。
   notes.push('服务端 buildMessages 渲染 day/kind/weight强度词/summary；memory.actor 不进提示词（sanitizeObservation 未保留它）。');
   notes.push('现有 decide() 请求体的 recentEvents 不在 sanitizeObservation 白名单内，会被静默丢弃。');
+  notes.push(
+    `采样层传输重试：共补 ${sampleRetries} 次（每个样本最多 ${SAMPLE_ATTEMPTS} 次，只在一条都没采到时重试，不看内容）。`,
+  );
 
   // 同 memory-weight-evidence：无 token 时这里只有「三组 complete:false」，
   // 写出去就是一份看着像证据、实则一条样本都没有的文件。只在真的采到样本时写。

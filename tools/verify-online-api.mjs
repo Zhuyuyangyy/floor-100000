@@ -1160,28 +1160,54 @@ async function decide(clientId, extra = {}) {
 // 所以这里必须让路径**原样上线**：用 `node:http` 的 `request({ path })`，
 // 它不做 URL 规范化。
 //
-// ⚠️ **这条判据能证伪什么、不能证伪什么，必须写清**（九组矩阵实测，三种服务端
-// × 三种载荷）：
+// ⚠️ **这条判据能证伪什么、不能证伪什么，必须写清**（五种服务端实测）。
 //
-//   服务端                          /../ fetch   /../ http.request   /..%2f fetch
-//   原样（normalize + 越界检查）      PASS           PASS               PASS
-//   只删越界检查（保留 normalize）    PASS           PASS               PASS
-//   真朴素（不 normalize、不检查）    **PASS**       **FAIL**           **FAIL**
+// 上一版只测了三行，漏掉了「只删 normalize、保留越界比对」那一格——而那是第二道
+// 保险**唯一单独起作用**的情形（a5 补的）。补上之后矩阵是：
 //
-// 第二行是关键：**只删掉那个 `if` 它照样 PASS**，因为 `normalize` 在它之前就把
-// 前导 `..` 吃掉了（`normalize('/../x')` → `'\x'`）。所以这条判据证伪的是
-// 「能被 `/../` 读出 dist 之外的源码」，**不是**「safePath 的越界检查还在」。
-// 后者是可执行的第二道保险，只有第一道（normalize）失效时才轮到它——而
-// normalize 一失效，这条判据就会 FAIL，所以两道里漏一道时这条只能测到一道。
+//   服务端                              旧(fetch)  旧(http)   现在
+//   原样（normalize + 越界检查）           PASS       PASS      PASS(弱)
+//   只删越界检查（保留 normalize）         PASS       PASS      PASS(弱)
+//   只删 normalize（保留越界检查）         PASS     **SKIP**    **PASS**  ← 修的就是这格
+//   真朴素（不 normalize、不检查）         PASS      FAIL      **FAIL**
 //
-// 换句话说：**这条 PASS 不等于「穿越防护整体有效」**，它只说明「用这个载荷
-// 读不到 dist 外的源码」。要证明第二道保险还在，只能读代码或改代码做对照。
+// 第三行是上一版的错误：服务端**正确拒绝了**穿越（403），旧判据把它读成
+// 「鉴权层就挡住了，没测到路径解析」。可这个服务端**根本没有鉴权层**——
+// `server/npc-proxy.mjs` 里 `401` 出现 0 次，403 只有一处来源（`safePath`
+// 返回 null 的那个分支，`:520`）。静态资源不带 token 也是 200。所以「鉴权层」
+// 那句指向一个不存在的东西，会把「防护生效」读成「没测」。
+//
+// 现在改成拿一条**肯定不存在**的路径做基线，把「没命中」和「没测到」分开。
+// 竞态说明：基线必须先取、载荷后取，两条请求都是同步串行的，中间没有别的写入。
+//
+//   · 载荷正文含源码符号                    → FAIL（命中了已知源码文件）
+//   · 载荷 403、基线可用                    → PASS（路径防护明确拒绝，最强的一档）
+//   · 载荷与基线状态+正文逐字节相同          → PASS(弱)（没命中任何文件）
+//   · 与基线不同但不含已知符号              → FAIL（命中了 dist 外的某个真实文件）
+//   · 基线本身就不是兜底页（401/403/405/5xx）→ SKIP（服务端整体不服务静态，真没测到）
+//
+// 第四档补的是另一个漏判面（我实测）：旧判据只认 `NPC_API_KEY` / `breakerThreshold`
+// 两个符号，于是 `/../package.json`（1270B）、`/../artifacts/…json`（480B）、
+// `/../.env.local`（161B）、`/../README.md`（14124B）在真朴素服务端上都**确实
+// 读到了文件却判 PASS**——因为里面不含那两个符号。符号只能抓 server/npc-proxy.mjs
+// 这一类，抓不到其余配置与文档。跟基线比才能把这一档抓回来。
+//
+// 第五档是我在装置上补测出来的一格，上一版没有：**服务端根本不接 GET 时，
+// 「载荷和基线都一样」会被读成 PASS(弱)**。实测全 405 的服务端上旧写法判 PASS，
+// 而它连一个字节的静态资源都没给过。所以基线必须先是「可用」的（不是 401/403/
+// 405/5xx），比对才成立；否则一律 SKIP。
+//
+// ⚠️ 但**不要**把这读成「穿越防护整体有效」：第二行（只删越界检查）现在还是
+// PASS(弱)，和第一行看不出区别——`normalize` 是第一道，越界检查是第二道，只删
+// 第二道时这条测不到。要证明那一道还在，只能读代码或改代码做对照。
 //
 // 为什么没有补一条「服务端确实收到了 `..`」的旁证：那需要服务端配合（回显
 // `req.url`），而线上那份是部署好的、不能为了验收加口子。所以这里的做法是
-// **让判据自己能 FAIL**——第三行就是它的证伪能力，而不是靠 detail 自证。
-// detail 里打印客户端原始 path，是为了让人能自己重放这一条，不是证明。
+// **让判据自己能 FAIL**，加上基线比对来区分「没命中」和「命中了别的文件」，
+// 而不是靠 detail 自证。detail 里打印客户端原始 path，是给人重放用的。
 const TRAVERSAL_PATH = '/../server/npc-proxy.mjs';
+// 基线：一条肯定不存在的路径。它的响应就是「什么文件都没命中」的形态。
+const BASELINE_PATH = `/__verify_missing_${Date.now()}.html`;
 
 async function rawGet(pathname) {
   const u = new URL(BASE);
@@ -1211,16 +1237,38 @@ async function rawGet(pathname) {
 }
 
 {
+  const base = await rawGet(BASELINE_PATH);
   const r = await rawGet(TRAVERSAL_PATH);
   const txt = r.text;
-  // 401/403 时 txt 里当然不含源码符号——「读不到」可能因为「压根没读到任何
-  // 东西」。要求先拿到一份非空响应正文，且不是鉴权错误页。
+
+  const leaked = txt.includes('NPC_API_KEY') || txt.includes('breakerThreshold');
+  // 基线的意义是「服务端对一条不存在的路径怎么答」。下面这几种状态下它答的
+  // 不是「没命中」，而是「服务端整体不服务静态资源」，比对就失去意义——
+  // 这时必须记 SKIP，不能记 PASS（实测：全 405 的服务端会被「两边一样」
+  // 的写法读成 PASS，而它根本没让人取过任何文件）。
+  const baselineUsable = ![401, 403, 405, 429].includes(base.status) && base.status < 500;
+  const sameAsBaseline = baselineUsable && r.status === base.status && txt === base.text;
+  // 载荷 403 而基线不是 403：路径防护明确拒绝。这是**正面证据**，比「没命中」
+  // 强一档，所以它单独成立时也算 PASS。
+  const refusedByPath = baselineUsable && r.status === 403;
+
+  const detail =
+    `载荷 HTTP ${r.status} ${txt.length}B｜基线 HTTP ${base.status} ${base.text.length}B｜`
+    + (leaked
+      ? '★读到含源码符号的正文'
+      : refusedByPath
+        ? '路径防护明确拒绝（载荷 403、基线非 403）'
+        : sameAsBaseline
+          ? '与兜底基线逐字节相同（没命中任何文件）'
+          : `与基线不同＝命中了 dist 外的真实文件：${JSON.stringify(txt.slice(0, 40))}`);
+
   checkIfMeasured(
     '路径穿越读不到源码',
-    txt.length > 0 && r.status !== 401 && r.status !== 403,
-    !txt.includes('NPC_API_KEY') && !txt.includes('breakerThreshold'),
-    `HTTP ${r.status} ${txt.length}B｜客户端原始 path：${TRAVERSAL_PATH}`,
-    `HTTP ${r.status}，鉴权层就挡住了，没测到路径解析`,
+    baselineUsable,
+    !leaked && (refusedByPath || sameAsBaseline),
+    detail,
+    `基线那条不存在的路径返回 HTTP ${base.status}（载荷 HTTP ${r.status}）——这不是「路径没命中」，`
+      + '是服务端整体不服务静态资源（鉴权/方法限制），比对失去意义，没测到路径解析',
   );
 }
 

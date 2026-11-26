@@ -2734,7 +2734,9 @@ export class GameScene extends Phaser.Scene {
     // and neither one is a wall of text.
     const { width, height } = this.viewSize();
     const panelW = this.panelWidthFor(440);
-    const panelH = this.portraitMode ? 340 : 236;
+    // The panel grew 14px because the detail well below grew 20px: the well
+    // carries a three-line body copy and the buttons below it need their air.
+    const panelH = this.portraitMode ? 340 : 250;
     const cx = width / 2;
     const cy = height / 2;
     const left = cx - panelW / 2;
@@ -2796,24 +2798,41 @@ export class GameScene extends Phaser.Scene {
     const DETAIL_X = this.portraitMode ? left + 12 : GRID_X + 4 * (CELL + GAP) + 8;
     const DETAIL_Y = this.portraitMode ? GRID_Y + 3 * (CELL + GAP) - GAP + 8 : GRID_Y;
     const DETAIL_W = this.portraitMode ? panelW - 24 : left + panelW - 12 - DETAIL_X;
-    const DETAIL_H = this.portraitMode ? 66 : 3 * (CELL + GAP) - GAP;
+    // The detail well is taller than the icon grid. It used to be exactly as
+    // tall as the grid (3 rows of cells), which left no room for a body copy
+    // that wraps: the longest one — "空格子。搜刮、制作或交易都往这里放东西。"
+    // (20 Han characters, 480px at 24px) — needs three lines of 25px once the
+    // wrap is on, and three lines plus a 30px title and a 20px meta line do
+    // not fit in 130px. 150px holds all of it with room to spare.
+    const DETAIL_H = this.portraitMode ? 66 : 150;
     this.invObjects.push(...buildPanelWell(this, DETAIL_X, DETAIL_Y, DETAIL_W, DETAIL_H, depth + 5));
-    // Three rows at 10 / 48 / 76. They used to be at 10 / 28 / 46, which only
+    // Three rows at 8 / 44 / 68. They used to be at 10 / 48 / 76, which only
     // worked because SimSun's glyphs sit inside a much smaller ink box than the
     // em size; a pixel face fills the whole em, so the 30px name ran straight
-    // through the 20px meta line and the body through both.
+    // through the 20px meta line and the body through both. The body moved up
+    // because it is now three lines tall instead of one.
     this.invDetailName = this.add
-      .text(DETAIL_X + 8, DETAIL_Y + (this.portraitMode ? 5 : 10), '', { fontFamily: FONT_FAMILY, fontSize: `${this.portraitMode ? 16 : TYPE.title}px`, color: hex(PALETTE.lightHigh) })
+      .text(DETAIL_X + 8, DETAIL_Y + (this.portraitMode ? 5 : 8), '', { fontFamily: FONT_FAMILY, fontSize: `${this.portraitMode ? 16 : TYPE.title}px`, color: hex(PALETTE.lightHigh) })
       .setDepth(depth + 7);
     this.invDetailMeta = this.add
-      .text(DETAIL_X + 8, DETAIL_Y + (this.portraitMode ? 26 : 48), '', { fontFamily: FONT_FAMILY, fontSize: `${this.portraitMode ? 13 : TYPE.caption}px`, color: hex(TEXT.dim) })
+      .text(DETAIL_X + 8, DETAIL_Y + (this.portraitMode ? 26 : 44), '', { fontFamily: FONT_FAMILY, fontSize: `${this.portraitMode ? 13 : TYPE.caption}px`, color: hex(TEXT.dim) })
       .setDepth(depth + 7);
     this.invDetailBody = this.add
-      .text(DETAIL_X + 8, DETAIL_Y + (this.portraitMode ? 45 : 76), '', { fontFamily: FONT_FAMILY, fontSize: `${this.portraitMode ? 13 : TYPE.body}px`, color: hex(TEXT.primary), wordWrap: { width: DETAIL_W - 16 } })
+      .text(DETAIL_X + 8, DETAIL_Y + (this.portraitMode ? 45 : 68), '', {
+        fontFamily: FONT_FAMILY,
+        fontSize: `${this.portraitMode ? 13 : TYPE.body}px`,
+        color: hex(TEXT.primary),
+        // useAdvancedWrap breaks a too-long line **by character**. Phaser's
+        // default wrap only breaks on spaces, and Chinese has none, so the
+        // 20-character empty-slot copy stayed on one 480px line and sailed
+        // 238px past the panel's right edge. Portrait keeps the default wrap:
+        // its 13px copy is exactly as wide as its wrap box and already fits.
+        wordWrap: { width: DETAIL_W - 16, useAdvancedWrap: !this.portraitMode },
+      })
       .setDepth(depth + 7);
     this.invObjects.push(this.invDetailName, this.invDetailMeta, this.invDetailBody);
 
-    const buttonY = this.portraitMode ? top + panelH - 44 : top + 186;
+    const buttonY = this.portraitMode ? top + panelH - 44 : top + 206;
     this.invObjects.push(...this.panelMouseButton(cx - 68, buttonY, '使用', () => {
       if (this.inventoryOpen) this.onUse();
     }));
@@ -4835,7 +4854,11 @@ export class GameScene extends Phaser.Scene {
     clickShield.on('pointerdown', () => undefined);
     this.shelterInputObjects.push(clickShield);
     this.shelterObjects.push(...buildPanelHeader(this, left, top, panelW, '夜间安排 · 宿舍', UI.good, depth + 5));
-    this.shelterObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 44, depth + 5));
+    // The well is 72px tall, not 44px: the stress line quotes the newest diary
+    // entry, which is a whole Chinese sentence, and with the character-level
+    // wrap below the longest real entry needs three lines of 20px. The old
+    // 44px well held exactly two, so the third line had nowhere to go.
+    this.shelterObjects.push(...buildPanelWell(this, left + 12, top + 28, panelW - 24, 72, depth + 5));
     const stress = Math.round(state.player.stress ?? 20);
     const latest = recentDiary(state, 1)[0];
     this.shelterObjects.push(
@@ -4843,11 +4866,19 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT_FAMILY,
         fontSize: `${TYPE.caption}px`,
         color: hex(stress >= 70 ? TEXT.warn : TEXT.primary),
-        wordWrap: { width: panelW - 48 },
-        maxLines: 2,
+        // Phaser's default wrap only breaks on spaces, and Chinese has none,
+        // so the quoted diary sentence stayed on one line: 460px against a
+        // 452px wrap box (8px over), and 520px / 56px past the well's right
+        // edge for the longest real entry — it left the panel. The
+        // character-level wrap breaks it at the wrap width instead.
+        wordWrap: { width: panelW - 48, useAdvancedWrap: true },
+        // maxLines used to be 2, which silently deleted the third line — a
+        // whole sentence — instead of showing it. The well now holds three
+        // lines, so the cap matches what can actually be shown.
+        maxLines: 3,
       }).setOrigin(0, 0).setDepth(depth + 6),
     );
-    const rowsTop = top + 80;
+    const rowsTop = top + 110;
     for (const [index, row] of SHELTER_ROWS.entries()) {
       const objects = buildListRow(this, left + 16, rowsTop + index * 26, panelW - 32, depth + 6, {
         label: row.label,

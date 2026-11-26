@@ -10,6 +10,8 @@
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 
 const BASE = process.env.ONLINE_BASE ?? 'https://studio-a1578804454-floor-100000.api-inference.modelscope.net';
 const TOKEN = process.env.MS_TOKEN ?? '';
@@ -1142,16 +1144,67 @@ async function decide(clientId, extra = {}) {
 }
 
 // ── 6. 路径穿越 ───────────────────────────────────────────────────────────
+//
+// ⚠️ 这一条**不能用 `fetch`**（a5 实测，我在桩上复现）。原因在 HTTP 客户端层，
+// 不在服务端：
+//
+//   fetch(`${BASE}/../server/npc-proxy.mjs`)  → 服务端收到 "/server/npc-proxy.mjs"
+//   http.request({ path: '/../server/npc-proxy.mjs' }) → 收到 "/../server/npc-proxy.mjs"
+//
+// WHATWG URL 解析在客户端就把 `/../` 折掉了，**穿越载荷从来没发出去过**。
+// 于是这条判据答的是「`/server/npc-proxy.mjs` 取不到源码」，而要问的是
+// 「穿越取不到」。实测：把服务端 `safePath` 的越界比对整段删掉（模拟完全没有
+// 防护），用 `fetch` 跑这条照样 PASS——因为它根本没越界，取的是 `dist` 里的
+// 正常路径，命不中就读不到那个符号。
+//
+// 所以这里必须让路径**原样上线**：用 `node:http` 的 `request({ path })`，
+// 它不做 URL 规范化。为此还需要一个旁证，证明服务端确实收到了带 `..` 的原始
+// 路径——否则下一个人换了客户端，这条又会静默退化成现在这个假绿。
+//
+// 为什么换成 `http.request` 之后能真正测到：服务端 `safePath` 里
+// `resolve(join(DIST_ROOT, normalize(decoded)))` —— `normalize('/../x')` 会把
+// 前导 `..` 吃掉变成 `\x`，所以**删掉越界比对也不会越界**；真正会越界的是
+// 不带 `normalize` 的写法。两种都要能区分，所以这里同时记下状态码与正文长度，
+// 并把「服务端收到了 `..`」写进 detail，让判据本身可被质疑。
+const TRAVERSAL_PATH = '/../server/npc-proxy.mjs';
+
+async function rawGet(pathname) {
+  const u = new URL(BASE);
+  const doRequest = u.protocol === 'https:' ? httpsRequest : httpRequest;
+  return new Promise((resolvePromise, rejectPromise) => {
+    const req = doRequest(
+      {
+        protocol: u.protocol,
+        hostname: u.hostname,
+        port: u.port || (u.protocol === 'https:' ? 443 : 80),
+        path: pathname,          // ← 原样，不经过 URL 规范化
+        method: 'GET',
+        headers: { ...H },
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => resolvePromise({
+          status: res.statusCode ?? 0,
+          text: Buffer.concat(chunks).toString('utf-8'),
+        }));
+      },
+    );
+    req.on('error', rejectPromise);
+    req.end();
+  });
+}
+
 {
-  const r = await get('/../server/npc-proxy.mjs');
-  const txt = await r.text();
+  const r = await rawGet(TRAVERSAL_PATH);
+  const txt = r.text;
   // 401/403 时 txt 里当然不含源码符号——「读不到」可能因为「压根没读到任何
   // 东西」。要求先拿到一份非空响应正文，且不是鉴权错误页。
   checkIfMeasured(
     '路径穿越读不到源码',
     txt.length > 0 && r.status !== 401 && r.status !== 403,
     !txt.includes('NPC_API_KEY') && !txt.includes('breakerThreshold'),
-    `HTTP ${r.status} ${txt.length}B`,
+    `HTTP ${r.status} ${txt.length}B｜客户端原始 path：${TRAVERSAL_PATH}`,
     `HTTP ${r.status}，鉴权层就挡住了，没测到路径解析`,
   );
 }
@@ -1285,8 +1338,9 @@ console.log(
         + '（「限流前先有成功请求」看序列里有没有 200；「同一记忆两次请求都成功」看是不是 HTTP 200/200）。'
         + '② 维修段和注入段各自的判据（那几条的 detail 里写着具体 intent）若 PASS，'
         + '说明那几次确实拿到了回复。'
-        + '注意这两条都不成立时**不能反推 token 坏**——维修段第 2、3 次调用和记忆段的回复都不在这两条里，'
-        + '它们成功也不会让这两条变绿')
+        + '注意这两条都不成立时**不能反推 token 坏**——维修段第 2、3 次调用不在任何一条里；'
+        + '记忆段那 44 次里除了噪声基线用的 2 次，其余 42 次也不在这两条里。'
+        + '它们成功也都不会让这两条变绿')
     : `｜模型回复 ${meta.modelSamplesObserved} 次`),
 );
 
@@ -1453,8 +1507,9 @@ if (!CAN_WRITE_CHECKLIST && FORCED_WITHOUT_DIR) {
       console.log('       任一成立说明那一批真的拿到了 200。（这两条只看 status，不看 decisionSource。）');
       console.log('    ② 维修段和注入段各自的判据若 PASS（那几条的 detail 里写着具体 intent），');
       console.log('       说明那几次确实拿到了回复。');
-      console.log('    这两条都不成立**不能反推 token 坏**：维修段第 2、3 次调用和记忆段的回复都不在这两条里，');
-      console.log('    它们成功也不会让这两条变绿。为什么没回，要看那几段各自的 FAIL 明细。');
+      console.log('    这两条都不成立**不能反推 token 坏**：维修段第 2、3 次调用不在任何一条里，');
+      console.log('    记忆段那 44 次里除了噪声基线用的 2 次、其余 42 次也不在这两条里，');
+      console.log('    它们成功也都不会让这两条变绿。为什么没回，要看那几段各自的 FAIL 明细。');
     }
     console.log('    判据清单写出来了，但它记录的是「拿不到数据」，不是「产品不合格」。');
     console.log('    拿这份去覆盖已有证据会毁掉真数据——api-verify-meta.json 里 modelSamplesObserved: 0 可查。');

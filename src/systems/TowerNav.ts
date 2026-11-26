@@ -1,4 +1,5 @@
 import { SECTOR_COUNT, SECTOR_SIZE, TOTAL_FLOORS, canEnter, sectorOf, sectorRange, type Access } from '../core/tower';
+import { DESIGN_HEIGHT } from '../core/design';
 import type { GameState } from '../core/gameTypes';
 import { ALIN_REPAIR_GATE, isAlinRepairGateOpen } from '../data/floorGates';
 
@@ -12,22 +13,41 @@ import { ALIN_REPAIR_GATE, isAlinRepairGateOpen } from '../data/floorGates';
 
 export type NavLevel = 'overview' | 'sector' | 'floor';
 
-// Overview: one row per sector. The row pitch is 3px and the strip is inset
-// from the top of the viewport, so all 100 rows sit inside the 360px canvas at
+// Overview: one row per sector. The row pitch is 6px and the strip is inset
+// from the top of the viewport, so all 100 rows sit inside the 720px canvas at
 // the default 1x zoom with the fixed HUD bands clear of them — the tower is
-// meant to be taken in at a glance before zooming in, and 4px rows overflowed
-// by 40px, which cut the last ten sectors off behind a drag.
+// meant to be taken in at a glance before zooming in.
+//
+// The pitch used to be 3px, which was right for the 640x360 canvas this game
+// was drawn on before the resolution doubled, and wrong for this one: 100 rows
+// then covered only 300 of the canvas' 720 pixels, so the lower half of the
+// screen was empty sky (docs/UI_AUDIT_R3.md D-10). At 6px the rows are 600
+// units tall — 83% of the canvas — and the tower finally reads as a tower.
 //
 // Integer geometry matters: pixelArt rendering of fractional fillRects produces
 // uneven edges, so both the pitch and the inset stay whole numbers.
-export const OVERVIEW_ROW_H = 3;
-export const CONTENT_TOP = 36;
+export const OVERVIEW_ROW_H = 6;
+// The fixed HUD's top band: the title (32px type at y=8) and the status line
+// (22px type at y=26) both live in it, so the content starts below them and
+// the summit row is not drawn under the text.
+export const CONTENT_TOP = 66;
 // Sector view: 1000 floors in a grid, 20 across x 50 down.
 export const SECTOR_COLS = 20;
 export const SECTOR_ROWS = SECTOR_SIZE / SECTOR_COLS;
 export const SECTOR_CELL = 12;
 
-export const VIEW_H = 360;
+// The camera's visible height in world units at 1x. Phaser shows
+// `camera.height / zoom` world units, and the canvas is 1280x720
+// (src/core/design.ts), so this has to be 720.
+//
+// It used to be 360 — the height of the 640x360 canvas this game was drawn on
+// before the resolution doubled (docs/UI_AUDIT_R3.md D-10). With the camera
+// 720 tall, a VIEW_H of 360 made the whole map believe it had half a screen:
+// it laid 100 sector rows into the top half of the canvas, centred the cursor
+// 180 units above the middle, and clamped scrolling against a band that was
+// not the one on screen. It is read from DESIGN_HEIGHT so the two cannot drift
+// apart again.
+export const VIEW_H = DESIGN_HEIGHT;
 // The fixed HUD occupies CONTENT_TOP at the top of the viewport and HUD_BOTTOM at
 // the bottom. Scroll bounds are computed against the usable band between them.
 // Without this the sector grid could be scrolled only to where its lowest rows sat
@@ -116,13 +136,16 @@ export function scrollForCentre(worldY: number): number {
 //   max = content    - VIEW_H/2 - (VIEW_H/2 - HUD_BOTTOM)/zoom
 //
 // At 1x on the overview both collapse to 0, which is why the whole tower fits
-// with nothing to scroll.
+// with nothing to scroll: the content is shorter than the visible height, so
+// the bottom bound comes out negative and is pulled up to the top bound.
 function scrollBounds(contentHeightValue: number, zoom: number): { min: number; max: number } {
   const half = VIEW_H / 2;
-  return {
-    min: CONTENT_TOP - half + (half - CONTENT_TOP) / zoom,
-    max: contentHeightValue - half - (half - HUD_BOTTOM) / zoom,
-  };
+  const min = CONTENT_TOP - half + (half - CONTENT_TOP) / zoom;
+  const max = contentHeightValue - half - (half - HUD_BOTTOM) / zoom;
+  // The content can be shorter than the usable band, in which case the bottom
+  // bound is negative: there is nothing to scroll to, and the range collapses
+  // onto the top bound rather than inverting.
+  return { min, max: Math.max(min, max) };
 }
 
 // Scroll is clamped to the content so a drag can never pull the tower off
@@ -149,7 +172,13 @@ export function openTower(access: Access): TowerNavState {
     zoom: ZOOM_MIN,
     scroll: 0,
   };
-  return { ...base, scroll: centredOn(base, sector * OVERVIEW_ROW_H + OVERVIEW_ROW_H / 2) };
+  // sectorCentreY() is the one place that knows where a sector sits: the strip
+  // is inset by CONTENT_TOP and runs upward (sector 0 at the base). The old
+  // inline `sector * OVERVIEW_ROW_H` measured from world y=0 and assumed
+  // sector 0 was at the top, so it pointed at the wrong row — harmless at 1x,
+  // where the scroll is clamped to 0 anyway, but wrong the moment the map
+  // opens zoomed in.
+  return { ...base, scroll: centredOn(base, sectorCentreY(sector)) };
 }
 
 export function zoomBy(state: TowerNavState, direction: 1 | -1): TowerNavState {

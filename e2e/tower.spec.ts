@@ -96,6 +96,26 @@ async function readView(page: Page): Promise<{ top: number; height: number; cont
   }) as Promise<{ top: number; height: number; content: number }>;
 }
 
+// What the camera is actually showing, straight from Phaser. The nav's own
+// view numbers have to agree with the camera that draws them — that is exactly
+// the assumption the 640x360-era VIEW_H broke.
+async function readCameraView(page: Page): Promise<{ top: number; height: number }> {
+  return page.evaluate(() => {
+    const g = (
+      window as unknown as {
+        __PHASER_GAME__?: {
+          scene: {
+            getScene: (key: string) => { cameras: { main: { worldView: { y: number; height: number } } } } | null;
+          };
+        };
+      }
+    ).__PHASER_GAME__;
+    const scene = g?.scene.getScene('TowerOverview');
+    if (!scene) throw new Error('no tower scene');
+    return { top: scene.cameras.main.worldView.y, height: scene.cameras.main.worldView.height };
+  }) as Promise<{ top: number; height: number }>;
+}
+
 // The colour each cell of the sector in view is drawn in.
 async function readCells(page: Page): Promise<Array<{ floor: number; state: string }>> {
   return page.evaluate(() => {
@@ -171,14 +191,30 @@ test('M opens the tower overview centred on the sector the player is in', async 
   const view = await readView(page);
   expect(view.top).toBeLessThanOrEqual(0);
   expect(view.top + view.height).toBeGreaterThanOrEqual(view.content);
-  expect(view.content).toBeLessThanOrEqual(360); // 100 rows inside the canvas
+  // The tower has to fill the screen it is drawn on.
+  //
+  // The old assertion here was `content <= 360`, which was written for the
+  // 640x360 canvas this game was drawn on before the resolution doubled. On
+  // the 1280x720 canvas it only said "the strip is shorter than half a
+  // screen" — which is the bug itself: 100 sector rows were drawn in
+  // y=36..336 and the lower half of the screen was empty sky. The invariant
+  // now is canvas-independent: the whole tower fits in what the camera shows
+  // (one look, no dragging) AND occupies at least 80% of it (no empty lower
+  // half).
+  expect(view.content).toBeLessThanOrEqual(view.height);
+  expect(view.content / view.height).toBeGreaterThanOrEqual(0.8);
+  // And the nav's world-space view has to be the camera's, or picking would be
+  // off by the same 360 units the layout was.
+  const cam = await readCameraView(page);
+  expect(cam.height).toBeCloseTo(view.height, 3);
+  expect(cam.top).toBeCloseTo(view.top, 3);
   await page.screenshot({ path: 'e2e/screenshots/20-tower-overview.png' });
 
   expect(await hasVisibleText(page, '塔楼总览')).toBe(true);
   expect(await hasVisibleText(page, '当前 3 层')).toBe(true);
   // All three reference points are on screen: the start, where the player is,
   // and the summit they are climbing toward. The summit used to be unmarked — at
-  // 3px a row the last sector is indistinguishable from the nine above it, and it
+  // 6px a row the last sector is indistinguishable from the nine above it, and it
   // is not even in the every-tenth label set.
   expect(await hasVisibleText(page, '起点 第1层')).toBe(true);
   expect(await hasVisibleText(page, '终点 第100000层')).toBe(true);
@@ -198,6 +234,9 @@ test('the whole tower is visible from any starting sector', async ({ page }) => 
   const view = await readView(page);
   expect(view.top).toBeLessThanOrEqual(0);
   expect(view.top + view.height).toBeGreaterThanOrEqual(view.content);
+  // Same fill as from the bottom of the tower: the tower is the tower from
+  // wherever in it the player stands.
+  expect(view.content / view.height).toBeGreaterThanOrEqual(0.8);
   await page.screenshot({ path: 'e2e/screenshots/23-tower-overview-high.png' });
 });
 

@@ -149,8 +149,8 @@ export class TowerOverviewScene extends Phaser.Scene {
   private dragging = false;
   private dragMoved = false;
   private dragStart = { x: 0, y: 0 };
-  // Sector under the pointer on the overview, or null. 3px rows are too small to
-  // aim at reliably, so the readout names the target before the click commits.
+  // Sector under the pointer on the overview, or null. 6px rows are still small
+  // to aim at reliably, so the readout names the target before the click commits.
   private hoverSector: number | null = null;
 
   // Per-frame input guard (GHI-03 m9): Phaser can deliver one keydown several
@@ -369,16 +369,16 @@ export class TowerOverviewScene extends Phaser.Scene {
       const summary = describeSector(s);
       const visited = this.isSectorVisited(s);
       g.fillStyle(tierColor(summary.tiers[0].tier), 1);
-      // 2px of fill with a 1px gap keeps 100 rows countable as a striped tower
+      // 5px of fill with a 1px gap keeps 100 rows countable as a striped tower
       // instead of one solid block where adjacent sectors share a tier.
       g.fillRect(STRIP_X, y, STRIP_W, OVERVIEW_ROW_H - 1);
-      // A lit top edge on every row: at 3px a row there is no room for shading,
-      // but one lighter pixel on top turns a flat stripe into a ledge, and it is
-      // what stops the overview reading as a bar chart.
+      // A lit top edge on every row: at 6px a row there is still no room for
+      // shading, but one lighter pixel on top turns a flat stripe into a ledge,
+      // and it is what stops the overview reading as a bar chart.
       g.fillStyle(PALETTE.dust, 0.3);
       g.fillRect(STRIP_X, y, STRIP_W, 1);
       if (visited) {
-        // A full-height explored stripe along the left edge of the strip: at 3px
+        // A full-height explored stripe along the left edge of the strip: at 6px
         // per sector anything narrower is invisible.
         g.fillStyle(COLOR_EXPLORED, 1);
         g.fillRect(STRIP_X, y, 8, OVERVIEW_ROW_H - 1);
@@ -398,7 +398,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.cursorGfx.strokeRect(STRIP_X - 3, ky - 1, STRIP_W + 6, OVERVIEW_ROW_H + 2);
 
     // The two ends of the climb. The summit in particular has to be marked: it
-    // is the goal the whole tower is arranged around, and at 3px a row the last
+    // is the goal the whole tower is arranged around, and at 6px a row the last
     // sector is otherwise indistinguishable from the nine below it — it is not
     // even in the every-tenth label set. Drawn after the current-sector marker so
     // they stay visible when the player is standing on one of them.
@@ -419,7 +419,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     this.drawEndpoints();
   }
 
-  // 起点 / 终点 tags in the right margin. At 3px a row neither end can carry its
+  // 起点 / 终点 tags in the right margin. At 6px a row neither end can carry its
   // own text, and the summit is the one thing a player must be able to find
   // without counting rows.
   private drawEndpoints(): void {
@@ -438,7 +438,7 @@ export class TowerOverviewScene extends Phaser.Scene {
     }
   }
 
-  // At 3px per row no row can carry its own label, so every tenth sector is
+  // At 6px per row no row can carry its own label, so every tenth sector is
   // numbered instead. Those anchors are what a player reads the tower by, and
   // they are what makes "all 100 sectors are on screen" verifiable by eye.
   // Positions only — redraw() owns the visibility, because this is not called at
@@ -562,7 +562,7 @@ export class TowerOverviewScene extends Phaser.Scene {
 
     // Bottom-centre readout. In the sector view it is the sector's composition;
     // on the overview it is whatever the pointer is over, which is what makes a
-    // 3px row pickable — you see the sector named before you commit to it.
+    // 6px row pickable — you see the sector named before you commit to it.
     if (level === 'sector' || level === 'floor') {
       this.tierText.setVisible(true);
       const summary = describeSector(this.nav.sector);

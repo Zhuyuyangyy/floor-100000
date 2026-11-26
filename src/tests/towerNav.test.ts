@@ -29,6 +29,7 @@ import {
   zoomBy,
 } from '../systems/TowerNav';
 import { SECTOR_COUNT, TOTAL_FLOORS, sectorRange } from '../core/tower';
+import { DESIGN_HEIGHT } from '../core/design';
 import type { GameState } from '../core/gameTypes';
 import { ALIN_REPAIR_GATE_FLAG } from '../data/floorGates';
 
@@ -81,6 +82,19 @@ describe('openTower', () => {
     // floor 100000 -> sector 99, the last one.
     const nav = openTower(accessOf(stateAt(TOTAL_FLOORS)));
     expect(nav.sector).toBe(99);
+  });
+
+  it('opens with the player\'s own sector in view', () => {
+    // The strip runs upward — sector 0 is at the base, sector 99 at the summit —
+    // so the row the player stands on is not simply `sector * row height`.
+    // Whichever sector the run is on, that sector has to be on screen the
+    // moment the map opens.
+    for (const floor of [1, 50001, TOTAL_FLOORS]) {
+      const nav = openTower(accessOf(stateAt(floor)));
+      const top = viewTop(nav.scroll, nav.zoom);
+      expect(top).toBeLessThanOrEqual(sectorCentreY(nav.sector));
+      expect(top + VIEW_H / nav.zoom).toBeGreaterThanOrEqual(sectorCentreY(nav.sector));
+    }
   });
 });
 
@@ -140,14 +154,38 @@ describe('level transitions', () => {
 
 // The overview's whole job is "see the entire tower at a glance, then zoom in".
 // That only holds if all 100 sectors fit inside the viewport at the default
-// zoom, with room left for the fixed HUD bands top and bottom.
+// zoom, with room left for the fixed HUD bands top and bottom — and if the
+// tower actually fills that viewport. A tower drawn in the top half of the
+// screen reads as a bar chart, not a tower (docs/UI_AUDIT_R3.md D-10).
 describe('the overview fits the whole tower', () => {
+  it('measures the camera by the canvas height, not the 640x360 of the old one', () => {
+    // The root cause of the empty lower half: VIEW_H used to be 360 while the
+    // camera is 720 tall, so every world-space conversion in this file was
+    // computed against half a screen.
+    expect(VIEW_H).toBe(DESIGN_HEIGHT);
+    expect(VIEW_H).toBe(720);
+  });
+
   it('lays 100 sector rows out inside the viewport at 1x', () => {
     expect(overviewHeight()).toBeLessThanOrEqual(VIEW_H);
     // Every row is reachable: the strip starts below the top HUD band and ends
     // above the bottom one.
     expect(CONTENT_TOP).toBeGreaterThan(0);
     expect(overviewHeight()).toBeLessThan(VIEW_H);
+  });
+
+  it('fills the screen instead of huddling in the top half', () => {
+    // The tower strip itself (100 rows), not counting the HUD inset above it.
+    const rows = SECTOR_COUNT * OVERVIEW_ROW_H;
+    expect(rows / VIEW_H).toBeGreaterThanOrEqual(0.8);
+    // And the whole content, inset included.
+    expect(overviewHeight() / VIEW_H).toBeGreaterThanOrEqual(0.8);
+  });
+
+  it('starts below the fixed HUD band, so the summit row is not under the title', () => {
+    // The title (32px type at y=8) and the status line (22px type at y=26)
+    // reach down to roughly y=60, so the strip has to start below that.
+    expect(CONTENT_TOP).toBeGreaterThanOrEqual(60);
   });
 
   it('shows the bottom of the tower from the top of the viewport at 1x', () => {
@@ -166,6 +204,46 @@ describe('the overview fits the whole tower', () => {
 
   it('keeps integer row geometry so pixelArt stays crisp', () => {
     expect(Number.isInteger(OVERVIEW_ROW_H)).toBe(true);
+    expect(Number.isInteger(CONTENT_TOP)).toBe(true);
+  });
+});
+
+// The world-space ranges the camera is clamped against. These are the numbers
+// that decide whether the tower can be dragged out from under the fixed HUD.
+describe('the world-space ranges', () => {
+  it('the visible world range at 1x is the whole canvas', () => {
+    const nav = openTower(accessOf(stateAt(1)));
+    expect(viewTop(nav.scroll, nav.zoom)).toBe(0);
+    expect(viewTop(nav.scroll, nav.zoom) + VIEW_H / nav.zoom).toBe(VIEW_H);
+  });
+
+  it('the overview scroll range is closed at 1x and opens once zoomed in', () => {
+    const nav = openTower(accessOf(stateAt(1)));
+    expect(scrollBy(nav, -99999)).toBe(0);
+    expect(scrollBy(nav, 99999)).toBe(0);
+    const zoomed = zoomBy(nav, 1); // 1.5x
+    expect(scrollBy(zoomed, -99999)).toBeLessThan(0);
+    expect(scrollBy(zoomed, 99999)).toBeGreaterThan(0);
+  });
+
+  it('picks every one of the 100 sectors, row by row', () => {
+    const nav = openTower(accessOf(stateAt(1)));
+    for (let sector = 0; sector < SECTOR_COUNT; sector++) {
+      // The strip runs upward, so sector 99 is the top row and sector 0 the
+      // bottom one.
+      const rowTop = CONTENT_TOP + (SECTOR_COUNT - 1 - sector) * OVERVIEW_ROW_H;
+      expect(pickSectorAt(nav, rowTop)).toBe(sector);
+      expect(pickSectorAt(nav, rowTop + OVERVIEW_ROW_H - 1)).toBe(sector);
+      // The first pixel of the next row down belongs to the sector below it.
+      if (sector > 0) expect(pickSectorAt(nav, rowTop + OVERVIEW_ROW_H)).toBe(sector - 1);
+    }
+  });
+
+  it('the sector grid fits in one look at 1x too', () => {
+    const nav = enterSector(0); // floors 1..1000
+    expect(sectorHeight()).toBeLessThanOrEqual(VIEW_H);
+    expect(scrollBy(nav, -99999)).toBe(0);
+    expect(scrollBy(nav, 99999)).toBe(0);
   });
 });
 

@@ -67,9 +67,20 @@ a1-ai-action / a2-gameplay / a3-visual / a5-qa-ci / a7-deliverables
 **没有代码待办。** A1 自己反复承诺「tools 停手」又改了多次，
 现在由我接手冻结；`tools/verify-online-api.mjs` 不再接受任何改动（含注释和文案）。
 
+> ⚠️ **2026-11-26 按作者授权解冻过一次**（`cb51e52`）：weight 段那条判据有两处**结构性**
+> confound（正向动作在「无库存」下不可达、summary 自带极性），
+> 加上上游偶发失败会把整条联合判据否掉。解冻的内容只有三处：
+> **weight 段的输入**（中性 summary + 补一件 NPC 真有的物品）、
+> **采样层的传输重试**（只在一条都没采到时重试、不看内容）、
+> 以及**新增的证据字段**（把用到的 summary 与库存写进证据文件）。
+> **阈值、样本数、单调性、采样完整性判据一律没动**，
+> 判据名 43 个（NUL 连接 md5 `c7bb10f4…`）与调用点 47 均未变，已核对。
+> **产品侧的改动（weight 渲染补性质词）在 `server/npc-proxy.mjs` 与 `src/ai/prompt.ts`，
+> 不在 tools/ 里**——那两份才是「记忆影响决策」这个特性真正要修的地方。
+
 **唯一挂着的活：public 之后真跑线上。** 这不是 A1 独有的，见文末 P0。
 > ✅ **2026-11-26 已完成**：空间本来就是 public，带 token 的正式验收已跑通
-> （40 条判据，38 通过 / 2 FAIL），六份产物落 `artifacts/online-verify/`。
+> （40 条判据，39 通过 / 1 FAIL，**记忆段 8 条全绿**），六份产物落 `artifacts/online-verify/`。
 > 「路径穿越判据落在哪一档」也查实了：**线上拿到的是网关 400 错误页，不是源码**
 > （逐字查过无 `NPC_API_KEY`），这条是**判据假阳性**。md5 已更新。见文末 P0。
 
@@ -319,30 +330,36 @@ a1-ai-action / a2-gameplay / a3-visual / a5-qa-ci / a7-deliverables
 | 11:0x | 修法（`7a9b486`）：`buildMessages` 加「记忆决策」契约 + 守护测试 | **改产品，不改判据**；规则层照样能否决 |
 | 11:07–11:08 | git 同步到创空间仓库 → `POST .../deploy` → 盯 build/run 日志 | `status=Running`；`[npc-proxy] listening on 0.0.0.0:7860`，模型 `Qwen/Qwen3.8-Flash-Next` |
 | 11:14 | 带 token 跑 API 专用地址，**六份产物落 `artifacts/online-verify/`** | **40 条判据，38 通过 / 2 FAIL**；记忆段 **7 PASS / 1 FAIL** |
+| 16:0x | 定位 weight 专项的根因：**weight 渲染不对称**（只有负向两档明说「负面」，正向两档只说「重」）→ 模型只学得到「负面 → 戒备」；另外正向动作在「无库存」下**不可达** | 三层原因全在产品/输入侧，不在接线 |
+| 16:1x | 修法（`cb51e52`）：**weight 渲染补性质词**（`·恩情` / `·记恨`，服务端与直连链路两份同步）；**weight 段观察补一件 NPC 真有的物品**；**weight 段 summary 换成中性事实**；采样层补**传输重试** | 判据**阈值、样本数、单调性、采样完整性一律没动**；判据名 43 个（NUL 连接 md5 `c7bb10f4…`）与调用点 47 均未变 |
+| 16:3x | git 同步 → `POST .../deploy` → Running（产物 `index-Dzve_6tz.js`） | 线上已是修好的版本 |
+| 16:58 | 带 token 重跑，**六份产物重新落盘** | **40 条判据，39 通过 / 1 FAIL**；**记忆段 8 条全绿**（含 weight 专项：极性差 1.50 ≥ 1.00、单调=true） |
 
 **证据级产物**（`hasToken:true` / `forceWrite:false` / `modelSamplesObserved:3`）：
 
 | 文件 | md5 |
 |---|---|
-| `api-verify.json`（40 条） | `7bbdc073085d1368fc4bf92cbe07613e` |
-| `api-verify-meta.json` | `55bb7e8cce868e4e357b7f4f8d539387` |
-| `api-verify-notes.json` | `76dea28c6d8da550370c1568a59db2d8` |
-| `real-model-runs.json` | `df4a9e1cfec2b1728aaf26f7c1856f94` |
-| `memory-evidence.json` | `45de0ccdd08cee28f7a3d7995755dcbc` |
-| `memory-weight-evidence.json` | `1b02d07e75b684f0512811a43ec881cf` |
+| `api-verify.json`（40 条） | `9437d7d35e33dd9dd27bae2189011b84` |
+| `api-verify-meta.json` | `35e1054cd3fb9e583e2712fc6ca50645` |
+| `api-verify-notes.json` | `f1850e71f98e0e84b74ab5f5c6ad40ab` |
+| `real-model-runs.json` | `07e5f1093bdf507c576a9be2ecd8264c` |
+| `memory-evidence.json` | `f605612abdfb68bafea52fc9c3078b6f` |
+| `memory-weight-evidence.json` | `a4f629355d7264d08332f6bf5d047e32` |
 
-**上一版（2026-11-25 23:36）**是 32 条基础段、md5 `cb827d5a…`、**不含记忆段**——
-那份 md5 仍然出现在 `tools/verify-online-api.mjs` 的注释里，那是它记的
+**更早的两版**：2026-11-26 11:14 是 40 条 / 38 通过 / 2 FAIL（md5 `7bbdc073…`，记忆段 7 绿 1 红）；
+2026-11-25 23:36 是 32 条基础段、md5 `cb827d5a…`、**不含记忆段**。
+那两个旧 md5 仍然出现在 `tools/verify-online-api.mjs` 的注释里，那是它记的
 「一次 token 拼错把权威产物覆盖成假产物」那次事故的**历史现场**，不是当前值。
-**脚本是冻结的，不接受任何改动**，所以由 `artifacts/online-verify/README.md` 解释。
 
-**两条 FAIL 都在判据侧，都已查实：**
+**唯一剩下的 FAIL 在判据侧，已查实：**
+**路径穿越**——线上拿到的是**网关自己的 400 错误页**（225B，Tengine），
+逐字查过**不含 `NPC_API_KEY`、不含源码**；判据只比「与基线不同」，
+把「400 错误页 vs 200 首页」读成了「命中源码」。**产品没有泄漏。**
 
-1. **路径穿越**：线上拿到的是**网关自己的 400 错误页**（225B，Tengine），
-   逐字查过**不含 `NPC_API_KEY`、不含源码**；判据只比「与基线不同」，
-   把「400 错误页 vs 200 首页」读成了「命中源码」。**产品没有泄漏。**
-2. **weight 专项**：正向极性在「无库存」条件下**无可达动作**
-   （`gift/trade` 需真有物品才能合法表达）；负向方向清楚（`neg` 4/4 全 `refuse`）。
+**weight 专项绿了，但要按实际口径说**（见 P0.5）：本轮差异**全部来自负向档**
+（负向让模型 3/4 转 `refuse`），正向档与中性档没有可观测差异（都是 `gift`——
+那句 summary 本身就是一次帮助）。它证明的是「**weight 的负面档能把态度从回报推向戒备**」，
+**不是**「weight 能双向驱动态度」。
 
 ### P0.7 — 主线浏览器回归的实测状态（2026-11-26 复跑）
 
@@ -360,15 +377,17 @@ a1-ai-action / a2-gameplay / a3-visual / a5-qa-ci / a7-deliverables
 ### P0.5 — 记忆段现在的口径（**可以写了，但必须带上过程**）
 > **记忆改变了模型的行为，而不只是它说的话。**
 > 三组对照全部成立（极性总增益 2.00 ≥ 1.50）、锚点回响命中 4 次、
-> 对照组零锚点成立（对照 0 次 / 治疗 4 次 → 锚点确实有区分力）。
+> 对照组零锚点成立（对照 0 次 / 治疗 4 次 → 锚点确实有区分力）、
+> weight 专项极性差 1.50 ≥ 1.00 且单调成立 —— **记忆段 8 条全绿**。
 
-**但这句话必须配上过程**：第一次线上跑是 6 条红 → 定位到提示词没把记忆写成决策因子 →
-改产品 → 重新部署 → 7 条绿。**不说这层过程，就把一次修复说成了一次发现。**
+**但这句话必须配上过程**：第一次线上跑是 6 条红 → 定位到**产品**（提示词没把记忆写成
+决策因子、weight 渲染不对称）→ 改产品 + 判据只改输入 → 重新部署 → 8 条全绿。
+**不说这层过程，就把一次修复说成了一次发现。**
 逐条数字见 `docs/BENCHMARK_REPORT.md` §2.5 与 `artifacts/online-verify/README.md`。
 
-**仍然待处理的一条**：weight 专项（正向极性在无库存条件下不可达）。
-要让它绿，得动 `tools/verify-online-api.mjs`（给 weight 段补一件真有的物品，
-让 `gift` 成为合法表达）——**但那份脚本是冻结的**，动它需要先解冻并改口径。
+**weight 专项的口径（别吹过头）**：本轮差异**全部来自负向档**（负向让模型 3/4 转 `refuse`），
+正向档与中性档没有可观测差异（都是 `gift`——那句 summary 本身就是一次帮助）。
+它证明的是「**weight 的负面档能把态度从回报推向戒备**」，不是「weight 双向驱动态度」。
 
 ### P1 — LICENSE 定稿（**已完成**，权利人 2026-11-26 拍板）
 

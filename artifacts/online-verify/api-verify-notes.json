@@ -1,7 +1,7 @@
 [
   "采样噪声基线（同记忆同参数）：intent 相同｜text 不同",
   "注意：text 在两次相同请求间已不同 —— 本段所有判据都不依赖 text 不等式，只依赖意图/锚点。",
-  "weight 段采样不全：base 失败 1、pos 失败 0、neg 失败 0（各需 4）。本次判据未通过的原因可能是上游失败而非「weight 不起作用」，看结论前先看这一段。",
   "服务端 buildMessages 渲染 day/kind/weight强度词/summary；memory.actor 不进提示词（sanitizeObservation 未保留它）。",
-  "现有 decide() 请求体的 recentEvents 不在 sanitizeObservation 白名单内，会被静默丢弃。"
+  "现有 decide() 请求体的 recentEvents 不在 sanitizeObservation 白名单内，会被静默丢弃。",
+  "采样层传输重试：共补 1 次（每个样本最多 3 次，只在一条都没采到时重试，不看内容）。"
 ]

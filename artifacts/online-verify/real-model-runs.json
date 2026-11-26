@@ -1,32 +1,32 @@
 {
-  "avgMs": 5553,
+  "avgMs": 6167,
   "runs": [
     {
       "status": 200,
       "body": {
         "ok": true,
-        "text": "{\"action\":{\"type\":\"dialogue\",\"text\":\"第2层的线路我来守住。体力已经不高，我不会做无谓冒险，但也不会先离开。若你是来帮忙的，就把你知道的情况说清楚。\"},\"confidence\":0.8}",
+        "text": "{\"action\":{\"type\":\"dialogue\",\"text\":\"先别往前冲。这层线路我来盯，你退到安全一点的位置，等确认附近没动静再走。\"},\"confidence\":0.8}",
         "decisionSource": "model"
       },
-      "ms": 6702
+      "ms": 5733
     },
     {
       "status": 200,
       "body": {
         "ok": true,
-        "text": "{\"action\":{\"type\":\"dialogue\",\"text\":\"这层线路需要保持畅通，我不会让任何人轻易越过这里。如果你愿意合作，就先说明你的来意，不要靠近关键节点。\"},\"confidence\":0.78}",
+        "text": "{\"action\":{\"type\":\"dialogue\",\"text\":\"这条线路不能断……先别乱动，把情况说清楚，我守得住。\"},\"confidence\":0.78}",
         "decisionSource": "model"
       },
-      "ms": 4668
+      "ms": 6116
     },
     {
       "status": 200,
       "body": {
         "ok": true,
-        "text": "{\"action\":{\"type\":\"dialogue\",\"text\":\"这层的线路要守住。我不会主动伤人，但也不会放松警惕。先一起确认安全，再决定怎么走。\"},\"confidence\":0.75}",
+        "text": "{\"action\":{\"type\":\"dialogue\",\"text\":\"我是 alin。这里第2层的线路不能乱，我愿意帮忙照看，但别急着乱动，先告诉我你看到什么异常。\"},\"confidence\":0.8}",
         "decisionSource": "model"
       },
-      "ms": 5289
+      "ms": 6652
     }
   ]
 }

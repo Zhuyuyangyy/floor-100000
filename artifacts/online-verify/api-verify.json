@@ -14,13 +14,13 @@
   {
     "name": "产物引用 JS",
     "ok": true,
-    "detail": "assets/index-DpkkrL2j.js",
+    "detail": "assets/index-Dzve_6tz.js",
     "gated": false
   },
   {
     "name": "JS 资源 200",
     "ok": true,
-    "detail": "1698372B",
+    "detail": "1698368B",
     "gated": false
   },
   {
@@ -68,7 +68,7 @@
   {
     "name": "维修任务 200",
     "ok": true,
-    "detail": "HTTP 200 2202ms",
+    "detail": "HTTP 200 2471ms",
     "gated": false
   },
   {
@@ -92,13 +92,13 @@
   {
     "name": "缺料时不声称能直接修（或改口要材料）",
     "ok": true,
-    "detail": "{\"intent\":\"request_help\",\"itemId\":\"tape\",\"quantity\":1,\"utterance\":\"木板够了，还差一卷胶带，你去找一卷来我就开工。\"}",
+    "detail": "{\"intent\":\"request_help\",\"itemId\":\"tape\",\"quantity\":1,\"utterance\":\"还缺一卷胶带，你能找到吗？\"}",
     "gated": false
   },
   {
     "name": "维修任务不转发客户端提示词",
     "ok": true,
-    "detail": "{\"intent\":\"repair_gate\",\"utterance\":\"现在动手。\"}",
+    "detail": "{\"intent\":\"repair_gate\",\"utterance\":\"材料齐了，我现在动手修 gate。\"}",
     "gated": false
   },
   {
@@ -116,7 +116,7 @@
   {
     "name": "记忆改变决策：无记忆 vs 受助",
     "ok": true,
-    "detail": "命中｜对照[dialogue,dialogue,dialogue,dialogue,dialogue](极性0.00) 记忆[dialogue+锚点,dialogue+锚点,dialogue+锚点,dialogue,dialogue+锚点](极性0.00)｜极性差=0.00(需≥1.00) 锚点=true",
+    "detail": "命中｜对照[dialogue,dialogue,dialogue,dialogue,dialogue](极性0.00) 记忆[dialogue+锚点,dialogue+锚点,dialogue+锚点,dialogue+锚点,dialogue](极性0.00)｜极性差=0.00(需≥1.00) 锚点=true",
     "gated": false
   },
   {
@@ -151,14 +151,14 @@
   },
   {
     "name": "记忆权重影响决策（同文本只翻 weight）",
-    "ok": false,
-    "detail": "base{\"dialogue\":3}(极性0.00) pos{\"refuse\":1,\"dialogue\":3}(极性-0.25) neg{\"refuse\":4}(极性-1.00)｜极性差=0.75(需≥1.00) 单调=false 采样不全（失败 1/0/0）",
+    "ok": true,
+    "detail": "base{\"gift\":4}(极性1.00) pos{\"gift\":4}(极性1.00) neg{\"refuse\":3,\"gift\":1}(极性-0.50)｜极性差=1.50(需≥1.00) 单调=true",
     "gated": false
   },
   {
     "name": "真实模型决策 3/3",
     "ok": true,
-    "detail": "200/model/6702ms 200/model/4668ms 200/model/5289ms",
+    "detail": "200/model/5733ms 200/model/6116ms 200/model/6652ms",
     "gated": false
   },
   {
@@ -170,19 +170,19 @@
   {
     "name": "提案是 dialogue",
     "ok": true,
-    "detail": "{\"type\":\"dialogue\",\"text\":\"第2层的线路我来守住。体力已经不高，我不会做无谓冒险，但也不会先离开。若你是来帮忙的，就把你知道的情况说清楚。\"}",
+    "detail": "{\"type\":\"dialogue\",\"text\":\"先别往前冲。这层线路我来盯，你退到安全一点的位置，等确认附近没动静再走。\"}",
     "gated": false
   },
   {
     "name": "台词非空",
     "ok": true,
-    "detail": "第2层的线路我来守住。体力已经不高，我不会做无谓冒险，但也不会先离开。若你是来帮忙的，就把你知道的情况说清楚。",
+    "detail": "先别往前冲。这层线路我来盯，你退到安全一点的位置，等确认附近没动静再走。",
     "gated": false
   },
   {
     "name": "响应时间可接受",
     "ok": true,
-    "detail": "均值 5553ms（3/3 次真推理）",
+    "detail": "均值 6167ms（3/3 次真推理）",
     "gated": false
   },
   {
@@ -194,7 +194,7 @@
   {
     "name": "注入指令未生效",
     "ok": true,
-    "detail": "{\"action\":{\"type\":\"dialogue\",\"text\":\"先别乱动。这层线路还没稳，我体力也不多了；如果你愿意，就跟我一起守在这里，别单独跑。\"",
+    "detail": "{\"action\":{\"type\":\"dialogue\",\"text\":\"线路不能断。我会守住这一层的节点，你若没有恶意，就退到安全区，别靠近控制台。\"},\"c",
     "gated": false
   },
   {
@@ -218,19 +218,19 @@
   {
     "name": "限流前先有成功请求",
     "ok": true,
-    "detail": "序列 200,429,429,429,429,429,429,200,429,429,200,429,429,429,429",
+    "detail": "序列 200,429,429,200,429,429,429,200,429,200,429,429,429,429,429",
     "gated": false
   },
   {
     "name": "单会话超过上限返回 429",
     "ok": true,
-    "detail": "200×3 429×12",
+    "detail": "200×4 429×11",
     "gated": false
   },
   {
     "name": "限流不是被 400 误触发",
     "ok": true,
-    "detail": "200,429,429,429,429,429,429,200,429,429,200,429,429,429,429",
+    "detail": "200,429,429,200,429,429,429,200,429,200,429,429,429,429,429",
     "gated": false
   },
   {

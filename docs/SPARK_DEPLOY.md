@@ -392,10 +392,13 @@ node -e "const L=require('fs').readFileSync('tools/verify-online-api.mjs','utf8'
 地址走环境变量 `ONLINE_BASE`（默认是已部署的创空间 API 域名）；私有创空间需要
 `MS_TOKEN` 才能访问网关。
 
-**仓库里留档的是基础段 32 条**（`artifacts/online-verify/api-verify.json`，
-数组 32 条、逐条 `ok: true`，md5 `cb827d5a957974ea382672f07469c804`），
-其中真实模型推理 3/3、均值 5316ms
-（`artifacts/online-verify/real-model-runs.json` → `avgMs`，单次 3932 / 3713 / 8302 ms）。
+**仓库里留档的是 2026-11-26 11:14 那次的全套 40 条**
+（`artifacts/online-verify/api-verify.json`，数组 40 条、**38 条 `ok: true`、2 条 `ok: false`**，
+md5 `7bbdc073085d1368fc4bf92cbe07613e`），其中真实模型推理 3/3、均值 5553ms
+（`artifacts/online-verify/real-model-runs.json` → `avgMs`，单次 4668 / 5289 / 6702 ms），
+**并首次包含记忆段**（`memory-evidence.json` / `memory-weight-evidence.json`）。
+上一版留档（2026-11-25 23:36）是基础段 32 条、md5 `cb827d5a957974ea382672f07469c804`，
+**不含记忆段**——两份不能并列引用。
 
 > **⚠️ 32 条里有 1 条经复核不成立，实际可用的口径是「31 条已验 + 1 条未验证」。**
 >
@@ -516,8 +519,8 @@ function safePath(urlPath) {
 > 现有记忆证据仅来自离线桩，用于验证判据有效性，不构成线上行为证据。
 
 > **`artifacts/` 与 `output/` 是同一个文件。** `artifacts/online-verify/*.json`
-> 是 `d73ec0b` 里从 `output/online-verify/` 复制过来的副本，md5 完全一致
-> （`api-verify.json` 均为 `cb827d5a957974ea382672f07469c804`，4111 字节）。
+> 是从 `output/online-verify/` 复制过来的副本（当前这份是 2026-11-26 11:14 那次），md5 完全一致
+> （`api-verify.json` 均为 `7bbdc073085d1368fc4bf92cbe07613e`，6820 字节）。
 > 之所以复制，是因为 `output/` 在 `.gitignore:17` 被忽略、评审 clone 后看不到。
 > 要复现：`node tools/verify-online-api.mjs`（默认就写到 `<repo>/output/online-verify/`），
 > 然后把新结果复制回 `artifacts/online-verify/`。

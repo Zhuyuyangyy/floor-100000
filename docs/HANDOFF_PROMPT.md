@@ -68,9 +68,10 @@ a1-ai-action / a2-gameplay / a3-visual / a5-qa-ci / a7-deliverables
 现在由我接手冻结；`tools/verify-online-api.mjs` 不再接受任何改动（含注释和文案）。
 
 **唯一挂着的活：public 之后真跑线上。** 这不是 A1 独有的，见文末 P0。
-前提：`curl <base>/` 返 200 且 `/healthz` 返 `ok:true`。
-A1 已经承诺过执行步骤，照做即可：探活 → 全量带 token → 8 条记忆判据逐条结果 →
-确认路径穿越判据落在哪一档 → 同步 `artifacts/` 并更新 md5 → 提交推送。
+> ✅ **2026-11-26 已完成**：空间本来就是 public，带 token 的正式验收已跑通
+> （40 条判据，38 通过 / 2 FAIL），六份产物落 `artifacts/online-verify/`。
+> 「路径穿越判据落在哪一档」也查实了：**线上拿到的是网关 400 错误页，不是源码**
+> （逐字查过无 `NPC_API_KEY`），这条是**判据假阳性**。md5 已更新。见文末 P0。
 
 **它犯过的错，新 agent 别重犯**（A1 自己列了 12 条，按重要性取三条）：
 - 「修错的动作本身可以造出新错」：为消除 detail 歧义，删掉了某场景下唯一的救场证据。
@@ -197,9 +198,12 @@ A1 已经承诺过执行步骤，照做即可：探活 → 全量带 token → 8
    `output/vitest-report.json`（**不是** `test-results/`，那是 Playwright 每次跑都清的目录），
    `test:collection` 卡下限 86 文件 / 1204 用例。CI 顺序：Build 必须先于单测
    （代理测试真 spawn 服务，静态根固定是仓库根的 `dist/`）。
-2. **401 论证**：创空间是 private，401 拦在平台网关——`GET /`、
-   `GET /healthz`、不存在的路径都 401，`X-Studio-Token` 明写在允许头里。
-   真正理由不是「平台要登录态」，而是「即便凭证有效也只证明持证人能访问」。
+2. **401 论证**（**2026-11-26 已更正**）：当时写「创空间是 private，401 拦在平台网关」——
+   现在看，**空间一直是 public**；401 只出现在 **API 专用地址**
+   （`studio-…api-inference.modelscope.net`，平台设计要求 SDK token），与公开性无关。
+   原始观察（`GET /`、`GET /healthz`、不存在的路径都 401，`X-Studio-Token` 明写在允许头里）
+   仍然成立，只是**归因错了**：不是「私有空间挡门」，是「这个地址要凭证」。
+   真正理由不变：即便凭证有效，也只证明持证人能访问。
 3. **7 条假绿判据的发现**：同一 401 响应上「维修回复是结构化 intent」判 FAIL、
    「维修契约没退回旧 action.type」判 PASS，两条读同一个 `{}`（空对象 truthy）。
 4. **一批真 bug 的发现**（A5 只复核不动代码）：
@@ -297,36 +301,61 @@ A1 已经承诺过执行步骤，照做即可：探活 → 全量带 token → 8
 
 **所以「评委免登录可访问」这条已经满足。** 不需要用户去改任何开关。
 
-**真正还差的一步：拿一个有效 `MS_TOKEN` 跑一次带凭证的验收。**
-无 token 时脚本按设计不落盘（`forceWrite` 的产物不是证据）。拿 token 的入口：
-魔搭「设置 → 访问令牌」。有了它：
+### P0 — 已完成：带凭证的线上验收跑通了，记忆段从 6 红变 7 绿
 
-```bash
-MS_TOKEN=<有效令牌> node tools/verify-online-api.mjs   # 六份产物落 output/online-verify/
-# 再把结果同步进 artifacts/online-verify/ 并更新 md5 记录（旧的标明跑于何时、当时条数）
-```
+**时间线（每一行都有出处）：**
 
-> **本轮已经跑过一轮「诊断轮」**（无 token + `FORCE_WRITE=1` + `SHOT_DIR=tmp/…`，
-> 只加了一个浏览器 UA 垫片让脚本能打到公开 host，脚本本身一行未改）：
-> **基础段 32 条全 PASS**（含真模型 3/3、限流、注入防护、405/400/413），
-> **记忆段 8 条里 6 FAIL / 1 SKIP / 1 PASS**。
-> 详细逐条结果与根因见 `docs/BENCHMARK_REPORT.md` §2.5。
+| 时间 | 做了什么 | 结果 |
+|---|---|---|
+| 11:07 | 第一次线上跑记忆段（无 token，走公开 host + UA 垫片，脚本一行未改） | 记忆段 **6 FAIL / 1 SKIP / 1 PASS**；基础段 32 条全 PASS |
+| 11:07 | 定位根因：提示词只把记忆当背景读物 | 模型读到了记忆（提示词逐字可查），但十几次采样全选 `dialogue` |
+| 11:0x | 修法（`7a9b486`）：`buildMessages` 加「记忆决策」契约 + 守护测试 | **改产品，不改判据**；规则层照样能否决 |
+| 11:07–11:08 | git 同步到创空间仓库 → `POST .../deploy` → 盯 build/run 日志 | `status=Running`；`[npc-proxy] listening on 0.0.0.0:7860`，模型 `Qwen/Qwen3.8-Flash-Next` |
+| 11:14 | 带 token 跑 API 专用地址，**六份产物落 `artifacts/online-verify/`** | **40 条判据，38 通过 / 2 FAIL**；记忆段 **7 PASS / 1 FAIL** |
 
-### P0.5 — 记忆段为什么红（必须如实处理）
+**证据级产物**（`hasToken:true` / `forceWrite:false` / `modelSamplesObserved:3`）：
 
-模型**读到了记忆**（提示词侧已逐字验证），也确实**改了它说出口的话**，
-但它**没有改动作类型**（`dialogue` → `dialogue`），而判据量的是动作类型。
-**在拿到动作层证据之前，任何材料都不要写「记忆改变行动」。**
-两个可选方向，需要人来定：
-(a) 如实降级参赛口径（只写「记忆进入提示词并改变措辞」）；
-(b) 改 `server/npc-proxy.mjs` 的 `buildMessages`，把记忆显式写成**决策因子**
-（记忆显示玩家帮过你 → 倾向回报；显示玩家失约 → 倾向戒备），
-再重新部署空间、重跑验收。**这不是改判据**，是改产品去兑现它自己的规格；
-但改完必须重新部署 + 重跑才作数。
+| 文件 | md5 |
+|---|---|
+| `api-verify.json`（40 条） | `7bbdc073085d1368fc4bf92cbe07613e` |
+| `api-verify-meta.json` | `55bb7e8cce868e4e357b7f4f8d539387` |
+| `api-verify-notes.json` | `76dea28c6d8da550370c1568a59db2d8` |
+| `real-model-runs.json` | `df4a9e1cfec2b1728aaf26f7c1856f94` |
+| `memory-evidence.json` | `45de0ccdd08cee28f7a3d7995755dcbc` |
+| `memory-weight-evidence.json` | `1b02d07e75b684f0512811a43ec881cf` |
 
-### P1 — LICENSE 定稿，卡在版权方（用户本人）
+**上一版（2026-11-25 23:36）**是 32 条基础段、md5 `cb827d5a…`、**不含记忆段**——
+那份 md5 仍然出现在 `tools/verify-online-api.mjs` 的注释里，那是它记的
+「一次 token 拼错把权威产物覆盖成假产物」那次事故的**历史现场**，不是当前值。
+**脚本是冻结的，不接受任何改动**，所以由 `artifacts/online-verify/README.md` 解释。
 
-见 A7 节。**不要替用户填**——填了就是伪造法律声明。
+**两条 FAIL 都在判据侧，都已查实：**
+
+1. **路径穿越**：线上拿到的是**网关自己的 400 错误页**（225B，Tengine），
+   逐字查过**不含 `NPC_API_KEY`、不含源码**；判据只比「与基线不同」，
+   把「400 错误页 vs 200 首页」读成了「命中源码」。**产品没有泄漏。**
+2. **weight 专项**：正向极性在「无库存」条件下**无可达动作**
+   （`gift/trade` 需真有物品才能合法表达）；负向方向清楚（`neg` 4/4 全 `refuse`）。
+
+### P0.5 — 记忆段现在的口径（**可以写了，但必须带上过程**）
+
+> **记忆改变了模型的行为，而不只是它说的话。**
+> 三组对照全部成立（极性总增益 2.00 ≥ 1.50）、锚点回响命中 4 次、
+> 对照组零锚点成立（对照 0 次 / 治疗 4 次 → 锚点确实有区分力）。
+
+**但这句话必须配上过程**：第一次线上跑是 6 条红 → 定位到提示词没把记忆写成决策因子 →
+改产品 → 重新部署 → 7 条绿。**不说这层过程，就把一次修复说成了一次发现。**
+逐条数字见 `docs/BENCHMARK_REPORT.md` §2.5 与 `artifacts/online-verify/README.md`。
+
+**仍然待处理的一条**：weight 专项（正向极性在无库存条件下不可达）。
+要让它绿，得动 `tools/verify-online-api.mjs`（给 weight 段补一件真有的物品，
+让 `gift` 成为合法表达）——**但那份脚本是冻结的**，动它需要先解冻并改口径。
+
+### P1 — LICENSE 定稿（**已完成**，权利人 2026-11-26 拍板）
+
+MIT，署名 **Zhuyuyangyy**；**美术纳入同一份 MIT**（artpack/frame-*.png/slot.png/
+env/title/weapons 全部覆盖）；第三方**逐项保留原许可**。
+`package.json` 补了 `"license": "MIT"`。见 A7 节与 `LICENSE` §Adoption record。
 
 ### P2 — 参赛材料方法论补强（**已完成**）
 

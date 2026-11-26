@@ -5,9 +5,12 @@ import { expect, test } from '@playwright/test';
 // 为什么单独一个文件：`wrap-inventory-table.spec.ts` 出的是数字表，评审看数字
 // 要自己换算；这两张图是「看一眼就懂」的那一半证据，和 09b / _cmp 同一级别。
 //
-// 断言策略：**不锁「坏了」**。这里钉的是「溢出确实存在」（这是当前事实，
-// 修好之后这条会红，届时把 toBeLessThanOrEqual 翻过来就是回归防线），
-// 并在注释里写清翻法，避免下一个人把它当 flake 删掉。
+// 断言策略：**不锁「坏了」**。
+// —— 2026-11-26 起，这两处已经修好（`1c37270`：开 `useAdvancedWrap` + 同步加高
+// 详情井与压力井），所以本文件已从「取证」翻成「回归防线」：
+//   钉的是「折行发生了、每一行都落在折行盒内、正文没有跑出面板、折行后不丢字」。
+// 原来的取证断言（lines===1 / textRight>panelRight / maxLine>wrap）已按本文件
+// 原注释里写好的翻法改掉，不再会红。改法见下面两处的注释。
 //
 // 两处都不是「代码里有长字符串」——它们都在真实交互路径上被抓到：
 //   #8b 背包详情空槽 → 用掉最后一格，键盘光标停在 index === slots.length 上
@@ -16,7 +19,7 @@ import { expect, test } from '@playwright/test';
 const INV_SHOT = 'docs/img/audit-2026-11-26/14-inventory-empty-slot-overflow.png';
 const SHELTER_SHOT = 'docs/img/audit-2026-11-26/15-shelter-stress-overflow.png';
 
-test('背包详情：空槽文案横向跑出面板 238px', async ({ page }) => {
+test('背包详情：空槽文案按字符折行，不跑出面板', async ({ page }) => {
   await page.goto('/?seed=42&debug=1');
   await page.waitForFunction(() => Boolean(window.__PHASER_GAME__));
   await page.waitForFunction(() => window.__PHASER_GAME__!.scene.getScenes(true).some((s) => s.scene.key === 'Menu'));
@@ -88,16 +91,15 @@ test('背包详情：空槽文案横向跑出面板 238px', async ({ page }) => 
   );
   console.log(`    "${v.text}"`);
 
-  // 已知缺陷。修好（开 useAdvancedWrap）后这两条会红：
-  //   lines 会变成 2~3，right 会落回 panelRight 之内。
-  // 届时改成：expect(v.lines).toBeGreaterThan(1) 与
-  //          expect(v.textRight).toBeLessThanOrEqual(v.panelRight)
-  // 就变成回归防线。
-  expect(v.lines, '当前未开 advancedWrap，中文零折行（缺陷本身）').toBe(1);
-  expect(v.textRight, '当前正文右沿越过面板右沿（缺陷本身）').toBeGreaterThan(v.panelRight);
+  // 回归防线（原为「缺陷本身」的取证断言，2026-11-26 按本文件原注释写好的翻法改）：
+  //   `invDetailBody` 已开 `useAdvancedWrap` —— 中文没有空格，默认折行只在空格处断，
+  //   整句被当成一个不可断的词，所以那 20 字文案曾经一行 480px 冲出面板 238px。
+  // 现在它折成 3 行（最宽行 192 ≤ 折行盒 212），正文右沿 820 落在面板右沿 870 之内。
+  expect(v.lines, '空槽文案必须真的折行（中文按字符折）').toBeGreaterThan(1);
+  expect(v.textRight, '正文右沿不得越过面板右沿').toBeLessThanOrEqual(v.panelRight);
 });
 
-test('夜宿压力行：最宽行超出 wrap 8px，且已用满 maxLines 2', async ({ page }) => {
+test('夜宿压力行：每一折行落在折行盒内，折行后不丢字', async ({ page }) => {
   await page.goto('/?seed=42&debug=1');
   await page.waitForFunction(() => Boolean(window.__PHASER_GAME__));
   await page.waitForFunction(() => window.__PHASER_GAME__!.scene.getScenes(true).some((s) => s.scene.key === 'Menu'));
@@ -147,6 +149,9 @@ test('夜宿压力行：最宽行超出 wrap 8px，且已用满 maxLines 2', asy
       left: Math.round(b.left),
       right: Math.round(b.right),
       h: Math.round(b.height),
+      // 折行后拼回来的字 vs 原文：用来判「有没有被 maxLines 静默截断」。
+      joined: rendered.join(''),
+      sourceText: line.text,
     };
   });
 
@@ -161,8 +166,17 @@ test('夜宿压力行：最宽行超出 wrap 8px，且已用满 maxLines 2', asy
   );
   console.log(`    "${v.text}"`);
 
-  // 已知缺陷：最后一行比 wrap 宽 8px，有 maxLines:2 兜住高度所以不会再长高，
-  // 但末字压住右侧内衬。修法是 wrap 收到 panelW-56 或加 useAdvancedWrap。
-  expect(v.maxLine, '最宽行超出 wrap（缺陷本身）').toBeGreaterThan(Math.round(v.wrap));
-  expect(v.lines, '已被 maxLines:2 截断，不会再长高（缺陷的边界）').toBeLessThanOrEqual(2);
+  // 回归防线（原为「缺陷本身」的取证断言，2026-11-26 改）：
+  //   压力行已开 `useAdvancedWrap`，`maxLines` 由 2 提到 3，压力井由 44 加到 72。
+  //   ⚠️ 旧注释里「第三行被静默删掉」**经实测并不成立**：修前那行只折成 2 行、
+  //   两行都画出来了，没有第三行可丢。真正的缺陷是**横向**——最宽行 460 vs
+  //   折行盒 452（超 8px），最长那条渲染 x[414..934]，冲出压力井右沿 878 达 56px。
+  //   另有一个潜在坑：井高 44 只容 2 行、`maxLines:2`，一旦按字符折行就会
+  //   静默删掉第三行——这才是改 `maxLines` 与井高的原因。
+  expect(v.maxLine, '每一折行都必须落在折行盒内').toBeLessThanOrEqual(Math.round(v.wrap));
+  expect(v.lines, '折行后不能丢字（maxLines 不得静默截断整句）').toBeGreaterThanOrEqual(2);
+  expect(
+    v.joined.replace(/\s/g, ''),
+    '折行后拼回来的字必须与原文逐字相同（不得静默截断）',
+  ).toBe(v.sourceText.replace(/\s/g, ''));
 });

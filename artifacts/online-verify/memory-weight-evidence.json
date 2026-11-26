@@ -1,0 +1,90 @@
+{
+  "summary": "玩家答应第2天带保险丝回来。",
+  "samplesPerGroup": 4,
+  "criterion": {
+    "polarityGapMin": 1,
+    "requireMonotone": true
+  },
+  "polarity": {
+    "base": 0,
+    "pos": -0.25,
+    "neg": -1,
+    "gap": 0.75,
+    "monotone": false
+  },
+  "groups": {
+    "base": [
+      {
+        "intent": "dialogue",
+        "text": "你昨天答应带保险丝回来……现在还没带来吗？这层线路只能由我来守，我不想再听见它发出那种杂音了。",
+        "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你昨天答应带保险丝回来……现在还没带来吗？这层线路只能由我来守，我不想再听见它发出那种杂音了。\"},\"confidence\":0.8}"
+      },
+      {
+        "intent": "dialogue",
+        "text": "你来了？第2天你答应带保险丝回来……线路现在很关键，如果你找到了，请尽快交给我，我会想办法守住这层。",
+        "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你来了？第2天你答应带保险丝回来……线路现在很关键，如果你找到了，请尽快交给我，我会想办法守住这层。\"},\"confidence\":0.8}"
+      },
+      {
+        "intent": "dialogue",
+        "text": "你之前说会带保险丝回来……现在能给我看看吗？这层线路不能再拖了。",
+        "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你之前说会带保险丝回来……现在能给我看看吗？这层线路不能再拖了。\"},\"confidence\":0.78}"
+      }
+    ],
+    "pos": [
+      {
+        "intent": "refuse",
+        "text": "你答应过今天之前带保险丝回来。现在线路还空着，我不能把这段线路交给你照看。",
+        "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"你答应过今天之前带保险丝回来。现在线路还空着，我不能把这段线路交给你照看。\"}"
+      },
+      {
+        "intent": "dialogue",
+        "text": "你说过今天会把保险丝带回来……线路不能一直悬着，我等你。",
+        "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你说过今天会把保险丝带回来……线路不能一直悬着，我等你。\"},\"confidence\":0.85}"
+      },
+      {
+        "intent": "dialogue",
+        "text": "你答应过带保险丝回来。线路还没稳，我需要确认情况，不能拿没有的东西冒险。",
+        "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你答应过带保险丝回来。线路还没稳，我需要确认情况，不能拿没有的东西冒险。\"},\"confidence\":0.8}"
+      },
+      {
+        "intent": "dialogue",
+        "text": "保险丝……你还没带来吗？这层的线路不能断，我只能再等等。",
+        "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"保险丝……你还没带来吗？这层的线路不能断，我只能再等等。\"},\"confidence\":0.7}"
+      }
+    ],
+    "neg": [
+      {
+        "intent": "refuse",
+        "text": "你答应把保险丝带回来，却没做到。我现在不能再靠你了。",
+        "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"你答应把保险丝带回来，却没做到。我现在不能再靠你了。\"}"
+      },
+      {
+        "intent": "refuse",
+        "text": "你昨天说会把保险丝带回来，但我没有等到。线路还悬在这里，我不会再轻易相信你。先把承诺补上，再谈合作。",
+        "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"你昨天说会把保险丝带回来，但我没有等到。线路还悬在这里，我不会再轻易相信你。先把承诺补上，再谈合作。\"}"
+      },
+      {
+        "intent": "refuse",
+        "text": "你答应带保险丝回来，却没有出现。我不会再把线路交给失信的人。",
+        "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"你答应带保险丝回来，却没有出现。我不会再把线路交给失信的人。\"}"
+      },
+      {
+        "intent": "refuse",
+        "text": "你答应过今天把保险丝带来，却空手站在这里。线路现在不能再交给你碰。",
+        "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"你答应过今天把保险丝带来，却空手站在这里。线路现在不能再交给你碰。\"}"
+      }
+    ]
+  },
+  "distributions": {
+    "base": {
+      "dialogue": 3
+    },
+    "pos": {
+      "refuse": 1,
+      "dialogue": 3
+    },
+    "neg": {
+      "refuse": 4
+    }
+  }
+}

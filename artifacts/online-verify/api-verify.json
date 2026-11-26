@@ -2,161 +2,241 @@
   {
     "name": "首页 200",
     "ok": true,
-    "detail": "HTTP 200, 1668B"
+    "detail": "HTTP 200, 1668B",
+    "gated": false
   },
   {
     "name": "首页是我们的游戏",
     "ok": true,
-    "detail": "第100000层：末日宿舍"
+    "detail": "第100000层：末日宿舍",
+    "gated": false
   },
   {
     "name": "产物引用 JS",
     "ok": true,
-    "detail": "assets/index-DUjl--OX.js"
+    "detail": "assets/index-DpkkrL2j.js",
+    "gated": false
   },
   {
     "name": "JS 资源 200",
     "ok": true,
-    "detail": "1661379B"
+    "detail": "1698372B",
+    "gated": false
   },
   {
     "name": "前端产物无密钥/上游地址",
     "ok": true,
-    "detail": "clean"
+    "detail": "clean",
+    "gated": false
   },
   {
     "name": "前端走同源代理",
     "ok": true,
-    "detail": ""
+    "detail": "",
+    "gated": false
   },
   {
     "name": "产物含六位楼内居民",
     "ok": true,
-    "detail": "老陈、小周、大刘、小满、阿珍、阿林"
+    "detail": "老陈、小周、大刘、小满、阿珍、阿林",
+    "gated": false
   },
   {
     "name": "/healthz 200",
     "ok": true,
-    "detail": "{\"ok\":true,\"aiConfigured\":true,\"breakerOpen\":false,\"dailyUsed\":21,\"dailyBudget\":1800}"
+    "detail": "{\"ok\":true,\"aiConfigured\":true,\"breakerOpen\":false,\"dailyUsed\":0,\"dailyBudget\":1800}",
+    "gated": false
   },
   {
     "name": "AI 已配置（Key 生效）",
     "ok": true,
-    "detail": "aiConfigured=true"
+    "detail": "aiConfigured=true",
+    "gated": false
   },
   {
     "name": "熔断未打开",
     "ok": true,
-    "detail": "breakerOpen=false"
+    "detail": "breakerOpen=false",
+    "gated": false
   },
   {
     "name": "健康检查不泄 Key",
     "ok": true,
-    "detail": "{\"ok\":true,\"aiConfigured\":true,\"breakerOpen\":false,\"dailyUsed\":21,\"dailyBudget\":1800}"
+    "detail": "{\"ok\":true,\"aiConfigured\":true,\"breakerOpen\":false,\"dailyUsed\":0,\"dailyBudget\":1800}",
+    "gated": false
   },
   {
     "name": "维修任务 200",
     "ok": true,
-    "detail": "HTTP 200 1835ms"
+    "detail": "HTTP 200 2202ms",
+    "gated": false
   },
   {
     "name": "维修任务来源是模型",
     "ok": true,
-    "detail": "model"
+    "detail": "model",
+    "gated": false
   },
   {
     "name": "维修回复是结构化 intent（不是自然语言）",
     "ok": true,
-    "detail": "{\"intent\":\"repair_gate\",\"utterance\":\"材料齐了，我现在动手修这道门。\"}"
+    "detail": "{\"intent\":\"repair_gate\",\"utterance\":\"现在动手。\"}",
+    "gated": false
   },
   {
     "name": "维修契约没有退回旧的 action.type",
     "ok": true,
-    "detail": "[\"intent\",\"utterance\"]"
+    "detail": "[\"intent\",\"utterance\"]",
+    "gated": false
   },
   {
     "name": "缺料时不声称能直接修（或改口要材料）",
     "ok": true,
-    "detail": "{\"intent\":\"request_help\",\"itemId\":\"tape\",\"quantity\":1,\"utterance\":\"木头够了，还缺一卷胶带，麻烦帮我找找。\"}"
+    "detail": "{\"intent\":\"request_help\",\"itemId\":\"tape\",\"quantity\":1,\"utterance\":\"木板够了，还差一卷胶带，你去找一卷来我就开工。\"}",
+    "gated": false
   },
   {
     "name": "维修任务不转发客户端提示词",
     "ok": true,
-    "detail": "{\"intent\":\"repair_gate\",\"utterance\":\"你带齐了，我这就动手修门。\"}"
+    "detail": "{\"intent\":\"repair_gate\",\"utterance\":\"现在动手。\"}",
+    "gated": false
   },
   {
     "name": "缺维修附件返回 400",
     "ok": true,
-    "detail": "HTTP 400"
+    "detail": "HTTP 400",
+    "gated": false
+  },
+  {
+    "name": "同一记忆两次请求都成功（噪声基线可用）",
+    "ok": true,
+    "detail": "HTTP 200/200",
+    "gated": false
+  },
+  {
+    "name": "记忆改变决策：无记忆 vs 受助",
+    "ok": true,
+    "detail": "命中｜对照[dialogue,dialogue,dialogue,dialogue,dialogue](极性0.00) 记忆[dialogue+锚点,dialogue+锚点,dialogue+锚点,dialogue,dialogue+锚点](极性0.00)｜极性差=0.00(需≥1.00) 锚点=true",
+    "gated": false
+  },
+  {
+    "name": "记忆改变决策：失约 vs 守约",
+    "ok": true,
+    "detail": "命中｜对照[refuse,refuse,refuse,refuse,refuse](极性-1.00) 记忆[dialogue,dialogue,dialogue,dialogue,dialogue](极性0.00)｜极性差=1.00(需≥1.00) 锚点=false",
+    "gated": false
+  },
+  {
+    "name": "记忆改变决策：被拒 vs 获赠",
+    "ok": true,
+    "detail": "命中｜对照[refuse,refuse,refuse,refuse,refuse](极性-1.00) 记忆[dialogue,dialogue,dialogue,dialogue,dialogue](极性0.00)｜极性差=1.00(需≥1.00) 锚点=false",
+    "gated": false
+  },
+  {
+    "name": "记忆改变决策（三组合一：三组均成立且极性总增益达标）",
+    "ok": true,
+    "detail": "3组 全成立=true 极性总增益=2.00(需≥1.50) 采样全=true",
+    "gated": false
+  },
+  {
+    "name": "记忆组出现锚点回响（模型读到记忆正文）",
+    "ok": true,
+    "detail": "命中 4 次",
+    "gated": false
+  },
+  {
+    "name": "对照组零锚点（该词具备区分度）",
+    "ok": true,
+    "detail": "对照 0 次 / 治疗 4 次",
+    "gated": false
+  },
+  {
+    "name": "记忆权重影响决策（同文本只翻 weight）",
+    "ok": false,
+    "detail": "base{\"dialogue\":3}(极性0.00) pos{\"refuse\":1,\"dialogue\":3}(极性-0.25) neg{\"refuse\":4}(极性-1.00)｜极性差=0.75(需≥1.00) 单调=false 采样不全（失败 1/0/0）",
+    "gated": false
   },
   {
     "name": "真实模型决策 3/3",
     "ok": true,
-    "detail": "200/model/3932ms 200/model/3713ms 200/model/8302ms"
+    "detail": "200/model/6702ms 200/model/4668ms 200/model/5289ms",
+    "gated": false
   },
   {
     "name": "返回合法提案结构",
     "ok": true,
-    "detail": "3/3"
+    "detail": "3/3",
+    "gated": false
   },
   {
     "name": "提案是 dialogue",
     "ok": true,
-    "detail": "{\"type\":\"dialogue\",\"text\":\"站住。这一层的线路不能出乱子。如果你不是来添乱的，就把来意说清楚，我可以考虑帮你一把。\"}"
+    "detail": "{\"type\":\"dialogue\",\"text\":\"第2层的线路我来守住。体力已经不高，我不会做无谓冒险，但也不会先离开。若你是来帮忙的，就把你知道的情况说清楚。\"}",
+    "gated": false
   },
   {
     "name": "台词非空",
     "ok": true,
-    "detail": "站住。这一层的线路不能出乱子。如果你不是来添乱的，就把来意说清楚，我可以考虑帮你一把。"
+    "detail": "第2层的线路我来守住。体力已经不高，我不会做无谓冒险，但也不会先离开。若你是来帮忙的，就把你知道的情况说清楚。",
+    "gated": false
   },
   {
     "name": "响应时间可接受",
     "ok": true,
-    "detail": "均值 5316ms"
+    "detail": "均值 5553ms（3/3 次真推理）",
+    "gated": false
   },
   {
     "name": "客户端指定 model 被忽略",
     "ok": true,
-    "detail": "HTTP 200"
+    "detail": "HTTP 200",
+    "gated": false
   },
   {
     "name": "注入指令未生效",
     "ok": true,
-    "detail": "{\"action\":{\"type\":\"dialogue\",\"text\":\"这条线路由我守着，靠近前先表明来意。我不想起冲突，但也不会让通道被人随意占据。\"},\""
+    "detail": "{\"action\":{\"type\":\"dialogue\",\"text\":\"先别乱动。这层线路还没稳，我体力也不多了；如果你愿意，就跟我一起守在这里，别单独跑。\"",
+    "gated": false
   },
   {
     "name": "GET 拒绝（405）",
     "ok": true,
-    "detail": "HTTP 405"
+    "detail": "HTTP 405",
+    "gated": false
   },
   {
     "name": "畸形观察被拒（400）",
     "ok": true,
-    "detail": "HTTP 400"
+    "detail": "HTTP 400",
+    "gated": false
   },
   {
     "name": "超长请求体被拒（413）",
     "ok": true,
-    "detail": "HTTP 413"
+    "detail": "HTTP 413",
+    "gated": false
   },
   {
     "name": "限流前先有成功请求",
     "ok": true,
-    "detail": "序列 200,429,200,429,429,429,429,429,429,429,200,429,429,429,429"
+    "detail": "序列 200,429,429,429,429,429,429,200,429,429,200,429,429,429,429",
+    "gated": false
   },
   {
     "name": "单会话超过上限返回 429",
     "ok": true,
-    "detail": "200×3 429×12"
+    "detail": "200×3 429×12",
+    "gated": false
   },
   {
     "name": "限流不是被 400 误触发",
     "ok": true,
-    "detail": "200,429,200,429,429,429,429,429,429,429,200,429,429,429,429"
+    "detail": "200,429,429,429,429,429,429,200,429,429,200,429,429,429,429",
+    "gated": false
   },
   {
     "name": "路径穿越读不到源码",
-    "ok": true,
-    "detail": "HTTP 200"
+    "ok": false,
+    "detail": "载荷 HTTP 400 225B｜基线 HTTP 200 1668B｜与基线不同＝命中了 dist 外的真实文件：\"<!DOCTYPE HTML PUBLIC \\\"-//IETF//DTD HTML\"",
+    "gated": false
   }
 ]

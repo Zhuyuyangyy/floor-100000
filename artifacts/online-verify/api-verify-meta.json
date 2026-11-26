@@ -2,7 +2,9 @@
   "base": "https://studio-a1578804454-floor-100000.api-inference.modelscope.net",
   "isDefaultBase": true,
   "hasToken": true,
-  "startedAt": "2026-11-25T15:36:00.000Z",
-  "node": "recorded retroactively",
-  "_note": "这份 meta 是事后补写的，不是脚本自动生成：该次运行发生在加 meta 字段之前（2026-11-25 23:36 本地时间）。补写依据是同目录 api-verify.json 里的四条实测特征——首页 1668B、JS 资源 1661379B、healthz 返回 dailyUsed:21、产物引用 assets/index-DUjl--OX.js。这四条都是本地离线桩无法产生的（桩为 66B / 32B / dailyUsed:0 / index-abc.js）。此后的运行由脚本自动写入，无需手工补。"
+  "modelSamplesObserved": 3,
+  "modelRepliesOutsideSampling": 2,
+  "forceWrite": false,
+  "startedAt": "2026-11-26T03:14:46.065Z",
+  "node": "v24.14.0"
 }

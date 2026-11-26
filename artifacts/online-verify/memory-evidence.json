@@ -1,0 +1,252 @@
+{
+  "united": {
+    "passed": true,
+    "allContrastsMoved": true,
+    "polarityGainTotal": 2,
+    "polarityGainMin": 1.5,
+    "allComplete": true,
+    "note": "联合判据的假阳性率（随机意图、完全不读记忆的桩，30 万次模拟）约 0.0043%。逐组 PASS 单看有约 4% 误判率，引用单组结论前先看这里。"
+  },
+  "criterion": {
+    "rounds": 5,
+    "polarityGapMin": 1,
+    "anchorAlternative": true,
+    "sampling": "固定轮数，不早停"
+  },
+  "contrasts": [
+    {
+      "contrast": "无记忆 vs 受助",
+      "asserted": true,
+      "rounds": 5,
+      "expectation": "treatment_more_positive",
+      "criterion": {
+        "polarityGapMin": 1,
+        "requireDirection": true,
+        "anchorAlternative": true
+      },
+      "complete": true,
+      "polarityControl": 0,
+      "polarityTreatment": 0,
+      "anchorMoved": true,
+      "moved": true,
+      "memorySent": [
+        {
+          "day": 2,
+          "kind": "help",
+          "summary": "第2天你发高烧，玩家把整卷银色绝缘胶带留给了你，自己去堵漏风的门。",
+          "weight": 0.6
+        }
+      ],
+      "control": [
+        {
+          "intent": "dialogue",
+          "text": "别靠近线路，这里不稳。我可以帮你避开危险，但你需要先说明来意。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"别靠近线路，这里不稳。我可以帮你避开危险，但你需要先说明来意。\"},\"confidence\":0.8}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "别靠近线路节点，我去检查。这层线路要守住，你帮我盯着入口就行。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"别靠近线路节点，我去检查。这层线路要守住，你帮我盯着入口就行。\"},\"confidence\":0.8}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "我在第2层守着这条线路，不会让通道轻易失守。若你愿意配合，我可以告诉你附近哪段路暂时安全。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"我在第2层守着这条线路，不会让通道轻易失守。若你愿意配合，我可以告诉你附近哪段路暂时安全。\"},\"confidence\":0.8}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "这层线路我来守，你退后些，别靠近损坏的节点。有动静先告诉我。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"这层线路我来守，你退后些，别靠近损坏的节点。有动静先告诉我。\"},\"confidence\":0.8}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "先别乱动这里的线路，守住它我们才安全。你愿意站我这边的话，我不会丢下你。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"先别乱动这里的线路，守住它我们才安全。你愿意站我这边的话，我不会丢下你。\"},\"confidence\":0.8}"
+        }
+      ],
+      "treatment": [
+        {
+          "intent": "dialogue",
+          "text": "你还记得吗，前天我烧得站不住，你把银色绝缘胶带留给了我，自己跑去堵那扇漏风的门。我身上现在没有能还你的东西，但我会守好这层的线路，不会让靠近这里的人再受牵连。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你还记得吗，前天我烧得站不住，你把银色绝缘胶带留给了我，自己跑去堵那扇漏风的门。我身上现在没有能还你的东西，但我会守好这层的线路，不会让靠近这里的人再受牵连。\"},\"confidence\":0.82}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "我还记得那卷银色绝缘胶带……你把它留给了我。现在这层线路我来守，需要我帮忙就说一声。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"我还记得那卷银色绝缘胶带……你把它留给了我。现在这层线路我来守，需要我帮忙就说一声。\"},\"confidence\":0.82}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "那天你把整卷绝缘胶带留给我，还替我去堵门。我现在没东西能还你，但这层的线路我会守好；你需要帮忙就叫我。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"那天你把整卷绝缘胶带留给我，还替我去堵门。我现在没东西能还你，但这层的线路我会守好；你需要帮忙就叫我。\"},\"confidence\":0.8}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "你那天把胶带留给我，自己去堵门……这份情我记着。这层线路我来守，别靠近接口，我去把松掉的线夹固定好。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你那天把胶带留给我，自己去堵门……这份情我记着。这层线路我来守，别靠近接口，我去把松掉的线夹固定好。\"},\"confidence\":0.82}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "你把那卷银色绝缘胶带留给我，又自己去堵门，这份情我记着。这层线路我来守，你去缓一缓，别硬撑。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你把那卷银色绝缘胶带留给我，又自己去堵门，这份情我记着。这层线路我来守，你去缓一缓，别硬撑。\"},\"confidence\":0.8}"
+        }
+      ]
+    },
+    {
+      "contrast": "失约 vs 守约",
+      "asserted": true,
+      "rounds": 5,
+      "expectation": "treatment_more_positive",
+      "criterion": {
+        "polarityGapMin": 1,
+        "requireDirection": true,
+        "anchorAlternative": true
+      },
+      "complete": true,
+      "polarityControl": -1,
+      "polarityTreatment": 0,
+      "anchorMoved": false,
+      "moved": true,
+      "memorySent": [
+        {
+          "day": 2,
+          "kind": "promise",
+          "summary": "玩家答应第2天带保险丝回来，第二天一早准时送到你手上。",
+          "weight": 0.5
+        }
+      ],
+      "control": [
+        {
+          "intent": "refuse",
+          "text": "你答应过的事没做到，我现在不能把线路交给你。",
+          "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"你答应过的事没做到，我现在不能把线路交给你。\"}"
+        },
+        {
+          "intent": "refuse",
+          "text": "你说过会带保险丝回来，可我等了一整夜。现在线路不稳，我不会再把东西交出去。",
+          "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"你说过会带保险丝回来，可我等了一整夜。现在线路不稳，我不会再把东西交出去。\"}"
+        },
+        {
+          "intent": "refuse",
+          "text": "你答应带保险丝回来，却整整一夜没有出现。这一次，我不能把这条线路托付给你。",
+          "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"你答应带保险丝回来，却整整一夜没有出现。这一次，我不能把这条线路托付给你。\"}"
+        },
+        {
+          "intent": "refuse",
+          "text": "你答应带保险丝却一整夜没回来。线路的事，我不打算再靠你赌一次。",
+          "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"你答应带保险丝却一整夜没回来。线路的事，我不打算再靠你赌一次。\"}"
+        },
+        {
+          "intent": "refuse",
+          "text": "你那天答应带保险丝回来，却整夜没出现。线路现在不能乱动，我也不能把东西给你。",
+          "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"你那天答应带保险丝回来，却整夜没出现。线路现在不能乱动，我也不能把东西给你。\"}"
+        }
+      ],
+      "treatment": [
+        {
+          "intent": "dialogue",
+          "text": "你昨天把保险丝准时送来了，这条线路才能继续撑着。这份帮助我不会忘。若接下来有我能帮上忙的地方，尽管说。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你昨天把保险丝准时送来了，这条线路才能继续撑着。这份帮助我不会忘。若接下来有我能帮上忙的地方，尽管说。\"},\"confidence\":0.8}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "你果然按时把保险丝带回来了，线路稳住了。第2层这附近还有几处接触不良，我会继续守着。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你果然按时把保险丝带回来了，线路稳住了。第2层这附近还有几处接触不良，我会继续守着。\"},\"confidence\":0.8}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "你把保险丝准时送来了，这层的线路稳住了。这份情我记着；若之后还要守这层，我会把能用的通道都给你留着。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你把保险丝准时送来了，这层的线路稳住了。这份情我记着；若之后还要守这层，我会把能用的通道都给你留着。\"},\"confidence\":0.85}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "你昨天送来的保险丝让这条线路稳住了，我欠你一份人情。后面若还有需要帮忙的地方，尽管说。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你昨天送来的保险丝让这条线路稳住了，我欠你一份人情。后面若还有需要帮忙的地方，尽管说。\"},\"confidence\":0.8}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "你昨天一早把保险丝送来，线路才撑住。谢谢你，我会继续盯紧这一层，别让断口再扩大。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你昨天一早把保险丝送来，线路才撑住。谢谢你，我会继续盯紧这一层，别让断口再扩大。\"},\"confidence\":0.8}"
+        }
+      ]
+    },
+    {
+      "contrast": "被拒 vs 获赠",
+      "asserted": true,
+      "rounds": 5,
+      "expectation": "treatment_more_positive",
+      "criterion": {
+        "polarityGapMin": 1,
+        "requireDirection": true,
+        "anchorAlternative": true
+      },
+      "complete": true,
+      "polarityControl": -1,
+      "polarityTreatment": 0,
+      "anchorMoved": false,
+      "moved": true,
+      "memorySent": [
+        {
+          "day": 1,
+          "kind": "help",
+          "summary": "玩家主动把身上最后一块木板塞给了你，没要任何回报。",
+          "weight": 0.6
+        }
+      ],
+      "control": [
+        {
+          "intent": "refuse",
+          "text": "上次你让我自己想办法，这次也别指望我凑上去。",
+          "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"上次你让我自己想办法，这次也别指望我凑上去。\"}"
+        },
+        {
+          "intent": "refuse",
+          "text": "你上次不肯借木板，我也不勉强；这层的线路我自己守得住。",
+          "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"你上次不肯借木板，我也不勉强；这层的线路我自己守得住。\"}"
+        },
+        {
+          "intent": "refuse",
+          "text": "木板的事我自己想办法。这条线路我守着，你先走你的路。",
+          "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"木板的事我自己想办法。这条线路我守着，你先走你的路。\"}"
+        },
+        {
+          "intent": "refuse",
+          "text": "你既然不肯借木板，也别指望我替你守这条线路。先顾好你自己吧。",
+          "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"你既然不肯借木板，也别指望我替你守这条线路。先顾好你自己吧。\"}"
+        },
+        {
+          "intent": "refuse",
+          "text": "木板的事我记得，这次先别找我帮忙。",
+          "raw": "{\"action\":{\"type\":\"refuse\"},\"utterance\":\"木板的事我记得，这次先别找我帮忙。\"}"
+        }
+      ],
+      "treatment": [
+        {
+          "intent": "dialogue",
+          "text": "你那天帮过我，我不会装作没发生。这层线路我来守，你跟着我，别擅自乱走。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你那天帮过我，我不会装作没发生。这层线路我来守，你跟着我，别擅自乱走。\"},\"confidence\":0.8}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "那天你把最后一块木板给了我，我一直记着。现在我身上没东西能还你，但你若有难处，我可以陪你守这层线路。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"那天你把最后一块木板给了我，我一直记着。现在我身上没东西能还你，但你若有难处，我可以陪你守这层线路。\"},\"confidence\":0.9}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "那天你把最后一块木板留给我，我一直记着。现在我身上没有东西能还你，但这条线路我会守住。你若需要帮忙，尽管说。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"那天你把最后一块木板留给我，我一直记着。现在我身上没有东西能还你，但这条线路我会守住。你若需要帮忙，尽管说。\"},\"confidence\":0.8}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "你之前帮过我，我记得。我现在手上没有东西能还你，但我愿意帮你守住第2层的线路。有什么需要，说。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你之前帮过我，我记得。我现在手上没有东西能还你，但我愿意帮你守住第2层的线路。有什么需要，说。\"},\"confidence\":0.8}"
+        },
+        {
+          "intent": "dialogue",
+          "text": "你给我的那块木板我记着。现在我身上没有东西能还你，但这条线路我来守，有危险你先退后。",
+          "raw": "{\"action\":{\"type\":\"dialogue\",\"text\":\"你给我的那块木板我记着。现在我身上没有东西能还你，但这条线路我来守，有危险你先退后。\"},\"confidence\":0.85}"
+        }
+      ]
+    }
+  ]
+}

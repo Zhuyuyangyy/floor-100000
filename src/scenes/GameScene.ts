@@ -517,6 +517,8 @@ export class GameScene extends Phaser.Scene {
   /** 最近一次赠礼结果；阿林走单 NPC 场景，小周走多 NPC 场景。 */
   lastGiftResult?: AlinGiftScenarioResult | SocialScenarioResult;
   private judgePanel?: HTMLElement;
+  /** Judge Mode 的折叠标题：来源与焦点 NPC 必须说真话，见 updateJudgeToggle。 */
+  private judgeToggle?: HTMLButtonElement;
   private judgePanelContent?: HTMLPreElement;
   private judgeExportButton?: HTMLButtonElement;
   private judgeExpanded = false;
@@ -3580,13 +3582,8 @@ export class GameScene extends Phaser.Scene {
       borderRadius: '5px', font: '12px/1.5 ui-monospace, SFMono-Regular, monospace',
     });
     const updateToggle = (): void => {
-      const autonomy = this.lastNpcAutonomyResult;
-      // 自主 tick 的来源也挂在标题上：评审一眼就能看到「世界自己触发过」。
-      const autonomyTag = autonomy && autonomy.status === 'executed'
-        ? ` · 自主tick:${autonomy.decisionSource}`
-        : '';
-      toggle.textContent = `Judge Mode · offline-fallback${autonomyTag} · seed ${getGame().runSeed} · 阿林${this.judgeExpanded ? ' ▾' : ' ▸'}`;
-      toggle.setAttribute('aria-expanded', String(this.judgeExpanded));
+      this.judgeToggle = toggle;
+      this.updateJudgeToggle();
       content.style.display = this.judgeExpanded ? 'block' : 'none';
     };
     toggle.addEventListener('click', () => {
@@ -3654,12 +3651,50 @@ export class GameScene extends Phaser.Scene {
     };
   }
 
+  /**
+   * Judge Mode 标题：来源与焦点 NPC 必须取自**真实发生过的结果**。
+   *
+   * 这里原来写死了 `offline-fallback` 和「阿林」——那是面板一次都没跑过时
+   * 就会显示的字。模型真的提案并提交成功之后，标题仍写着 offline-fallback，
+   * 就是一个**假的来源标签**；玩家跟小周或阿珍交互之后仍写着「阿林」，
+   * 就是**假的 NPC 名字**。评审专门盯这两条：初始应显示「等待中」，
+   * 跑过什么就显示什么。
+   *
+   * 与面板内容（refreshJudgeModePanel）用的是同一套判定，两处不会打架。
+   */
+  private updateJudgeToggle(): void {
+    const toggle = this.judgeToggle;
+    if (!toggle) return;
+    const latest = this.judgeLatestResult;
+    // 没发生过任何 scenario → 不写来源，只写「等待中」。
+    const source = latest
+      ? ('decisionSource' in latest ? latest.decisionSource : 'offline-fallback')
+      : '等待中';
+    const focus = latest
+      ? ('focusNpcId' in latest ? getNpc(latest.focusNpcId).name : getNpc('alin').name)
+      : '';
+    const autonomy = this.lastNpcAutonomyResult;
+    // 自主 tick 的来源也挂在标题上：评审一眼就能看到「世界自己触发过」。
+    const autonomyTag = autonomy && autonomy.status === 'executed'
+      ? ` · 自主tick:${autonomy.decisionSource}`
+      : '';
+    toggle.textContent = `Judge Mode · ${source}${autonomyTag} · seed ${getGame().runSeed}`
+      + (focus ? ` · ${focus}` : '')
+      + (this.judgeExpanded ? ' ▾' : ' ▸');
+    toggle.setAttribute('aria-expanded', String(this.judgeExpanded));
+  }
+
   private refreshJudgeModePanel(): void {
     if (!this.judgePanelContent) return;
+    // 标题与内容必须说同一件事：来源、焦点 NPC 都取自真实结果。
+    this.updateJudgeToggle();
     const result = this.judgeLatestResult;
     if (!result) {
       this.judgePanelContent.textContent = JSON.stringify({
-        mode: 'offline-fallback', seed: getGame().runSeed, npc: '阿林', target: 'alin-repair-gate',
+        // 还没跑过任何 scenario：这里**不能**写一个来源或一个 NPC 名字。
+        // 写死 'offline-fallback' / '阿林' 就是一条假证据——模型真的跑过之后
+        // 面板里还写着它们，评审一眼看到的就是编的。
+        mode: '等待中', seed: getGame().runSeed, npc: null, target: null,
         status: '等待真实 scenario result',
         instructions: '与阿林交互：赠礼会运行赠礼 scenario；维修门计划会运行只读校验。未出现 scenario 结果前，没有状态提交。',
         autonomy: this.judgeAutonomyEvidence(),

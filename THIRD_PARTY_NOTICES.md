@@ -12,8 +12,10 @@ The source is one of:
 Anything not backed by one of those three is marked **来源待确认 (provenance unconfirmed)**
 and must not be relied on. This file deliberately does not guess.
 
-Last verified: 2026-11-25, against the working tree (Phaser 4.2.1, no `LICENSE` file
-in the repo root at that time — see `LICENSE`, which is a draft awaiting owner sign-off).
+Last verified: 2026-11-26, against the working tree (Phaser 4.2.1; the repo now
+carries a final `LICENSE` — MIT, adopted by the copyright holder on 2026-11-26).
+Earlier verification was done on 2026-11-25, when no `LICENSE` file existed in the
+repository root.
 
 ## Selection marker — Kenney, CC0 1.0
 
@@ -50,12 +52,9 @@ in the repo root at that time — see `LICENSE`, which is a draft awaiting owner
   `tools/build-artpack.mjs` (see `docs/ARTPACK_INTEGRATION.md`). Item icons are
   area-averaged from ~250px down to 16x16; the panel frame is cut into four
   natural-size corners and four stretchable edges.
-- **Licence:** the owner's to state. Nothing here was taken from a third party.
-
-> If this repository is ever published, this section is the one to settle first:
-> the art is the owner's, but a public repo grants the world a licence the owner
-> may not intend. The code is MIT-shaped original work; the art is not
-> automatically.
+- **Licence:** MIT, as part of this repository. The copyright holder confirmed on
+  2026-11-26 that the owner-supplied artwork **is** covered by the project's MIT
+  grant (see `LICENSE` §Scope notes). Nothing here was taken from a third party.
 
 ---
 

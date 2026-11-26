@@ -1,6 +1,7 @@
 {
   "name": "floor-100000",
   "private": true,
+  "license": "MIT",
   "version": "0.1.0",
   "description": "第100000层：末日宿舍 — 2D 横版像素生存游戏（开发规格基线 v0.1）",
   "type": "module",

@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 The "第100000层：末日宿舍 / Floor 100000" project authors
+Copyright (c) 2026 Zhuyuyangyy
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,30 +20,42 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-================================================================================
-STATUS — PENDING OWNER CONFIRMATION
-================================================================================
+--------------------------------------------------------------------------------
+Scope notes (not a second licence — the grant above is the whole licence)
+--------------------------------------------------------------------------------
 
-This file is a DRAFT. It has not been formally adopted by the copyright holder.
+**Artwork is included.** The MIT grant above covers the whole of this
+repository, *including* the owner-supplied artwork: the art pack
+(`public/assets/artpack/`), the panel frames (`public/assets/ui/frame-*.png`),
+the inventory slot frame (`public/assets/ui/slot.png`), and the environment,
+title and weapon sprites. The copyright holder confirmed on 2026-11-26 that
+this artwork is **not** excluded from the grant.
 
-Why it exists: the repository previously carried no `LICENSE` file and no
-`license` field in `package.json`. `THIRD_PARTY_NOTICES.md` described the source
-code only as "MIT-shaped original work" — a description, not a grant.
+**Third-party components keep their own licences.** Nothing here relicenses
+them; each keeps the terms it shipped with, enumerated with its provenance in
+`THIRD_PARTY_NOTICES.md`:
 
-What the copyright holder must decide before treating this as final:
+| Component | Licence |
+| --- | --- |
+| Phaser 4 | MIT |
+| Ark Pixel Font | SIL Open Font License 1.1 |
+| Kenney "Pixel UI Pack" selection marker | CC0 1.0 |
+| pixelfx effect sheets | MIT |
 
-  1. Confirm MIT as the intended licence for the source code, and fill in the
-     real copyright holder name above (individual legal name or entity).
-  2. Confirm that the scope is code only. The ART IS NOT COVERED by this MIT
-     grant. `public/assets/artpack/`, `public/assets/ui/frame-*.png`,
-     `public/assets/ui/slot.png`, `public/assets/env/`, `public/assets/title/`
-     and `public/assets/weapons/` are owner-supplied artwork whose terms the
-     owner has not yet stated. See THIRD_PARTY_NOTICES.md.
-  3. Confirm that third-party components keep their own licences: Phaser (MIT),
-     Ark Pixel Font (SIL OFL 1.1), Kenney selection marker (CC0 1.0), pixelfx
-     effect sheets (MIT). Those are enumerated in THIRD_PARTY_NOTICES.md and are
-     not relicensed by this file.
+--------------------------------------------------------------------------------
+Adoption record
+--------------------------------------------------------------------------------
 
-Until the holder confirms, treat this file as a proposal. If a different licence
-is chosen, replace the text above wholesale rather than appending to it — a
-LICENSE file with two licences in it grants nothing clearly.
+This file was a draft marked `STATUS — PENDING OWNER CONFIRMATION` until the
+copyright holder adopted it on **2026-11-26**, deciding three things:
+
+1. MIT is the licence; the copyright holder is **Zhuyuyangyy** (repository
+   owner, and the ModelScope account that hosts the deployed Studio).
+2. The scope is **not** code-only — the owner's artwork is covered by the same
+   MIT grant.
+3. Third-party components keep their own licences, listed individually rather
+   than as a blanket disclaimer.
+
+The draft's text and its reasoning are preserved in the git history
+(`git log -- LICENSE`); a LICENSE file with two competing licences in it grants
+nothing clearly, so the draft block was replaced rather than appended to.

@@ -211,8 +211,8 @@ flowchart TB
 | 跨天记忆影响决策 | **无端到端证据。** 记忆验收段已实现于 `tools/verify-online-api.mjs`（按段落标题「2.6 记忆影响决策」定位，不按行号；含锚点回响、意图分布、weight 分级三组对照 + 采样噪声基线），但**线上实例仍为 private，平台层就挡住了**（`GET /` 与 `/healthz` 均 401、门户站 403），**该段从未在线上执行**。现有记忆证据仅来自离线桩，用于验证判据有效性，不构成线上行为证据 |
 | 一天里约 8 小时无事可做 | `docs/M1_PLAYTEST.md` 实测，内容量问题 |
 | 五层内容是一次性的 | 回取一趟之后再无上楼理由 |
-| 代码许可证 | **未定。** `LICENSE` 是草稿，待权利人确认 |
-| 美术素材再分发条款 | **权利人未声明**。公开仓库会授予访问者一份可能并不想给的许可 |
+| 代码许可证 | **MIT**（权利人 2026-11-26 定稿，见 `LICENSE`） |
+| 美术素材再分发条款 | **纳入同一份 MIT**：权利人 2026-11-26 确认美术不排除在 MIT 之外 |
 
 ---
 
@@ -328,12 +328,13 @@ cp .env.example .env.local
 | **[Spark 部署](docs/SPARK_DEPLOY.md)** | 模型、环境变量、启动命令、验证命令、排障顺序 |
 | **[Benchmark 报告](docs/BENCHMARK_REPORT.md)** | 指标定义与实测值（大量 `【待实测】` 占位，已填部分均标注来源文件） |
 | **[第三方声明](THIRD_PARTY_NOTICES.md)** | 逐项许可证核查，含"已核实 / 声称 / 查不到"三档标注 |
-| **[LICENSE](LICENSE)** | **草稿，待权利人确认。** 未正式采用 |
+| **[LICENSE](LICENSE)** | **MIT，权利人 2026-11-26 定稿**（含署名、美术范围与第三方逐项保留的口径） |
 
-**许可证现状（必须知道）**：仓库此前无 `LICENSE`、`package.json` 无 `license` 字段。
-`THIRD_PARTY_NOTICES.md` 曾把代码描述为 "MIT-shaped original work"——那是描述不是授权。
-现在放了一份 MIT 草稿，但它**待权利人签字**。美术素材（`public/assets/artpack/`、
-`env/`、`title/`、`weapons/`）的再分发条款**权利人尚未声明**。
+**许可证现状**：仓库此前无 `LICENSE`、`package.json` 无 `license` 字段。
+权利人已于 **2026-11-26** 正式采用 MIT：`package.json` 补上 `"license": "MIT"`，
+`LICENSE` 定稿并写明三件事——署名 **Zhuyuyangyy**；**美术素材（`public/assets/artpack/`、
+`env/`、`title/`、`weapons/`）不排除在 MIT 之外**；第三方组件**各自保留原许可**并逐项列在
+`THIRD_PARTY_NOTICES.md`（Phaser MIT / 方舟像素字体 OFL 1.1 / Kenney CC0 / pixelfx MIT）。
 
 ---
 

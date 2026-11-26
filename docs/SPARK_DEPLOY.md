@@ -565,11 +565,35 @@ Dockerfile 是三段式（build → runtime），要点：
 **重新部署（改了 `server/` 或前端产物之后）：**
 
 ```bash
-# 1. 仓库根目录（ms_deploy.json 在这里）
-# 2. 同步代码并重新部署（用魔搭官方 SDK/CLI，账号 token 从环境变量 MODELSCOPE_API_KEY 读）
-#    具体命令见官方 Skill：https://www.modelscope.cn/skills/modelscope/modelscope-studio
-# 3. 等平台把容器跑起来：/healthz 返 {"ok":true,...} 且 status=Running
+# 1. 拿一个魔搭访问令牌（设置 → 访问令牌）：https://modelscope.cn/my/myaccesstoken
+export MODELSCOPE_API_KEY=<token>
+export MODELSCOPE_ENDPOINT=https://modelscope.cn
+
+# 2. 代码同步走 Git —— 这一步没有 API，只能推 git
+git remote add modelscope https://oauth2:${MODELSCOPE_API_KEY}@modelscope.cn/studios/a1578804454/floor-100000.git
+git fetch modelscope master
+git merge modelscope/master --allow-unrelated-histories -m "Merge remote"
+#   冲突时保留本地：git checkout --ours . && git add . && git commit -m "Resolve conflicts, keep local version"
+git push modelscope HEAD:master        # 空间默认分支是 master，本地分支名不同，别推成 deploy-ms-20261125
+
+# 3. 触发部署（等价 CLI：ms deploy a1578804454/floor-100000 --repo-type studio）
+curl -X POST "$MODELSCOPE_ENDPOINT/openapi/v1/studios/a1578804454/floor-100000/deploy" \
+  -H "Authorization: Bearer $MODELSCOPE_API_KEY"
+
+# 4. 看日志：docker 类型先看 build，构建完再看 run
+curl "$MODELSCOPE_ENDPOINT/openapi/v1/studios/a1578804454/floor-100000/logs/build" -H "Authorization: Bearer $MODELSCOPE_API_KEY"
+curl "$MODELSCOPE_ENDPOINT/openapi/v1/studios/a1578804454/floor-100000/logs/run"   -H "Authorization: Bearer $MODELSCOPE_API_KEY"
+
+# 5. 等 status 回到 Running
+curl "$MODELSCOPE_ENDPOINT/openapi/v1/studios/a1578804454/floor-100000" -H "Authorization: Bearer $MODELSCOPE_API_KEY"
 ```
+
+> **可见性也能用 API 改**（万一需要）：`PATCH .../studios/{owner}/{repo}/settings`，
+> body `{"visibility":"public"}`，或 `ms settings {owner}/{repo} --repo-type studio private=false`。
+> ⚠️ 但**当前空间本来就是 public**（`visibility:"public"` / `private:false`），不用改。
+>
+> **第一次 docker 构建约 3–5 分钟**，构建缓存会让后续快很多。
+> 部署完的验收见下一节。
 
 **重跑线上验收（拿一个有效 SDK token）：**
 

@@ -411,6 +411,81 @@ export function searchPose(frame: number): Pose {
   };
 }
 
+// ── die (3 frames) ────────────────────────────────────────────────────────
+// 倒下：站不稳 → 膝先落地 → 整个人伏下去。
+//
+// 这三帧原先是**空的**：`DIE_FRAME_START` 之后没有任何绘制调用，而 die 动画
+// 明确引用 15..17（见 createCharacterAnimations）。所以程序化烘焙的四个住户
+// 一倒地就整个消失——不是"倒下"，是"蒸发"。同样的洞在 pickup（18..19）。
+//
+// 几何上不能靠 lean 硬拽：髋一旦低到某个程度，两条 37px 的腿就必须折起来，
+// 所以每帧都是先定髋高、再用 legTo 把脚放回地上，落地失败直接抛错（宁可
+// 构建期炸，也不要一个脚陷进地板的死人）。
+const DIE_TABLE: ReadonlyArray<{ hipY: number; stance: number; lean: number; headDx: number; swing: number; farSwing: number; neckDx: number }> = [
+  // 1) 膝盖软了：髋落 8px，躯干还在，头开始往前掉
+  { hipY: IDLE_HIP_Y + 8, stance: 7, lean: 10, headDx: 5, swing: 34, farSwing: 20, neckDx: 5 },
+  // 2) 单膝着地：髋落到腿折起来的高度，上半身已经明显前倾
+  { hipY: IDLE_HIP_Y + 20, stance: 10, lean: 20, headDx: 9, swing: 52, farSwing: 38, neckDx: 8 },
+  // 3) 伏地：髋贴到底，头低过肩，手臂摊在身前——这张要停住给结算卡
+  { hipY: IDLE_HIP_Y + 30, stance: 12, lean: 30, headDx: 12, swing: 74, farSwing: 62, neckDx: 11 },
+];
+
+export function diePose(frame: number): Pose {
+  const f = ((frame % DIE_FRAMES) + DIE_FRAMES) % DIE_FRAMES;
+  const t = DIE_TABLE[f];
+  const hip: Point = { x: HIP_X, y: t.hipY };
+  // 脚仍踩在地面线上：倒地过程中人是跪下去，不是脚跟着沉进地板。
+  const { a, b } = plantedLegs(hip, t.stance);
+  const shoulder: Point = { x: HIP_X, y: hip.y - 26 };
+  return {
+    hip,
+    shoulder,
+    head: { x: HIP_X + t.headDx, y: shoulder.y - HEAD_R - 1 },
+    a,
+    b,
+    near: 'a',
+    armSwing: t.swing,
+    farSwing: t.farSwing,
+    neckDx: t.neckDx,
+    hipY: hip.y,
+    lean: t.lean,
+  };
+}
+
+// ── pickup (2 frames) ─────────────────────────────────────────────────────
+// 俯身捡东西：第一帧探手下去，第二帧抓到并起身。
+//
+// 前两版都不对，原因值得记下来：只压短躯干（torso 17→11）不会读成"弯腰"，
+// 它读成"这个人变矮了"——因为头永远长在肩口正上方，肩低了头也低，轮廓还是
+// 一根直棍。弯腰的轮廓特征是**头明显跑到髋的前方、并且低于肩**，所以真正
+// 起作用的是 headDx / neckDx（往前送 12px）和 lean，不是 torso 压多短。
+// torso 留在 15/16（接近 search 的 16/15），靠头前探和手够地来说话。
+const PICKUP_TABLE: ReadonlyArray<{ torso: number; headDx: number; swing: number; farSwing: number; neckDx: number; lean: number }> = [
+  { torso: 15, headDx: 13, swing: 88, farSwing: 72, neckDx: 13, lean: 9 },
+  { torso: 16, headDx: 9, swing: 72, farSwing: 58, neckDx: 10, lean: 7 },
+];
+
+export function pickupPose(frame: number): Pose {
+  const f = ((frame % PICKUP_FRAMES) + PICKUP_FRAMES) % PICKUP_FRAMES;
+  const t = PICKUP_TABLE[f];
+  const hip: Point = { x: HIP_X, y: IDLE_HIP_Y };
+  const { a, b } = plantedLegs(hip, IDLE_STANCE);
+  const shoulder: Point = { x: HIP_X, y: hip.y - t.torso };
+  return {
+    hip,
+    shoulder,
+    head: { x: HIP_X + t.headDx, y: shoulder.y - HEAD_R - 1 },
+    a,
+    b,
+    near: 'a',
+    armSwing: t.swing,
+    farSwing: t.farSwing,
+    neckDx: t.neckDx,
+    hipY: hip.y,
+    lean: t.lean,
+  };
+}
+
 // ── palette ───────────────────────────────────────────────────────────────
 // The project palette from 05_ART_GUIDE.md §2, as the build-characters.mjs set
 // already laid it out. One triplet of clothing colours per character so the four
@@ -1097,6 +1172,14 @@ export function bakeWalkSheets(scene: Phaser.Scene): void {
     }
     for (let f = 0; f < SEARCH_FRAMES; f++) {
       drawPose(sheet, searchPose(f), col, (SEARCH_FRAME_START + f) * FRAME_W);
+    }
+    // W6 的 die(3) 与 pickup(2) 必须画，否则 15..19 这几列是空 alpha：
+    // createCharacterAnimations 已经把它们登记成动画，播到就是不存在的帧。
+    for (let f = 0; f < DIE_FRAMES; f++) {
+      drawPose(sheet, diePose(f), col, (DIE_FRAME_START + f) * FRAME_W);
+    }
+    for (let f = 0; f < PICKUP_FRAMES; f++) {
+      drawPose(sheet, pickupPose(f), col, (PICKUP_FRAME_START + f) * FRAME_W);
     }
 
     const tex = scene.textures.createCanvas(key, sheet.w, sheet.h);

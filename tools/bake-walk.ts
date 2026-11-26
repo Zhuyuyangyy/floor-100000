@@ -1,10 +1,16 @@
 // Bakes the walk cycle frames to PNG for visual review.
 // Run: node tools/bake-walk.ts [characterKey] [outDir] [--dump]
 // Writes 1x frames plus a 4x nearest-neighbour contact sheet.
+// `--sheet` writes the game-ready 20x64x96 spritesheet instead of review frames.
 //
-// W5: the sheet is walk(6) + idle(2) + attack(3) + hurt(2) + search(2) = 15
-// columns. The one-shot segments are appended, so the ASCII dump below is
-// printed in four labelled sections instead of one flat run of frames.
+// The sheet is walk(6) + idle(2) + attack(3) + hurt(2) + search(2) + die(3)
+// + pickup(2) = 20 columns, in that order, matching TOTAL_FRAMES.
+//
+// 2026-11-27 修：这里原来只烘前 15 帧（walk/idle/attack/hurt/search），
+// 而 TOTAL_FRAMES 在加入 die(3)+pickup(2) 之后已经是 20。下面的断言因此
+// 每次运行都抛错——工具自 die/pickup 落地起就是坏的，只是没人跑过。
+// 现在补齐两段，并且配色改为直接读 CHARACTER_PALETTES，不再自己维护一份
+// 副本（那份副本漏了后来新增的四个住户，正是它挡住了给老陈/大刘/小满出图）。
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,9 +21,13 @@ import {
   ATTACK_FRAMES,
   HURT_FRAMES,
   SEARCH_FRAMES,
+  DIE_FRAMES,
+  PICKUP_FRAMES,
   ATTACK_FRAME_START,
   HURT_FRAME_START,
   SEARCH_FRAME_START,
+  DIE_FRAME_START,
+  PICKUP_FRAME_START,
   TOTAL_FRAMES,
   FRAME_W,
   FRAME_H,
@@ -26,28 +36,26 @@ import {
   attackPose,
   hurtPose,
   searchPose,
+  diePose,
+  pickupPose,
   drawPose,
   makeCanvas,
-  PLAYER_COLORS,
-  ALIN_COLORS,
-  XIAOZHOU_COLORS,
-  WANDERER_COLORS,
-  type CharacterColors,
+  CHARACTER_PALETTES,
+  type CharacterKey,
   type Pose,
 } from '../src/render/walkcycle.ts';
 
 const key = process.argv[2] ?? 'player';
 const outDir = process.argv[3] ?? 're/frames';
+const wantSheet = process.argv.includes('--sheet');
 mkdirSync(outDir, { recursive: true });
 
-const COLORS: Record<string, CharacterColors> = {
-  player: PLAYER_COLORS,
-  npc_alin: ALIN_COLORS,
-  npc_xiaozhou: XIAOZHOU_COLORS,
-  wanderer: WANDERER_COLORS,
-};
-const col = COLORS[key];
-if (!col) throw new Error(`unknown character ${key}`);
+const col = CHARACTER_PALETTES[key as CharacterKey];
+if (!col) {
+  throw new Error(
+    `unknown character ${key}; known: ${Object.keys(CHARACTER_PALETTES).join(', ')}`,
+  );
+}
 
 // 帧清单与 sheet 列号一一对应，bakeWalkSheets() 用的是同一套起始列常量。
 const SEGMENTS: ReadonlyArray<{ label: string; count: number; pose: (f: number) => Pose }> = [
@@ -56,6 +64,8 @@ const SEGMENTS: ReadonlyArray<{ label: string; count: number; pose: (f: number) 
   { label: 'attack', count: ATTACK_FRAMES, pose: attackPose },
   { label: 'hurt', count: HURT_FRAMES, pose: hurtPose },
   { label: 'search', count: SEARCH_FRAMES, pose: searchPose },
+  { label: 'die', count: DIE_FRAMES, pose: diePose },
+  { label: 'pickup', count: PICKUP_FRAMES, pose: pickupPose },
 ];
 
 const frames: Uint8Array[] = [];
@@ -117,7 +127,9 @@ console.log(
     `(walk 0-${WALK_FRAMES - 1}, idle ${WALK_FRAMES}-${WALK_FRAMES + IDLE_FRAMES - 1}, ` +
     `attack ${ATTACK_FRAME_START}-${ATTACK_FRAME_START + ATTACK_FRAMES - 1}, ` +
     `hurt ${HURT_FRAME_START}-${HURT_FRAME_START + HURT_FRAMES - 1}, ` +
-    `search ${SEARCH_FRAME_START}-${SEARCH_FRAME_START + SEARCH_FRAMES - 1})`,
+    `search ${SEARCH_FRAME_START}-${SEARCH_FRAME_START + SEARCH_FRAMES - 1}, ` +
+    `die ${DIE_FRAME_START}-${DIE_FRAME_START + DIE_FRAMES - 1}, ` +
+    `pickup ${PICKUP_FRAME_START}-${PICKUP_FRAME_START + PICKUP_FRAMES - 1})`,
 );
 
 // ASCII dump: one char per palette role, so the pixel placement can be reviewed
@@ -150,6 +162,31 @@ if (process.argv.includes('--dump')) {
       console.log(line.replace(/\.+$/, ''));
     }
   }
+}
+
+// ── game-ready sheet ─────────────────────────────────────────────────────
+// The review sheet above is 4x, which is right for looking at and wrong for
+// shipping. `--sheet` writes the 1:1 20x64x96 strip that BootScene's
+// import.meta.glob('assets/characters/*.png') picks up as a spritesheet —
+// dropping the file in is the whole install, no registry edit.
+if (wantSheet) {
+  const sheetW = FRAME_W * total;
+  const flat = new Uint8Array(sheetW * FRAME_H * 4);
+  for (let f = 0; f < total; f++) {
+    for (let y = 0; y < FRAME_H; y++) {
+      for (let x = 0; x < FRAME_W; x++) {
+        const s = (y * FRAME_W + x) * 4;
+        const d = (y * sheetW + f * FRAME_W + x) * 4;
+        flat[d] = frames[f][s];
+        flat[d + 1] = frames[f][s + 1];
+        flat[d + 2] = frames[f][s + 2];
+        flat[d + 3] = frames[f][s + 3];
+      }
+    }
+  }
+  const out = join(outDir, `${key}.png`);
+  writeFileSync(out, rgbaToPng(flat, sheetW, FRAME_H));
+  console.log(`wrote ${sheetW}x${FRAME_H} game sheet (${total} frames) -> ${out}`);
 }
 
 function rgbaToPng(px: Uint8Array, w: number, h: number): Buffer {

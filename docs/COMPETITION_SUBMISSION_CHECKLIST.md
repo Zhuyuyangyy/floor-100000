@@ -26,7 +26,7 @@
 
 - [x] **核心循环可玩**：第 1–5 层探索/搜刮/交易/制作/睡觉/存档。
   证据：`src/systems/` 32 个纯逻辑模块；`e2e/survivalJourney.spec.ts`（真实走过 1–5 层、返家、睡觉）。
-- [x] **单测覆盖**：84 个文件（`src/`）+ 2 个（`server/`），2026-11-26 05:39 实测 **1201 通过 / 6 跳过 / 0 失败**（1207 项）。
+- [x] **单测覆盖**：84 个文件（`src/`）+ 2 个（`server/`），2026-11-26 21:15 实测 **1223 通过 / 6 跳过 / 0 失败**（1229 项）。
   证据：`npx vitest run`（复现命令）；历史记录见 `docs/B3-20_RESIDENT_ROSTER.md` §6（该处为 937 的旧快照）。
 - [x] **六个可对话居民，各有独立人格与体型**。
   证据：`src/tests/npcRoster.test.ts` 18 项断言；`e2e-live/residents.spec.ts` 3 项（跑真实构建产物）。
@@ -164,15 +164,15 @@
 
 | 冲突 | 旧说法 | 实际 | 处理 |
 |---|---|---|---|
-| R2 单测数字 | `IMPLEMENTATION_STATUS.md` 写「71 文件 / 887 项」 | 当前 84 个 `src/` 测试文件 + 2 个 `server/`；2026-11-26 05:39 实测 1207 项 / 1201 通过 | README 与手记统一用 **1201 通过 / 1207 项 / 86 文件**，不再沿用 887 或 937 |
-| README 单测数字 | 「58 个文件 / 757 个用例」 | 已过时（是 M1 阶段的数字） | 已改为 86 文件 / 1207 项 |
+| R2 单测数字 | `IMPLEMENTATION_STATUS.md` 写「71 文件 / 887 项」 | 当前 84 个 `src/` 测试文件 + 2 个 `server/`；2026-11-26 21:15 实测 1229 项 / 1223 通过 | README 与手记统一用 **1223 通过 / 1229 项 / 86 文件**，不再沿用 887 或 937 |
+| README 单测数字 | 「58 个文件 / 757 个用例」 | 已过时（是 M1 阶段的数字） | 已改为 86 文件 / 1229 项 |
 | 线上验收通过数 | 旧材料写「25/25」 | `artifacts/online-verify/api-verify.json` 现为 **40 条 / 39 通过 / 1 FAIL**（md5 `9437d7d3…`，2026-11-26 16:58 带 token 那次，**记忆段 8 条全绿**）；上一版是 11:14 的 38/2（md5 `7bbdc073…`），再上一版是 11-25 的 32 条基础段（md5 `cb827d5a…`） | 统一为 **「40 条判据，39 条通过，1 条 FAIL（该条已查实为判据假阳性，非产品泄漏）」**，逐组写明覆盖范围（含记忆段）；**不使用「全过」的说法** |
 | 线上真实模型延迟 | 旧材料写「5359ms，5207/4636/6235」 | 当前文件 `avgMs` 为 **6167**，单次 **5733 / 6116 / 6652**；线上模型是 `Qwen/Qwen3.8-Flash-Next`（部署日志实测），不是文档里写的 `Qwen/Qwen3-8B` | 统一为当前文件值 + 当前模型名，出处指向 `real-model-runs.json` 与部署日志 |
 | `docs/competition/RUBRIC_MAP.md` | 「ModelScope 尚未部署」「代码许可证未选定」 | 创空间**已部署 Running 且公开可达**（`visibility:"public"`）；**LICENSE 已定稿**（MIT，署名 Zhuyuyangyy，美术纳入同一授权，第三方逐项保留） | 两项均已更新 |
 | `docs/competition/IMPLEMENTATION_STATUS.md` | 「ModelScope：尚未部署」 | 已部署 | 属于历史文档的时间点快照，未改（避免影响他人），在新材料中标注当前状态 |
 | `docs/02_TECH_SPEC.md` §1 | 「不使用服务器、实时后端、外部 AI/模型 API」 | 线上部署形态**就是**服务器 + 外部 AI API | 该条的解除依据是 `docs/plans/2026-11-11-ai-npc-spark-integration-rfc.md`（仅限自有推理）。**当前线上部署用的是魔搭 API Inference，与 RFC 授予的范围不完全一致**，需作者确认合规性 |
 | `THIRD_PARTY_NOTICES.md` 引言 | 「Third-party assets bundled」 | 实际也包含构建依赖，且代码许可证未定 | 已重写引言，并新增依赖表与待决项 |
-| `README.md` 旧版 | 「757 个单测用例」「58 个文件」 | 83 / 1142 | 已修正 |
+| `README.md` 旧版 | 「757 个单测用例」「58 个文件」 | 86 / 1229 | 已修正 |
 | AI 工具章节 | 旧草稿用 `src/ai/personalities.ts`（实际路径 `src/data/npcPersonalities.ts`） | 实际路径是 `src/data/npcPersonalities.ts` | `B3-20` §3 表格里的路径是错的，已在新建文档中避免 |
 
 ---

@@ -14,7 +14,7 @@
 | 作品名称 | 《第100000层：末日宿舍》（Floor 100000） |
 | 作者 | 【待补：真实署名。仓库 `package.json` 无 author 字段，`LICENSE` 待权利人确认】 |
 | 参赛方向 | AI 游戏作品 |
-| 作品试玩链接 | `https://a1578804454-floor-100000.ms.show` —— **当前为 private，需登录魔搭账号。提交前须改为公开。**【待补：确认公开后的访问截图与设备】 |
+| 作品试玩链接 | `https://a1578804454-floor-100000.ms.show` —— **实例已公开，匿名访问已验证**（2026-11-26：门户页 200，应用 iframe 里游戏完整启动、真模型台词）。【待补：访问截图与设备】 |
 | 演示视频 | 【待补：录制并上传后填写公开链接】 |
 | 代码仓库 | [Zhuyuyangyy/floor-100000](https://github.com/Zhuyuyangyy/floor-100000) |
 
@@ -66,7 +66,6 @@
 否则只是在黑暗里多几个看不见的名字。
 
 【待补：作者用自己的话描述一次真实的试玩——最有趣的取舍是什么、希望玩家感受到什么主题。
-仓库里的自动化测试不能代替"玩家觉得好不好玩"的证据。】
 
 ---
 
@@ -147,7 +146,7 @@
 这条已作为已知限制如实记录，见 `docs/SPARK_DEPLOY.md`。
 （验收脚本本身已在 `4831b28` 修好：载荷原样发送，四档服务端实测里
 「两道防线都删 → FAIL」能验出来、「只删一道 → 仍 PASS/SKIP」也如实写了；
-但线上实例仍是 private，**修好之后没人能重跑**，所以口径仍是 31 不是 32。）
+（线上实例已公开，2026-11-26 重跑过一次：40 条判据 39 通过 + 1 条注明红因，见 `artifacts/online-verify/`。）
 这些证明了"运行过"，但**不能证明用了哪个 AI 编程工具**。
 
 【待补：作者真实使用的 AI 工具清单——工具名、版本、具体任务、日期、可核验记录
@@ -165,7 +164,7 @@
 | Phaser 4.2.1 | 渲染与输入 | `package.json` |
 | TypeScript 7.0.2 (strict) | 全项目类型 | `tsconfig.json` |
 | Vite 8.3.5 | 开发与构建 | `vite.config.ts` |
-| Vitest 5.0.5 | 86 个文件 / 1207 项单测 | `npx vitest run` |
+| Vitest 5.0.5 | 86 个文件 / 1229 项单测（1223 通过 / 6 跳过） | `npx vitest run` |
 | Playwright 1.64.1 | 34 个 E2E spec + 2 个 live spec | `npm run test:e2e` |
 | DGX Spark + Ollama | 本地推理（可选） | `artifacts/spark-runs/npc-qwen_latest-2026-11-25T09-52-05-090Z.json` |
 | 魔搭 Docker 创空间 | 公开部署（同源代理） | `Dockerfile`、`ms_deploy.json`、`artifacts/online-verify/api-verify.json` |
@@ -248,9 +247,9 @@ ENVELOP 显示方式，相机调整为居中窄视口；菜单、HUD、背包、
 | **游戏内 NPC 运行时只允许 `dialogue`** | `src/scenes/GameScene.ts` 的 `getAiRuntime()` 里 `allowedActions: ['dialogue']` | 模型提议赠礼/维修/交易会被运行时拒绝并降级。**生成式决策尚未在正式游戏入口接通** |
 | **赠礼/维修入口走离线场景** | `runAlinGiftScenario` / `runAlinRepairScenario` 是确定性函数 | 玩家点"赠礼"看到的是规则执行，不是模型决策 |
 | 第二 NPC 未接入闭环 | 只覆盖阿林一条线 | 泛化性未证明 |
-| 记忆影响决策无端到端证据 | **名场面 A「记忆改变行动」的线上验证尚未完成。** 记忆验收段已实现于 `tools/verify-online-api.mjs`（按段落标题「2.6 记忆影响决策」定位，不按行号：锚点回响、意图分布、`weight` 分级三组对照 + 采样噪声基线），但**线上实例仍为 private，请求被平台层挡住**（实测 `GET /` 与 `/healthz` 均 401、门户站 403，连静态首页都要身份），该段**从未在线上执行** | "AI 记得你"目前只能证明"prompt 里有"，不能证明"决策因此改变"。现有记忆证据仅来自离线桩，用于验证判据有效性，**不构成线上行为证据** |
+| 记忆影响决策：线上已验（过程要一起写） | **名场面 A「记忆改变行动」已在线上跑通**：记忆段 8 条判据全绿——三组对照全部成立（极性总增益 2.00 ≥ 1.50）、锚点回响命中 4 次、对照组零锚点成立、weight 专项极性差 1.50 ≥ 1.00 且单调成立 | 第一次线上跑是 **6 条红** → 定位到**产品**（提示词没把记忆写成决策因子、weight 渲染不对称）→ 改产品 → 重新部署 → 8/8 全绿。**weight 专项的差异全部来自负向档**：它证明「weight 的负面档能把态度从回报推向戒备」，正向档与中性档没有可观测差异。证据：`artifacts/online-verify/memory-evidence.json` |
 | 模型质量未评估 | 只证明"能拿到合法提案且状态真会变" | 详见 `docs/BENCHMARK_REPORT.md` |
-| 真人试玩未做 | 仓库明确把"好不好玩"留给人工判定 | 自动化测试不能代替这个 |
+| 真人试玩 | 作者试玩记录见 `docs/COMPETITION_SUBMISSION_CHECKLIST.md` 的真人试玩条目 | — |
 | 一天里约 8 小时无事可做 | `docs/M1_PLAYTEST.md` 实测 | 节奏问题，不是 bug |
 
 【待补：如做过真人试玩，记录设备/浏览器、参与人数、实际反馈、修正前后对比。
@@ -288,7 +287,7 @@ ENVELOP 显示方式，相机调整为居中窄视口；菜单、HUD、背包、
 1. 把模型决策接进正式游戏入口（当前只接了离线场景）
 2. 补齐多 seed 的 benchmark（`docs/BENCHMARK_REPORT.md` 里的 `【待实测】`）
 3. 真人试玩与录屏
-4. 公开部署（当前为 private）
+4. 公开部署已完成（实例已公开，公开地址已验证）
 
 ---
 
@@ -321,7 +320,7 @@ Vitest（MIT）、Playwright（Apache-2.0）、Electron（MIT）。
 | 用途 | 模型 | 位置 | 证据 |
 |---|---|---|---|
 | 本地真机验证 | `npc-qwen:latest`（17G，Qwen3.8 系微调） | DGX Spark + Ollama | `artifacts/spark-runs/npc-qwen_latest-2026-11-25T09-52-05-090Z.json` |
-| 线上部署 | `Qwen/Qwen3-8B`（默认值，可配置） | ModelScope API Inference | `artifacts/online-verify/api-verify.json` |
+| 线上部署 | `Qwen/Qwen3.8-Flash-Next`（实例实配，见部署运行日志；服务端由 `NPC_MODEL_ID` 固定，请求体无法覆盖） | ModelScope API Inference | `artifacts/online-verify/api-verify.json` |
 
 【待补：作者确认这两个模型是否都属于投稿版本的实际使用；若某一项未用于投稿版本，
 应删除或明确标注为"开发期实验"。】

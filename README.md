@@ -16,12 +16,16 @@ Phaser 4.2.1 · TypeScript strict · Vite · 82 个单测文件 + 2 个服务端
 
 | | |
 |---|---|
-| 在线试玩 | `https://a1578804454-floor-100000.ms.show` — **当前为 private（需登录魔搭账号）**，公开访问待开放 |
+| 在线试玩 | `https://a1578804454-floor-100000.ms.show` — **实例 public，公开地址已验证可访问**（2026-11-26 匿名浏览器实测：门户页 200，应用 iframe 里游戏完整启动、Menu 场景 active、真模型台词） |
 | 离线运行 | 见下方[本地运行](#本地运行)。不需要任何模型配置即可完整游玩 |
-| 演示脚本 | [`docs/competition/DEMO_SCRIPT.md`](docs/competition/DEMO_SCRIPT.md) — 操作提纲，**尚未录制** |
+| 演示脚本 | [`docs/competition/VIDEO_BRIEF_FOR_OPUS.md`](docs/competition/VIDEO_BRIEF_FOR_OPUS.md) — 录制提纲与口播要点；视频链接由作者录完后填入 |
 
-> 为什么如实标注 private：私有创空间需要魔搭登录态才能进。参赛材料的"公开可访问"
-> 要求还没满足，写在这里而不是藏在脚注里。
+> **本次交付为可玩垂直切片**：第 1–5 层的完整生存循环、居民社会与 AI 决策闭环。
+> 第 100000 层是设计长期目标（`docs/GAME_DESIGN_LOCK.md`），不在本次切片内。
+> 第 1 章阶段达成后有明确的结算反馈（修好线路、抵达第 3 层 → 结算卡）。
+>
+> （旧注写的是「实例需登录魔搭账号才能进、公开可访问这条要求还没满足」——2026-11-26 实测推翻：
+> 实例是 public，公开地址匿名可访问。）
 
 ---
 
@@ -126,7 +130,7 @@ flowchart TB
 | 缺口 | 具体现状 | 影响 |
 |---|---|---|
 | 只覆盖阿林一条线 | 第二、第三个 NPC 未接入同一闭环 | 泛化性未证明 |
-| 记忆影响决策无端到端证据 | **名场面 A「记忆改变行动」的线上验证尚未完成。** 记忆验收段已实现于 `tools/verify-online-api.mjs`（按段落标题「2.6 记忆影响决策」定位，不按行号；含锚点回响、意图分布、`weight` 分级三组对照 + 采样噪声基线），但**线上实例仍为 private，平台层就挡住了**（实测 `GET /` 与 `/healthz` 均 401、门户站 403，连静态首页都要身份），该段**从未在线上执行** | 能证明"prompt 里有"，不能证明"决策因此改变"。现有记忆证据仅来自离线桩，用于验证判据有效性，**不构成线上行为证据** |
+| 记忆影响决策：线上已验（过程要一起写） | **名场面 A「记忆改变行动」已在线上跑通**：记忆段 8 条判据全绿——三组对照全部成立（极性总增益 2.00 ≥ 1.50）、锚点回响命中 4 次、对照组零锚点成立、weight 专项极性差 1.50 ≥ 1.00 且单调成立。证据：`artifacts/online-verify/memory-evidence.json` 与 `memory-weight-evidence.json` | 第一次线上跑是 **6 条红** → 定位到**产品**（提示词没把记忆写成决策因子、weight 渲染不对称）→ 改产品 → 重新部署 → 8/8 全绿。**weight 专项的差异全部来自负向档**：它证明「weight 的负面档能把态度从回报推向戒备」，正向档与中性档没有可观测差异 |
 | 模型质量未评估 | 只证明"能拿到合法提案且状态真会变" | 见 [`docs/BENCHMARK_REPORT.md`](docs/BENCHMARK_REPORT.md) 的 `【待实测】` |
 
 **已接通的两条（2026-11-25）**，留在这里是为了让"改了什么"可查：
@@ -202,13 +206,13 @@ flowchart TB
 |---|---|
 | **模型决策接入正式游戏入口** | 维修路径**已接通**（2026-11-25）；赠礼/交易仍在离线场景 |
 | **CI 修复** | 已修：`Build` 前移到单测之前（代理测试真 spawn 服务、静态根是 `dist/`），本地复现「无 dist → 明确报错而非 404」 |
-| 单测现状 | 2026-11-26 05:39 实测 **1201 通过 / 6 跳过 / 0 失败**（1207 项，86 文件）；复现命令 `npx vitest run` |
-| 公开试玩 | 创空间 Running 但 **private** |
-| 演示视频 | 未录制 |
+| 单测现状 | 2026-11-26 20:35 实测 **1223 通过 / 6 跳过 / 0 失败**（1229 项，86 文件）；复现命令 `npx vitest run` |
+| 公开试玩 | 创空间 Running 且 **public**，公开地址已验证可访问 |
+| 演示视频 | 见 [`docs/competition/VIDEO_BRIEF_FOR_OPUS.md`](docs/competition/VIDEO_BRIEF_FOR_OPUS.md)，链接待作者填 |
 | 多 seed benchmark | 全部 `【待实测】`，见 `docs/BENCHMARK_REPORT.md` |
-| 真人试玩 | 未做。自动化测试不能代替"好不好玩" |
+| 真人试玩 | 作者试玩记录见 [`docs/COMPETITION_SUBMISSION_CHECKLIST.md`](docs/COMPETITION_SUBMISSION_CHECKLIST.md) 的真人试玩条目 |
 | 第二 NPC 接入闭环 | 只覆盖阿林 |
-| 跨天记忆影响决策 | **无端到端证据。** 记忆验收段已实现于 `tools/verify-online-api.mjs`（按段落标题「2.6 记忆影响决策」定位，不按行号；含锚点回响、意图分布、weight 分级三组对照 + 采样噪声基线），但**线上实例仍为 private，平台层就挡住了**（`GET /` 与 `/healthz` 均 401、门户站 403），**该段从未在线上执行**。现有记忆证据仅来自离线桩，用于验证判据有效性，不构成线上行为证据 |
+| 跨天记忆影响决策 | **已在线上验证**（对照实验口径：三组对照只换记忆正文，世界与信任不变）：记忆段 8 条全绿，逐条数字见 `docs/BENCHMARK_REPORT.md` §2.5，证据在 `artifacts/online-verify/` | 第一次线上跑是 6 条红，改产品（不是改判据）后重跑全绿。**这层过程要一起写**，否则就是把一次修复说成一次发现 |
 | 一天里约 8 小时无事可做 | `docs/M1_PLAYTEST.md` 实测，内容量问题 |
 | 五层内容是一次性的 | 回取一趟之后再无上楼理由 |
 | 代码许可证 | **MIT**（权利人 2026-11-26 定稿，见 `LICENSE`） |
@@ -305,7 +309,7 @@ cp .env.example .env.local
 | 关卡 | 规模 | 命令 |
 |---|---|---|
 | 类型检查 | TypeScript strict，`noUnusedLocals` / `noImplicitOverride` | `npm run typecheck` |
-| 单元测试 | `src/` 84 个 + `server/` 2 个 = 86 个测试文件（`vitest.config.ts` 的 include）；2026-11-26 05:39 实测 **1201 通过 / 6 跳过 / 0 失败**（1207 项） | `npx vitest run` |
+| 单元测试 | `src/` 84 个 + `server/` 2 个 = 86 个测试文件（`vitest.config.ts` 的 include）；2026-11-26 21:15 实测 **1223 通过 / 6 跳过 / 0 失败**（1229 项） | `npx vitest run` |
 | 浏览器测试 | 34 个 E2E spec + 2 个 live spec | `npm run test:e2e` |
 | CI | push / PR 跑 typecheck、单测、build（确定性门槛）；E2E 为观测项不阻断 | `.github/workflows/ci.yml` |
 

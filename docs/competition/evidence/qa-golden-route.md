@@ -452,6 +452,52 @@ Running 2 tests using 1 worker
 > 而不是本报告记录的这一支。**请以修复后重跑的结果为准**，本报告保留原始观测
 > 作为缺陷留档。
 
+#### 修复后的复验（A9 实测，2026-11-27）
+
+**A9 已在隔离 worktree 上复验了总控的修复**（`git worktree add --detach tmp/a9/fixcheck 868d6b6`，
+独立起 vite，不碰共享工作区）。
+
+复验用的是**原先触发阻断的那套条件**：本地 dev + `.env.local`（`VITE_NPC_MODEL=npc-qwen:latest`
+→ mode `ollama` → 模型不可达），同一套脚本、同一颗种子。
+
+```
+=== VARIANT A (http://localhost:5191/?seed=42)   ← 修复前这里是 exhausted
+options before repair: ["赠礼","维修门计划","交易","退出"]
+REPAIR message: "门已打开｜已提交"
+REPAIR source: "offline-fallback · 场景规则提案"
+REPAIR status: executed decisionSource: offline-fallback attempts: 1
+REPAIR validation: {"accepted":true,"reason":"ok",
+  "expectedStateDelta":{ ... "inventory":[{"owner":"player","itemId":"wood","quantityDelta":-2},
+                                          {"owner":"player","itemId":"tape","quantityDelta":-1}],
+  "gateStatus":[{"gateId":"alin-repair-gate","from":"closed","to":"open"}], ...}}
+REPAIR feedback outcomes: ["executed"]
+gate flag: {"autonomy:last-round-minute":427,"story:alin-repair-gate":1}
+inv after repair: {"player":["ration_packx2","flashlightx1"],"alinTrust":78.2,"alinMem":3}
+```
+
+**结论：阻断已被修复，BLOCKER-01 现在落在「门开了、`status==='executed'`」那一支。**
+
+| | 修复前（`7297a37` / 线上 `index-WSEUTZFA.js`） | 修复后（`868d6b6`） |
+|---|---|---|
+| `status` | `exhausted` | **`executed`** |
+| `proposal` / `validation` | `null` / `null` | 有提案、`validation.accepted: true` |
+| 对话正文 | `校验拒绝｜未改变` | `门已打开｜已提交` |
+| `decisionSource` | `offline-fallback`（但什么也没做） | `offline-fallback`（真的做了，**来源标注依然诚实**） |
+| 门 flag | 未设置 | `story:alin-repair-gate: 1` |
+| 材料 | 没扣 | 木 −2、胶带 −1 |
+
+**仍未闭合的三件事**（不因这次修复而消失）：
+
+1. **线上还没重新部署这个修复**：跑完复验时线上产物仍是
+   `assets/index-WSEUTZFA.js`（不含 `868d6b6`）。**A11 需要重新部署**，
+   否则评委拿到的还是会卡死的那份。
+2. **线上 spec 的 BLOCKER-01 仍是红的**（本报告 §4.3 的输出是修复前的）：
+   重跑它应落在「门开了」那一支；**它转绿之前不要把 §0 当成已解决**。
+3. **文案那条建议还没落地**：修复后走的是成功分支，`校验拒绝｜未改变` 这句
+   误导性文案只在**别的拒绝分支**上还会出现（比如真的低信任 / 真缺料）。
+   §2.6-2 建议的「按真实 outcome 分类 + 给出下一步」仍然值得做。
+
+
 ### 4.4 公共 smoke
 
 `e2e-public/public-smoke.spec.ts` 是仓库既有文件，**不在 A9 的文件域内，未改动**。

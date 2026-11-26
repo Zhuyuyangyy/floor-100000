@@ -1,0 +1,745 @@
+{
+  "schema": "floor-100000/trace-summary/v1",
+  "generatedAt": "2026-11-26T16:23:46.538Z",
+  "generatedBy": "A10 证据 / 创作手记（本文档的每个数字都由脚本从 artifacts/online-verify/ 直接读出，不手抄）",
+  "sources": [
+    {
+      "path": "artifacts/online-verify/api-verify.json",
+      "bytes": 6655,
+      "md5": "9437d7d35e33dd9dd27bae2189011b84",
+      "sha256": "9a01e0d74ae824c5af8c3a04d6871795b4033ef332da4a865f1ea2493f04df4f"
+    },
+    {
+      "path": "artifacts/online-verify/api-verify-meta.json",
+      "bytes": 282,
+      "md5": "35e1054cd3fb9e583e2712fc6ca50645",
+      "sha256": "eca31881cbaba3bb5442a39076217fc615a65f4374e5e29aa43e62f23199641d"
+    },
+    {
+      "path": "artifacts/online-verify/api-verify-notes.json",
+      "bytes": 592,
+      "md5": "f1850e71f98e0e84b74ab5f5c6ad40ab",
+      "sha256": "4d3bf7be97e86f6d8901346203d36db44455ba304752bc3a5d1872d6fc4eba7b"
+    },
+    {
+      "path": "artifacts/online-verify/real-model-runs.json",
+      "bytes": 1008,
+      "md5": "07e5f1093bdf507c576a9be2ecd8264c",
+      "sha256": "29482a7d6f7873502f5fb2ffc2d844e07f1a8ba2acd2a013d62f4c4e0a29f39c"
+    },
+    {
+      "path": "artifacts/online-verify/memory-evidence.json",
+      "bytes": 14906,
+      "md5": "f605612abdfb68bafea52fc9c3078b6f",
+      "sha256": "0429841fc27728513d29d8d072fda2dbcff9a4d8db2181b106719d74f6aa08bc"
+    },
+    {
+      "path": "artifacts/online-verify/memory-weight-evidence.json",
+      "bytes": 2983,
+      "md5": "a4f629355d7264d08332f6bf5d047e32",
+      "sha256": "9ec5418f157182be391e983d77749c47b9f7fdf57f2743343115dfa10b248a15"
+    }
+  ],
+  "run": {
+    "startedAt": "2026-11-26T08:58:52.267Z",
+    "node": "v24.14.0",
+    "hasToken": true,
+    "forceWrite": false,
+    "isDefaultBase": true,
+    "base": "https://studio-a1578804454-floor-100000.api-inference.modelscope.net",
+    "modelSamplesObserved": 3,
+    "modelRepliesOutsideSampling": 2,
+    "note": "forceWrite=false 表示这些文件是脚本正式落盘的真产物，不是诊断轮（诊断轮会写 forceWrite:true，那份不能当证据引用）。"
+  },
+  "acceptance": {
+    "total": 40,
+    "passed": 39,
+    "failed": 1,
+    "passRate": 97.5,
+    "gated": 0,
+    "sections": [
+      {
+        "key": "staticAssets",
+        "title": "静态产物",
+        "total": 7,
+        "passed": 7,
+        "failed": 0
+      },
+      {
+        "key": "health",
+        "title": "健康检查",
+        "total": 4,
+        "passed": 4,
+        "failed": 0
+      },
+      {
+        "key": "repairContract",
+        "title": "维修任务契约",
+        "total": 7,
+        "passed": 7,
+        "failed": 0
+      },
+      {
+        "key": "memory",
+        "title": "记忆影响决策",
+        "total": 8,
+        "passed": 8,
+        "failed": 0
+      },
+      {
+        "key": "realModel",
+        "title": "真实模型决策",
+        "total": 5,
+        "passed": 5,
+        "failed": 0
+      },
+      {
+        "key": "security",
+        "title": "安全边界与限流",
+        "total": 9,
+        "passed": 8,
+        "failed": 1
+      }
+    ],
+    "sectionDetail": [
+      {
+        "key": "staticAssets",
+        "title": "静态产物",
+        "total": 7,
+        "passed": 7,
+        "failed": 0,
+        "criteria": [
+          {
+            "index": 1,
+            "name": "首页 200",
+            "ok": true,
+            "detail": "HTTP 200, 1668B"
+          },
+          {
+            "index": 2,
+            "name": "首页是我们的游戏",
+            "ok": true,
+            "detail": "第100000层：末日宿舍"
+          },
+          {
+            "index": 3,
+            "name": "产物引用 JS",
+            "ok": true,
+            "detail": "assets/index-Dzve_6tz.js"
+          },
+          {
+            "index": 4,
+            "name": "JS 资源 200",
+            "ok": true,
+            "detail": "1698368B"
+          },
+          {
+            "index": 5,
+            "name": "前端产物无密钥/上游地址",
+            "ok": true,
+            "detail": "clean"
+          },
+          {
+            "index": 6,
+            "name": "前端走同源代理",
+            "ok": true,
+            "detail": ""
+          },
+          {
+            "index": 7,
+            "name": "产物含六位楼内居民",
+            "ok": true,
+            "detail": "老陈、小周、大刘、小满、阿珍、阿林"
+          }
+        ]
+      },
+      {
+        "key": "health",
+        "title": "健康检查",
+        "total": 4,
+        "passed": 4,
+        "failed": 0,
+        "criteria": [
+          {
+            "index": 8,
+            "name": "/healthz 200",
+            "ok": true,
+            "detail": "{\"ok\":true,\"aiConfigured\":true,\"breakerOpen\":false,\"dailyUsed\":0,\"dailyBudget\":1800}"
+          },
+          {
+            "index": 9,
+            "name": "AI 已配置（Key 生效）",
+            "ok": true,
+            "detail": "aiConfigured=true"
+          },
+          {
+            "index": 10,
+            "name": "熔断未打开",
+            "ok": true,
+            "detail": "breakerOpen=false"
+          },
+          {
+            "index": 11,
+            "name": "健康检查不泄 Key",
+            "ok": true,
+            "detail": "{\"ok\":true,\"aiConfigured\":true,\"breakerOpen\":false,\"dailyUsed\":0,\"dailyBudget\":1800}"
+          }
+        ]
+      },
+      {
+        "key": "repairContract",
+        "title": "维修任务契约",
+        "total": 7,
+        "passed": 7,
+        "failed": 0,
+        "criteria": [
+          {
+            "index": 12,
+            "name": "维修任务 200",
+            "ok": true,
+            "detail": "HTTP 200 2471ms"
+          },
+          {
+            "index": 13,
+            "name": "维修任务来源是模型",
+            "ok": true,
+            "detail": "model"
+          },
+          {
+            "index": 14,
+            "name": "维修回复是结构化 intent（不是自然语言）",
+            "ok": true,
+            "detail": "{\"intent\":\"repair_gate\",\"utterance\":\"现在动手。\"}"
+          },
+          {
+            "index": 15,
+            "name": "维修契约没有退回旧的 action.type",
+            "ok": true,
+            "detail": "[\"intent\",\"utterance\"]"
+          },
+          {
+            "index": 16,
+            "name": "缺料时不声称能直接修（或改口要材料）",
+            "ok": true,
+            "detail": "{\"intent\":\"request_help\",\"itemId\":\"tape\",\"quantity\":1,\"utterance\":\"还缺一卷胶带，你能找到吗？\"}"
+          },
+          {
+            "index": 17,
+            "name": "维修任务不转发客户端提示词",
+            "ok": true,
+            "detail": "{\"intent\":\"repair_gate\",\"utterance\":\"材料齐了，我现在动手修 gate。\"}"
+          },
+          {
+            "index": 18,
+            "name": "缺维修附件返回 400",
+            "ok": true,
+            "detail": "HTTP 400"
+          }
+        ]
+      },
+      {
+        "key": "memory",
+        "title": "记忆影响决策",
+        "total": 8,
+        "passed": 8,
+        "failed": 0,
+        "criteria": [
+          {
+            "index": 19,
+            "name": "同一记忆两次请求都成功（噪声基线可用）",
+            "ok": true,
+            "detail": "HTTP 200/200"
+          },
+          {
+            "index": 20,
+            "name": "记忆改变决策：无记忆 vs 受助",
+            "ok": true,
+            "detail": "命中｜对照[dialogue,dialogue,dialogue,dialogue,dialogue](极性0.00) 记忆[dialogue+锚点,dialogue+锚点,dialogue+锚点,dialogue+锚点,dialogue](极性0.00)｜极性差=0.00(需≥1.00) 锚点=true"
+          },
+          {
+            "index": 21,
+            "name": "记忆改变决策：失约 vs 守约",
+            "ok": true,
+            "detail": "命中｜对照[refuse,refuse,refuse,refuse,refuse](极性-1.00) 记忆[dialogue,dialogue,dialogue,dialogue,dialogue](极性0.00)｜极性差=1.00(需≥1.00) 锚点=false"
+          },
+          {
+            "index": 22,
+            "name": "记忆改变决策：被拒 vs 获赠",
+            "ok": true,
+            "detail": "命中｜对照[refuse,refuse,refuse,refuse,refuse](极性-1.00) 记忆[dialogue,dialogue,dialogue,dialogue,dialogue](极性0.00)｜极性差=1.00(需≥1.00) 锚点=false"
+          },
+          {
+            "index": 23,
+            "name": "记忆改变决策（三组合一：三组均成立且极性总增益达标）",
+            "ok": true,
+            "detail": "3组 全成立=true 极性总增益=2.00(需≥1.50) 采样全=true"
+          },
+          {
+            "index": 24,
+            "name": "记忆组出现锚点回响（模型读到记忆正文）",
+            "ok": true,
+            "detail": "命中 4 次"
+          },
+          {
+            "index": 25,
+            "name": "对照组零锚点（该词具备区分度）",
+            "ok": true,
+            "detail": "对照 0 次 / 治疗 4 次"
+          },
+          {
+            "index": 26,
+            "name": "记忆权重影响决策（同文本只翻 weight）",
+            "ok": true,
+            "detail": "base{\"gift\":4}(极性1.00) pos{\"gift\":4}(极性1.00) neg{\"refuse\":3,\"gift\":1}(极性-0.50)｜极性差=1.50(需≥1.00) 单调=true"
+          }
+        ]
+      },
+      {
+        "key": "realModel",
+        "title": "真实模型决策",
+        "total": 5,
+        "passed": 5,
+        "failed": 0,
+        "criteria": [
+          {
+            "index": 27,
+            "name": "真实模型决策 3/3",
+            "ok": true,
+            "detail": "200/model/5733ms 200/model/6116ms 200/model/6652ms"
+          },
+          {
+            "index": 28,
+            "name": "返回合法提案结构",
+            "ok": true,
+            "detail": "3/3"
+          },
+          {
+            "index": 29,
+            "name": "提案是 dialogue",
+            "ok": true,
+            "detail": "{\"type\":\"dialogue\",\"text\":\"先别往前冲。这层线路我来盯，你退到安全一点的位置，等确认附近没动静再走。\"}"
+          },
+          {
+            "index": 30,
+            "name": "台词非空",
+            "ok": true,
+            "detail": "先别往前冲。这层线路我来盯，你退到安全一点的位置，等确认附近没动静再走。"
+          },
+          {
+            "index": 31,
+            "name": "响应时间可接受",
+            "ok": true,
+            "detail": "均值 6167ms（3/3 次真推理）"
+          }
+        ]
+      },
+      {
+        "key": "security",
+        "title": "安全边界与限流",
+        "total": 9,
+        "passed": 8,
+        "failed": 1,
+        "criteria": [
+          {
+            "index": 32,
+            "name": "客户端指定 model 被忽略",
+            "ok": true,
+            "detail": "HTTP 200"
+          },
+          {
+            "index": 33,
+            "name": "注入指令未生效",
+            "ok": true,
+            "detail": "{\"action\":{\"type\":\"dialogue\",\"text\":\"线路不能断。我会守住这一层的节点，你若没有恶意，就退到安全区，别靠近控制台。\"},\"c"
+          },
+          {
+            "index": 34,
+            "name": "GET 拒绝（405）",
+            "ok": true,
+            "detail": "HTTP 405"
+          },
+          {
+            "index": 35,
+            "name": "畸形观察被拒（400）",
+            "ok": true,
+            "detail": "HTTP 400"
+          },
+          {
+            "index": 36,
+            "name": "超长请求体被拒（413）",
+            "ok": true,
+            "detail": "HTTP 413"
+          },
+          {
+            "index": 37,
+            "name": "限流前先有成功请求",
+            "ok": true,
+            "detail": "序列 200,429,429,200,429,429,429,200,429,200,429,429,429,429,429"
+          },
+          {
+            "index": 38,
+            "name": "单会话超过上限返回 429",
+            "ok": true,
+            "detail": "200×4 429×11"
+          },
+          {
+            "index": 39,
+            "name": "限流不是被 400 误触发",
+            "ok": true,
+            "detail": "200,429,429,200,429,429,429,200,429,200,429,429,429,429,429"
+          },
+          {
+            "index": 40,
+            "name": "路径穿越读不到源码",
+            "ok": false,
+            "detail": "载荷 HTTP 400 225B｜基线 HTTP 200 1668B｜与基线不同＝命中了 dist 外的真实文件：\"<!DOCTYPE HTML PUBLIC \\\"-//IETF//DTD HTML\""
+          }
+        ]
+      }
+    ],
+    "failures": [
+      {
+        "index": 40,
+        "name": "路径穿越读不到源码",
+        "detail": "载荷 HTTP 400 225B｜基线 HTTP 200 1668B｜与基线不同＝命中了 dist 外的真实文件：\"<!DOCTYPE HTML PUBLIC \\\"-//IETF//DTD HTML\"",
+        "verdict": "判据假阳性，不是产品泄漏",
+        "evidence": "线上拿到的是网关自己的 400 错误页（225 B，server: Tengine 的 HTML 错误页），逐字查过不含 NPC_API_KEY、不含 /api/npc/decide、不含任何仓库源码。判据只比较「与基线不同」，把两个不同的错误页读成了泄漏。正确的判据应当是「载荷响应里出现了源码内容」。",
+        "caveat": "同一路径的匿名复测在网关更外层就被拦下（HTTP 403，YUNWAF_CLIENT_UNCLASSIFIED），与带 token 时拿到的 400 不是同一层——两者都证明「没读到源码」，但不可互相替代引用。"
+      }
+    ]
+  },
+  "memorySection": {
+    "total": 8,
+    "passed": 8,
+    "failed": 0,
+    "criteria": [
+      {
+        "index": 19,
+        "name": "同一记忆两次请求都成功（噪声基线可用）",
+        "ok": true,
+        "detail": "HTTP 200/200"
+      },
+      {
+        "index": 20,
+        "name": "记忆改变决策：无记忆 vs 受助",
+        "ok": true,
+        "detail": "命中｜对照[dialogue,dialogue,dialogue,dialogue,dialogue](极性0.00) 记忆[dialogue+锚点,dialogue+锚点,dialogue+锚点,dialogue+锚点,dialogue](极性0.00)｜极性差=0.00(需≥1.00) 锚点=true"
+      },
+      {
+        "index": 21,
+        "name": "记忆改变决策：失约 vs 守约",
+        "ok": true,
+        "detail": "命中｜对照[refuse,refuse,refuse,refuse,refuse](极性-1.00) 记忆[dialogue,dialogue,dialogue,dialogue,dialogue](极性0.00)｜极性差=1.00(需≥1.00) 锚点=false"
+      },
+      {
+        "index": 22,
+        "name": "记忆改变决策：被拒 vs 获赠",
+        "ok": true,
+        "detail": "命中｜对照[refuse,refuse,refuse,refuse,refuse](极性-1.00) 记忆[dialogue,dialogue,dialogue,dialogue,dialogue](极性0.00)｜极性差=1.00(需≥1.00) 锚点=false"
+      },
+      {
+        "index": 23,
+        "name": "记忆改变决策（三组合一：三组均成立且极性总增益达标）",
+        "ok": true,
+        "detail": "3组 全成立=true 极性总增益=2.00(需≥1.50) 采样全=true"
+      },
+      {
+        "index": 24,
+        "name": "记忆组出现锚点回响（模型读到记忆正文）",
+        "ok": true,
+        "detail": "命中 4 次"
+      },
+      {
+        "index": 25,
+        "name": "对照组零锚点（该词具备区分度）",
+        "ok": true,
+        "detail": "对照 0 次 / 治疗 4 次"
+      },
+      {
+        "index": 26,
+        "name": "记忆权重影响决策（同文本只翻 weight）",
+        "ok": true,
+        "detail": "base{\"gift\":4}(极性1.00) pos{\"gift\":4}(极性1.00) neg{\"refuse\":3,\"gift\":1}(极性-0.50)｜极性差=1.50(需≥1.00) 单调=true"
+      }
+    ],
+    "unified": {
+      "passed": true,
+      "allContrastsMoved": true,
+      "polarityGainTotal": 2,
+      "polarityGainMin": 1.5,
+      "allComplete": true,
+      "note": "联合判据的假阳性率（随机意图、完全不读记忆的桩，30 万次模拟）约 0.0043%。逐组 PASS 单看有约 4% 误判率，引用单组结论前先看这里。"
+    },
+    "criterion": {
+      "rounds": 5,
+      "polarityGapMin": 1,
+      "anchorAlternative": true,
+      "sampling": "固定轮数，不早停"
+    },
+    "contrasts": [
+      {
+        "contrast": "无记忆 vs 受助",
+        "criterionName": "记忆改变决策：无记忆 vs 受助",
+        "ok": true,
+        "rounds": 5,
+        "controlSamples": 5,
+        "treatmentSamples": 5,
+        "polarityControl": 0,
+        "polarityTreatment": 0,
+        "polarityGap": 0,
+        "gapRequired": 1,
+        "anchorMoved": true,
+        "complete": true,
+        "moved": true,
+        "expectation": "treatment_more_positive",
+        "memorySent": [
+          {
+            "day": 2,
+            "kind": "help",
+            "summary": "第2天你发高烧，玩家把整卷银色绝缘胶带留给了你，自己去堵漏风的门。",
+            "weight": 0.6
+          }
+        ],
+        "controlIntents": [
+          "dialogue",
+          "dialogue",
+          "dialogue",
+          "dialogue",
+          "dialogue"
+        ],
+        "treatmentIntents": [
+          "dialogue",
+          "dialogue",
+          "dialogue",
+          "dialogue",
+          "dialogue"
+        ]
+      },
+      {
+        "contrast": "失约 vs 守约",
+        "criterionName": "记忆改变决策：失约 vs 守约",
+        "ok": true,
+        "rounds": 5,
+        "controlSamples": 5,
+        "treatmentSamples": 5,
+        "polarityControl": -1,
+        "polarityTreatment": 0,
+        "polarityGap": 1,
+        "gapRequired": 1,
+        "anchorMoved": false,
+        "complete": true,
+        "moved": true,
+        "expectation": "treatment_more_positive",
+        "memorySent": [
+          {
+            "day": 2,
+            "kind": "promise",
+            "summary": "玩家答应第2天带保险丝回来，第二天一早准时送到你手上。",
+            "weight": 0.5
+          }
+        ],
+        "controlIntents": [
+          "refuse",
+          "refuse",
+          "refuse",
+          "refuse",
+          "refuse"
+        ],
+        "treatmentIntents": [
+          "dialogue",
+          "dialogue",
+          "dialogue",
+          "dialogue",
+          "dialogue"
+        ]
+      },
+      {
+        "contrast": "被拒 vs 获赠",
+        "criterionName": "记忆改变决策：被拒 vs 获赠",
+        "ok": true,
+        "rounds": 5,
+        "controlSamples": 5,
+        "treatmentSamples": 5,
+        "polarityControl": -1,
+        "polarityTreatment": 0,
+        "polarityGap": 1,
+        "gapRequired": 1,
+        "anchorMoved": false,
+        "complete": true,
+        "moved": true,
+        "expectation": "treatment_more_positive",
+        "memorySent": [
+          {
+            "day": 1,
+            "kind": "help",
+            "summary": "玩家主动把身上最后一块木板塞给了你，没要任何回报。",
+            "weight": 0.6
+          }
+        ],
+        "controlIntents": [
+          "refuse",
+          "refuse",
+          "refuse",
+          "refuse",
+          "refuse"
+        ],
+        "treatmentIntents": [
+          "dialogue",
+          "dialogue",
+          "dialogue",
+          "dialogue",
+          "dialogue"
+        ]
+      }
+    ],
+    "weight": {
+      "criterionName": "记忆权重影响决策（同文本只翻 weight）",
+      "ok": true,
+      "summary": "玩家第2天拿来了保险丝。",
+      "memoryKind": "fact",
+      "inventory": [
+        {
+          "itemId": "fuse",
+          "quantity": 1
+        }
+      ],
+      "samplesPerGroup": 4,
+      "sampleRetries": 1,
+      "criterion": {
+        "polarityGapMin": 1,
+        "requireMonotone": true
+      },
+      "polarity": {
+        "base": 1,
+        "pos": 1,
+        "neg": -0.5,
+        "gap": 1.5,
+        "monotone": true
+      },
+      "distributions": {
+        "base": {
+          "gift": 4
+        },
+        "pos": {
+          "gift": 4
+        },
+        "neg": {
+          "refuse": 3,
+          "gift": 1
+        }
+      },
+      "scope": "本轮差异全部来自负向档：base +1.00、pos +1.00、neg −0.50 → 差 1.50 ≥ 1.00，且 pos ≥ base ≥ neg 单调成立。正向档与中性档没有可观测差异（都是 gift）。所以它证明的是「weight 的负面档能把态度从回报推向戒备」，不是「weight 能双向驱动态度」。"
+    },
+    "timeline": [
+      {
+        "at": "2026-11-26T11:07+08:00",
+        "what": "第一次线上跑记忆段",
+        "result": "8 条里 6 FAIL / 1 SKIP / 1 PASS",
+        "rootCause": "不是接线——提示词侧逐字可查（记忆正文与 weight 强度词都在），是产品没把记忆写成决策因子：模型十几次采样全是 dialogue，记忆改了它说出口的话，没改它的动作。"
+      },
+      {
+        "at": "2026-11-26 修复",
+        "what": "改的是产品，不是判据",
+        "changes": [
+          "修法一（提示词）：server/npc-proxy.mjs 的 buildMessages 与直连链路 src/ai/prompt.ts 的 fmtMemory 增加「记忆决策」契约——记忆必须影响选择（帮过你→倾向回报，失约→倾向戒备），但仍只能从「可用行动」里选，规则层照样能否决；另加守护测试：有记忆才写这段、无记忆不写。",
+          "修法二（weight 渲染不对称，产品自身的缺陷）：旧映射只有负向两档明说「负面」，正向两档只说「重」而不带褒贬；正向两档补上性质词（极重·恩情 / 较重·恩情 / 一般 / 偏负面·记恨 / 严重负面·记恨）。",
+          "判据侧只改输入，不改判据：weight 段的 summary 换成中性事实、观察补一件 NPC 真有的物品；阈值、样本数、单调性、采样完整性判据一律没动。"
+        ],
+        "criteriaUnchangedEvidence": "判据名 43 个（单引号字面量名按源码顺序 NUL 连接 md5 = c7bb10f4046752d12714a24513d52951）与调用点 47，本次独立复核一致。"
+      },
+      {
+        "at": "2026-11-26T08:50:48Z",
+        "what": "重新部署空间",
+        "result": "门户页内嵌 JSON 的 DeployedTime=1795683048（=16:50:48 +08:00）"
+      },
+      {
+        "at": "2026-11-26T08:58:52.267Z",
+        "what": "重跑线上验收",
+        "result": "40 条 39 通过 / 1 FAIL；记忆段 8 条全绿"
+      }
+    ],
+    "honestCaveat": "记忆段是「改完产品再跑」的结果，不是「本来就绿」。引用「记忆改变行动」时必须同时写清改了什么、什么时候改的、改前是红的——否则就是把一次修复说成了一次发现。"
+  },
+  "realModelRounds": {
+    "documentedRounds": 3,
+    "documentedRoundsNote": "这 3 次是唯一有独立逐条耗时台账的线上真实推理。完整响应体在 real-model-runs.json 里。",
+    "latenciesMs": {
+      "values": [
+        5733,
+        6116,
+        6652
+      ],
+      "min": 5733,
+      "max": 6652,
+      "mean": 6167,
+      "median": 6116,
+      "range": 919,
+      "reportedAvg": 6167
+    },
+    "avgMsMatchesScript": true,
+    "rounds": [
+      {
+        "round": 1,
+        "status": 200,
+        "decisionSource": "model",
+        "ms": 5733,
+        "confidence": 0.8,
+        "actionType": "dialogue",
+        "text": "先别往前冲。这层线路我来盯，你退到安全一点的位置，等确认附近没动静再走。"
+      },
+      {
+        "round": 2,
+        "status": 200,
+        "decisionSource": "model",
+        "ms": 6116,
+        "confidence": 0.78,
+        "actionType": "dialogue",
+        "text": "这条线路不能断……先别乱动，把情况说清楚，我守得住。"
+      },
+      {
+        "round": 3,
+        "status": 200,
+        "decisionSource": "model",
+        "ms": 6652,
+        "confidence": 0.8,
+        "actionType": "dialogue",
+        "text": "我是 alin。这里第2层的线路不能乱，我愿意帮忙照看，但别急着乱动，先告诉我你看到什么异常。"
+      }
+    ]
+  },
+  "decisionSource": {
+    "definition": "decisionSource 区分三种来源：model（真实模型推理）/ offline-fallback（模型不可用时的规则脑兜底）/ scripted（脚本）。公开材料里必须区分，fallback 不得冒充实时模型。",
+    "observed": {
+      "model": 3,
+      "offline-fallback": 0,
+      "scripted": 0
+    },
+    "scope": "统计口径 = real-model-runs.json 里逐条记录的 3 次真实模型决策，全部 decisionSource=model。",
+    "additionalModelSourcedObservation": "api-verify.json 的判据「维修任务来源是模型」独立确认了维修任务链路的 decisionSource 也是 model。",
+    "notCovered": "本证据集里没有一次 offline-fallback 或 scripted 采样——降级链路没有被线上证据覆盖。不能据此声称「已验证降级」。"
+  },
+  "sampleScale": {
+    "onlineModelRoundsTotal": 52,
+    "breakdown": {
+      "memorySectionSamples": 44,
+      "memorySectionDetail": "三组对照 3×5 轮×2 组 = 15 对照 + 15 治疗 = 30；weight 专项 12（4×3）；同记忆同参数的噪声基线 2 次（数自判据「同一记忆两次请求都成功（噪声基线可用）」的 detail 「HTTP 200/200」）。",
+      "documentedRealModelRuns": 3,
+      "repairContractCalls": 3,
+      "securityBoundaryCalls": 2
+    },
+    "independentlyTimedRounds": 3,
+    "samplingNoiseBaseline": "采样噪声基线（同记忆同参数）：intent 相同｜text 不同",
+    "samplingNoiseNote": "注意：text 在两次相同请求间已不同 —— 本段所有判据都不依赖 text 不等式，只依赖意图/锚点。",
+    "serverRenderingNote": "服务端 buildMessages 渲染 day/kind/weight强度词/summary；memory.actor 不进提示词（sanitizeObservation 未保留它）。",
+    "silentlyDroppedFieldsNote": "现有 decide() 请求体的 recentEvents 不在 sanitizeObservation 白名单内，会被静默丢弃。",
+    "samplingRetries": 1,
+    "samplingRetryNote": "采样层传输重试：共补 1 次（每个样本最多 3 次，只在一条都没采到时重试，不看内容）。",
+    "noUnifiedLedger": "不存在统一的「20–30 回样本台账」；上述 52 次是按判据 detail 与证据文件逐条数出来的，其中只有 3 次有独立耗时记录。"
+  },
+  "knownGaps": [
+    "多 seed benchmark 未做：线上模型的多 seed 成功率 / 非法动作率 / 重规划率均无统计。",
+    "offline-fallback 路径无线上采样证据。",
+    "第二 NPC（阿林以外）的线上真实模型闭环证据尚不存在。",
+    "记忆段只覆盖阿林一条线、三组对照，未覆盖跨天/跨楼层的长期记忆漂移。"
+  ]
+}

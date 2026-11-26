@@ -1,0 +1,265 @@
+================================================================================
+A10 证据包 · 门禁输出（本次实跑，原始输出）
+================================================================================
+执行时间   : 2026-11-27 00:20:18 – 00:21:2x（+08:00）
+仓库       : D:\ZYY_Inovation\game\wt-r2
+分支       : a10/evidence-pack（自 7297a37 建出）
+被测代码   : 共享工作区当前状态（= 7297a37 + A3 未提交的自主 tick 在途实现）
+基线对照   : 独立 worktree，detached HEAD 7297a375fee562b4e2c7776bb32ec34613be8d4b
+             （D:\ZYY_Inovation\game\_a10-baseline-gate，只读验证，跑完已清理）
+机器       : Windows 10.0.22621 x64 / Node v24.14.0 / npm
+命令前缀   : npm --prefix <repo> run <script>   （注意：见第 8 节，npm exec --prefix 不可用）
+原始日志   : output/a10-gates3.log（共享工作区）
+             output/a10-gates2.log / output/a10-gates.log（两次错误执行，见第 8 节）
+             _a10-baseline-gate/baseline-gates2.log（基线对照）
+
+一句话结论：
+  共享工作区当前状态 —— typecheck / vitest / test:ci / test:collection / build /
+  线上公开冒烟 E2E，全部 exit 0。
+  已提交基线 7297a37 —— 同样全部 exit 0。
+  过程中出现过两次 **我自己调用方式错误** 导致的「假红」（一次收集了 3247 个测试文件、
+  一次报 444 个 failed），已如实记录在第 8 节，不算在门禁结果里。
+
+================================================================================
+1) npm run typecheck   （= tsc --noEmit）
+================================================================================
+> floor-100000@0.1.0 typecheck
+> tsc --noEmit
+
+[a10-3] typecheck exit=0
+
+  → 无输出即通过。exit 0。
+
+--------------------------------------------------------------------------------
+1b) 基线对照：typecheck @ 7297a37（独立 worktree）
+--------------------------------------------------------------------------------
+> floor-100000@0.1.0 typecheck
+> tsc --noEmit
+
+[baseline-2] typecheck exit=0
+
+================================================================================
+2) npm run test   （= vitest run）
+================================================================================
+> floor-100000@0.1.0 test
+> vitest run
+
+ RUN  v5.0.5 D:/ZYY_Inovation/game/wt-r2
+
+ Test Files  84 passed | 2 skipped (86)
+      Tests  1223 passed | 6 skipped (1229)
+   Start at  00:20:20
+   Duration  2.65s (import 39%, tests 34%, transform 16%, worker 9%)
+
+    Isolate  86 workers spawned · ~288ms startup each (spawn + environment, per file)
+             at least ~1.36s faster with isolate: false — reuses workers across files instead of one per file
+
+[a10-3] vitest exit=0
+
+  用例数与通过数：**被收集 86 个文件（84 passed / 2 skipped），1229 条用例
+  （1223 passed / 6 skipped）**，exit 0，零失败。
+  那 2 个 skipped 文件 / 6 条 skipped 用例是 spark 真机联调，用
+  `describe.skipIf(!LIVE)` 在没有 LIVE 环境时才跳过——它们仍计入集合
+  （出处：tools/check-test-collection.mjs 的注释）。
+
+--------------------------------------------------------------------------------
+2b) 基线对照：vitest @ 7297a37
+--------------------------------------------------------------------------------
+ Test Files  84 passed | 2 skipped (86)
+      Tests  1223 passed | 6 skipped (1229)
+   Duration  3.58s (transform 44%, import 30%, tests 20%, worker 6%)
+
+[baseline-2] vitest exit=0
+
+  → 与共享工作区**数字完全一致**（1223 passed / 6 skipped）。
+
+================================================================================
+3) npm run test:ci   （vitest run --reporter=json --outputFile=output/vitest-report.json）
+================================================================================
+  产出 output/vitest-report.json（output/ 在 .gitignore:17，不入库）。
+  这是下一项门禁的输入——**必须先跑它，test:collection 才有意义**。
+
+ Test Files  84 passed | 2 skipped (86)
+      Tests  1223 passed | 6 skipped (1229)
+   Duration  3.05s (import 39%, tests 32%, transform 20%, worker 9%)
+
+[a10-3] test:ci exit=0
+
+--------------------------------------------------------------------------------
+3b) 基线对照：test:ci @ 7297a37
+--------------------------------------------------------------------------------
+ Test Files  84 passed | 2 skipped (86)
+      Tests  1223 passed | 6 skipped (1229)
+   Duration  3.04s (import 40%, tests 34%, transform 18%, worker 9%)
+
+[baseline-2] test:ci exit=0
+
+================================================================================
+4) npm run test:collection   （= node tools/check-test-collection.mjs）
+================================================================================
+> floor-100000@0.1.0 test:collection
+> node tools/check-test-collection.mjs
+
+测试集合：文件 86（下限 86），用例 1229（下限 1204）
+OK 测试集合没有缩小
+
+[a10-3] test:collection exit=0
+
+--------------------------------------------------------------------------------
+4b) 基线对照：test:collection @ 7297a37
+--------------------------------------------------------------------------------
+测试集合：文件 86（下限 86），用例 1229（下限 1204）
+OK 测试集合没有缩小
+
+[baseline-2] test:collection exit=0
+
+  → 这个门禁守的是「**被收集的测试有没有被静默缩小**」，不是「有没有 failed」。
+  它的下限常量是 86 文件 / 1204 用例；加测试照常绿，删测试必须过不去。
+
+================================================================================
+5) npm run build   （= tsc && vite build）
+================================================================================
+> floor-100000@0.1.0 build
+> tsc && vite build
+
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 105 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                            1.71 kB │ gzip:   0.86 kB
+dist/assets/wanderer-faVCyfK0.png         19.54 kB
+dist/assets/npc_azhen-kFJQ3j_w.png        29.45 kB
+dist/assets/player-CfPRniqt.png           36.58 kB
+dist/assets/npc_xiaozhou-DSbYLfvW.png     37.82 kB
+dist/assets/npc_alin-C2bgvzL0.png         44.19 kB
+dist/assets/index-50KPLunn.js          1,715.96 kB │ gzip: 466.39 kB │ map: 12,891.65 kB
+
+✓ built in 1.55s
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeS
+plitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+[a10-3] build exit=0
+
+  → 构建成功（exit 0）。有一条 **chunk 体积警告**（主包 1.72 MB / gzip 466 kB，
+  超过 500 kB 提示线）——是警告不是错误，但主包偏大，弱网首屏会吃亏。
+  上面的 `[plugin builtin:vite-reporter]` 那一行是 PowerShell 把 vite 的
+  stderr 输出包装成 NativeCommandError 记录，**不是构建错误**——退出码是 0。
+
+--------------------------------------------------------------------------------
+5b) 基线对照：build @ 7297a37
+--------------------------------------------------------------------------------
+✓ built in 884ms
+
+[baseline] build exit=0
+
+  → 已提交基线同样构建成功。
+
+================================================================================
+6) 线上公开地址冒烟 E2E（playwright.public.config.ts，匿名打真实公开地址）
+================================================================================
+命令：
+  PUBLIC_BASE=https://www.modelscope.cn/studios/a1578804454/floor-100000 \
+    npx playwright test -c playwright.public.config.ts
+
+Running 3 tests using 1 worker
+
+  ok 1 [chrome] › wt-r2\e2e-public\public-smoke.spec.ts:165:1 › 公开链接对匿名访客可见，并把应用挂了出来 (14.0s)
+  ok 2 [chrome] › wt-r2\e2e-public\public-smoke.spec.ts:183:1 › 新设备进游戏：第 2 层站着四个居民 (14.8s)
+  ok 3 [chrome] › wt-r2\e2e-public\public-smoke.spec.ts:222:1 › 同源代理的真链路：浏览器里拿到的台词来自模型 (17.9s)
+
+  3 passed (47.8s)
+
+[a10-3] playwright exit=0
+
+  → **3/3 通过。** 这三条是站在评委视角打的：不开本地服务、不带任何 token，
+  打开公开门户链接 → 等门户挂出 .ms.show 的 iframe → 按真实按键进游戏 →
+  断言第 2 层站着 4 位居民 → 在 iframe 内发 POST /api/npc/decide，
+  断言 `decisionSource == "model"` 且台词非空。
+  换句话说：**「评委匿名打开链接能看到什么」这件事，本次是被自动验证过的。**
+
+================================================================================
+7) 汇总表
+================================================================================
+  门禁                        共享工作区      基线 7297a37
+  --------------------------  -------------  -------------
+  npm run typecheck           exit 0         exit 0
+  npm run test (vitest)       exit 0         exit 0
+    └ Test Files              84 passed | 2 skipped (86)      同上
+    └ Tests                  1223 passed | 6 skipped (1229)   同上
+  npm run test:ci            exit 0         exit 0
+  npm run test:collection    exit 0         exit 0
+    └ 集合                    文件 86 / 用例 1229（下限 86 / 1204）  同上
+  npm run build              exit 0         exit 0
+  线上公开冒烟 E2E            3 passed       （只对线上跑，不适用于基线 worktree）
+
+  已知非致命项：build 的 chunk 体积警告（主包 1.72 MB / gzip 466 kB）。
+
+================================================================================
+8) 过程中出现的两次「假红」——如实记录，不算门禁结果
+================================================================================
+这两次都是**我自己的调用方式错误**，不是仓库缺陷，也不是被测代码的问题。
+把它们写进来，是因为：如果不写，下一个人照抄同样的命令，会得到一份
+「444 个测试失败」的报告，然后去追一个不存在的 bug。
+
+--------------------------------------------------------------------------------
+8.1 第一次：vitest 收集了 3247 个测试文件，444 failed
+--------------------------------------------------------------------------------
+  起因：用 `npm --prefix <repo> exec -- vitest run` 调用。
+  **npm exec --prefix 不会把工作目录切到 --prefix 指向的目录**，
+  于是 vitest 的工作目录停在会话根目录 `D:\ZYY_Inovation\game`，
+  在那里按默认 include 递归收集，扫进了：
+    - `tmp/qa-evidence/split-step*/baseline-src/**`（另一个 agent 的基线源码副本）
+    - `D:\ZYY_Inovation\game\agent-worktrees\gameplay\src\**`（另一个 agent 的 worktree）
+  结果：
+    Test Files  3247 failed | 4467 passed | 12 skipped (7726)
+         Tests  444 failed | 84008 passed | 182 skipped (84634)
+      Duration  781.88s
+  那 444 个 failed **全部**在上述副本/worktree 里，不在 `src/` 或 `server/`。
+  同一份代码用正确方式跑（见第 2 节）只要 2.65 s，且 0 failed。
+
+  同一次链里还暴露了两个真实情况，一并记录：
+    · `npm run build` 当时 exit 1，两条 TS6133 未使用符号
+      （`src/scenes/GameScene.ts:187 NPC_AUTONOMY_ACTOR`、
+        `src/scenes/GameScene.ts:4217 updateNpcAutonomy`）——
+      这是 **A3 正在进行的自主 tick 在途改动**，未提交，几分钟后即消失。
+    · `npm run test:collection` 当时 exit 0，但它读的是 2026-11-26 20:36
+      那次的旧 `output/vitest-report.json`——**这个门禁必须在 test:ci 之后跑**，
+      否则它校验的是旧报告。正确顺序见第 3、4 节。
+
+--------------------------------------------------------------------------------
+8.2 第二次：playwright 报「config 不存在」
+--------------------------------------------------------------------------------
+  起因：同样用了 `npm exec --prefix`，工作目录停在会话根目录，
+  于是相对路径 `playwright.public.config.ts` 解析到了
+  `D:\ZYY_Inovation\game\playwright.public.config.ts`（不存在）。
+  报错原文：
+    Error: D:\ZYY_Inovation\game\playwright.public.config.ts does not exist
+  修法：给 `-c` 传**绝对路径**。修好后 3/3 通过（见第 6 节）。
+
+--------------------------------------------------------------------------------
+8.3 给下一个跑门禁的人（以及 CI）
+--------------------------------------------------------------------------------
+  · 用 `npm --prefix <dir> run <script>`；**不要**用 `npm --prefix <dir> exec -- <cmd>`。
+  · `test:collection` 必须紧跟在 `test:ci` 之后跑，否则校验的是旧报告。
+  · 这个仓库没有 `vitest.workspace` 之类的边界文件，而
+    `D:\ZYY_Inovation\game\` 下面同时躺着多个 agent 的 worktree——
+    一旦工作目录跑到仓库外面，vitest 会把它们一起收进来。
+    建议 A11 在 CI 里显式指定工作目录，或加一条 workspace 边界。
+
+================================================================================
+9) 这些门禁**没有**覆盖的东西（别拿它们当更大范围的保证）
+================================================================================
+  · 线上模型的多 seed 成功率 / 非法动作率 / 重规划率 —— **未统计**。
+  · offline-fallback 降级链路 —— 本次证据集里**没有**一次 fallback 采样。
+  · 第二个 NPC（阿林以外）的线上真实模型闭环 —— **不存在**。
+  · NPC 自主行动（AI-06）—— 在**已提交基线**上尚未实现；
+    共享工作区里 A3 的在途实现本次未被线上部署、也未被本证据包验收。
+  · 真人试玩与演示视频 —— 见 natural-playthrough.md / video-timestamps.md，均为 0。
+
+  线上那 40 条判据（39 通过 / 1 FAIL，记忆段 8/8）**不在本文件里**——
+  它的权威产物是 artifacts/online-verify/，汇总见 trace-summary.json。

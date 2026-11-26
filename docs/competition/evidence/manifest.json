@@ -1,0 +1,345 @@
+{
+  "schema": "floor-100000/evidence-manifest/v1",
+  "generatedAt": "2026-11-26T23:57:12+08:00",
+  "generatedAtUtc": "2026-11-26T15:57:12Z",
+  "generator": {
+    "role": "A10 证据 / 创作手记",
+    "runtime": "MiniMax Code (minimax Code) on Windows 10.0.22621 x64",
+    "node": "v24.14.0",
+    "note": "本文件由 A10 在共享工作目录中生成；所有数字均可在 artifacts/online-verify/ 内逐条对上。"
+  },
+
+  "repository": {
+    "url": "https://github.com/Zhuyuyangyy/floor-100000",
+    "cloneUrl": "https://github.com/Zhuyuyangyy/floor-100000.git",
+    "license": "MIT (见 LICENSE，署名 Zhuyuyangyy；美术资产纳入同一授权)",
+    "releaseBranch": "deploy-ms-20261125",
+    "evidenceBranch": "a10/evidence-pack",
+    "codeShaVerifiedOnline": "526cdb96c99bf94d671dc616b2681f50545268d6",
+    "codeShaVerifiedOnlineNote": "本次线上验收（40 条判据）所针对的代码基线。已包含 cb51e52『weight 的提示词渲染补上正面性质词』——记忆段 8/8 全绿的必要条件之一。",
+    "headAtPackTime": "7297a375fee562b4e2c7776bb32ec34613be8d4b",
+    "headAtPackTimeNote": "打证据包时 origin/deploy-ms-20261125 的 HEAD；相对 526cdb9 只多了两次 docs 提交（9bb4a7c、7297a37），不含代码改动。",
+    "finalSha": null,
+    "finalShaNote": "最终提交 SHA 由 A11 合并发布线后确定。文件无法包含自身所在提交的 SHA（自指），因此本字段留空并在下一条提交回填 evidencePack.commitSha（= 首次引入本证据包的提交）。"
+  },
+
+  "deployment": {
+    "studio": "a1578804454/floor-100000",
+    "status": "Running",
+    "statusSource": "门户页内嵌 JSON：\"Status\":\"Running\"（2026-11-26 匿名实测）",
+    "visibility": "public",
+    "visibilitySource": "交接与仓库记录（visibility:\"public\" / private:false）；门户页内嵌 JSON 对应字段为 \"Visibility\":5，本次未独立复核该枚举值到字符串 public 的映射（需带 token 调 settings API）。匿名可达性实测与「非 private」一致：private 状态下静态首页会返 401。",
+    "sdkType": "docker",
+    "deployRevision": "master",
+    "lastDeployedAt": "2026-11-26T08:50:48Z",
+    "lastDeployedAtSource": "门户页内嵌 JSON 的 DeployedTime=1795683048（epoch 秒）换算为 UTC。",
+    "deployedAtVsAcceptanceRun": "部署完成时间 2026-11-26 16:50:48（+08:00），验收脚本 startedAt=2026-11-26T08:58:52.267Z（=16:58:52 +08:00）——本次被验收的正是这次部署出来的产物，相隔约 8 分钟。",
+    "urls": {
+      "portalForJudges": "https://www.modelscope.cn/studios/a1578804454/floor-100000",
+      "appHost": "https://a1578804454-floor-100000.ms.show/",
+      "apiHost": "https://studio-a1578804454-floor-100000.api-inference.modelscope.net"
+    },
+    "urlRoles": {
+      "portalForJudges": "给评委的链接。门户页匿名可读（实测 200，33386 B），游戏跑在门户挂出的 iframe 里。",
+      "appHost": "应用本体。匿名实测 200，直接返回游戏 index.html。",
+      "apiHost": "验收脚本专用。平台设计要求带 SDK token，匿名实测 401——与空间是否公开无关。"
+    },
+    "model": {
+      "onlineModelId": "Qwen/Qwen3.8-Flash-Next",
+      "source": "部署运行日志实测（见 docs/SPARK_DEPLOY.md:206、docs/ADR-002-online-model-hosting.md:13）。",
+      "configuredBy": "服务端环境变量 NPC_MODEL_ID，在 server/npc-proxy.mjs 中固定；请求体无法覆盖（判据『客户端指定 model 被忽略』通过）。",
+      "codeDefaultDiffers": "代码默认值 server/npc-proxy.mjs:41 是 'Qwen/Qwen3-8B'，与线上实配不同——线上由环境变量覆盖，不是改代码改出来的。",
+      "upstream": "https://api-inference.modelscope.cn/v1（OpenAI 兼容端点，同源代理转发）",
+      "notSpark": "线上推理来自魔搭云端 API，不是本地 DGX Spark；公开材料不得写成『本地 Spark 实机』。",
+      "secretHandling": "密钥只存在于创空间密文环境变量 NPC_API_KEY，从未进入前端产物（判据『前端产物无密钥/上游地址』通过）。本证据包不含任何令牌、机器访问凭据或账号信息。"
+    },
+    "builtArtifacts": [
+      {
+        "name": "index.html",
+        "path": "/",
+        "bytes": 1682,
+        "sha256": "d222be08fc6b27f89ad223c6f771c618471e20f7e3bbef24930caf973e82114f",
+        "md5": "ef141fbd8cfbb430cd6d89394561a6b8",
+        "observedAt": "2026-11-26 匿名实测 https://a1578804454-floor-100000.ms.show/",
+        "note": "带 token 经 API 主机取到的首页是 1668 B（api-verify.json 记录），两个字节数不同是因为网关按入口注入的内容不同，文件名与 JS 引用一致。"
+      },
+      {
+        "name": "assets/index-Dzve_6tz.js",
+        "path": "/assets/index-Dzve_6tz.js",
+        "bytes": 1713524,
+        "sha256": "b1ae4dd0ed76e4100f410edcdddbefb018482cad029772d23d098afce36531d1",
+        "md5": "78cc718d213698f7655811a20257e582",
+        "observedAt": "2026-11-26 匿名实测 https://a1578804454-floor-100000.ms.show/assets/index-Dzve_6tz.js",
+        "note": "文件名与 api-verify.json 记录的产物引用一致（assets/index-Dzve_6tz.js），说明 2026-11-26 16:58 那次验收测的就是这份部署产物。字节数 1713524 与验收记录里的 1698368 不同，原因同上（入口不同，网关注入不同）。"
+      }
+    ],
+    "buildArtifactCaveat": "/healthz 不暴露提交号，所以『线上跑的是哪个源码 SHA』无法从线上直接证明；可证明的是产物文件名与 16:58 验收时一致，且线上产物已包含 weight 渲染对称修复（记忆段全绿所必需）。",
+    "deployProcedure": {
+      "source": "docs/SPARK_DEPLOY.md §3.6（2026-11-26 实测流程）",
+      "steps": [
+        "1) 取魔搭访问令牌，导出 MODELSCOPE_API_KEY 与 MODELSCOPE_ENDPOINT=https://modelscope.cn",
+        "2) 代码同步走 Git（平台没有部署 API，只能推 git）：git push modelscope HEAD:master（空间默认分支是 master）",
+        "3) 触发部署：POST https://modelscope.cn/openapi/v1/studios/a1578804454/floor-100000/deploy（等价 CLI：ms deploy a1578804454/floor-100000 --repo-type studio）",
+        "4) 看日志：GET .../logs/build（docker 类型先看 build），构建完再看 .../logs/run",
+        "5) 等 status 回到 Running（GET .../studios/a1578804454/floor-100000）",
+        "6) 重跑线上验收：MS_TOKEN=<魔搭访问令牌> node tools/verify-online-api.mjs（产物落 output/online-verify/，再复制回 artifacts/online-verify/）",
+        "7) 公开地址冒烟：PUBLIC_BASE=https://www.modelscope.cn/studios/a1578804454/floor-100000 npx playwright test -c playwright.public.config.ts"
+      ],
+      "buildTime": "第一次 docker 构建约 3–5 分钟，构建缓存会让后续快很多。"
+    },
+    "rollback": {
+      "source": "docs/SPARK_DEPLOY.md §3.6 + §8（每天最后一次构建作为可回滚快照）",
+      "procedure": [
+        "代码回滚：git 在魔搭镜像分支（master）上 revert 或 reset 到上一个可用提交，再 git push modelscope HEAD:master，然后重复部署步骤 3–5。",
+        "产物回滚：每个提交都对应一次可重现构建，dist/ 由 Dockerfile 三段式（build → runtime）生成，可用上一提交的同一流程重建。",
+        "快照约定：Sprint 期间每天最后一次构建作为可回滚快照（docs/competition/MASTER_SPRINT_PLAN_20261126.md §8）。",
+        "验证回滚：回滚后必须重跑 tools/verify-online-api.mjs 与 e2e-public/public-smoke.spec.ts，确认仍是 39/40 且记忆段 8/8。"
+      ],
+      "note": "以上是仓库里记录并在 2026-11-26 实际走通过的流程；本次 A10 没有独立执行一次回滚，因此不把它写成『已演练过』。"
+    }
+  },
+
+  "gates": {
+    "runAt": "2026-11-27T00:20:18+08:00",
+    "note": "完整原始输出见 docs/competition/evidence/test-results.txt。命令前缀 npm --prefix <repo> run <script>。",
+    "sharedWorkingTree": {
+      "typecheck": "exit 0",
+      "vitest": "exit 0 — Test Files 84 passed | 2 skipped (86)；Tests 1223 passed | 6 skipped (1229)",
+      "testCi": "exit 0",
+      "testCollection": "exit 0 — 测试集合：文件 86（下限 86），用例 1229（下限 1204）；OK 测试集合没有缩小",
+      "build": "exit 0 — vite v8.3.5，✓ 105 modules transformed，✓ built in 1.55s",
+      "publicSmokeE2E": "exit 0 — 3 passed (47.8s)，匿名打真实公开地址：门户可见+iframe 挂出+1280x720 画布、真实按键进游戏后第 2 层 4 位居民、iframe 内 /api/npc/decide 的 decisionSource=model 且台词非空"
+    },
+    "committedBaseline7297a37": {
+      "note": "在独立 worktree（detached HEAD 7297a37）上复跑，用于区分「已提交代码的状态」与「共享工作区里 A3 在途改动的影响」。跑完已清理。",
+      "typecheck": "exit 0",
+      "vitest": "exit 0 — Test Files 84 passed | 2 skipped (86)；Tests 1223 passed | 6 skipped (1229)",
+      "testCi": "exit 0",
+      "testCollection": "exit 0 — 文件 86 / 用例 1229",
+      "build": "exit 0 — ✓ built in 884ms"
+    },
+    "nonFatal": [
+      "build 有一条 chunk 体积警告：主包 1 715.96 kB（gzip 466.39 kB），超过 500 kB 提示线。"
+    ]
+  },
+
+  "sampleScale": {
+    "principle": "按实际写，不补造、不凑数。",
+    "onlineModelRounds": 52,
+    "onlineModelRoundsBreakdown": {
+      "memorySectionSamples": 44,
+      "memorySectionBreakdown": "三组对照 3×5 轮×2 组 = 30（control 15 + treatment 15）；weight 专项 3 组×4 = 12；同记忆同参数的噪声基线 2 次。逐条原文见 memory-evidence.json 与 memory-weight-evidence.json。",
+      "documentedRealModelRuns": 3,
+      "documentedRealModelRunsNote": "real-model-runs.json 里逐条带耗时的真实推理回合（5733 / 6116 / 6652 ms，均 decisionSource=model）。",
+      "repairContractCalls": 3,
+      "repairContractCallsNote": "维修任务契约三条判据涉及的模型决策：成功那次 2471 ms，加上缺料改口与不转发客户端提示词各一次。",
+      "securityBoundaryCalls": 2,
+      "securityBoundaryCallsNote": "『客户端指定 model 被忽略』与『注入指令未生效』各一次。"
+    },
+    "independentlyLoggedRounds": 3,
+    "independentlyLoggedRoundsNote": "只有 3 次有独立的逐条耗时记录。其余 49 次以样本条数形式记录在证据 JSON 里，没有逐次耗时台账。",
+    "acceptanceCriteria": 40,
+    "acceptanceCriteriaPassed": 39,
+    "acceptanceCriteriaFailed": 1,
+    "acceptanceCriteriaFailedDetail": "『路径穿越读不到源码』——判据假阳性，详见 knownDefects。",
+    "memoryCriteria": 8,
+    "memoryCriteriaPassed": 8,
+    "multiSeedBenchmark": 0,
+    "multiSeedBenchmarkNote": "多 seed 成功率、非法动作率、重规划率均未统计（docs/SPARK_DEPLOY.md §4 明确列为未统计）。artifacts/benchmark/competition-replay-default-seeds.json 是离线重放基准，不是线上多 seed 模型采样。",
+    "humanPlaytestSessions": 0,
+    "humanPlaytestSessionsNote": "尚无真人试玩记录，见 natural-playthrough.md 的模板。",
+    "recordedVideoMinutes": 0,
+    "recordedVideoMinutesNote": "视频尚未录制，见 video-timestamps.md 的清单骨架。"
+  },
+
+  "evidenceFiles": [
+    {
+      "path": "docs/competition/evidence/manifest.json",
+      "summary": "本文件：仓库、分支、SHA、部署状态、模型来源、实际样本规模、证据索引、已知缺陷清单。"
+    },
+    {
+      "path": "docs/competition/evidence/trace-summary.json",
+      "summary": "从 artifacts/online-verify/ 的真实产物汇总：40 条判据的分组通过/失败、记忆段 8 条逐条结果、真实模型回合数与延迟分布、决策来源分布。"
+    },
+    {
+      "path": "docs/competition/evidence/deployment-smoke.md",
+      "summary": "公开地址的实测记录：匿名访问、门户页→应用 iframe 链路、/healthz 返回、产物文件名与哈希、三条路径的区别、部署与回滚的实际做法。"
+    },
+    {
+      "path": "docs/competition/evidence/test-results.txt",
+      "summary": "本次实际跑出来的门禁输出原文：tsc / vitest / build / test:collection。"
+    },
+    {
+      "path": "docs/competition/evidence/video-timestamps.md",
+      "summary": "给录制方的三个名场面时间码清单骨架与判据（视频尚未录制）。"
+    },
+    {
+      "path": "docs/competition/evidence/natural-playthrough.md",
+      "summary": "真人试玩记录模板 + 已由自动测试覆盖 / 必须由真人验证的机制划分（尚无真人记录）。"
+    }
+  ],
+
+  "sourceEvidence": {
+    "directory": "artifacts/online-verify/",
+    "note": "该目录是唯一的线上真证据来源，只读。output/online-verify/ 是同一份文件的副本（output/ 被 .gitignore 忽略，评审 clone 后看不到），md5 一致，可自行核对。",
+    "files": [
+      {
+        "path": "artifacts/online-verify/api-verify.json",
+        "bytes": 6655,
+        "md5": "9437d7d35e33dd9dd27bae2189011b84",
+        "sha256": "9a01e0d74ae824c5af8c3a04d6871795b4033ef332da4a865f1ea2493f04df4f",
+        "summary": "40 条线上判据的逐条结果：39 条 ok:true、1 条 ok:false。"
+      },
+      {
+        "path": "artifacts/online-verify/api-verify-meta.json",
+        "bytes": 282,
+        "md5": "35e1054cd3fb9e583e2712fc6ca50645",
+        "sha256": "eca31881cbaba3bb5442a39076217fc615a65f4374e5e29aa43e62f23199641d",
+        "summary": "验收运行配置：hasToken:true / forceWrite:false / modelSamplesObserved:3 / startedAt 2026-11-26T08:58:52.267Z。"
+      },
+      {
+        "path": "artifacts/online-verify/api-verify-notes.json",
+        "bytes": 592,
+        "md5": "f1850e71f98e0e84b74ab5f5c6ad40ab",
+        "sha256": "4d3bf7be97e86f6d8901346203d36db44455ba304752bc3a5d1872d6fc4eba7b",
+        "summary": "观测备注（不计入通过率）：采样噪声基线、采样层重试 1 次、memory.actor 与 recentEvents 被静默丢弃。"
+      },
+      {
+        "path": "artifacts/online-verify/real-model-runs.json",
+        "bytes": 1008,
+        "md5": "07e5f1093bdf507c576a9be2ecd8264c",
+        "sha256": "29482a7d6f7873502f5fb2ffc2d844e07f1a8ba2acd2a013d62f4c4e0a29f39c",
+        "summary": "3 次真实模型调用的完整响应与耗时，均 decisionSource=model。"
+      },
+      {
+        "path": "artifacts/online-verify/memory-evidence.json",
+        "bytes": 14906,
+        "md5": "f605612abdfb68bafea52fc9c3078b6f",
+        "sha256": "0429841fc27728513d29d8d072fda2dbcff9a4d8db2181b106719d74f6aa08bc",
+        "summary": "记忆段三组对照的完整证据：逐条原文、意图、锚点命中、轮数、极性。"
+      },
+      {
+        "path": "artifacts/online-verify/memory-weight-evidence.json",
+        "bytes": 2983,
+        "md5": "a4f629355d7264d08332f6bf5d047e32",
+        "sha256": "9ec5418f157182be391e983d77749c47b9f7fdf57f2743343115dfa10b248a15",
+        "summary": "weight 专项（同一句 summary 只翻 weight）的三档采样与本次用到的 summary / 库存。"
+      },
+      {
+        "path": "artifacts/online-verify/README.md",
+        "bytes": 92432,
+        "md5": "97f3c5627c212bb7d537a13dc22e0246",
+        "sha256": "d59fcfe4269bdcca214392e5960bc674dbf79628e6fb4d72d4e60d8ab3a4a306",
+        "summary": "证据口径的完整说明：历次运行的条数与 md5、判据的覆盖与不覆盖、假阳性分析、记忆段从红到绿的过程。"
+      }
+    ],
+    "frozenVerifier": {
+      "path": "tools/verify-online-api.mjs",
+      "bytes": 103279,
+      "md5": "fe01e500bab18b8251c368b181b5952e",
+      "sha256": "2ccbea32ef06cf909d9e9f71cc2eeff42a0480ee42a3cb5ccb0e14c7f4308eb9",
+      "criterionNames": 43,
+      "criterionNamesMd5": "c7bb10f4046752d12714a24513d52951",
+      "criterionCallSites": 47,
+      "note": "判据名与调用点数本次独立复核通过（43 个单引号字面量名按源码顺序 NUL 连接取 md5 = c7bb10f4…；调用点 47）。『改的是产品不是判据』这句话因此可以被复核。"
+    }
+  },
+
+  "licensing": {
+    "projectLicense": {
+      "file": "LICENSE",
+      "bytes": 3000,
+      "md5": "f4b01db5fae71647914381b2fcd238dd",
+      "summary": "MIT，Copyright (c) 2026 Zhuyuyangyy；美术资产纳入同一授权。"
+    },
+    "thirdPartyNotices": {
+      "file": "THIRD_PARTY_NOTICES.md",
+      "bytes": 11665,
+      "md5": "0ba3470bdfa572e71003891f2b8f1ccf",
+      "summary": "第三方素材与依赖的来源与授权逐条登记：Phaser (MIT)、方舟像素字体 (OFL 1.1)、Kenney (CC0 1.0)、pixelfx (MIT)。"
+    }
+  },
+
+  "knownDefects": [
+    {
+      "id": "D1",
+      "severity": "低（判据侧，非产品缺陷）",
+      "title": "唯一一条 FAIL 是判据假阳性",
+      "detail": "『路径穿越读不到源码』拿到的不是源码，而是网关自己的 400 错误页：HTTP 400、225 B、server: Tengine 的 HTML 错误页。逐字查过不含 NPC_API_KEY、不含 /api/npc/decide、不含任何仓库源码。判据只比较『与基线不同』，基线那次是 200 的首页（1668 B），载荷这次是 400 的错误页，两个不同就被读成了泄漏。正确的判据应当是『载荷响应里出现了源码内容』。",
+      "productImpact": "无。证据：逐字查过响应体。"
+    },
+    {
+      "id": "D2",
+      "severity": "中（覆盖面）",
+      "title": "weight 专项只证明了负向档",
+      "detail": "本轮极性差 1.50（base +1.00 / pos +1.00 / neg −0.50）全部来自负向档：负向让模型 3/4 转 refuse。正向档与中性档没有可观测差异（都是 gift）。所以证明的是『weight 的负面档能把态度从回报推向戒备』，不是『weight 能双向驱动态度』。",
+      "productImpact": "写作口径风险，不是功能缺陷。"
+    },
+    {
+      "id": "D3",
+      "severity": "中（覆盖缺口）",
+      "title": "畸形 URL 崩溃已修，但 40 条判据里没有任何一条覆盖 URL 解析",
+      "detail": "server/npc-proxy.mjs 曾对 GET /% 这类畸形百分号编码抛未捕获 URIError 直接退出进程（12 个载荷 6 个能打死服务）。已由 0914cc1 修复并部署。本次 40 条判据没有一条发过畸形 URL，所以『已修复』不是被这 40 条证明的。",
+      "productImpact": "已修复，缺覆盖。"
+    },
+    {
+      "id": "D4",
+      "severity": "低（配置漂移）",
+      "title": "线上部署规格与仓库 ms_deploy.json 不一致",
+      "detail": "门户页内嵌 JSON 记录上次部署为 platform/2v-cpu-8g-mem、memory 8192；仓库 ms_deploy.json 写的是 platform/2v-cpu-16g-mem。本项是配置漂移，本次未在平台侧改动。",
+      "productImpact": "内存规格偏小，可能影响大并发；建议 A11/A2 统一后再部署一次。"
+    },
+    {
+      "id": "D5",
+      "severity": "中（覆盖面）",
+      "title": "线上只闭环了阿林一条线",
+      "detail": "第二 NPC 的闭环尚未覆盖；赠礼/维修入口仍走离线场景函数，不是模型决策。docs/SPARK_DEPLOY.md §4 已列此边界。",
+      "productImpact": "直接影响『最佳 AI NPC』专项的评分面。"
+    },
+    {
+      "id": "D6",
+      "severity": "低（可观测性）",
+      "title": "线上无法证明运行的是哪个源码 SHA",
+      "detail": "/healthz 不暴露提交号。可证明的替代事实：产物文件名 assets/index-Dzve_6tz.js 与 16:58 验收记录一致，且线上产物已包含 weight 渲染对称修复。",
+      "productImpact": "提交材料里必须写『产物级对齐』而不是『SHA 级对齐』。"
+    },
+    {
+      "id": "D7",
+      "severity": "低（观测噪音）",
+      "title": "两个字段被静默丢弃",
+      "detail": "memory.actor 不进提示词（sanitizeObservation 未保留它）；decide() 请求体的 recentEvents 不在 sanitizeObservation 白名单内，会被静默丢弃。证据见 api-verify-notes.json。",
+      "productImpact": "记忆证据里的锚点命中仍成立，但解释力受此限制。"
+    },
+    {
+      "id": "D8",
+      "severity": "中（发布一致性）",
+      "title": "本地最新构建产物 ≠ 线上产物",
+      "detail": "本地 npm run build 产出 dist/assets/index-50KPLunn.js（1 715.96 kB）；线上是 assets/index-Dzve_6tz.js（1 713 524 B）。工作区此后已变化（A3 的自主 tick 在途实现）。要让线上一致必须重新部署，并重跑线上公开冒烟 E2E。",
+      "productImpact": "本次 E2E 3/3 通过验证的是线上那份（2026-11-26 16:50:48 部署），不是本地最新代码。"
+    },
+    {
+      "id": "D9",
+      "severity": "低（工具链/流程）",
+      "title": "门禁调用方式有坑，且仓库没有 workspace 边界",
+      "detail": "npm exec --prefix 不会切换工作目录，会让 vitest 在仓库外收集到其他 agent 的 worktree（本次误收集 3247 个测试文件、444 failed），也会让 playwright 的相对 config 路径解析失败。仓库没有 vitest.workspace 之类的边界文件，而仓库父目录下同时存在多个 agent 的 worktree。",
+      "productImpact": "不是产品缺陷，是发布流程风险：照抄错误命令会得到一份「444 个测试失败」的假报告。已写入 test-results.txt 第 8 节。"
+    }
+  ],
+
+  "notYetEvidenced": [
+    "演示视频：三个名场面的录像尚未录制（video-timestamps.md 只给清单骨架与判据）。",
+    "真人试玩：0 次独立真人试玩记录（natural-playthrough.md 只给模板与机制划分）。",
+    "多 seed benchmark：线上模型的多 seed 成功率 / 非法动作率 / 重规划率均未统计。",
+    "线上 offline-fallback 路径：本证据集里没有一次 fallback 采样，降级链路没有被线上证据覆盖。",
+    "第二个 NPC 的线上真实模型闭环证据。",
+    "NPC 自主行动（AI-06）：在已提交基线 7297a37 上 world_tick 全仓库 0 次。2026-11-27 00:00 观察到 A3 在共享工作区落地了自主 tick 的在途实现（未提交、未部署、未验证），因此本证据包既不能证明它可用，名场面 C 也不可录。"
+  ],
+
+  "honestyNotes": [
+    "记忆段不是本来就绿：2026-11-26 11:07 第一次线上跑是 6 FAIL / 1 SKIP / 1 PASS；根因在产品（提示词没把记忆写成决策因子、weight 渲染不对称）；改的是产品不是判据（阈值、样本数、单调性、采样完整性判据一次没动；判据名 43 个 md5 c7bb10f4… 与调用点 47 均未变）；改完重新部署，16:58 重跑 8/8 全绿。",
+    "线上验收的真实数字是 40 条判据 / 39 通过 / 1 FAIL。早期快照里出现过 38 通过 / 2 FAIL（2026-11-26 11:14 那次，md5 7bbdc073…）与 32 条基础段（2026-11-25 23:36，md5 cb827d5a…），引用时必须带上快照时间与 md5，否则会把不同次运行的结果混着用。",
+    "样本规模按实际写：线上真实模型回合 52 次，其中只有 3 次有独立逐条耗时台账。没有任何『20–30 回』的统一样本口径。",
+    "本次门禁是在共享工作区上跑的：过程中另一个 agent 正在改 src/scenes/GameScene.ts，typecheck 与 build 一度报红（两个 TS6133 未使用符号），几分钟后即消失。为把「已提交代码的状态」与「在途改动的影响」分开，本包另在独立 worktree 上复跑了同一组门禁（detached HEAD 7297a37），全部 exit 0。",
+    "本包不代替创作手记正文（docs/competition/ 下由他人负责的文件）。它只提供可核对的事实、数字与清单。"
+  ]
+}

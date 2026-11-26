@@ -19,8 +19,23 @@
     "codeShaVerifiedOnlineNote": "本次线上验收（40 条判据）所针对的代码基线。已包含 cb51e52『weight 的提示词渲染补上正面性质词』——记忆段 8/8 全绿的必要条件之一。",
     "headAtPackTime": "7297a375fee562b4e2c7776bb32ec34613be8d4b",
     "headAtPackTimeNote": "打证据包时 origin/deploy-ms-20261125 的 HEAD；相对 526cdb9 只多了两次 docs 提交（9bb4a7c、7297a37），不含代码改动。",
-    "finalSha": null,
-    "finalShaNote": "最终提交 SHA 由 A11 合并发布线后确定。文件无法包含自身所在提交的 SHA（自指），因此本字段留空并在下一条提交回填 evidencePack.commitSha（= 首次引入本证据包的提交）。"
+    "finalSha": "b96a19215d40b3dd84ad4fb5cf20e987159a1463",
+    "finalShaNote": "这是**首次引入本证据包的提交**（分支 a10/evidence-pack）。文件无法包含自身所在提交的 SHA，所以该字段是在其后的下一次提交里回填的；回填它的那个提交只改这一个字段，其余内容与 b96a192 完全一致。A11 合并到发布线后，请把本字段指向真正的发布提交。",
+    "evidencePack": {
+      "branch": "a10/evidence-pack",
+      "introducedInCommit": "b96a19215d40b3dd84ad4fb5cf20e987159a1463",
+      "introducedInCommitNote": "首次引入本证据包的提交；本 manifest 的 repository.finalSha 指向它。",
+      "files": 6,
+      "blobSha256AtIntroducedInCommit": {
+        "manifest.json": "8a0fbf6cac00dfed94e18d9244f8ee3ef3d93ce4c52e6d312de878e93e8e0ce1",
+        "trace-summary.json": "4861cc9dd1795a782ab88ac23473a9dc0038769c6386d73ce111093a252d65f1",
+        "deployment-smoke.md": "5b504bf09a79aa9661fe162bf60241da504b66ad97d3f59e3144b0f3017b464f",
+        "test-results.txt": "d8c4db524e97bf1fcd734986312a7aefab764dc46029f0abb02c0c00ebb88464",
+        "video-timestamps.md": "ebefe593de09632469621544841f6cf847354a942c7f6f7cb0da6e5ccf554b06",
+        "natural-playthrough.md": "d03644fc73d4110c4726297d331511c32418e3de27400af372223d538ab06982"
+      },
+      "blobSha256Note": "这是 b96a192 那次提交里六个文件的 blob sha256，可用 `git show b96a192:docs/competition/evidence/<file> | sha256sum` 复核。manifest.json 在回填本字段的那次提交里内容有变，其哈希以 git blob 为准。"
+    }
   },
 
   "deployment": {

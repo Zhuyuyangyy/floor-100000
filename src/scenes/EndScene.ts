@@ -3,7 +3,7 @@ import Phaser from 'phaser';
 import { getGame, startNewGame } from '../core/session';
 import { deathCause } from '../systems/SurvivalSystem';
 import { clearSave } from '../systems/SaveSystem';
-import { ART_BANNER_WIN_KEY, ART_BANNER_LOSE_KEY, TITLE_BG_KEY } from '../render/artpack';
+import { ART_BANNER_WIN_KEY, ART_BANNER_LOSE_KEY, CHAPTER1_CLEAR_BG_KEY, TITLE_BG_KEY } from '../render/artpack';
 import { PALETTE, ROLE, TEXT, hex } from '../render/palette.ts';
 import { buildPanelHeader, buildPanelWell, FONT_FAMILY, UI } from '../render/uiKit';
 import { buildPanel, PANEL_DEPTH } from '../render/panels';
@@ -99,8 +99,18 @@ export class EndScene extends Phaser.Scene {
         .setAlpha(0.95);
     }
 
-    for (const o of buildPanel(this, cx, height / 2 + 16, panelW, panelH, chapter || won ? 'green' : 'yellow', depth)) {
-      this.add.existing(o as Phaser.GameObjects.GameObject);
+    // 第 1 章结算卡用 owner 提供的绘制背景（400x250，正好等于 panel 尺寸）。
+    // 缺纹理时退回原来的程序化面板，所以这张图是纯增量、不是加载依赖。
+    const chapterArt = chapter && this.textures.exists(CHAPTER1_CLEAR_BG_KEY);
+    if (chapterArt) {
+      this.add
+        .image(cx, top + panelH / 2, CHAPTER1_CLEAR_BG_KEY)
+        .setDisplaySize(panelW, panelH)
+        .setDepth(depth);
+    } else {
+      for (const o of buildPanel(this, cx, height / 2 + 16, panelW, panelH, chapter || won ? 'green' : 'yellow', depth)) {
+        this.add.existing(o as Phaser.GameObjects.GameObject);
+      }
     }
     for (const o of buildPanelHeader(this, left, top, panelW, chapter ? '第 1 章' : won ? '这一趟' : '死因', chapter || won ? PALETTE.clothHigh : PALETTE.lightHigh, depth + 5)) {
       this.add.existing(o as Phaser.GameObjects.GameObject);

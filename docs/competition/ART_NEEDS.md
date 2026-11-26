@@ -1,6 +1,7 @@
 # 美术需求清单（给你统一绘图用）
 
-> 写于 2026-11-26 20:32。只列**真正缺的**，不列「有了更好」的。
+> 写于 2026-11-26 20:32。**21:45 更新：P0/P1/P2 三张图已交付并接入，见文末验收记录。**
+> 只列**真正缺的**，不列「有了更好」的。
 > 现有资源：artpack 30 张 + ui 18 张 + fx 33 个 atlas + 4 张角色精灵。
 > 已够用。下面这些是审查里点名、目前没有的。
 
@@ -32,7 +33,7 @@
 | 项 | 规格 |
 |---|---|
 | 用途 | 阿珍是三个完整 Agent 之一，但角色精灵目录里只有 npc_alin / npc_xiaozhou / player / wanderer，**没有阿珍** |
-| 尺寸 | **1280×96 sprite sheet**（实测 4 张现有角色精灵全是这个尺寸：16 帧 × 80px 横向排列，2x 显示）。别画单张立绘 |
+| 尺寸 | **1280×96 sprite sheet = 20 帧 × 64×96**（`src/render/walkcycle.ts` 的 `FRAME_W=64` / `TOTAL_FRAMES=20`；帧序 walk 0–5 / idle 6–7 / attack 8–10 / hurt 11–12 / search 13–14 / die 15–17 / pickup 18–19）。我先前写「16 帧×80px」是错的，已按仓库权威更正 |
 | 风格 | 食堂/炊事人员，围裙、耐心的眼神；像素风，和现有四张同一画法 |
 | 放置 | 画完放 `src/assets/characters/npc_azhen.png`，我接进对话面板 |
 
@@ -66,3 +67,27 @@
 3. 跑全量回归 + 更新 `THIRD_PARTY_NOTICES.md`（如果是你原创，标注 owner-supplied）
 
 **不要**自己改 `GameScene.ts`——那是共享文件，我统一接。
+
+---
+
+## 交付验收记录（2026-11-26 21:45）
+
+来源：`floor100000_art_20261126.zip`，owner 提供的原创 AI 辅助美术，无第三方素材。
+
+| 图 | 交付路径 | 实测结果 |
+|---|---|---|
+| 第 1 章结算卡背景 | `public/assets/ui/chapter1_clear_bg.png` | 400×250 RGB，**9 色全部命中 PALETTE**；暖色是完整 LIGHT 梯度 `#8a4a1e → #ffe4b6`，冷蓝夜间背景，右侧留白可叠文字 |
+| 阿珍 sprite sheet | `src/assets/characters/npc_azhen.png` | 1280×96 RGBA = **20×64×96**，8 色全部命中 PALETTE，透明背景 alpha=0；围裙、头巾、走动作符合食堂人员；帧序与 `walkcycle.ts` 一致 |
+| 夜幕纹理 | `public/assets/ui/night_overlay.png` | 512×512 RGBA，alpha 5–31；**左右/上下接缝各 0 处不一致**（无缝平铺）；唯一色 `#232b4b` 在 PALETTE 外，属可选合成层，已在交付说明标注 |
+
+### 接线方式
+
+- 阿珍：`import.meta.glob('../assets/characters/*.png')` 自动发现，**放进去即生效**，无需改注册表。
+- 结算卡：`CHAPTER1_CLEAR_BG_KEY` → BootScene 加载 → EndScene chapter 分支用它替换程序化面板；缺纹理时退回原面板。
+- 夜幕：`NIGHT_OVERLAY_KEY` → BootScene 加载 → GameScene 增加 `nightTint` TileSprite，与原黑罩共用 `nightOverlayAlpha`；缺纹理时不创建，行为不变。
+
+### 验证
+
+`tsc` 0 错 · `vitest` 1223 passed / 6 skipped（1229） · `vite build` 成功，产物 `index-50KPLunn.js`，三张图全部进入 `/assets/`。
+
+**注意**：这些是静态与构建验证；运行时美术审查（`tools/art-audit.mjs`）与游戏内视觉复核尚未做，需要重新部署后在浏览器里看。

@@ -22,7 +22,7 @@ const CUSTOM_ENV = import.meta.glob('../assets/env/*.png', {
   query: '?url',
   import: 'default',
 }) as Record<string, string>;
-import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHARACTER_FILES, ENV_FILES, ENV_FLOOR_KEY, ENV_WALL_KEY, FURNITURE_FILES, ITEM_ICON_FILES, TITLE_BG_KEY } from '../render/artpack';
+import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHAPTER1_CLEAR_BG_KEY, CHARACTER_FILES, ENV_FILES, ENV_FLOOR_KEY, ENV_WALL_KEY, FURNITURE_FILES, ITEM_ICON_FILES, NIGHT_OVERLAY_KEY, TITLE_BG_KEY } from '../render/artpack';
 
 // Bakes all procedural pixel-art textures, loads the licensed UI pack
 // (GHI-04), then shows the title menu (开始新游戏 / 继续游戏 / 操作说明).
@@ -87,6 +87,10 @@ export class BootScene extends Phaser.Scene {
 
     this.load.image(ART_BANNER_WIN_KEY, 'assets/artpack/banner-win.png');
     this.load.image(ART_BANNER_LOSE_KEY, 'assets/artpack/banner-lose.png');
+    // 章末卡背景与夜幕纹理。两者都是可选合成层：缺文件时 Phaser 只记一次
+    // 加载失败，场景侧的 exists() 守卫会退回原程序化画面，不会白屏。
+    this.load.image(CHAPTER1_CLEAR_BG_KEY, 'assets/ui/chapter1_clear_bg.png');
+    this.load.image(NIGHT_OVERLAY_KEY, 'assets/ui/night_overlay.png');
 
     // Painted overrides, if any have been dropped in.
     for (const [path, url] of Object.entries(CUSTOM_CHARACTER_SHEETS)) {

@@ -102,7 +102,7 @@ import {
   buildPanelWell,
   drawStatBar,
 } from '../render/uiKit';
-import { ENV_FLOOR_KEY, ENV_WALL_KEY } from '../render/artpack';
+import { ENV_FLOOR_KEY, ENV_WALL_KEY, NIGHT_OVERLAY_KEY } from '../render/artpack';
 import {
   ATTACK_FRAME_START,
   ATTACK_FRAMES,
@@ -408,6 +408,9 @@ export class GameScene extends Phaser.Scene {
   private craftMarker!: Phaser.GameObjects.Image;
   private craftSelected = 0;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
+  // 夜幕的冷色纹理层（可选）。原矩形负责压暗，这一层只补色温；
+  // 纹理缺失时不创建，游戏退回原来的纯压暗，行为完全不变。
+  private nightTint?: Phaser.GameObjects.TileSprite;
   /** the warm pool the player carries; only visible once night falls */
   private playerLight?: Phaser.GameObjects.Image;
   // OVERHAUL Art Pass: the floor's lighting layer (warm pools, cool ambient,
@@ -629,6 +632,18 @@ export class GameScene extends Phaser.Scene {
       .setAlpha(0)
       .setDepth(NIGHT_DEPTH)
       .setName('night-overlay');
+
+    // Cold tint on top of the darkening: the audit recorded "night is only a
+    // dark wash, no colour temperature". The texture bakes alpha 5-31/255, so
+    // its strength is fixed by the art; we only fade the whole layer with the
+    // same night factor. It is optional — no texture means no tint, no bug.
+    if (this.textures.exists(NIGHT_OVERLAY_KEY)) {
+      this.nightTint = this.add
+        .tileSprite(FLOOR_WIDTH / 2, FLOOR_HEIGHT / 2, FLOOR_WIDTH, FLOOR_HEIGHT, NIGHT_OVERLAY_KEY)
+        .setAlpha(0)
+        .setDepth(NIGHT_DEPTH)
+        .setName('night-tint');
+    }
 
     // A light the player carries, bright enough to read the floor by.
     //
@@ -2942,6 +2957,9 @@ export class GameScene extends Phaser.Scene {
     const state = getGame();
     const night = nightOverlayAlpha(state);
     this.nightOverlay.setAlpha(night);
+    // The tint carries its own low alpha in the texture; scaling the layer by
+    // `night` keeps it in step with the darkening without changing the art.
+    if (this.nightTint) this.nightTint.setAlpha(night);
     if (this.playerLight) {
       // Full strength at the darkest setting, off in daylight. Kept below the
       // lamp upgrade's brightness so crafting a lamp still visibly pays.

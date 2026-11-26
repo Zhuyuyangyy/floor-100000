@@ -70,6 +70,12 @@ export const CHARACTER_FILES: Partial<Record<CharacterKey, string>> = {
 export const ART_SLOT_KEY = 'ui-slot';
 export const ART_BANNER_WIN_KEY = 'art-banner-win';
 export const ART_BANNER_LOSE_KEY = 'art-banner-lose';
+// 第 1 章结算卡的绘制背景（400x250，owner 提供，调色板内 9 色）。
+// 只有 chapter 分支用它；胜负卡沿用原来的程序化面板，不改既有观感。
+export const CHAPTER1_CLEAR_BG_KEY = 'chapter1-clear-bg';
+// 夜幕的冷色叠加纹理（512x512 无缝平铺，alpha 5-31）。可选合成层：
+// 现有夜幕是纯 alpha 0.6 黑罩，审查里记过「有压暗、没色温」。
+export const NIGHT_OVERLAY_KEY = 'night-overlay';
 
 // The room itself. These replace the 16x16 procedural tile_wall / tile_floor,
 // which repeated a flat brick 80 times across a wall and read as graph paper next

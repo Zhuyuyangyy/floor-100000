@@ -114,7 +114,8 @@ offline — those must be confirmed against the upstream source before publicati
 | Entry | File present? | Licence text present? | Status |
 | --- | --- | --- | --- |
 | Kenney selection marker | `public/assets/ui/marker.png` — yes | no local copy; CC0 needs no bundled text | **Claim only** (upstream URL + crop coordinates not re-verified) |
-| Art pack (owner) | `public/assets/artpack/` — 30 files; `ui/frame-*.png`, `ui/slot.png` — yes | n/a | **Owner to state terms** |
+| Art pack (owner) | `public/assets/artpack/` — 30 files; `ui/frame-*.png`, `ui/slot.png` — yes | n/a | **Owner confirmed 2026-11-26**: artwork included in the MIT grant (see `LICENSE`) |
+| Art added 11-26 (owner) | `public/assets/ui/chapter1_clear_bg.png`, `public/assets/ui/night_overlay.png`, `src/assets/characters/npc_azhen.png` — yes | n/a | **Owner-supplied original AI-assisted artwork**; no third-party assets, covered by the same MIT grant. Provenance: `floor100000_art_20261126.zip`; static checks in `docs/competition/ART_NEEDS.md` |
 | pixelfx effect sheets | `public/assets/fx/` — 27 original PNGs + 6 atlases added 11-26 (33 atlases total) across `melee/`, `impacts/`, `fire/`, `water/`, `pickups/`, `status/`, `critters/`, `arcane/`, `ice/` — yes | no local `LICENSE` copy; MIT attribution is in this file only | **Claim only** (which of the original 27 sheets derive from pixelfx vs. project-drawn is not recorded per-file; the 6 new ones are individually traceable to their upstream ids) |
 | Ark Pixel Font | `public/assets/fonts/ark-pixel-latin.woff2`, `public/assets/fonts/ark-pixel-zh_hans.woff2` — yes | `public/assets/fonts/OFL.txt` — yes, SIL OFL 1.1, "Copyright (c) 2021, TakWolf" | **Verified** (release tag `2026.11.10` in the entry above is not verifiable offline) |
 | Audio | no audio files anywhere under `public/` | n/a | **Verified by absence** — `src/render/audio.ts` synthesises every SFX via Web Audio |

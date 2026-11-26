@@ -134,7 +134,7 @@ flowchart TB
 - 维修入口不再走确定性函数。`runAlinRepairScenario(game, { proposeWithModel })`
   把「修不修」交给模型，validator 仍独立裁决「能不能修」；`decisionSource`
   只在模型产出提案且提交成功时才标 `model`。
-- 线上实测（`tools/verify-online-api.mjs`，32 项全过）里，缺料时模型回的是
+- 线上实测（`tools/verify-online-api.mjs`）里，缺料时模型回的是
   `request_help` 并准确说出缺 `tape×1`，而不是声称能修。这是"失败后改变计划"
   的第一份线上证据，不是本地夹具。（该项属维修任务契约判据，与记忆无关。）
 
@@ -190,7 +190,7 @@ flowchart TB
 | 软锁防护：第 2 层保底材料箱；制作入口预留维修材料 | `src/tests/craftingSystem.test.ts`；`src/tests/ShelterSystem.test.ts`；`e2e/shelter.spec.ts` |
 | 离线回放确定性：3 seed × 3 场景 = 9/9 逐位一致 | `artifacts/benchmark/competition-replay-default-seeds.json` |
 | 魔搭 Docker 创空间已部署并 Running | `Dockerfile`；`artifacts/online-verify/api-verify.json` |
-| 线上 API 验收 32 项全过（**2026-11-25 23:36 那次，带 token**；含真实模型推理 3/3、均值 5316ms） | `artifacts/online-verify/api-verify.json`（数组 32 条，逐条 `ok: true`，md5 `cb827d5a…`；`real-model-runs.json` 同目录）。⚠️ 此后实例回到 private，**同一脚本现在跑出的数不能与这份并列**。覆盖静态产物完整性、同源代理、密钥不泄漏、维修任务契约、真实模型决策、注入防护、限流与熔断、路径穿越。**不覆盖记忆相关判据**——见下方"进行中"。 |
+| 线上 API 验收 **31 项已验证通过**（**2026-11-25 23:36 那次，带 token**；含真实模型推理 3/3、均值 5316ms）。32 条记录里第 32 条「路径穿越」经复核为无效判据，不计入 | `artifacts/online-verify/api-verify.json`（数组 32 条，逐条 `ok: true`，md5 `cb827d5a…`；`real-model-runs.json` 同目录）。⚠️ 此后实例回到 private，**同一脚本现在跑出的数不能与这份并列**。覆盖静态产物完整性、同源代理、密钥不泄漏、维修任务契约、真实模型决策、注入防护、限流与熔断。⚠️ **「路径穿越」那条不作数**：它的载荷在客户端被 `fetch` 规范化（`/../` → `/`），服务端从未收到 `..`；拿一个完全不做防护的静态服务器对跑，这条照样 PASS。详见 `docs/SPARK_DEPLOY.md`。**不覆盖记忆相关判据**——见下方"进行中"。 |
 | 同源代理：Key 在服务端、单会话限流、每日预算、熔断 | `server/npc-proxy.mjs`；`server/npc-proxy.test.mts` |
 | DGX Spark 真机推理 6/6 合法提案、中位 3830ms | `artifacts/spark-runs/npc-qwen_latest-2026-11-25T09-52-05-090Z.json` |
 | 竖屏适配与触控移动 | `docs/B3-UI-07_MOBILE_PORTRAIT.md`；`e2e/portraitTouch.spec.ts` |

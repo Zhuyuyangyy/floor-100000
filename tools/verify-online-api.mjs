@@ -1158,14 +1158,29 @@ async function decide(clientId, extra = {}) {
 // 正常路径，命不中就读不到那个符号。
 //
 // 所以这里必须让路径**原样上线**：用 `node:http` 的 `request({ path })`，
-// 它不做 URL 规范化。为此还需要一个旁证，证明服务端确实收到了带 `..` 的原始
-// 路径——否则下一个人换了客户端，这条又会静默退化成现在这个假绿。
+// 它不做 URL 规范化。
 //
-// 为什么换成 `http.request` 之后能真正测到：服务端 `safePath` 里
-// `resolve(join(DIST_ROOT, normalize(decoded)))` —— `normalize('/../x')` 会把
-// 前导 `..` 吃掉变成 `\x`，所以**删掉越界比对也不会越界**；真正会越界的是
-// 不带 `normalize` 的写法。两种都要能区分，所以这里同时记下状态码与正文长度，
-// 并把「服务端收到了 `..`」写进 detail，让判据本身可被质疑。
+// ⚠️ **这条判据能证伪什么、不能证伪什么，必须写清**（九组矩阵实测，三种服务端
+// × 三种载荷）：
+//
+//   服务端                          /../ fetch   /../ http.request   /..%2f fetch
+//   原样（normalize + 越界检查）      PASS           PASS               PASS
+//   只删越界检查（保留 normalize）    PASS           PASS               PASS
+//   真朴素（不 normalize、不检查）    **PASS**       **FAIL**           **FAIL**
+//
+// 第二行是关键：**只删掉那个 `if` 它照样 PASS**，因为 `normalize` 在它之前就把
+// 前导 `..` 吃掉了（`normalize('/../x')` → `'\x'`）。所以这条判据证伪的是
+// 「能被 `/../` 读出 dist 之外的源码」，**不是**「safePath 的越界检查还在」。
+// 后者是可执行的第二道保险，只有第一道（normalize）失效时才轮到它——而
+// normalize 一失效，这条判据就会 FAIL，所以两道里漏一道时这条只能测到一道。
+//
+// 换句话说：**这条 PASS 不等于「穿越防护整体有效」**，它只说明「用这个载荷
+// 读不到 dist 外的源码」。要证明第二道保险还在，只能读代码或改代码做对照。
+//
+// 为什么没有补一条「服务端确实收到了 `..`」的旁证：那需要服务端配合（回显
+// `req.url`），而线上那份是部署好的、不能为了验收加口子。所以这里的做法是
+// **让判据自己能 FAIL**——第三行就是它的证伪能力，而不是靠 detail 自证。
+// detail 里打印客户端原始 path，是为了让人能自己重放这一条，不是证明。
 const TRAVERSAL_PATH = '/../server/npc-proxy.mjs';
 
 async function rawGet(pathname) {

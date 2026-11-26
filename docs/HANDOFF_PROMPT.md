@@ -262,54 +262,70 @@ A1 已经承诺过执行步骤，照做即可：探活 → 全量带 token → 8
 
 ## 真正的全局待办（按优先级）
 
-### P0 — 只有用户本人能做：创空间改 public
+### P0 — 「改 public」这一步**已经不需要做了**（2026-11-26 实测推翻）
 
-现状：`curl <base>/` → 401，`/healthz` → `Authentication failed`，门户 → 403。
-401 拦在魔搭**平台网关**，补 `MS_TOKEN` 不解决——那只证明「持证人能访问」，
-证明不了「评委无需登录能访问」。`docs/COMPETITION_SUBMISSION_CHECKLIST.md:12`
-早就写着「已部署，仍为 private」。
+**旧结论（错的）：** 「创空间仍为 private，只有用户本人能改；401 拦在平台网关。」
 
-public 之后按顺序执行：
+**实测事实：**
+
+| 项 | 实测 |
+|---|---|
+| 空间可见性 | `GET https://modelscope.cn/openapi/v1/studios/a1578804454/floor-100000` → `"visibility":"public"`、`"private":false`、`"status":"Running"` |
+| 公开地址 | `https://www.modelscope.cn/studios/a1578804454/floor-100000` → 匿名 **200** |
+| 游戏是否真的起来 | 是。门户挂出应用 iframe，iframe 里 **canvas 1280×720、Menu 场景 active**（见 `e2e-public/public-smoke.spec.ts`） |
+| 真模型链路 | 浏览器里 `POST /api/npc/decide` → `decisionSource:"model"`，真台词 |
+| 401 出现在哪 | **只在 API 专用地址** `studio-…api-inference.modelscope.net`。该地址按平台设计**必须带 SDK token**，与空间是否公开无关 |
+| 顶层访问 `.ms.show` | **302** 到门户页，游戏跑在门户 iframe 里（所有魔搭创空间都这样，不是故障） |
+
+**所以「评委免登录可访问」这条已经满足。** 不需要用户去改任何开关。
+
+**真正还差的一步：拿一个有效 `MS_TOKEN` 跑一次带凭证的验收。**
+无 token 时脚本按设计不落盘（`forceWrite` 的产物不是证据）。拿 token 的入口：
+魔搭「设置 → 访问令牌」。有了它：
 
 ```bash
-# 1. 探活，不过就别跑判据
-curl -s -o /dev/null -w '%{http_code}' <base>/     # 期望 200
-curl -s <base>/healthz                             # 期望 ok:true
+MS_TOKEN=<有效令牌> node tools/verify-online-api.mjs   # 六份产物落 output/online-verify/
+# 再把结果同步进 artifacts/online-verify/ 并更新 md5 记录（旧的标明跑于何时、当时条数）
 ```
 
-若 `/` 仍 401，说明不是 private 开关的问题（可能域名解析到门户前端），
-按 SKIP 记账，**不要**写成「产品不合格」。
+> **本轮已经跑过一轮「诊断轮」**（无 token + `FORCE_WRITE=1` + `SHOT_DIR=tmp/…`，
+> 只加了一个浏览器 UA 垫片让脚本能打到公开 host，脚本本身一行未改）：
+> **基础段 32 条全 PASS**（含真模型 3/3、限流、注入防护、405/400/413），
+> **记忆段 8 条里 6 FAIL / 1 SKIP / 1 PASS**。
+> 详细逐条结果与根因见 `docs/BENCHMARK_REPORT.md` §2.5。
 
-2. `MS_TOKEN=<有效令牌> node tools/verify-online-api.mjs` 跑全量，六份产物落 `output/online-verify/`。
-3. 出 8 条记忆判据逐条结果，连同 `memory-evidence.json` 的三合判据
-   (`united.passed`、`polarityGainTotal`、三组 `moved`) 一起给，不包装；某组 `moved:false` 如实写。
-4. 确认路径穿越判据在真服务端落在哪一档（能 FAIL 还是与基线相同）。
-5. 同步进 `artifacts/`，更新 md5 记录；旧那份标明跑于何时、当时条数，
-   不能让两份长得一样躺在仓库里。
-6. 提交推送。
+### P0.5 — 记忆段为什么红（必须如实处理）
 
-### P1 — 用户拍板后立刻可做
+模型**读到了记忆**（提示词侧已逐字验证），也确实**改了它说出口的话**，
+但它**没有改动作类型**（`dialogue` → `dialogue`），而判据量的是动作类型。
+**在拿到动作层证据之前，任何材料都不要写「记忆改变行动」。**
+两个可选方向，需要人来定：
+(a) 如实降级参赛口径（只写「记忆进入提示词并改变措辞」）；
+(b) 改 `server/npc-proxy.mjs` 的 `buildMessages`，把记忆显式写成**决策因子**
+（记忆显示玩家帮过你 → 倾向回报；显示玩家失约 → 倾向戒备），
+再重新部署空间、重跑验收。**这不是改判据**，是改产品去兑现它自己的规格；
+但改完必须重新部署 + 重跑才作数。
 
-`LICENSE` 定稿，见 A7 节。
+### P1 — LICENSE 定稿，卡在版权方（用户本人）
 
-### P2 — 可选补强参赛材料
+见 A7 节。**不要替用户填**——填了就是伪造法律声明。
 
-`docs/BENCHMARK_REPORT.md` 方法论段加一条判断标准即可：
+### P2 — 参赛材料方法论补强（**已完成**）
 
-> 如果一个结论是靠数代码里某个字符串出现了几次得出的，它只能证明「那个字符串还在」。
-> 要证明判据生效、要证明模型被调了几次，只能跑。
-
-配一条可复现的假结论（桩只让限流段 15 次成功）：
-同一屏上半部 `PASS 限流前先有成功请求 :: 序列 200×15`，
-下半部 `目标 …｜本轮 0 次模型回复：token 无效…`。
-**不要**列举「我们审出了 N 处瑕疵」。
+`docs/BENCHMARK_REPORT.md` §5 已加一条判断标准（「能重跑的才算结论，数出来的只能算线索」）
++ 一条可复现的假结论（限流段 15 次成功 vs 本轮 0 次模型回复，同一屏互相打脸）。
+**没有**列举「我们审出了 N 处瑕疵」。
 
 ### P3 — 明确不做的技术债
 
 | 项 | 现状 | 为什么不现在做 |
 |---|---|---|
-| `requestBlackoutHelp('azhen')` 幂等 | 潜伏 bug，见 A2 节 | 无 UI 入口；修要迁移 flag 键 |
 | `weight` 词表 | 直连链路已修，但 `flee`/`observed` 仍落兜底「相遇」 | 改词表是语义决策 |
 | `recentEvents` 接线 | 生成 3 处消费 0 处，已标注释 | 要改 `server/` 白名单并扩大线上验证面 |
 | `isDecisionFresh` | 生产零调用，已登记已知限制 | 不影响赛前演示 |
-| `dialogue-fit-probe` 补 360x900 | 现只跑两个视口 | 低优先级，见 A3 节 P3 |
+| `dialogue-fit-probe` 补 360x900 | 见 A3 节 P3 | 低优先级 |
+
+> **`requestBlackoutHelp('azhen')` 幂等已修**（`e9fd25e`）：承诺按人分键
+> （alin/azhen/xiaozhou），幂等检查提到分支之外，过期判定逐人判，
+> 旧存档单键保留为只读回退。实测阿珍连点 5 次信任恒为 46（修复前 46→57→68→79→90），
+> 补了 8 条回归断言。阿林行为逐字不变。

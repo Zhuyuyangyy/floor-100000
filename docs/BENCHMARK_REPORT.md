@@ -143,6 +143,30 @@ md5 `cb827d5a957974ea382672f07469c804`）**不包含任何记忆判据**。逐�
 > （200 + 1716B 的 `index.html` 兜底）；换 `http.request({path})` 直发同一台无防护服务端，
 > 返回 28513B 含 `NPC_API_KEY` 的真源码。
 > **一条无法被反例推翻的判据，不能算通过。**
+>
+> **脚本侧已修（`4831b28`）**：改用 `node:http` 的 `request({ path })`，载荷原样上线。
+> 判据名一条没增没删（43 个字面量名、NUL 连接 md5 三版同值）。**但线上 public 实例
+> 仍未观测**，所以上面那个「31 项」的口径不变——**「脚本修好」≠「这条通过」**。
+>
+> **它能证伪什么，我四档实测过（载荷固定 `/../server/npc-proxy.mjs`、`rawGet` 直发）：**
+> 线上原样 → PASS；**只删越界比对、保留 `normalize` → 仍 PASS**；只删 `normalize` →
+> 403/SKIP；两道都删 → **FAIL（47B 含源码）**。第二格是关键：`safePath` 有两道防线，
+> `normalize()` 已经先把前导 `..` 吃掉，所以这条判据证伪的是「能被 `/../` 读出 dist 外
+> 的源码」，**不是**「越界比对那一行还在」。
+
+> ⚠️ **另有一条不在 32 项里的问题，比路径穿越更严重：畸形 URL 能把服务打死。**
+> 对 `server/npc-proxy.mjs` 发 `GET /%`、`/%2`、`/%zz`、`/index.html%`、`/%E0%A4%A`
+> 或 `HEAD /%`，`safePath` 里的 `decodeURIComponent` 抛 `URIError`；`serveStatic` 与
+> `createServer` 回调都没有 try/catch，全文件也没有 `unhandledRejection` 兜底，
+> **进程直接退出**。12 个载荷实测 6 个能打死，每次都用 `/healthz` 复查
+> （发之前 200，发之后连不上）。
+> 这是**覆盖缺口**不是数据污染——32 条里没有任何一条发过畸形 URL
+> （`grep -c 'decodeURIComponent\|404' tools/verify-online-api.mjs` → 0）。
+> 该 bug 自 `6cef682`（11-25 20:13）起存在，**早于产出证据的 `b9ffd0b`（23:37）**，
+> 所以那份证据是在一个有这个缺陷的服务上跑出来的。
+> 修法 3 行（`safePath` 里 try/catch → `return null`，复用既有 403 分支），已在桩上验证；
+> `server/` 不归本文作者，**未代改**。详见 `artifacts/online-verify/README.md`
+> §「复核这条时顺手抓到的第二件事」。
 
 **必须如实说的：** **名场面 A「记忆改变行动」的线上验证尚未完成。**
 记忆验收段已实现于 `tools/verify-online-api.mjs`（按段落标题「2.6 记忆影响决策」定位，

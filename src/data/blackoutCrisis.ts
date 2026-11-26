@@ -28,6 +28,42 @@ export const BLACKOUT_CRISIS_ID = 'blackout-tower-main';
 export const BLACKOUT_POWER_GATE_ID = 'tower-main-power';
 
 /**
+ * 停电危机里会向玩家发起委托的三个人。
+ *
+ * 只有这三位有「承诺」这回事，所以承诺也只有这三份。顺序不影响任何逻辑，
+ * 只是为了让「按人逐个判定」的地方读起来像一句名单。
+ */
+export type BlackoutPromiseNpcId = 'alin' | 'azhen' | 'xiaozhou';
+
+/**
+ * 承诺按人分键。
+ *
+ * 为什么不能只用一把全局 flag：接单是「我答应**这个人**」，不是「我答应过停电
+ * 这件事」。共用一把钥匙有两个后果——阿珍问过一次就把小周的接单顶掉（反之
+ * 亦然），两个人互相取消对方的幂等；更要命的是连点同一个人可以重复记账，每
+ * 记一遍信任 +11，等于开了一个刷信任的入口。分键之后，谁的承诺落在谁自己的
+ * 钥匙上，谁失信也只记在谁头上。
+ */
+export const BLACKOUT_PROMISE_DAY: Readonly<Record<BlackoutPromiseNpcId, string>> = {
+  alin: flagKey.story(`${BLACKOUT_CRISIS_ID}:promise-day:alin`),
+  azhen: flagKey.story(`${BLACKOUT_CRISIS_ID}:promise-day:azhen`),
+  xiaozhou: flagKey.story(`${BLACKOUT_CRISIS_ID}:promise-day:xiaozhou`),
+};
+
+/**
+ * 失信也按人分键。
+ *
+ * 理由同上，而且后果必须分人：只有**阿林**失信才会让他变成 guarded（谨慎态
+ * 会抬高维修门槛、压低修好奖励）；阿珍或小周失信是他俩自己的账，不该让阿林
+ * 也背上「这人说话不算数」。
+ */
+export const BLACKOUT_PROMISE_BROKEN: Readonly<Record<BlackoutPromiseNpcId, string>> = {
+  alin: flagKey.story(`${BLACKOUT_CRISIS_ID}:promise-broken:alin`),
+  azhen: flagKey.story(`${BLACKOUT_CRISIS_ID}:promise-broken:azhen`),
+  xiaozhou: flagKey.story(`${BLACKOUT_CRISIS_ID}:promise-broken:xiaozhou`),
+};
+
+/**
  * 危机的全部持久标记。
  *
  * 只用 flag 存「事实」，不用新字段：GameState 是全局契约，加字段要动 A0 的
@@ -46,10 +82,36 @@ export const BLACKOUT_FLAG = {
   azhenWater: flagKey.story(`${BLACKOUT_CRISIS_ID}:azhen-water`),
   /** 阿林在谨慎状态下要求「先核料」；值是该动作发生的天数 */
   verifiedDay: flagKey.story(`${BLACKOUT_CRISIS_ID}:verified-day`),
-  /** 玩家接单的承诺发生在哪一天；缺失表示没接 */
-  promiseDay: flagKey.story(`${BLACKOUT_CRISIS_ID}:promise-day`),
-  /** 承诺已过期未履约（1）；由 sync 写入，之后不再重复写 */
-  promiseBroken: flagKey.story(`${BLACKOUT_CRISIS_ID}:promise-broken`),
+  /**
+   * 玩家接单的承诺发生在哪一天；缺失表示没接。
+   *
+   * ── 迁移口径（这一版把「全局单键」改成「按人分键」） ────────────────────
+   * - 这把钥匙现在指向**阿林**的分人键 `promise-day:alin`；阿珍、小周各有自己
+   *   的（见 promiseDayAzhen / promiseDayXiaozhou）。
+   * - 旧存档里那把单键 `promise-day` 只有一个含义：阿林的承诺日。它被保留成
+   *   `promiseDayLegacy` 并**只读**——读侧在新的阿林键缺失时回退查它，所以
+   *   老存档既不丢进度，也不会把阿林已有的承诺误判成「没承诺」；写侧只写新键。
+   */
+  promiseDay: BLACKOUT_PROMISE_DAY.alin,
+  /** 阿珍的承诺日 */
+  promiseDayAzhen: BLACKOUT_PROMISE_DAY.azhen,
+  /** 小周的承诺日 */
+  promiseDayXiaozhou: BLACKOUT_PROMISE_DAY.xiaozhou,
+  /** 旧存档的单键：语义 = 阿林的承诺日；只读兼容，不再写 */
+  promiseDayLegacy: flagKey.story(`${BLACKOUT_CRISIS_ID}:promise-day`),
+  /**
+   * 承诺已过期未履约（1）；由 sync 写入，之后不再重复写。
+   *
+   * 同样是阿林的分人键（只有他失信会变 guarded）；旧存档的单键见
+   * `promiseBrokenLegacy`，读侧回退、写侧只写新键。
+   */
+  promiseBroken: BLACKOUT_PROMISE_BROKEN.alin,
+  /** 阿珍失信 */
+  promiseBrokenAzhen: BLACKOUT_PROMISE_BROKEN.azhen,
+  /** 小周失信 */
+  promiseBrokenXiaozhou: BLACKOUT_PROMISE_BROKEN.xiaozhou,
+  /** 旧存档的单键：语义 = 阿林失信；只读兼容，不再写 */
+  promiseBrokenLegacy: flagKey.story(`${BLACKOUT_CRISIS_ID}:promise-broken`),
   /** 危机库存只铺一次，防止重复 sync 把货架刷回来 */
   stocked: flagKey.story(`${BLACKOUT_CRISIS_ID}:stocked`),
 } as const;

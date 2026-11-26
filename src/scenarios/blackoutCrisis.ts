@@ -43,6 +43,8 @@ import {
   BLACKOUT_FLAG,
   BLACKOUT_PARTIES,
   BLACKOUT_POWER_GATE_ID,
+  BLACKOUT_PROMISE_BROKEN,
+  BLACKOUT_PROMISE_DAY,
   BLACKOUT_PROMISE_DAYS,
   BLACKOUT_REPAIR_MATERIALS,
   BLACKOUT_SPOIL_WITH_WATER,
@@ -59,6 +61,7 @@ import {
   type BlackoutOffer,
   type BlackoutPartyStatus,
   type BlackoutPlayerActionKind,
+  type BlackoutPromiseNpcId,
   type BlackoutStage,
 } from '../data/blackoutCrisis';
 import { ALIN_REPAIR_GATE_ID, isAlinRepairGateOpen } from '../data/floorGates';
@@ -149,6 +152,90 @@ function grant(game: GameState, itemId: ItemId, quantity: number): number {
   return addItem(game.player.inventory, itemId, quantity).added;
 }
 
+// ── 承诺（按人分键） ────────────────────────────────────────────────────────
+
+/** 会向玩家发起委托的三个人。逐个判定用，顺序不影响结果。 */
+const PROMISE_NPCS: readonly BlackoutPromiseNpcId[] = ['alin', 'azhen', 'xiaozhou'];
+
+/**
+ * 某位居民的承诺发生在第几天；0 表示没接过单。
+ *
+ * 读侧兼容旧存档：旧存档只有一把全局单键 `promise-day`，语义是**阿林**的
+ * 承诺日，所以只有阿林这一路会回退查它（`promiseDayLegacy`）。写侧只写新的
+ * 分人键，旧键从此只读——老存档因此既不丢进度，也不会把阿林已有的承诺误判成
+ * 「没承诺」。
+ */
+function promiseDayOf(game: GameState, npcId: BlackoutPromiseNpcId): number {
+  const stored = flagCount(game, BLACKOUT_PROMISE_DAY[npcId]);
+  if (stored > 0) return stored;
+  if (npcId === 'alin') return flagCount(game, BLACKOUT_FLAG.promiseDayLegacy);
+  return 0;
+}
+
+/**
+ * 某位居民是不是已经失信过一次。
+ *
+ * 与 promiseDayOf 同一套迁移口径：旧存档的 `promise-broken` 语义 = 阿林失信。
+ * 单向、不可撤销——失信是本章唯一的不可逆后果。
+ */
+function promiseBrokenOf(game: GameState, npcId: BlackoutPromiseNpcId): boolean {
+  if (flagCount(game, BLACKOUT_PROMISE_BROKEN[npcId]) > 0) return true;
+  if (npcId === 'alin') return flagCount(game, BLACKOUT_FLAG.promiseBrokenLegacy) > 0;
+  return false;
+}
+
+/** 这位居民要的东西怎么写（「净水×2」），与接单时写进承诺的那句保持一致。 */
+function wantsTextOf(npcId: BlackoutPromiseNpcId): string {
+  return BLACKOUT_PARTIES[npcId].request
+    .map((req) => `${getItem(req.itemId).displayName}×${req.quantity}`)
+    .join('、');
+}
+
+/** 失信时写进记忆的两句话：承诺本身 + 失信摘要。逐人独立，不共用措辞。 */
+const BROKEN_MEMORY: Readonly<Record<BlackoutPromiseNpcId, { promise: string; summary: string }>> = {
+  alin: {
+    promise: '玩家答应补齐保险丝和电线',
+    summary: '玩家答应帮忙修线，却一直没有交货',
+  },
+  azhen: {
+    promise: `玩家答应给${wantsTextOf('azhen')}`,
+    summary: `玩家答应给${wantsTextOf('azhen')}，却一直没有送来`,
+  },
+  xiaozhou: {
+    promise: `玩家答应给${wantsTextOf('xiaozhou')}`,
+    summary: `玩家答应给${wantsTextOf('xiaozhou')}，却一直没有送来`,
+  },
+};
+
+/**
+ * 这位居民的承诺是不是已经履约了。
+ *
+ * 履约了就不能再记失信——玩家答应了又真的做到，不该第二天就被写成失信。
+ * 判据各人不同，因为「履约」在这三个人身上是三件事：
+ * - 阿林：主线接回去（供电恢复）就算修好了；
+ * - 阿珍：净水送到了（`azhenWater`），她要的就是水；
+ * - 小周：交易成了（他收了玩家的货）。
+ */
+function promiseKept(game: GameState, npcId: BlackoutPromiseNpcId): boolean {
+  if (npcId === 'alin') return flagCount(game, BLACKOUT_FLAG.power) > 0;
+  if (npcId === 'azhen') return flagCount(game, BLACKOUT_FLAG.azhenWater) > 0;
+  return loadCompetitionNpcMemory(game, 'xiaozhou').some(
+    (entry) => entry.kind === 'fact' && entry.subject === 'trade',
+  );
+}
+
+/** 记一笔失信：只写给这位居民本人，并把他那把失信键钉上。 */
+function breakPromise(game: GameState, npcId: BlackoutPromiseNpcId): void {
+  atomic(game, () => {
+    setFlag(game, BLACKOUT_PROMISE_BROKEN[npcId], 1);
+    appendMemory(
+      game, npcId,
+      { kind: 'refusal', summary: BROKEN_MEMORY[npcId].summary },
+      promiseEntry(game, npcId, BROKEN_MEMORY[npcId].promise, 'broken'),
+    );
+  });
+}
+
 // ── 阿林的合作意愿 ──────────────────────────────────────────────────────────
 
 /**
@@ -186,7 +273,8 @@ function grant(game: GameState, itemId: ItemId, quantity: number): number {
  *   获得了一次免检，第 2 条理由跟着作废。
  */
 export function alinStanceOf(game: GameState): BlackoutAlinStance {
-  if (flagCount(game, BLACKOUT_FLAG.promiseBroken) > 0) return 'guarded';
+  // 读的是「阿林这把失信键」：新键优先，旧存档的单键回退（口径见 promiseBrokenOf）。
+  if (promiseBrokenOf(game, 'alin')) return 'guarded';
   const gaveWaterEarlier = loadCompetitionNpcMemory(game, 'alin').some(
     (entry) =>
       entry.kind === 'fact' &&
@@ -561,13 +649,17 @@ export function syncBlackoutCrisis(game: GameState): BlackoutTransition {
   }
 
   // 承诺过期：接单当天 + 1 天内没交货，就记一笔失信。
-  const promiseDay = flagCount(game, BLACKOUT_FLAG.promiseDay);
-  if (promiseDay > 0 && flagCount(game, BLACKOUT_FLAG.power) === 0 &&
-      game.day > promiseDay + BLACKOUT_PROMISE_DAYS && flagCount(game, BLACKOUT_FLAG.promiseBroken) === 0) {
-    atomic(game, () => {
-      setFlag(game, BLACKOUT_FLAG.promiseBroken, 1);
-      appendMemory(game, 'alin', { kind: 'refusal', summary: '玩家答应帮忙修线，却一直没有交货' }, promiseEntry(game, 'alin', '玩家答应补齐保险丝和电线', 'broken'));
-    });
+  //
+  // **按人分别判定**：谁的承诺看谁的钥匙，谁失信只记在谁头上。以前这里是读
+  // 一把全局 flag，所以只要有一个人接过单，另一个人就会被算进同一笔账——阿珍
+  // 的承诺过期会把阿林打成 guarded，小周的承诺过期也会顺手写一条阿林的失信。
+  for (const npcId of PROMISE_NPCS) {
+    const promiseDay = promiseDayOf(game, npcId);
+    if (promiseDay <= 0) continue;                                // 没接过单
+    if (promiseBrokenOf(game, npcId)) continue;                    // 已经记过失信，不重复写
+    if (game.day <= promiseDay + BLACKOUT_PROMISE_DAYS) continue;  // 还在期限内
+    if (promiseKept(game, npcId)) continue;                       // 已经履约，不算失信
+    breakPromise(game, npcId);
   }
 
   // 死线：过了就是明确的失败出口，不是无限等待。
@@ -639,6 +731,17 @@ function guardActive(game: GameState): BlackoutDetailCode {
  *
  * 为什么「接单」本身要落库：因为后面的判断依赖它——接下阿林却拖着不办，
  * 第二天他就会要求先核料（guarded）。没有这条记录，失信就无从谈起。
+ *
+ * ── 幂等：**按人**判定，同一个人一辈子只接得到一次单 ──────────────────────
+ *
+ * 承诺存在各自的钥匙上（`BLACKOUT_PROMISE_DAY`：alin / azhen / xiaozhou 各一把），
+ * 所以语义是：
+ * - 同一个人重复接单 → 返回 `already_requested`，不加信任、不多写一条记忆；
+ * - 不同的人互不影响：阿珍接过单不会顶掉小周的额度，反之亦然。
+ *
+ * 之前幂等检查只写在 `if (npcId === 'alin')` 分支里，阿珍/小周走公共分支，
+ * 而那条分支只有 appendMemory、没有「已接单」判断——连点同一个人就能把同一条
+ * 承诺记很多遍，每记一遍信任 +11（help 0.5×20×1.1），那就是一个刷信任的入口。
  */
 export function requestBlackoutHelp(game: GameState, npcId: 'alin' | 'xiaozhou' | 'azhen'): BlackoutActionResult {
   const guard = guardActive(game);
@@ -647,13 +750,15 @@ export function requestBlackoutHelp(game: GameState, npcId: 'alin' | 'xiaozhou' 
   if (reach !== 'ok') {
     return result(game, 'request_help', false, reach, reach === 'wrong_floor' ? `${npcName(npcId)}不在这一层。` : `走近一点再和${npcName(npcId)}说话。`);
   }
+  // 已经答应过这一位就不重复记：重复接单不该刷出第二条承诺。
+  // 读的是**这个人自己**那把钥匙，所以阿珍的承诺不会顶掉小周的（反之亦然）。
+  if (promiseDayOf(game, npcId) > 0) {
+    const message = npcId === 'alin' ? '你已经答应过他了。' : `你已经答应过${npcName(npcId)}了。`;
+    return result(game, 'request_help', false, 'already_requested', message);
+  }
   if (npcId === 'alin') {
-    // 已经答应过一次就不重复记：重复接单不该刷出第二条承诺。
-    if (flagCount(game, BLACKOUT_FLAG.promiseDay) > 0) {
-      return result(game, 'request_help', false, 'already_requested', '你已经答应过他了。');
-    }
     const committed = atomic(game, () => {
-      setFlag(game, BLACKOUT_FLAG.promiseDay, game.day);
+      setFlag(game, BLACKOUT_PROMISE_DAY.alin, game.day);
       advanceBlackoutStage(game, 'materials_needed');
       appendMemory(
         game, 'alin',
@@ -666,8 +771,9 @@ export function requestBlackoutHelp(game: GameState, npcId: 'alin' | 'xiaozhou' 
     return result(game, 'request_help', true, 'ok', '他列了清单：保险丝一个、电线一段。');
   }
   const party = BLACKOUT_PARTIES[npcId];
-  const wants = party.request.map((req) => `${getItem(req.itemId).displayName}×${req.quantity}`).join('、');
+  const wants = wantsTextOf(npcId);
   const committed = atomic(game, () => {
+    setFlag(game, BLACKOUT_PROMISE_DAY[npcId], game.day);
     appendMemory(game, npcId, { kind: 'help', summary: `玩家问起${party.need}` }, promiseEntry(game, npcId, `玩家答应给${wants}`, 'open'));
     return true;
   });
@@ -685,9 +791,10 @@ export function requestBlackoutHelp(game: GameState, npcId: 'alin' | 'xiaozhou' 
  * 只在 `investigating` 调，有三个理由：
  * - `initial` 时门还没开、危机没开始，`guardActive` 会拒，但那时也根本没有
  *   「接回主线」这个选项（`isBlackoutActive` 为 false），多一次判断没坏处。
- * - `materials_needed` 之后已经接过单，`requestBlackoutHelp` 内部靠
- *   `promiseDay` flag 幂等，重复调用只会返回 `already_requested`，不会刷出
- *   第二条承诺——所以连点三次维修也不会把承诺写三遍。
+ * - `materials_needed` 之后已经接过单，`requestBlackoutHelp` 内部靠**阿林那把**
+ *   承诺键（`BLACKOUT_PROMISE_DAY.alin`）幂等，重复调用只会返回
+ *   `already_requested`，不会刷出第二条承诺——所以连点三次维修也不会把承诺写
+ *   三遍。
  * - `resolved_*` 时 `guardActive` 会拒，不需要额外分支。
  *
  * 返回值交给调用方只是为了可测：失败不该阻断维修（玩家可能只是站远了），

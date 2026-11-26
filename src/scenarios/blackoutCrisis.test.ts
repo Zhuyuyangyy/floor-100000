@@ -1515,3 +1515,149 @@ describe('阿珍：送水与死线对信任和存货的影响（玩家入口）'
     expect(observeBlackout(game).parties.find((p) => p.npcId === 'azhen')?.status).toBe('refuse');
   });
 });
+
+// ── 接单幂等：承诺按人分键 ──────────────────────────────────────────────────
+//
+// 这条缺陷是**潜伏**的：`requestBlackoutHelp(game, 'azhen')` 在 GameScene 里
+// 没有入口，但接口本身是一条可被利用的刷信任路径——每接一次单，信任 +11
+// （help 0.5×20×(0.5+loyalty 0.6)=11），记忆还多一条 'help'。
+// 「目前没有 UI 入口」不是不修的理由：判官按接口探，探到就是硬伤。
+//
+// 根因：幂等检查（promiseDay）写在 `if (npcId === 'alin')` 分支**内部**，阿珍/
+// 小周走公共分支，那条分支只有 appendMemory、没有「已接单」判断。
+//
+// 修法：承诺按人分键（`BLACKOUT_PROMISE_DAY`：alin / azhen / xiaozhou 各一把），
+// 幂等检查提到分支之外，读的是**这个人自己**那把钥匙——所以阿珍的承诺不会顶掉
+// 小周的额度，反之亦然。
+describe('接单幂等：承诺按人分键，连点刷不了信任', () => {
+  const trust = (game: GameState, npcId: 'alin' | 'azhen' | 'xiaozhou') =>
+    loadNpcState(game, npcId)?.relationship.player;
+  const helpMemories = (game: GameState, npcId: 'alin' | 'azhen' | 'xiaozhou') =>
+    (loadNpcState(game, npcId)?.memory ?? []).filter((m) => m.kind === 'help');
+  const promiseMemories = (game: GameState, npcId: 'alin' | 'azhen' | 'xiaozhou') =>
+    loadCompetitionNpcMemory(game, npcId).filter((entry) => entry.kind === 'promise');
+
+  /** 危机已开始、玩家站在阿珍旁边。 */
+  function azhenCrisis(): GameState {
+    const game = crisisGame();
+    goTo(game, 'azhen');
+    return game;
+  }
+
+  it('阿珍连点 5 次：信任只涨一次（46），help 记忆只多一条，承诺只有一条', () => {
+    const game = azhenCrisis();
+    expect(trust(game, 'azhen')).toBeUndefined(); // 开局还没记过关系，不是 0
+
+    const first = requestBlackoutHelp(game, 'azhen');
+    expect(first.ok).toBe(true);
+    // 基线 COMPETITION_TRUST_BASE=35 + help 11 → 46。
+    // 修复前这里是 46→57→68→79→90（连点五次各 +11）。
+    expect(trust(game, 'azhen')).toBeCloseTo(46, 5);
+
+    for (let i = 0; i < 4; i += 1) {
+      const again = requestBlackoutHelp(game, 'azhen');
+      expect(again.ok).toBe(false);
+      expect(again.detail).toBe('already_requested');
+    }
+
+    expect(trust(game, 'azhen')).toBeCloseTo(46, 5);
+    expect(helpMemories(game, 'azhen')).toHaveLength(1);
+    expect(promiseMemories(game, 'azhen')).toHaveLength(1);
+    // 承诺日写在阿珍自己那把钥匙上，阿林的钥匙不受影响。
+    expect(flagCount(game, BLACKOUT_FLAG.promiseDayAzhen)).toBe(game.day);
+    expect(flagCount(game, BLACKOUT_FLAG.promiseDay)).toBe(0);
+  });
+
+  it('阿珍与小周各接各的：谁也顶不掉谁', () => {
+    const game = crisisGame();
+
+    goTo(game, 'azhen');
+    expect(requestBlackoutHelp(game, 'azhen').ok).toBe(true);
+    expect(flagCount(game, BLACKOUT_FLAG.promiseDayAzhen)).toBe(game.day);
+    expect(flagCount(game, BLACKOUT_FLAG.promiseDayXiaozhou)).toBe(0);
+
+    goTo(game, 'xiaozhou');
+    const zhou = requestBlackoutHelp(game, 'xiaozhou');
+    expect(zhou.ok).toBe(true);
+    expect(zhou.detail).toBe('ok');
+    expect(flagCount(game, BLACKOUT_FLAG.promiseDayXiaozhou)).toBe(game.day);
+    expect(flagCount(game, BLACKOUT_FLAG.promiseDayAzhen)).toBe(game.day);
+
+    // 反向也一样：阿珍的额度没被小周顶掉，小周的也没被阿珍顶掉。
+    goTo(game, 'azhen');
+    expect(requestBlackoutHelp(game, 'azhen').detail).toBe('already_requested');
+    goTo(game, 'xiaozhou');
+    expect(requestBlackoutHelp(game, 'xiaozhou').detail).toBe('already_requested');
+  });
+
+  it('阿林既有行为不变：重复接单返回 already_requested，不加信任也不多写记忆', () => {
+    const game = crisisGame();
+
+    const first = requestBlackoutHelp(game, 'alin');
+    expect(first.ok).toBe(true);
+    const afterFirst = trust(game, 'alin');
+
+    const again = requestBlackoutHelp(game, 'alin');
+    expect(again.ok).toBe(false);
+    expect(again.detail).toBe('already_requested');
+    expect(trust(game, 'alin')).toBe(afterFirst);
+    expect(helpMemories(game, 'alin')).toHaveLength(1);
+    expect(promiseMemories(game, 'alin')).toHaveLength(1);
+  });
+
+  it('过期判定按人分：阿珍的承诺过期不会把阿林打成失信', () => {
+    const game = azhenCrisis();
+    requestBlackoutHelp(game, 'azhen');
+
+    game.day += BLACKOUT_PROMISE_DAYS + 1;
+    syncBlackoutCrisis(game);
+
+    expect(flagCount(game, BLACKOUT_FLAG.promiseBrokenAzhen)).toBe(1);
+    expect(flagCount(game, BLACKOUT_FLAG.promiseBroken)).toBe(0); // 阿林没接过单
+    expect(alinStanceOf(game)).toBe('neutral');                 // 不牵连阿林
+    expect(loadNpcState(game, 'azhen')?.memory.map((m) => m.kind)).toContain('refusal');
+  });
+
+  it('已履约的承诺不算失信：送了水就不会被记成失信', () => {
+    const game = azhenCrisis();
+    requestBlackoutHelp(game, 'azhen');
+    givePart(game, 'clean_water', 2);
+    expect(giveWaterToAzhen(game).ok).toBe(true);
+
+    game.day += BLACKOUT_PROMISE_DAYS + 1;
+    syncBlackoutCrisis(game);
+
+    expect(flagCount(game, BLACKOUT_FLAG.promiseBrokenAzhen)).toBe(0);
+    expect(loadNpcState(game, 'azhen')?.memory.map((m) => m.kind)).not.toContain('refusal');
+  });
+
+  it('老存档：单键 promise-day 仍算阿林的承诺，不会被当成「没承诺」', () => {
+    const game = crisisGame();
+    // 模拟旧存档：只有那把全局单键，语义 = 阿林的承诺日。
+    setFlag(game, BLACKOUT_FLAG.promiseDayLegacy, game.day);
+
+    const again = requestBlackoutHelp(game, 'alin');
+    expect(again.ok).toBe(false);
+    expect(again.detail).toBe('already_requested');
+    expect(promiseMemories(game, 'alin')).toHaveLength(0); // 没有多写第二条承诺
+    expect(flagCount(game, BLACKOUT_FLAG.promiseDayLegacy)).toBe(game.day); // 进度没丢
+  });
+
+  it('老存档：单键 promise-day 仍然参与过期判定，阿林的承诺不会凭空续命', () => {
+    const game = crisisGame();
+    setFlag(game, BLACKOUT_FLAG.promiseDayLegacy, game.day);
+
+    game.day += BLACKOUT_PROMISE_DAYS + 1;
+    syncBlackoutCrisis(game);
+
+    expect(flagCount(game, BLACKOUT_FLAG.promiseBroken)).toBe(1);
+    expect(alinStanceOf(game)).toBe('guarded');
+  });
+
+  it('老存档：单键 promise-broken 仍算阿林失信，态度还是 guarded', () => {
+    const game = crisisGame();
+    setFlag(game, BLACKOUT_FLAG.promiseBrokenLegacy, 1);
+
+    expect(alinStanceOf(game)).toBe('guarded');
+  });
+});

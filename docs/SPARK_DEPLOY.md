@@ -547,6 +547,58 @@ Dockerfile 是三段式（build → runtime），要点：
 **Key 的注入方式**：创空间的密文环境变量 `NPC_API_KEY`。它在构建期**从未被引用**，
 所以 `--build-arg` 也拿不到它。
 
+#### 3.6 改完代码之后：重新部署 → 重跑验收（2026-11-26 实测流程）
+
+> **这一步以前没人跑通过**，因为上一轮认定「实例是 private、只有本人能访问」。
+> 2026-11-26 实测推翻了它：空间可见性是 `visibility: "public"` / `private: false`，
+> 公开地址匿名可达，游戏在门户 iframe 里完整启动。**所以重新部署 + 重跑是可以做的，
+> 只是要分清两条路。**
+
+**两条访问路径不是一回事，别混：**
+
+| 路径 | 用途 | 要什么 |
+|---|---|---|
+| `https://www.modelscope.cn/studios/<ns>/<name>` | **给评委的链接**。门户页 → iframe 里跑游戏 | 什么都不用 |
+| `https://studio-<ns>-<name>.api-inference.modelscope.net` | **验收脚本要打的口** | **必须带 SDK token**（平台设计，与空间是否公开无关） |
+| `https://<ns>-<name>.ms.show` | 应用本体 | 顶层访问会 **302** 到门户页；游戏实际跑在门户挂出的 iframe 里 |
+
+**重新部署（改了 `server/` 或前端产物之后）：**
+
+```bash
+# 1. 仓库根目录（ms_deploy.json 在这里）
+# 2. 同步代码并重新部署（用魔搭官方 SDK/CLI，账号 token 从环境变量 MODELSCOPE_API_KEY 读）
+#    具体命令见官方 Skill：https://www.modelscope.cn/skills/modelscope/modelscope-studio
+# 3. 等平台把容器跑起来：/healthz 返 {"ok":true,...} 且 status=Running
+```
+
+**重跑线上验收（拿一个有效 SDK token）：**
+
+```bash
+MS_TOKEN=<魔搭「设置 → 访问令牌」生成的那个> node tools/verify-online-api.mjs
+# 六份产物落 output/online-verify/；脚本按自身位置推仓库根，与 cwd 无关
+```
+
+**只想看一眼判据条数、不落盘（诊断轮）：**
+
+```bash
+FORCE_WRITE=1 SHOT_DIR=tmp/probe node tools/verify-online-api.mjs
+# 落盘后 api-verify-meta.json 里 forceWrite: true —— 这些文件不是证据，别引用
+```
+
+**不设 `MS_TOKEN` 时脚本打不到线上**：API 专用地址会返 401
+（`Authentication failed, please make sure that a valid ModelScope token is supplied`）。
+
+**公开地址冒烟（不需要 token，验评委视角）：**
+
+```bash
+PUBLIC_BASE=https://www.modelscope.cn/studios/<ns>/<name> \
+  npx playwright test -c playwright.public.config.ts
+```
+
+> **别把「门户 200」当成「游戏起来了」。** 顶层访问会被 302 到门户页，
+> 那一屏是门户 SPA，不是游戏。真正的判据是**门户挂出的 iframe 里有 1280×720 画布、
+> Menu 场景 active**——`e2e-public/public-smoke.spec.ts` 正是这么断的。
+
 ---
 
 ## 4. 已知边界（诚实清单）
@@ -557,7 +609,7 @@ Dockerfile 是三段式（build → runtime），要点：
 | 赠礼 / 维修入口 | 走离线场景函数 `runAlinGiftScenario` / `runAlinRepairScenario`，不是模型决策 |
 | 模型质量 | 已证明"能拿到合法提案且状态真会变"，**未统计**多 seed 成功率、非法动作率、重规划率 |
 | 第二 NPC | 目前闭环只覆盖阿林一条线 |
-| 跨天记忆影响决策 | 记忆已持久化且有导出，但"次日决策因记忆改变"无端到端证据。`weight` 的提示词渲染**代码已支持（`7d2e02c`，只动了 `server/npc-proxy.mjs`）、线上未验证**：留档的 32 项证据跑于 2026-11-25 23:36，早于该提交的 00:01，所以那份证据里不可能含此修复；此后线上是否已重新部署**无法判断**——`/healthz`（`server/npc-proxy.mjs:581-590`）只返回 `ok/aiConfigured/breakerOpen/dailyUsed/dailyBudget`，不暴露版本或提交号 |
+| 跨天记忆影响决策 | **已在线上跑过，结果是红的**（2026-11-26）：记忆段 8 条判据 6 FAIL / 1 SKIP / 1 PASS。模型**读到了**记忆（提示词逐字可查，回复会复述记忆内容），但动作类型十几次采样全是 `dialogue`——记忆只改了语气，没改选择。逐条结果与根因见 `docs/BENCHMARK_REPORT.md` §2.5。⚠️ 「线上是否已重新部署无法判断」这条限制已解除：`/healthz` 仍不暴露提交号，但线上产物特征（JS 文件名 `assets/index-DUjl--OX.js`、六位居民名）与 2026-11-25 那份一致 |
 | `qwen3:0.6b` 等小模型 | 实测不可用：输出缺 `confidence`、物品 ID 用中文，被 Validator 正确拒绝。契约遵守需要 17G 级模型 |
 
 ---

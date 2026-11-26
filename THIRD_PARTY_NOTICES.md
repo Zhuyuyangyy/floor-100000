@@ -63,6 +63,13 @@ repository root.
 - **Files:** `public/assets/fx/melee/sword-slash/` and
   `public/assets/fx/impacts/parry/` (the existing `public/assets/fx/` atlases use
   the same source)
+- **11-26 added effects:** `public/assets/fx/fire/spirit-flame/`,
+  `critters/wisp/`, `critters/bat/`, `arcane/portal/`, `ice/blizzard-vortex/`,
+  `impacts/bullet-impact/`. Six atlases (18 files: PNG + JSON + contact sheet
+  each), exported from the same upstream with `node tools/render.mjs <id>
+  --sheet` at pixelfx v0.3.1. Registered in `src/render/fx.ts` and pinned by
+  `src/tests/fx.test.ts`; **not yet called from any scene** — registration alone
+  is not a claim that the effects appear in the running game.
 - **Source:** Patch Pixel, https://github.com/patch-gg/pixelfx
 - **Licence:** MIT License, Copyright © 2026 Patch and Hugo Duprez.
 - **Adapted source:** `src/core/sim.js` and effects that identify Sprite Fusion
@@ -108,7 +115,7 @@ offline — those must be confirmed against the upstream source before publicati
 | --- | --- | --- | --- |
 | Kenney selection marker | `public/assets/ui/marker.png` — yes | no local copy; CC0 needs no bundled text | **Claim only** (upstream URL + crop coordinates not re-verified) |
 | Art pack (owner) | `public/assets/artpack/` — 30 files; `ui/frame-*.png`, `ui/slot.png` — yes | n/a | **Owner to state terms** |
-| pixelfx effect sheets | `public/assets/fx/` — 27 PNGs across `melee/`, `impacts/`, `fire/`, `water/`, `pickups/`, `status/` — yes | no local `LICENSE` copy; MIT attribution is in this file only | **Claim only** (which of the 27 sheets derive from pixelfx vs. project-drawn is not recorded per-file) |
+| pixelfx effect sheets | `public/assets/fx/` — 27 original PNGs + 6 atlases added 11-26 (33 atlases total) across `melee/`, `impacts/`, `fire/`, `water/`, `pickups/`, `status/`, `critters/`, `arcane/`, `ice/` — yes | no local `LICENSE` copy; MIT attribution is in this file only | **Claim only** (which of the original 27 sheets derive from pixelfx vs. project-drawn is not recorded per-file; the 6 new ones are individually traceable to their upstream ids) |
 | Ark Pixel Font | `public/assets/fonts/ark-pixel-latin.woff2`, `public/assets/fonts/ark-pixel-zh_hans.woff2` — yes | `public/assets/fonts/OFL.txt` — yes, SIL OFL 1.1, "Copyright (c) 2021, TakWolf" | **Verified** (release tag `2026.11.10` in the entry above is not verifiable offline) |
 | Audio | no audio files anywhere under `public/` | n/a | **Verified by absence** — `src/render/audio.ts` synthesises every SFX via Web Audio |
 | Character rigs | `art-src/rigs/` — 5 rig SVGs + 5 anim JSONs | n/a | **Project-generated, per repo docs; copyright holder unrecorded** |

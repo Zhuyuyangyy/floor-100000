@@ -46,6 +46,15 @@ export const FX: ReadonlyArray<{ id: string; path: string }> = [
   { id: 'drip', path: 'water/drip' },
   { id: 'ripples', path: 'water/ripples' },
   { id: 'poisoned', path: 'status/poisoned' },
+  // ── 末日氛围层（11-26 加入，均来自同一 pixelfx MIT 来源）──
+  // 这些是**已接入注册表、可被调用**的效果。场景里的调用点由后续改动接入；
+  // 只注册不调用不等于「已上线」，别把这条注释读成行为证据。
+  { id: 'spirit-flame', path: 'fire/spirit-flame' },   // 停电后的冷火
+  { id: 'wisp', path: 'critters/wisp' },               // 塔层的游魂
+  { id: 'bat', path: 'critters/bat' },                 // 夜间生物
+  { id: 'portal', path: 'arcane/portal' },             // 塔楼异常
+  { id: 'blizzard-vortex', path: 'ice/blizzard-vortex' }, // 高层寒流
+  { id: 'bullet-impact', path: 'impacts/bullet-impact' }, // 远程命中反馈
 ];
 
 /** Load every atlas. Call from preload(). */
@@ -222,4 +231,11 @@ export const FX_META: Record<string, { fps: number; loop: boolean; pivot: { x: n
   ripples: { fps: 30, loop: true, pivot: { x: 68, y: 30 }, frameSize: [136, 52] },
   'ground-slam': { fps: 30, loop: false, pivot: { x: 144, y: 164 }, frameSize: [288, 208] },
   poisoned: { fps: 30, loop: true, pivot: { x: 36, y: 54 }, frameSize: [72, 64] },
+  // 数值逐字抄自各自 atlas 的 meta.pixelfx，不是手推的。改素材时同步改这里。
+  'spirit-flame': { fps: 30, loop: true, pivot: { x: 40, y: 94 }, frameSize: [80, 124] },
+  wisp: { fps: 30, loop: true, pivot: { x: 64, y: 96 }, frameSize: [128, 104] },
+  bat: { fps: 30, loop: true, pivot: { x: 56, y: 40 }, frameSize: [112, 80] },
+  portal: { fps: 30, loop: true, pivot: { x: 76, y: 106 }, frameSize: [152, 116] },
+  'blizzard-vortex': { fps: 30, loop: true, pivot: { x: 64, y: 102 }, frameSize: [128, 116] },
+  'bullet-impact': { fps: 30, loop: false, pivot: { x: 116, y: 84 }, frameSize: [152, 100] },
 };

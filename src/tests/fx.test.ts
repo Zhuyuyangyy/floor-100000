@@ -31,3 +31,23 @@ describe('melee pixelfx registry', () => {
     }
   });
 });
+
+describe('末日氛围层特效的元数据一致性', () => {
+  const ids = ['spirit-flame', 'wisp', 'bat', 'portal', 'blizzard-vortex', 'bullet-impact'];
+
+  it('每个新效果都有 PNG/JSON 对，且 FX_META 与 atlas 逐字一致', () => {
+    for (const id of ids) {
+      const def = FX.find((f) => f.id === id);
+      expect(def, `${id} 已注册`).toBeDefined();
+      const dir = join(root, def!.path);
+      expect(existsSync(join(dir, `${id}.png`)), `${id}.png exists`).toBe(true);
+      const meta = JSON.parse(readFileSync(join(dir, `${id}.json`), 'utf8')).meta.pixelfx;
+      expect(FX_META[id], `${id} 有 meta`).toBeDefined();
+      expect(meta.fps).toBe(FX_META[id].fps);
+      expect(meta.loop).toBe(FX_META[id].loop);
+      expect(meta.frameSize).toEqual(FX_META[id].frameSize);
+      expect(meta.pivot).toEqual([FX_META[id].pivot.x, FX_META[id].pivot.y]);
+      expect(meta.frames).toBeGreaterThan(0);
+    }
+  });
+});

@@ -1,14 +1,13 @@
 {
   "schema": "floor-100000/evidence-manifest/v1",
-  "generatedAt": "2026-11-26T23:57:12+08:00",
-  "generatedAtUtc": "2026-11-26T15:57:12Z",
+  "generatedAt": "2026-11-27T01:02:52.365+08:00",
+  "generatedAtUtc": "2026-11-26T17:02:52.365Z",
   "generator": {
     "role": "A10 证据 / 创作手记",
     "runtime": "MiniMax Code (minimax Code) on Windows 10.0.22621 x64",
     "node": "v24.14.0",
-    "note": "本文件由 A10 在共享工作目录中生成；所有数字均可在 artifacts/online-verify/ 内逐条对上。"
+    "note": "本文件由 A10 在共享工作目录中生成；所有数字均可在 artifacts/online-verify/ 内逐条对上。 2026-11-27 00:5x 由总控更新：登记本轮新增的修复与当前线上状态。"
   },
-
   "repository": {
     "url": "https://github.com/Zhuyuyangyy/floor-100000",
     "cloneUrl": "https://github.com/Zhuyuyangyy/floor-100000.git",
@@ -17,8 +16,8 @@
     "evidenceBranch": "a10/evidence-pack",
     "codeShaVerifiedOnline": "526cdb96c99bf94d671dc616b2681f50545268d6",
     "codeShaVerifiedOnlineNote": "本次线上验收（40 条判据）所针对的代码基线。已包含 cb51e52『weight 的提示词渲染补上正面性质词』——记忆段 8/8 全绿的必要条件之一。",
-    "headAtPackTime": "7297a375fee562b4e2c7776bb32ec34613be8d4b",
-    "headAtPackTimeNote": "打证据包时 origin/deploy-ms-20261125 的 HEAD；相对 526cdb9 只多了两次 docs 提交（9bb4a7c、7297a37），不含代码改动。",
+    "headAtPackTime": "ea82714d12ceab9156d6f5e3596709aa112582fd",
+    "headAtPackTimeNote": "2026-11-27 00:5x 更新：发布线 HEAD = ea82714d12ceab9156d6f5e3596709aa112582fd（相对 526cdb96c99bf94d671dc616b2681f50545268d6 增了 AI-06 自主 tick、模型不可达的降级护栏修复、Judge Mode 真值标题、部署规格对齐、QA 用例与美术补帧）。与 origin 差异：领先 1 / 落后 0。",
     "finalSha": "b96a19215d40b3dd84ad4fb5cf20e987159a1463",
     "finalShaNote": "这是**首次引入本证据包的提交**（分支 a10/evidence-pack）。文件无法包含自身所在提交的 SHA，所以该字段是在其后的下一次提交里回填的；回填它的那个提交只改这一个字段，其余内容与 b96a192 完全一致。A11 合并到发布线后，请把本字段指向真正的发布提交。",
     "evidencePack": {
@@ -35,9 +34,13 @@
         "natural-playthrough.md": "d03644fc73d4110c4726297d331511c32418e3de27400af372223d538ab06982"
       },
       "blobSha256Note": "这是 b96a192 那次提交里六个文件的 blob sha256，可用 `git show b96a192:docs/competition/evidence/<file> | sha256sum` 复核。manifest.json 在回填本字段的那次提交里内容有变，其哈希以 git blob 为准。"
+    },
+    "releaseLine": {
+      "branch": "deploy-ms-20261125",
+      "head": "ea82714d12ceab9156d6f5e3596709aa112582fd",
+      "note": "发布线唯一分支；A3/A9/A10 的成果均以 cherry-pick 方式并入，合并顺序见各提交信息。"
     }
   },
-
   "deployment": {
     "studio": "a1578804454/floor-100000",
     "status": "Running",
@@ -111,9 +114,22 @@
         "验证回滚：回滚后必须重跑 tools/verify-online-api.mjs 与 e2e-public/public-smoke.spec.ts，确认仍是 39/40 且记忆段 8/8。"
       ],
       "note": "以上是仓库里记录并在 2026-11-26 实际走通过的流程；本次 A10 没有独立执行一次回滚，因此不把它写成『已演练过』。"
+    },
+    "currentLive": {
+      "observedAt": "2026-11-27T01:02:52.365+08:00",
+      "bundle": "assets/index-TkYEZy4I.js",
+      "healthz": {
+        "ok": true,
+        "aiConfigured": true,
+        "breakerOpen": false,
+        "dailyUsed": 2,
+        "dailyBudget": 1800
+      },
+      "deployedAt": null,
+      "note": "**当前线上是验收那次之后的又一次部署**：16:58 那次带凭证验收测的是 assets/index-Dzve_6tz.js；此后又部署了两次，当前产物是上面这个文件名。两次新部署新增的内容：AI-06 自主 tick（world_tick）、模型不可达时的降级护栏修复（原先玩家被卡死）、Judge Mode 标题与初始面板不再写死来源与 NPC 名、die/pickup 帧补齐。",
+      "verifiedBy": "线上公开 E2E 2/2 通过（e2e/onlineGoldenRoute.spec.ts）：黄金路线走到第 3 层弹出「第 1 章完成」结算卡；BLOCKER-01（模型不可用时修门不能变成没有下一步的死路）由红转绿。"
     }
   },
-
   "gates": {
     "runAt": "2026-11-27T00:20:18+08:00",
     "note": "完整原始输出见 docs/competition/evidence/test-results.txt。命令前缀 npm --prefix <repo> run <script>。",
@@ -137,7 +153,6 @@
       "build 有一条 chunk 体积警告：主包 1 715.96 kB（gzip 466.39 kB），超过 500 kB 提示线。"
     ]
   },
-
   "sampleScale": {
     "principle": "按实际写，不补造、不凑数。",
     "onlineModelRounds": 52,
@@ -166,7 +181,6 @@
     "recordedVideoMinutes": 0,
     "recordedVideoMinutesNote": "视频尚未录制，见 video-timestamps.md 的清单骨架。"
   },
-
   "evidenceFiles": [
     {
       "path": "docs/competition/evidence/manifest.json",
@@ -193,7 +207,6 @@
       "summary": "真人试玩记录模板 + 已由自动测试覆盖 / 必须由真人验证的机制划分（尚无真人记录）。"
     }
   ],
-
   "sourceEvidence": {
     "directory": "artifacts/online-verify/",
     "note": "该目录是唯一的线上真证据来源，只读。output/online-verify/ 是同一份文件的副本（output/ 被 .gitignore 忽略，评审 clone 后看不到），md5 一致，可自行核对。",
@@ -259,7 +272,6 @@
       "note": "判据名与调用点数本次独立复核通过（43 个单引号字面量名按源码顺序 NUL 连接取 md5 = c7bb10f4…；调用点 47）。『改的是产品不是判据』这句话因此可以被复核。"
     }
   },
-
   "licensing": {
     "projectLicense": {
       "file": "LICENSE",
@@ -274,7 +286,6 @@
       "summary": "第三方素材与依赖的来源与授权逐条登记：Phaser (MIT)、方舟像素字体 (OFL 1.1)、Kenney (CC0 1.0)、pixelfx (MIT)。"
     }
   },
-
   "knownDefects": [
     {
       "id": "D1",
@@ -298,13 +309,6 @@
       "productImpact": "已修复，缺覆盖。"
     },
     {
-      "id": "D4",
-      "severity": "低（配置漂移）",
-      "title": "线上部署规格与仓库 ms_deploy.json 不一致",
-      "detail": "门户页内嵌 JSON 记录上次部署为 platform/2v-cpu-8g-mem、memory 8192；仓库 ms_deploy.json 写的是 platform/2v-cpu-16g-mem。本项是配置漂移，本次未在平台侧改动。",
-      "productImpact": "内存规格偏小，可能影响大并发；建议 A11/A2 统一后再部署一次。"
-    },
-    {
       "id": "D5",
       "severity": "中（覆盖面）",
       "title": "线上只闭环了阿林一条线",
@@ -326,13 +330,6 @@
       "productImpact": "记忆证据里的锚点命中仍成立，但解释力受此限制。"
     },
     {
-      "id": "D8",
-      "severity": "中（发布一致性）",
-      "title": "本地最新构建产物 ≠ 线上产物",
-      "detail": "本地 npm run build 产出 dist/assets/index-50KPLunn.js（1 715.96 kB）；线上是 assets/index-Dzve_6tz.js（1 713 524 B）。工作区此后已变化（A3 的自主 tick 在途实现）。要让线上一致必须重新部署，并重跑线上公开冒烟 E2E。",
-      "productImpact": "本次 E2E 3/3 通过验证的是线上那份（2026-11-26 16:50:48 部署），不是本地最新代码。"
-    },
-    {
       "id": "D9",
       "severity": "低（工具链/流程）",
       "title": "门禁调用方式有坑，且仓库没有 workspace 边界",
@@ -340,21 +337,37 @@
       "productImpact": "不是产品缺陷，是发布流程风险：照抄错误命令会得到一份「444 个测试失败」的假报告。已写入 test-results.txt 第 8 节。"
     }
   ],
-
   "notYetEvidenced": [
     "演示视频：三个名场面的录像尚未录制（video-timestamps.md 只给清单骨架与判据）。",
     "真人试玩：0 次独立真人试玩记录（natural-playthrough.md 只给模板与机制划分）。",
     "多 seed benchmark：线上模型的多 seed 成功率 / 非法动作率 / 重规划率均未统计。",
     "线上 offline-fallback 路径：本证据集里没有一次 fallback 采样，降级链路没有被线上证据覆盖。",
     "第二个 NPC 的线上真实模型闭环证据。",
-    "NPC 自主行动（AI-06）：在已提交基线 7297a37 上 world_tick 全仓库 0 次。2026-11-27 00:00 观察到 A3 在共享工作区落地了自主 tick 的在途实现（未提交、未部署、未验证），因此本证据包既不能证明它可用，名场面 C 也不可录。"
+    "NPC 自主行动（AI-06）：已实现（4ae9fc1）并部署，行为层证据来自其 15 条单元测试（含电池 4→2 的库存守恒与重复触发零动作）；但**线上尚未观测到一次 autonomous tick 触发**——线上黄金路线走到第 3 层结算卡，没有经过「停电阶段变化 / 跨整点」这类世界触发点。名场面 C 仍不可录。"
   ],
-
   "honestyNotes": [
     "记忆段不是本来就绿：2026-11-26 11:07 第一次线上跑是 6 FAIL / 1 SKIP / 1 PASS；根因在产品（提示词没把记忆写成决策因子、weight 渲染不对称）；改的是产品不是判据（阈值、样本数、单调性、采样完整性判据一次没动；判据名 43 个 md5 c7bb10f4… 与调用点 47 均未变）；改完重新部署，16:58 重跑 8/8 全绿。",
     "线上验收的真实数字是 40 条判据 / 39 通过 / 1 FAIL。早期快照里出现过 38 通过 / 2 FAIL（2026-11-26 11:14 那次，md5 7bbdc073…）与 32 条基础段（2026-11-25 23:36，md5 cb827d5a…），引用时必须带上快照时间与 md5，否则会把不同次运行的结果混着用。",
     "样本规模按实际写：线上真实模型回合 52 次，其中只有 3 次有独立逐条耗时台账。没有任何『20–30 回』的统一样本口径。",
     "本次门禁是在共享工作区上跑的：过程中另一个 agent 正在改 src/scenes/GameScene.ts，typecheck 与 build 一度报红（两个 TS6133 未使用符号），几分钟后即消失。为把「已提交代码的状态」与「在途改动的影响」分开，本包另在独立 worktree 上复跑了同一组门禁（detached HEAD 7297a37），全部 exit 0。",
-    "本包不代替创作手记正文（docs/competition/ 下由他人负责的文件）。它只提供可核对的事实、数字与清单。"
+    "本包不代替创作手记正文（docs/competition/ 下由他人负责的文件）。它只提供可核对的事实、数字与清单。",
+    "A9 实机走查（2026-11-27）发现的第一个阻断点是**产品缺陷**，不是用例问题：模型不可达时「阿林不接活」，玩家无路可走。修法改的是产品与端口契约（模型不可达抛异常，不再与「模型拒绝」共用 null），**判据一条没动**。修完后线上 BLOCKER-01 由红转绿。"
+  ],
+  "resolvedSincePack": [
+    {
+      "id": "D4",
+      "title": "部署规格漂移（已修）",
+      "detail": "仓库 ms_deploy.json 写的是 platform/2v-cpu-16g-mem，而平台实际跑的是 platform/2v-cpu-8g-mem——仓库在描述一个并不存在的实例规格。已按「仓库描述现实」把 ms_deploy.json 改成 8g（提交 b82d6a5）。**没有顺手申请升配**：升配涉及资源与可能的付费，不该由一次口径修正顺手做掉。"
+    },
+    {
+      "id": "D8",
+      "title": "本地构建 ≠ 线上产物（已修）",
+      "detail": "已重新部署两次，线上产物与发布线代码一致；并在线上重跑公开 E2E 2/2 通过（黄金路线 + BLOCKER-01）。发布时仍要注意：部署只取**已提交的主线树**，工作区里未提交的改动不会进容器。"
+    },
+    {
+      "id": "D10",
+      "title": "模型不可达会把玩家卡死（A9 实机走查发现的第一个阻断点，已修）",
+      "detail": "A9 走黄金路线时发现：玩家在 2 楼把材料凑齐、信任刷到 78.2（门槛 70），按下「维修门计划」——门没开、材料没扣、状态没变，面板只给一句「校验拒绝｜未改变」（真实 outcome 是 no_proposal，那句话本身不成立）。根因是「模型挂了」与「模型说不动」被压成同一个信号（null）：null 在场景层表示「模型明确拒绝」，于是 fallback 被禁止，「模型不可用时玩家仍能玩完」这条护栏从来没执行过。已在 868d6b6 修掉：模型不可达改为抛异常，运行时记 proposal_error 并调用 fallback，规则脑接管，来源如实标 offline-fallback。**修完后线上 BLOCKER-01 由红转绿**（见 deployment.currentLive.verifiedBy）。"
+    }
   ]
 }

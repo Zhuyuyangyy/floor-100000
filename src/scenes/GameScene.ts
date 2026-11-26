@@ -181,6 +181,18 @@ import {
   type BlackoutTradeRunResult,
 } from '../scenarios/blackoutCrisis';
 import { blackoutStageOf } from '../data/blackoutCrisis';
+import {
+  detectNpcAutonomyTrigger,
+  initNpcAutonomyCursor,
+  NPC_AUTONOMY_ACTOR,
+  NPC_AUTONOMY_MIN_INTERVAL_MINUTES,
+  npcAutonomyThrottled,
+  runNpcAutonomyTick,
+  type NpcAutonomyCursor,
+  type NpcAutonomyModelPort,
+  type NpcAutonomyProposal,
+  type NpcAutonomyResult,
+} from '../systems/NpcWorldTick';
 import { proposeWithBrain } from '../ai/competitionModelBridge';
 import { MAX_UTTERANCE } from '../ai/rulesExecutor';
 import { computeDialogueLayout } from './dialogueLayout';
@@ -483,6 +495,23 @@ export class GameScene extends Phaser.Scene {
    * 这里从一开始就把锁加上。
    */
   private blackoutInFlight = false;
+  /**
+   * 自主 tick 的世界游标：上一次看到的世界长什么样。
+   *
+   * 只用来判断「这一帧有没有发生世界事件」（阶段变化 / 跨整点）。它是**缓存**
+   * 不是剧情事实，所以不进存档：重开局后重新初始化即可，真正决定「这件事是不是
+   * 已经做过」的是 flag（见 `NPC_AUTONOMY_FLAG.handled`）。
+   */
+  private npcAutonomyCursor?: NpcAutonomyCursor;
+  /** 自主 tick 的重入锁：模型回话期间不再发起第二轮。 */
+  private npcAutonomyInFlight = false;
+  /**
+   * 最近一次自主 tick 的结果。Judge Mode 面板靠它展示「这次是谁动的」。
+   *
+   * 与其它 `last*Result` 一样是 public：E2E 与评审要能读到「世界触发过自主
+   * 行为」的证据，而不是只能相信界面上的字。
+   */
+  lastNpcAutonomyResult?: NpcAutonomyResult;
   /** Last gift result, exposed like the repair result for browser integration diagnostics. */
   lastAlinGiftResult?: AlinGiftScenarioResult;
   /** 最近一次赠礼结果；阿林走单 NPC 场景，小周走多 NPC 场景。 */
@@ -584,6 +613,9 @@ export class GameScene extends Phaser.Scene {
     // 没有任何反应、也没有报错。这不是理论风险，是「重开一局必现」。
     this.repairInFlight = false;
     this.blackoutInFlight = false;
+    this.npcAutonomyInFlight = false;
+    this.npcAutonomyCursor = undefined;
+    this.lastNpcAutonomyResult = undefined;
     this.lastAlinRepairResult = undefined;
     this.lastBlackoutRepairResult = undefined;
     this.lastAlinGiftResult = undefined;
@@ -3548,7 +3580,12 @@ export class GameScene extends Phaser.Scene {
       borderRadius: '5px', font: '12px/1.5 ui-monospace, SFMono-Regular, monospace',
     });
     const updateToggle = (): void => {
-      toggle.textContent = `Judge Mode · offline-fallback · seed ${getGame().runSeed} · 阿林${this.judgeExpanded ? ' ▾' : ' ▸'}`;
+      const autonomy = this.lastNpcAutonomyResult;
+      // 自主 tick 的来源也挂在标题上：评审一眼就能看到「世界自己触发过」。
+      const autonomyTag = autonomy && autonomy.status === 'executed'
+        ? ` · 自主tick:${autonomy.decisionSource}`
+        : '';
+      toggle.textContent = `Judge Mode · offline-fallback${autonomyTag} · seed ${getGame().runSeed} · 阿林${this.judgeExpanded ? ' ▾' : ' ▸'}`;
       toggle.setAttribute('aria-expanded', String(this.judgeExpanded));
       content.style.display = this.judgeExpanded ? 'block' : 'none';
     };
@@ -3571,6 +3608,52 @@ export class GameScene extends Phaser.Scene {
     this.refreshJudgeModePanel();
   }
 
+  /**
+   * 自主 tick 的可观测证据（AI-06）。
+   *
+   * 评审要能一眼看到两件事：这次行为是**世界**触发的（actor=world_tick、
+   * trigger 是什么世界事件），以及决策到底是谁做的（decisionSource）。
+   * 没发生过就明说「尚未发生」，不留空让人误以为有。
+   */
+  private judgeAutonomyEvidence(): Record<string, unknown> {
+    const result = this.lastNpcAutonomyResult;
+    if (!result) {
+      return {
+        actor: NPC_AUTONOMY_ACTOR,
+        status: '尚未发生世界触发的自主行为',
+        trigger: null,
+        decisionSource: null,
+        modelCalls: 0,
+        outcomes: [],
+      };
+    }
+    return {
+      actor: result.actor,
+      status: result.status,
+      trigger: result.trigger,
+      stage: result.stage,
+      decisionSource: result.decisionSource,
+      modelCalls: result.modelCalls,
+      worldRevision: { before: result.revisionBefore, after: result.revisionAfter },
+      outcomes: result.outcomes.map((outcome) => ({
+        npc: getNpc(outcome.npcId).name,
+        npcId: outcome.npcId,
+        actor: outcome.actor,
+        action: outcome.action,
+        status: outcome.status,
+        decisionSource: outcome.decisionSource,
+        reason: outcome.reason,
+        utterance: outcome.utterance,
+        worldRevision: outcome.worldRevision,
+        actualStateDelta: outcome.stateDelta,
+        npcInventoryBefore: outcome.npcInventoryBefore,
+        npcInventoryAfter: outcome.npcInventoryAfter,
+        playerInventoryBefore: outcome.playerInventoryBefore,
+        playerInventoryAfter: outcome.playerInventoryAfter,
+      })),
+    };
+  }
+
   private refreshJudgeModePanel(): void {
     if (!this.judgePanelContent) return;
     const result = this.judgeLatestResult;
@@ -3579,6 +3662,7 @@ export class GameScene extends Phaser.Scene {
         mode: 'offline-fallback', seed: getGame().runSeed, npc: '阿林', target: 'alin-repair-gate',
         status: '等待真实 scenario result',
         instructions: '与阿林交互：赠礼会运行赠礼 scenario；维修门计划会运行只读校验。未出现 scenario 结果前，没有状态提交。',
+        autonomy: this.judgeAutonomyEvidence(),
       }, null, 2);
       if (this.judgeExportButton) this.judgeExportButton.disabled = true;
       return;
@@ -3631,6 +3715,7 @@ export class GameScene extends Phaser.Scene {
       attemptSequence: feedback.map((event) => event.attempt),
       reason: result.reason,
       stateHashes: { before: result.beforeHash, after: result.afterHash },
+      autonomy: this.judgeAutonomyEvidence(),
     };
     this.judgePanelContent.textContent = JSON.stringify(evidence, null, 2);
     if (this.judgeExportButton) this.judgeExportButton.disabled = false;
@@ -4165,6 +4250,98 @@ export class GameScene extends Phaser.Scene {
     this.blackoutSyncedKey = key;
     const transition = syncBlackoutCrisis(state);
     if (transition.ok && transition.message) this.flash(transition.message);
+  }
+
+  /**
+   * NPC 自主 tick：世界事件驱动的居民自主行为（AI-06）。
+   *
+   * 与玩家按 E 的那条路是**两回事**：这里没有任何玩家输入，触发源只有世界
+   * 事件——停电危机的阶段变化，或游戏跨过整点。
+   *
+   * 三道闸，缺一不可：
+   * 1. 触发检测（`detectNpcAutonomyTrigger`）：阶段变了或跨整点才算事件；
+   * 2. 节流（`npcAutonomyThrottled`）：上一轮刚跑过就跳过。这一道决定模型
+   *    调用频率的上限是「每游戏小时一次」，而不是每帧一次；
+   * 3. 重入锁：模型还在回话时不再发起第二轮。
+   *
+   * 「同一 NPC 同一阶段最多一次」不在这里管——它落在存档里的 flag 上
+   * （`NPC_AUTONOMY_FLAG.handled`），所以重载、换场景之后依然成立。
+   */
+  private updateNpcAutonomy(state: GameState): void {
+    if (this.npcAutonomyInFlight) return;
+    const cursor = this.npcAutonomyCursor ?? initNpcAutonomyCursor(state);
+    this.npcAutonomyCursor = cursor;
+    if (!detectNpcAutonomyTrigger(state, cursor)) return;
+    if (npcAutonomyThrottled(state, NPC_AUTONOMY_MIN_INTERVAL_MINUTES)) return;
+    this.npcAutonomyInFlight = true;
+    void this.runNpcAutonomyRound(state).finally(() => {
+      this.npcAutonomyInFlight = false;
+    });
+  }
+
+  /**
+   * 跑一轮自主 tick。
+   *
+   * 状态变了就必须落盘——玩家刷新页面不该把居民刚做完的事弄丢。这跟维修那条
+   * 「先存再判会话」是同一个道理：提交已经发生，就不该等 UI。
+   */
+  private async runNpcAutonomyRound(state: GameState): Promise<void> {
+    try {
+      const run = await runNpcAutonomyTick(state, {
+        cursor: this.npcAutonomyCursor,
+        proposeWithModel: this.buildNpcAutonomyPort(),
+      });
+      this.npcAutonomyCursor = run.cursor;
+      this.lastNpcAutonomyResult = run.result;
+      const acted = run.result.outcomes.filter((outcome) => outcome.status === 'executed');
+      if (acted.length > 0) {
+        saveToStorage(state);
+        this.refreshInventory();
+        this.flash(acted.map((outcome) => `${getNpc(outcome.npcId).name}${outcome.reason}`).join(' '));
+      }
+      this.refreshJudgeModePanel();
+    } catch {
+      // 自主行为失败不许拖垮游戏循环：玩家照常玩，下一轮再来。
+      this.lastNpcAutonomyResult = undefined;
+    }
+  }
+
+  /**
+   * 自主 tick 的模型提案口。
+   *
+   * 走的是和其它 AI 场景同一条桥（`proposeWithBrain`）：模型只产出「建议」，
+   * 翻译层把旧契约的 action.type 翻成竞赛契约动作，规则层再独立裁决能不能做。
+   * 模型不可用时这里返回 undefined（不传端口），模块就走规则脑，产出如实标成
+   * `offline-fallback`。
+   *
+   * 自主语义与契约动作的对应：模型的 `gift`（NPC 把东西给玩家）就是
+   * 「保护物资」——停电时把容易丢的货交到玩家手上保管。模型的对话/拒绝不是
+   * 自主动作，返回 null 交给规则降级。
+   */
+  private buildNpcAutonomyPort(): NpcAutonomyModelPort | undefined {
+    const cfg = aiNpcConfig();
+    if (cfg.mode !== 'ollama' && cfg.mode !== 'proxy') return undefined;
+    return async (input): Promise<NpcAutonomyProposal | null> => {
+      const runtime = this.getAiRuntime(getNpc(input.npcId));
+      if (!runtime) return null;
+      const translated = await proposeWithBrain(runtime.brain, input.observation, {
+        availableActions: ['gift', 'dialogue', 'refuse'],
+      });
+      if (!translated) return null;
+      const proposal = translated.proposal;
+      if (proposal.kind !== 'give') return null;
+      const transfer = proposal.transfer;
+      // 方向必须严格是「这位居民 → 玩家」。方向反了就是白送或者凭空造物。
+      if (transfer.to !== 'player') return null;
+      if (transfer.from.kind !== 'npc' || transfer.from.npcId !== input.npcId) return null;
+      return {
+        kind: 'protect_supplies',
+        npcId: input.npcId,
+        itemId: transfer.itemId,
+        quantity: transfer.quantity,
+        ...(translated.utterance ? { utterance: translated.utterance } : {}),
+      };
+    };
   }
 
   /**
@@ -5299,6 +5476,10 @@ export class GameScene extends Phaser.Scene {
     // 之后才知道要不要跨天过期，又必须早于 dwell 的「单事件槽位」判定，才能
     // 保证自己是独立剧情线、不去抢 `worldEvents.activeEvent`。
     this.syncBlackoutOnTick(state);
+    // AI-06：NPC 自主 tick。放在危机同步之后——阶段变了，这一轮才知道该发生
+    // 什么。触发与节流都在模块内部判，这里每帧问一次是廉价的（不满足条件就
+    // 直接返回，不会调用模型）。
+    this.updateNpcAutonomy(state);
     // B3-15: dwell pressure — the longer the player lingers on one floor, the
     // more likely the next roll is teeth. Runs after the night roll so a night
     // event already occupying the day's slot suppresses the prowler (an

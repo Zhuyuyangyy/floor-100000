@@ -91,7 +91,9 @@ B 类值大多是随手写的字面量——这正是本规范要收敛的部分
 > `src/systems/TowerNav.ts:30` 的 `VIEW_H = 360` 是 640×360 时代的值，
 > 相机实际高 720。后果是塔楼总览的 100 条楼层带只画在 `y=36..336`，
 > **700px 高的画布下半部整片空着**（截图 `e2e/screenshots/20-tower-overview.png`）。
-> 这是「100000 层」这个核心概念唯一的产品呈现，登记为 D-10，待修。
+> ✅ **已修**（`875ae1e`）：`VIEW_H` 改读 `DESIGN_HEIGHT`（720），行高 3→6、
+> 顶部内缩 36→66。100 条楼层带现在占画布高 **83.3%**（含内缩 92.5%），
+> 下半屏空屏从 384px（53.3%）降到 54px（7.5%）。
 
 ### 竖屏的可见宽度不是 1280
 
@@ -525,14 +527,14 @@ panelHeight = optionsTop + 4 × 30 + 40
 
 | # | 概念 | 值 A | 值 B | 冻结 |
 |---|---|---|---|---|
-| 1 | 画布分辨率 | `640x360`（历史：3 份文档 + 1 处注释） | `1280x720`（代码） | **用 1280x720**。✅ 2026-11-26 已修 `05_ART_GUIDE` / `02_TECH_SPEC` / `CHANGELOG`；`uiKit.ts:43` 注释与 `TowerNav.ts:30` 的 `VIEW_H` 仍待修（D-6 / D-10） |
+| 1 | 画布分辨率 | `640x360`（历史：3 份文档 + 1 处注释） | `1280x720`（代码） | **用 1280x720**。✅ 2026-11-26 已修 `05_ART_GUIDE` / `02_TECH_SPEC` / `CHANGELOG`；✅ `TowerNav.ts:30` 的 `VIEW_H` 也已改读 `DESIGN_HEIGHT`（`875ae1e`）；`uiKit.ts:43` 注释仍待修（D-6） |
 | 2 | 面板填充 | 文档「深色半透明」 | 代码 `alpha = 1`（故意，防止世界透视） | **用不透明**；文档待改（D-3） |
 | 3 | 面板底色 | 文档 `#18242C` | 代码 `#14202c` / `#2c3f4e` | **用代码**（palette.ts 已冻结）；文档待改（D-4） |
 | 4 | 人物尺寸 | 文档 `16x24` | 实际 `64x96` 立绘（`public/assets/artpack/char-*.png`） | **用实际**。✅ 2026-11-26 已在两份文档标注为 v0.1 占位值（D-5） |
 | 5 | 字号管理 | `TYPE` 常量（53 处引用） | 硬编码字面量（**109 处 `fontSize`，53 处走常量**） | 新代码**必须**用 `TYPE` / `TEXT_SIZE` |
 | 6 | 格子间隙 | 桌面 5 | 竖屏 4 | **统一 4** |
 | 7 | 对话行距 | 30 | 网格要求 4 倍数 | **改 32** |
-| 8 | 中文折行 | `wordWrap: { width }`（14 处，不折中文） | `+ useAdvancedWrap: true`（3 处，折） | **用 advanced**。✅ 已改 `dialogueMessage`（`bac96ae`）与 `MetaSelectScene` 两处；`invDetailBody` 与夜宿压力行仍待修（`UI_AUDIT_R3.md` B-2 处置表） |
+| 8 | 中文折行 | `wordWrap: { width }`（14 处，不折中文） | `+ useAdvancedWrap: true`（3 处，折） | **用 advanced**。✅ 已改 `dialogueMessage`（`bac96ae`）与 `MetaSelectScene` 两处；✅ `invDetailBody` 与夜宿压力行（`1c37270`，并同步加高详情井 130→150、压力井 44→72，`maxLines` 2→3） |
 
 ---
 

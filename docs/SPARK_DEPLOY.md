@@ -27,7 +27,7 @@
   前提：本机或 SSH 隧道能到 Spark 的 11434
 
 形态 B · 同源代理（公开部署用）
-  Browser ──同源──▶ server/npc-proxy.mjs @ :7860 ──▶ ModelScope API ──▶ Qwen3-8B
+  Browser ──同源──▶ server/npc-proxy.mjs @ :7860 ──▶ ModelScope API ──▶ Qwen3.8-Flash-Next
                     （Key 只在这一层）
 ```
 
@@ -203,7 +203,7 @@ SPARK_LIVE=1 npx vitest run src/ai/brains/ollamaBrain.spark.test.ts
 | `HOST` | `0.0.0.0` | 同上 |
 | `NPC_UPSTREAM_URL` | `https://api-inference.modelscope.cn/v1` | OpenAI 兼容端点，可换成任何兼容服务 |
 | `NPC_API_KEY` | 空 | **Key 只在这里。** 空 = 未配置，AI 走降级 |
-| `NPC_MODEL_ID` | `Qwen/Qwen3-8B` | 服务端固定，请求体无法覆盖 |
+| `NPC_MODEL_ID` | 代码默认值见 `server/npc-proxy.mjs:41`；**线上实例实配 `Qwen/Qwen3.8-Flash-Next`**（部署运行日志实测） | 服务端固定，请求体无法覆盖 |
 | `NPC_MAX_TOKENS` | `320` | 服务端硬上限 |
 | `NPC_REQUEST_TIMEOUT_MS` | `20000` | 上游超时 |
 | `NPC_EXPOSE_ERRORS` | 未设 | 设 `1` 才向上游错误详情暴露给客户端；默认收敛成 503 + reason |
@@ -428,7 +428,7 @@ md5 `9437d7d35e33dd9dd27bae2189011b84`），其中真实模型推理 3/3、均�
 > **进展（2026-11-26）：脚本侧已修，`4831b28`。** 改用 `node:http` 的 `request({ path })`，
 > 载荷原样上线，`detail` 写出客户端发的原始 path。**判据名一条没增没删**
 > （47 个调用点、43 个字面量名、md5 `c7bb10f4…` 三版同值）。
-> **但线上 public 实例仍未观测**（实例还是 private，没人能跑），
+> **但线上实例当时仍未观测**（还没人跑得起来），
 > 所以材料口径**不变**：仍是「31 项已验 + 1 项线上未观测」。
 > **「脚本修好了」不等于「这条通过了」**——两者之间隔着一次还没发生的线上重跑。
 >
@@ -506,7 +506,7 @@ function safePath(urlPath) {
 
 > **记忆段为什么没有线上结果：** 该段已实现（`tools/verify-online-api.mjs` 的
 > 「2.6 记忆影响决策」段落，按标题定位不按行号），**从未在线上执行过**。
-> 但原因不是「本机没配 token」——线上实例仍是 **private**，平台层直接把请求挡了：
+> 但原因不是「本机没配 token」——当时线上实例**要求登录**，平台层直接把请求挡了：
 > 实测 `GET <api 域名>/` 与 `/healthz` 均 **401**、`GET <门户>.ms.show/` **403**，
 > **连静态首页都要身份**。这是创空间访问控制，不是 `server/npc-proxy.mjs` 的鉴权
 > （那个只护 `/api/npc/decide`）。
@@ -552,7 +552,7 @@ Dockerfile 是三段式（build → runtime），要点：
 
 #### 3.6 改完代码之后：重新部署 → 重跑验收（2026-11-26 实测流程）
 
-> **这一步以前没人跑通过**，因为上一轮认定「实例是 private、只有本人能访问」。
+> **这一步以前没人跑通过**，因为上一轮认定「实例要求登录、只有本人能访问」。
 > 2026-11-26 实测推翻了它：空间可见性是 `visibility: "public"` / `private: false`，
 > 公开地址匿名可达，游戏在门户 iframe 里完整启动。**所以重新部署 + 重跑是可以做的，
 > 只是要分清两条路。**

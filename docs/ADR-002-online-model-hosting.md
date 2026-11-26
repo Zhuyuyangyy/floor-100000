@@ -10,7 +10,7 @@
 | 位置 | 原文 | 线上实际 |
 |---|---|---|
 | `docs/02_TECH_SPEC.md` §1 | 「不使用服务器、实时后端、数据库、外部 AI/模型 API」 | 有服务器（`server/npc-proxy.mjs`），有外部模型 API |
-| `docs/02_TECH_SPEC.md` §1 边界 | 「唯一例外是 DGX Spark 局域网推理……**云 API 依旧禁止**」 | 创空间跑在魔搭，上游是 `https://api-inference.modelscope.cn/v1`，默认模型 `Qwen/Qwen3-8B` |
+| `docs/02_TECH_SPEC.md` §1 边界 | 「唯一例外是 DGX Spark 局域网推理……**云 API 依旧禁止**」 | 创空间跑在魔搭，上游是 `https://api-inference.modelscope.cn/v1`，线上实例实配模型 `Qwen/Qwen3.8-Flash-Next`（由 `NPC_MODEL_ID` 固定，见部署运行日志） |
 | `docs/plans/2026-11-11-ai-npc-spark-integration-rfc.md` §21 | 「无云 API、无账号系统、无付费服务、无联机依赖」 | 有云 API、有账号（魔搭）、有免费额度上限 |
 
 结论：**冲突是真实的，不是文档表述问题。** 不能靠改措辞糊过去。

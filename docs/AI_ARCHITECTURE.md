@@ -175,7 +175,7 @@ flowchart LR
         C2["魔搭 Docker 创空间<br/>单容器 · 非 root"]
         C3["npc-proxy.mjs :7860"]
         C4["静态托管 dist/"]
-        C5["ModelScope API<br/>Qwen3-8B · Key 在服务端"]
+        C5["ModelScope API<br/>Qwen3.8-Flash-Next · Key 在服务端"]
         C2 --> C3
         C2 --> C4
         C3 --> C5

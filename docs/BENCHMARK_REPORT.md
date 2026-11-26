@@ -32,7 +32,7 @@
 |---|---|
 | 代码版本 | 【待实测：git commit sha】 |
 | 推理位置 | 【待实测：DGX Spark 本地 / 魔搭代理】 |
-| 模型 | 【待实测：`npc-qwen:latest` / `Qwen/Qwen3-8B` / 其他】 |
+| 模型 | 线上：`Qwen/Qwen3.8-Flash-Next`（部署运行日志实测）；Spark 直连：`npc-qwen:latest`（17G，Qwen3.8 系微调） |
 | 模型量化 | 【待实测】 |
 | 硬件 | 【待实测】 |
 | 参数 | `think:false` · `format:json` · `temperature:0.7` · `num_predict:192` |
@@ -161,7 +161,7 @@ Validator `ok`、executor `executed`，玩家**木材 -2、胶带 -1**，门禁 
 > 判据的阈值、样本数、单调性、采样完整性判据一律没动，判据名与调用点也未变。
 > ⚠️ **口径**：本轮差异**全部来自负向档**（负向让模型 3/4 转 `refuse`），
 > 正向档与中性档没有可观测差异（都是 `gift`——那句 summary 本身就是一次帮助）。
-> 所以它证明的是「**weight 的负面档能把态度从回报推向戒备**」，不是「双向驱动」。
+> 所以它证明的是「**weight 的负面档能把态度从回报推向戒备**」——正向档与中性档没有可观测差异，别把它写成两个方向都能驱动。
 >
 > **判据能证伪什么，四档实测过（载荷固定 `/../server/npc-proxy.mjs`、`rawGet` 直发）：**
 > 线上原样 → PASS；**只删越界比对、保留 `normalize` → 仍 PASS**；只删 `normalize` →
@@ -293,13 +293,13 @@ Validator `ok`、executor `executed`，玩家**木材 -2、胶带 -1**，门禁 
 >
 > ⚠️ **weight 专项要按实际口径说**：本轮差异**全部来自负向档**（负向让模型 3/4 转 `refuse`），
 > 正向档与中性档没有可观测差异（都是 `gift`——那句 summary 本身就是一次帮助）。
-> 它证明的是「**weight 的负面档能把态度从回报推向戒备**」，不是「weight 双向驱动态度」。
+> 它证明的是「**weight 的负面档能把态度从回报推向戒备**」——正向档与中性档没有可观测差异，别把它写成两个方向都能驱动。
 
 **剩下那 1 条 FAIL 在判据侧**，逐条查实见 `artifacts/online-verify/README.md`
 §「结论」：路径穿越那条是**判据假阳性**（线上拿到的是网关 400 错误页，
 逐字查过没有源码、没有密钥；判据只比「与基线不同」，把两个不同的错误页读成了泄漏）。
 
-> 顺带更正一条旧结论：**「线上实例仍为 private，平台层把请求挡在门外」已被实测推翻。**
+> 顺带更正一条旧结论：**「线上实例要求登录、平台层把请求挡在门外」已被实测推翻。**
 > 空间可见性是 `visibility: "public"` / `private: false`，匿名浏览器打开公开地址，
 > 应用在门户 iframe 里完整启动（Menu 场景、1280×720 画布），同源代理返回
 > `decisionSource: "model"` 的真模型台词。401 只出现在 **API 专用地址**
@@ -368,7 +368,7 @@ Validator `ok`、executor `executed`，玩家**木材 -2、胶带 -1**，门禁 
 | 记忆中提及率 | 输出中复述了历史记忆条目的比例 | **4/5（受助组），对照 0/5** | `artifacts/online-verify/memory-evidence.json` → `treatmentAnchorHits` / `controlAnchorHits`；锚点词是记忆正文里才有的「银色绝缘胶带」 |
 | 记忆改变行动比例 | 加入记忆 vs 不加记忆，`proposal.kind` 不同的比例 | **三组对照各 5/5 分化**（负向记忆→`refuse` 5/5；正向记忆→`dialogue` 5/5；无记忆→`dialogue` 5/5） | 同上 → `control[]` / `treatment[]` 的 `intent` 分布 |
 | 跨天记忆生效 | 第 2 天决策因第 1 天记忆而改变 | **线上已验（对照实验口径）**：三组对照里记忆正文与极性同时变；`united.passed=true`、极性总增益 2.00 | `api-verify.json` → 「记忆改变决策（三组合一）」 |
-| 记忆权重影响决策 | 记忆文本不变、只翻 `weight`，输出极性是否同向改变 | **线上已验（绿）**：实测 `base{gift:4}` +1.00 / `pos{gift:4}` +1.00 / `neg{refuse:3,gift:1}` −0.50 → **极性差 1.50 ≥ 1.00、单调=true**。⚠️ 差异**全部来自负向档**（负向让模型 3/4 转 `refuse`），正向档与中性档无差异（都是 `gift`——那句 summary 本身就是一次帮助）→ 它证明「**weight 的负面档能把态度从回报推向戒备**」，不是「双向驱动」。**曾红过三次，根因都在产品/输入侧**（weight 渲染不对称、正向动作不可达、summary 自带极性），**判据阈值一次没动** | 代码：`server/npc-proxy.mjs` 与 `src/ai/prompt.ts` 的 `buildMessages`/`fmtMemory`（两份同步）；证据：`artifacts/online-verify/memory-weight-evidence.json`；测法：`tools/verify-online-api.mjs` 的「记忆权重影响决策」（判据 `极性差≥1.00` + 单调 + 采样完整） |
+| 记忆权重影响决策 | 记忆文本不变、只翻 `weight`，输出极性是否同向改变 | **线上已验（绿）**：实测 `base{gift:4}` +1.00 / `pos{gift:4}` +1.00 / `neg{refuse:3,gift:1}` −0.50 → **极性差 1.50 ≥ 1.00、单调=true**。⚠️ 差异**全部来自负向档**（负向让模型 3/4 转 `refuse`），正向档与中性档没有可观测差异（都是 `gift`——那句 summary 本身就是一次帮助）→ 它证明的是「**weight 的负面档能把态度从回报推向戒备**」。**曾红过三次，根因都在产品/输入侧**（weight 渲染不对称、正向动作不可达、summary 自带极性），**判据阈值一次没动** | 代码：`server/npc-proxy.mjs` 与 `src/ai/prompt.ts` 的 `buildMessages`/`fmtMemory`（两份同步）；证据：`artifacts/online-verify/memory-weight-evidence.json`；测法：`tools/verify-online-api.mjs` 的「记忆权重影响决策」（判据 `极性差≥1.00` + 单调 + 采样完整） |
 
 **为什么"离线桩的判据有效"不等于"线上行为有证据"：** 离线桩可以按设计
 返回「读记忆」或「不读记忆」两种行为，用来确认判据能否区分二者；
@@ -396,7 +396,7 @@ Validator `ok`、executor `executed`，玩家**木材 -2、胶带 -1**，门禁 
 **线上用的模型名（2026-11-26 部署日志实测）**：
 `[npc-proxy] upstream=https://api-inference.modelscope.cn/v1 model=Qwen/Qwen3.8-Flash-Next keyConfigured=true`
 ——即创空间里 `NPC_MODEL_ID` 配的是 **`Qwen/Qwen3.8-Flash-Next`**，
-不是 `server/npc-proxy.mjs` 里的默认值 `Qwen/Qwen3-8B`。**引用线上延迟数据时要用这个模型名**。
+与服务端代码里的默认值不同（默认值见 `server/npc-proxy.mjs:41`）。**引用线上延迟数据时要用这个实测到的模型名**。
 
 **延迟数据的可比性警告：**
 - Spark 直连（3.83s 中位，N=6）与线上代理（5.55s 均值，N=3）**不可直接比较**——不同上游、不同模型
@@ -439,7 +439,7 @@ npm run competition:benchmark
 
 | 未测项 | 影响哪个论断 | 补齐方式 |
 |---|---|---|
-| **线上记忆验证（名场面 A）** | **"记忆影响行为"——这是核心叙事之一，评委大概率会追问** | **卡在「够不到」，不是「没测」：线上实例仍是 private，被挡在平台层。** 2026-11-26 实测无 token：`GET <api 域名>/` → **401**、`GET /healthz` → **401**（`{"error":{"message":"Authentication failed, please make sure that a valid ModelScope token is supplied."}}`）；`GET https://a1578804454-floor-100000.ms.show/` → **403**（`{"Code":10011402001,...}`）。**连静态首页都要身份**——这不是 `server/npc-proxy.mjs` 的鉴权（那个只护 `/api/npc/decide`），是创空间本身还没公开。<br>**为什么「补个 token」不算补齐：** 即便塞进一个能过网关的凭证，得到的也只是「**我**能访问」，而 `docs/COMPETITION_SUBMISSION_CHECKLIST.md:15` 要的是「**评委**无需登录即可访问」。前者做到了也不改变后者。<br>**真正的补齐路径是两步：① 把创空间转为公开；② 再跑 `MS_TOKEN=... node tools/verify-online-api.mjs`**（输出默认落 `<repo>/output/online-verify/`，不用设 `SHOT_DIR`），产出 `memory-evidence.json` 与 `memory-weight-evidence.json`。<br>记忆段代码本身已就绪（`tools/verify-online-api.mjs` 的「2.6 记忆影响决策」段落）。**条数不要抄固定值**——脚本在 2026-11-26 被反复重写，记忆段条数在 7 与 8 之间变过多次，判据也演进过。引用时现算（命令见 §5 第 2 条，按段落标题定位、不依赖行号）。<br>**离线桩的对照实验证明判据有效**（`honors` 读 weight → `gap` 2，pos/neg 精确满格 ±1；`summary` 忽略 weight → 0；`ignores` 是旧版格式、无 `polarity` 字段；`random` → 0.25 且 `monotone: false`），但**桩不构成线上行为证据**。**桩有三条独立佐证，最硬的是耗时**：同样叫 `api-verify.json`，桩那份「真实模型决策 3/3」是 `200/model/2ms 200/model/2ms 200/model/1ms`（均值 2ms），线上那份是 `3932 / 3713 / 8302ms`（均值 5316ms），**差 2658 倍**——Spark 单次推理最快也要几百毫秒，1ms 在物理上排除远程调用。 |
+| **线上记忆验证（名场面 A）** | **"记忆影响行为"——这是核心叙事之一，评委大概率会追问** | ✅ **已在线上跑通并留证**：记忆段 8 条判据全绿——三组对照全部成立（极性总增益 2.00 ≥ 1.50）、锚点回响命中 4 次、对照组零锚点成立、weight 专项极性差 1.50 ≥ 1.00 且单调。证据：`artifacts/online-verify/memory-evidence.json`、`memory-weight-evidence.json`、`api-verify.json`（2026-11-26 16:58 带 token 那次）。<br>**过程要一起写**：第一次线上跑是 **6 条红** → 定位到**产品**（提示词没把记忆写成决策因子、weight 渲染不对称）→ 改产品 + 判据只改输入 → 重新部署 → 8/8 全绿。<br>⚠️ weight 专项的差异**全部来自负向档**（正向与中性档没有可观测差异）——它证明的是「weight 的负面档能把态度从回报推向戒备」。<br>**条数不要抄固定值**，引用时现算（命令见 §5 第 2 条，按段落标题定位、不依赖行号）。<br>离线桩的对照实验只证明判据有效，**线上行为证据以上面那份为准**。 |
 | 多 seed 下的模型成功率 | Q2、Q3 的所有比率 | 真机跑 ≥30 seed × 3 场景，读 trace 统计 |
 | 真实模型下的重规划行为 | "系统能自我纠正" | 构造可被拒的观察，看第 2 次是否成功 |
 | 跨天记忆改变决策 | "记忆影响行为" | A/B 对照：同状态 ±记忆，比较 `proposal.kind` |

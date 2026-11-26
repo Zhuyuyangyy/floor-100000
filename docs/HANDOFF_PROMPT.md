@@ -216,7 +216,7 @@ a1-ai-action / a2-gameplay / a3-visual / a5-qa-ci / a7-deliverables
    `output/vitest-report.json`（**不是** `test-results/`，那是 Playwright 每次跑都清的目录），
    `test:collection` 卡下限 86 文件 / 1204 用例。CI 顺序：Build 必须先于单测
    （代理测试真 spawn 服务，静态根固定是仓库根的 `dist/`）。
-2. **401 论证**（**2026-11-26 已更正**）：当时写「创空间是 private，401 拦在平台网关」——
+2. **401 论证**（**2026-11-26 已更正**）：当时写「创空间要求登录、401 拦在平台网关」——
    现在看，**空间一直是 public**；401 只出现在 **API 专用地址**
    （`studio-…api-inference.modelscope.net`，平台设计要求 SDK token），与公开性无关。
    原始观察（`GET /`、`GET /healthz`、不存在的路径都 401，`X-Studio-Token` 明写在允许头里）
@@ -304,7 +304,7 @@ a1-ai-action / a2-gameplay / a3-visual / a5-qa-ci / a7-deliverables
 
 ### P0 — 「改 public」这一步**已经不需要做了**（2026-11-26 实测推翻）
 
-**旧结论（错的）：** 「创空间仍为 private，只有用户本人能改；401 拦在平台网关。」
+**旧结论（错的）：** 「创空间要求登录、只有用户本人能改；401 拦在平台网关。」
 
 **实测事实：**
 
@@ -359,7 +359,7 @@ a1-ai-action / a2-gameplay / a3-visual / a5-qa-ci / a7-deliverables
 **weight 专项绿了，但要按实际口径说**（见 P0.5）：本轮差异**全部来自负向档**
 （负向让模型 3/4 转 `refuse`），正向档与中性档没有可观测差异（都是 `gift`——
 那句 summary 本身就是一次帮助）。它证明的是「**weight 的负面档能把态度从回报推向戒备**」，
-**不是**「weight 能双向驱动态度」。
+正向档与中性档没有可观测差异，别把它写成两个方向都能驱动。
 
 ### P0.7 — 主线浏览器回归的实测状态（2026-11-26 复跑）
 
@@ -387,7 +387,7 @@ a1-ai-action / a2-gameplay / a3-visual / a5-qa-ci / a7-deliverables
 
 **weight 专项的口径（别吹过头）**：本轮差异**全部来自负向档**（负向让模型 3/4 转 `refuse`），
 正向档与中性档没有可观测差异（都是 `gift`——那句 summary 本身就是一次帮助）。
-它证明的是「**weight 的负面档能把态度从回报推向戒备**」，不是「weight 双向驱动态度」。
+它证明的是「**weight 的负面档能把态度从回报推向戒备**」——正向档与中性档没有可观测差异，别把它写成两个方向都能驱动。
 
 ### P1 — LICENSE 定稿（**已完成**，权利人 2026-11-26 拍板）
 

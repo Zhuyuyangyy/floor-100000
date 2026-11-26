@@ -4227,9 +4227,19 @@ export class GameScene extends Phaser.Scene {
         },
       });
 
-      // 模型没答上来（超时/不可达/降级）：返回 null，让场景的 fallback 接管。
-      // 注意这跟「模型说不动」是两回事——这条路径的产出会被标成 offline-fallback。
-      if (!result || result.source !== 'model') return null;
+      // 模型没答上来（超时/不可达/降级）：**抛出**，让 competitionRuntime 记成
+      // 'proposal_error' 并调用场景的 fallback 端口（规则脑接管，玩家仍能玩完）。
+      //
+      // ⚠️ 这里以前 return null——但 null 在场景层表示「模型明确说了不动」
+      // （`alinRepairDemo.ts` 据此置 modelDeclinedToAct 并禁止 fallback 替它动手）。
+      // 于是「模型挂了」被读成「阿林不愿意修」：玩家材料凑齐、信任够门槛，
+      // 按下维修门却**什么都不发生**，面板还只给一句「校验拒绝｜未改变」，
+      // 黄金路线就此卡死（2026-11-27 A9 实机走查发现的第一个阻断点）。
+      //
+      // 抛出去之后产出被标成 offline-fallback，不冒充模型——这正是「降级不锁死游戏」。
+      if (!result || result.source !== 'model') {
+        throw new Error(`model_unavailable:${result?.source ?? 'none'}`);
+      }
 
       const decision = parseRepairIntent(result.text);
       if (!decision) return null;

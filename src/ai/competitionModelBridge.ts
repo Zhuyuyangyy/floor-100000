@@ -442,8 +442,8 @@ function honorableLegacyActions(
 /**
  * 用真实 NpcBrain 生成一次竞赛提案（旧的 action.type 路径）。
  *
- * 失败路径全部返回 null：模型不可达、正文为空、翻译不了——都交给
- * competitionRuntime 的 fallback 端口走规则人格脑，不伪造动作。
+ * 失败路径：**模型不可达（异常）时向上抛**，交给 competitionRuntime 的 fallback
+ * 端口走规则人格脑；正文为空或翻译不了才返回 null（= 模型这一轮没有可执行提案）。
  *
  * 注意：NpcBrain.decide 只返回 NpcActionProposal，不返回原始正文，所以这条路
  * 天然用不了结构化契约。需要契约时用 proposeWithContract。
@@ -456,13 +456,20 @@ export async function proposeWithBrain(
   const ctx = translationContextFrom(observation, extras);
   // 调用方给了就照办（场景最清楚这一阶段接通了什么），否则按「能兑现」推导。
   const availableActions = extras.availableActions ?? honorableLegacyActions(observation, ctx);
-  try {
-    const raw = await brain.decide(toNpcObservation(observation, { availableActions }));
-    return translateModelAction(raw, ctx);
-  } catch {
-    // 模型侧任何异常都在这里收口：调用方只看到 null，进而走规则降级。
-    return null;
-  }
+  // 模型侧任何异常都**向上抛**，不再在这里压成 null。
+  //
+  // 为什么：null 在场景层表示「模型明确说了不动」——`alinRepairDemo.ts` 与
+  // `blackoutCrisis.ts` 都据此置 `modelDeclinedToAct`，并**禁止** fallback 替它动手。
+  // 于是「模型挂了（超时/503/断网）」一旦被压成 null，就被读成「阿林不愿意修」，
+  // fallback 这条「模型不可用时玩家仍能玩」的护栏从来没被执行过。
+  // 实测后果（2026-11-27 A9 实机走查）：玩家在 2 楼把材料凑齐、信任刷到 78.2
+  // （门槛 70），按下「维修门计划」——**门没开、材料没扣、状态没变**，
+  // 面板只给一句「校验拒绝｜未改变」，整条黄金路线就此走不下去。
+  //
+  // 抛出后 competitionRuntime 会把它记成 'proposal_error' 并调用 fallback 端口，
+  // 规则脑接管并如实标成 offline-fallback —— 这才是「降级不锁死游戏」。
+  const raw = await brain.decide(toNpcObservation(observation, { availableActions }));
+  return translateModelAction(raw, ctx);
 }
 
 /**

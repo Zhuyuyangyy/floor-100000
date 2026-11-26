@@ -279,13 +279,22 @@ describe('竞赛模型桥：与 NpcBrain 联合', () => {
     expect(await proposeWithBrain(brain(null), snapshot())).toBeNull();
   });
 
-  it('brain 抛错时不冒泡，返回 null', async () => {
+  // 模型**挂了**与模型「说不动」是两件事，2026-11-27 起必须能分开。
+  //
+  // 以前这里把 brain 的异常吞掉、返回 null。可 null 在场景层表示「模型明确说了
+  // 不动」——`alinRepairDemo.ts` 与 `blackoutCrisis.ts` 都据此禁止 fallback 替它动手。
+  // 于是模型一挂，降级护栏就跟着失效：玩家凑齐材料、信任够门槛，按维修门却
+  // 什么都不发生（实测 2026-11-27 A9 黄金路线走查的第一个阻断点）。
+  //
+  // 现在异常向上冒泡，competitionRuntime 会记成 'proposal_error' 并调用 fallback
+  // 端口，规则脑接管并如实标成 offline-fallback。
+  it('brain 抛错时异常向上冒泡，不压成 null（null 会被读成「模型拒绝」）', async () => {
     const throwing: NpcBrain = {
       id: 'boom',
       health: async () => true,
       decide: async () => { throw new Error('network down'); },
     };
-    await expect(proposeWithBrain(throwing, snapshot())).resolves.toBeNull();
+    await expect(proposeWithBrain(throwing, snapshot())).rejects.toThrow('network down');
   });
 });
 

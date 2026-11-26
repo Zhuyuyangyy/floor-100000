@@ -27,7 +27,9 @@ import { countItem } from '../systems/InventorySystem';
 import { loadNpcInventory, saveNpcInventory } from '../systems/NpcInventory';
 import { loadCompetitionNpcMemory } from '../systems/CompetitionNpcMemoryStore';
 import { loadNpcState, saveNpcState } from '../systems/NpcMemory';
-import { flagCount, setFlag } from '../systems/WorldFlags';
+import { flagCount, FLAG_CHAPTER1_CLEARED, hasFlag, setFlag } from '../systems/WorldFlags';
+import { chapter1Reached, clearChapter1 } from '../systems/chapters';
+import { CHAPTER1_CLEAR_FLOOR } from '../core/constants';
 import { runAlinGiftScenario } from './alinGiftDemo';
 import { runAlinRepairScenario } from './alinRepairDemo';
 import {
@@ -1659,5 +1661,68 @@ describe('接单幂等：承诺按人分键，连点刷不了信任', () => {
     setFlag(game, BLACKOUT_FLAG.promiseBrokenLegacy, 1);
 
     expect(alinStanceOf(game)).toBe('guarded');
+  });
+});
+
+// ── 第 1 章达成：一次性的阶段里程碑 ──────────────────────────────────────────
+//
+// 为什么要有它：正式胜利条件是抵达第 100000 层（docs/GAME_DESIGN_LOCK.md），
+// 而本次交付的可玩范围只有第 1–5 层——正常玩永远走不到胜利屏。没有阶段终点，
+// 评委在公开链接里就玩不到任何「做完了」的时刻。
+//
+// 它**不是胜利**：`status` 不会被改成 'won'，`isLegacyVictory` 不动，
+// `?devwin=1` 也不影响正常流程。卡片自己会写明「正式胜利条件为抵达第 100000 层」。
+describe('第 1 章达成：修好线路、抵达第 3 层', () => {
+  it('真实玩家路径：送礼攒信任 → 修门 → 走上第 3 层，flag 置位且只置一次', async () => {
+    const game = createNewGame(2026);
+    game.currentFloor = NPC_FLOOR;
+    game.player.x = getNpc('alin').x;
+    expect(isAlinRepairGateOpen(game)).toBe(false);
+
+    // 开局信任 35，修门门槛 70，差 35 —— 3 件礼物（每件 +14.4）够得着。
+    for (const itemId of ['ration_pack', 'ration_pack', 'clean_water'] as const) {
+      const gift = await runAlinGiftScenario(game, itemId, 1);
+      expect(gift.status).toBe('executed');
+    }
+    // 2 层维修材料箱必出木材×2 + 胶带×1，玩家捡得到。
+    givePart(game, 'wood', 2);
+    givePart(game, 'tape', 1);
+    const door = await runAlinRepairScenario(game);
+    expect(door.status).toBe('executed');
+    expect(isAlinRepairGateOpen(game)).toBe(true);
+
+    // 门开了但人还在第 2 层 → 章节还没到，flag 不置位。
+    expect(chapter1Reached(game)).toBe(false);
+    expect(clearChapter1(game)).toBe(false);
+    expect(hasFlag(game, FLAG_CHAPTER1_CLEARED)).toBe(false);
+
+    // 走上第 3 层 → 第一次置位。
+    game.currentFloor = CHAPTER1_CLEAR_FLOOR;
+    expect(chapter1Reached(game)).toBe(true);
+    expect(clearChapter1(game)).toBe(true);
+    expect(hasFlag(game, FLAG_CHAPTER1_CLEARED)).toBe(true);
+    expect(flagCount(game, FLAG_CHAPTER1_CLEARED)).toBe(1);
+
+    // 再上一次楼 → 不重复弹卡（once 语义）。
+    game.currentFloor = CHAPTER1_CLEAR_FLOOR;
+    expect(clearChapter1(game)).toBe(false);
+    expect(flagCount(game, FLAG_CHAPTER1_CLEARED)).toBe(1);
+
+    // 里程碑不是胜利。
+    expect(game.status).not.toBe('won');
+  });
+
+  it('门已经开了但人还在第 2 层：不算章节达成', () => {
+    // 站在第 3 层就说明门是开的（`isAlinRepairGateOpen` 对第 3 层及以上
+    // 恒为真——门本来就在 2 楼与 3 楼之间），所以「门没开却到了第 3 层」
+    // 这种状态构造不出来。能构造、也真的有意义的另一种情况是：
+    // 门已经开了，人却还没往上走——那就不算章节达成。
+    const game = createNewGame(2026);
+    setFlag(game, ALIN_REPAIR_GATE_FLAG, 1);
+    game.currentFloor = NPC_FLOOR;
+    expect(isAlinRepairGateOpen(game)).toBe(true);
+    expect(chapter1Reached(game)).toBe(false);
+    expect(clearChapter1(game)).toBe(false);
+    expect(hasFlag(game, FLAG_CHAPTER1_CLEARED)).toBe(false);
   });
 });

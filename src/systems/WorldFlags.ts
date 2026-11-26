@@ -88,3 +88,17 @@ export const flagKey = {
   container: (id: string): string => `${FLAG_PREFIX.container}:${id}`,
   story: (id: string): string => `${FLAG_PREFIX.story}:${id}`,
 };
+
+/**
+ * The chapter-1 milestone flag: "chapter 1 cleared".
+ *
+ * Chapter 1 ends when the Alin repair gate is open AND the player stands on
+ * floor 3 (see `CHAPTER1_CLEAR_FLOOR`). It is a **stage milestone**, not a
+ * win: the frozen design keeps victory at floor 100000
+ * (docs/GAME_DESIGN_LOCK.md), so nothing here sets `status = 'won'`.
+ *
+ * The `once:` prefix carries the one-shot semantics the card needs: the flag
+ * is set the first time the milestone is reached and never again, so coming
+ * back down and up does not pop the card a second time.
+ */
+export const FLAG_CHAPTER1_CLEARED = flagKey.once('chapter1-cleared');

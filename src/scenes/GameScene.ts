@@ -6,6 +6,7 @@ import { DESIGN_HEIGHT, DESIGN_WIDTH, isPortraitViewport, portraitViewportFor } 
 import { getGame, startNewGame } from '../core/session';
 import {
   BED_X,
+  CHAPTER1_CLEAR_FLOOR,
   CRAFT_X,
   DOWN_EXIT_X,
   FLOOR_VIEW_ZOOM,
@@ -44,6 +45,7 @@ import {
   tryChangeFloor,
 } from '../systems/FloorSystem';
 import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
+import { clearChapter1 } from '../systems/chapters';
 import { countItem, isBagFull, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
 import { absoluteMinute, advanceTime, ACTION_COSTS, AUTOSAVE_EVERY_GAME_MINUTES, isNight, spendTime } from '../systems/SurvivalSystem';
@@ -4770,6 +4772,11 @@ export class GameScene extends Phaser.Scene {
     this.drawFloor();
     saveToStorage(state);
     this.cameras.main.flash(180, 0, 0, 0);
+    // 抄近路也可能正好落在第 3 层 → 同一套阶段达成判定。
+    if (this.maybeClearChapter1(state)) {
+      playSfx('goal');
+      return;
+    }
     this.flash(`你抄近路跳到了第 ${state.currentFloor} 层（-${offer.price} 金）`);
     playSfx('goal');
   }
@@ -5130,7 +5137,30 @@ export class GameScene extends Phaser.Scene {
     // follow the player across the stairwell.
     if (state.worldEvents.activeEvent?.source === 'dwell') state.worldEvents.activeEvent = null;
     saveToStorage(state);
+    // 第 1 章达成（修好线路、抵达第 3 层）→ 阶段达成卡接管这一屏。
+    if (this.maybeClearChapter1(state)) return;
     this.flash(`到达第 ${state.currentFloor} 层 · 已从楼梯落地`);
+  }
+
+  /**
+   * 第 1 章达成：门禁修好后抵达第 3 层 → 弹一次阶段达成卡。
+   *
+   * 这是**阶段里程碑**，不是胜利：`status` 不会被改成 'won'，正式胜利条件
+   * 仍是抵达第 100000 层（docs/GAME_DESIGN_LOCK.md 最高设计权威）。
+   * `once` 语义保证只弹一次：再上一次楼不再弹（flag 已经置位）。
+   *
+   * 判定本身在 `systems/chapters.ts`（纯函数，可单测）；场景层只负责
+   * 「弹卡」这一有画面的部分。
+   */
+  private maybeClearChapter1(state: GameState): boolean {
+    if (!clearChapter1(state)) return false;
+    saveToStorage(state);
+    this.scene.start('End', {
+      mode: 'chapter',
+      title: '第 1 章完成',
+      subtitle: `线路恢复，抵达第 ${CHAPTER1_CLEAR_FLOOR} 层`,
+    });
+    return true;
   }
 
   // B3-15: rolls dwell pressure and applies the outcome. Pure logic lives in

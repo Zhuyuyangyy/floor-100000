@@ -5,7 +5,7 @@ import { deathCause } from '../systems/SurvivalSystem';
 import { clearSave } from '../systems/SaveSystem';
 import { ART_BANNER_WIN_KEY, ART_BANNER_LOSE_KEY, TITLE_BG_KEY } from '../render/artpack';
 import { PALETTE, ROLE, TEXT, hex } from '../render/palette.ts';
-import { buildPanelHeader, buildPanelWell, FONT_FAMILY } from '../render/uiKit';
+import { buildPanelHeader, buildPanelWell, FONT_FAMILY, UI } from '../render/uiKit';
 import { buildPanel, PANEL_DEPTH } from '../render/panels';
 import { depthRecord, runScore } from '../systems/progress';
 
@@ -23,16 +23,31 @@ import { depthRecord, runScore } from '../systems/progress';
 // (GAME_DESIGN_LOCK.md) makes victory reaching floor 100000, which is B8; the only
 // thing that sets status='won' today is isLegacyVictory(), the retired day-8
 // threshold, and that is gated behind the ?devwin=1 fixture.
+//
+// ── the chapter card ────────────────────────────────────────────────────────
+// A **stage milestone**, not a win: the same card, drawn once, saying
+// 「第 1 章完成：线路恢复，抵达第 3 层」, with 「继续游玩 / 重新开始」 as the
+// two exits. The formal victory condition stays "reach floor 100000"
+// (GAME_DESIGN_LOCK.md) and this card says so out loud - a judge must never
+// read it as "the game is finished".
 const BANNER_W = 300;
 const BANNER_H = 88;
+
+/** What the scene was launched for. `mode: 'chapter'` is the stage-milestone card. */
+export interface EndSceneData {
+  mode?: 'chapter';
+  title?: string;
+  subtitle?: string;
+}
 
 export class EndScene extends Phaser.Scene {
   constructor() {
     super({ key: 'End' });
   }
 
-  create(): void {
+  create(data?: EndSceneData): void {
     const state = getGame();
+    const chapter = data?.mode === 'chapter';
     const won = state.status === 'won';
     const { width, height } = this.cameras.main;
 
@@ -48,7 +63,7 @@ export class EndScene extends Phaser.Scene {
     // The outcome wash: deep teal for a clear, deep red for a death. Both are the
     // palette's ramps, so the end card belongs to the same world as the run.
     this.add
-      .rectangle(width / 2, height / 2, width, height, won ? PALETTE.clothDeep : PALETTE.lightDeep)
+      .rectangle(width / 2, height / 2, width, height, chapter || won ? PALETTE.clothDeep : PALETTE.lightDeep)
       .setAlpha(0.26)
       .setDepth(-29);
     this.add.rectangle(width / 2, height / 2, width, height, PALETTE.ink).setAlpha(0.46).setDepth(-28);
@@ -61,12 +76,12 @@ export class EndScene extends Phaser.Scene {
     const top = height / 2 - panelH / 2 + 16;
     const depth = PANEL_DEPTH.menu.help;
 
-    const headline = won ? '你活了下来' : '你没能活下来';
+    const headline = chapter ? (data?.title ?? '第 1 章完成') : won ? '你活了下来' : '你没能活下来';
     this.add
       .text(cx, top - 74, headline, {
         fontFamily: FONT_FAMILY,
         fontSize: '52px',
-        color: won ? hex(PALETTE.clothHigh) : hex(ROLE.danger),
+        color: chapter || won ? hex(PALETTE.clothHigh) : hex(ROLE.danger),
         stroke: hex(PALETTE.ink),
         strokeThickness: 6,
       })
@@ -74,8 +89,9 @@ export class EndScene extends Phaser.Scene {
       .setDepth(depth + 2);
 
     // The outcome icon sits above the headline, small: it is a stamp, not the
-    // subject.
-    if (this.textures.exists(won ? ART_BANNER_WIN_KEY : ART_BANNER_LOSE_KEY)) {
+    // subject. The chapter card has no stamp: the win banner would read as
+    // "the game is won", and the formal condition is still floor 100000.
+    if (!chapter && this.textures.exists(won ? ART_BANNER_WIN_KEY : ART_BANNER_LOSE_KEY)) {
       this.add
         .image(cx, top - 118, won ? ART_BANNER_WIN_KEY : ART_BANNER_LOSE_KEY)
         .setDisplaySize(BANNER_W, BANNER_H)
@@ -83,14 +99,18 @@ export class EndScene extends Phaser.Scene {
         .setAlpha(0.95);
     }
 
-    for (const o of buildPanel(this, cx, height / 2 + 16, panelW, panelH, won ? 'green' : 'yellow', depth)) {
+    for (const o of buildPanel(this, cx, height / 2 + 16, panelW, panelH, chapter || won ? 'green' : 'yellow', depth)) {
       this.add.existing(o as Phaser.GameObjects.GameObject);
     }
-    for (const o of buildPanelHeader(this, left, top, panelW, won ? '这一趟' : '死因', won ? PALETTE.clothHigh : PALETTE.lightHigh, depth + 5)) {
+    for (const o of buildPanelHeader(this, left, top, panelW, chapter ? '第 1 章' : won ? '这一趟' : '死因', chapter || won ? PALETTE.clothHigh : PALETTE.lightHigh, depth + 5)) {
       this.add.existing(o as Phaser.GameObjects.GameObject);
     }
 
-    const reason = won ? '旧版第 8 天阈值 · ?devwin=1 夹具' : deathCause(state);
+    const reason = chapter
+      ? (data?.subtitle ?? '线路恢复，抵达第 3 层')
+      : won
+        ? '旧版第 8 天阈值 · ?devwin=1 夹具'
+        : deathCause(state);
     for (const o of buildPanelWell(this, left + 12, top + 26, panelW - 24, 26, depth + 5)) {
       this.add.existing(o as Phaser.GameObjects.GameObject);
     }
@@ -137,7 +157,7 @@ export class EndScene extends Phaser.Scene {
       }
     });
 
-    if (won) {
+    if (won || chapter) {
       this.add
         .text(cx, top + panelH - 60, '正式胜利条件为抵达第 100000 层', { fontFamily: FONT_FAMILY, fontSize: '20px', color: hex(TEXT.dim) })
         .setOrigin(0.5)
@@ -149,6 +169,31 @@ export class EndScene extends Phaser.Scene {
     for (const o of buildPanelWell(this, left + 12, footY - 14, panelW - 24, 28, depth + 5)) {
       this.add.existing(o as Phaser.GameObjects.GameObject);
     }
+
+    if (chapter) {
+      // Two exits, both one keypress or one click away:
+      //   继续游玩 - back into the run, the save is intact (it was written before
+      //              the card was shown), so the player keeps the chapter behind.
+      //   重新开始 - a fresh run, same as the death screen's restart.
+      this.addChapterButton(cx - 86, footY, '继续游玩', () => {
+        this.scene.start('Game');
+      });
+      this.addChapterButton(cx + 86, footY, '重新开始', () => {
+        clearSave();
+        startNewGame(Date.now() >>> 0);
+        this.scene.start('Game');
+      });
+      this.input.keyboard?.once('keydown-ENTER', () => {
+        this.scene.start('Game');
+      });
+      this.input.keyboard?.once('keydown-R', () => {
+        clearSave();
+        startNewGame(Date.now() >>> 0);
+        this.scene.start('Game');
+      });
+      return;
+    }
+
     this.add
       .text(cx, footY, '按 回车 重新开始', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(PALETTE.clothHigh) })
       .setOrigin(0.5)
@@ -159,5 +204,19 @@ export class EndScene extends Phaser.Scene {
       startNewGame(Date.now() >>> 0);
       this.scene.start('Game');
     });
+  }
+
+  /** A clickable button for the chapter card's two exits, shaped like the game's own. */
+  private addChapterButton(x: number, y: number, label: string, action: () => void): void {
+    const width = 148;
+    this.add
+      .rectangle(x, y, width, 28, UI.surfaceRaised)
+      .setStrokeStyle(1, UI.line)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', action);
+    this.add
+      .text(x, y, label, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(PALETTE.clothHigh) })
+      .setOrigin(0.5)
+      .setDepth(PANEL_DEPTH.menu.help + 8);
   }
 }

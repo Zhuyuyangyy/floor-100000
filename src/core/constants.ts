@@ -15,6 +15,12 @@ export const STARTING_FLOOR = GAME_CONFIG.player.startingFloor;
 // The slum range the player starts in (floors 1..5). Floor 100000 is the
 // summit and the long-term goal, never the spawn point.
 export const PLAYABLE_FLOORS_V01: readonly number[] = GAME_CONFIG.world.playableFloorsV01;
+// The floor that ends chapter 1: the Alin repair gate opens between floors 2 and
+// 3, so reaching floor 3 with the gate open means the line is repaired.
+// This is a **chapter milestone**, not the victory condition - that stays
+// "reach floor 100000" (docs/GAME_DESIGN_LOCK.md), and `status` is never set
+// to 'won' by it.
+export const CHAPTER1_CLEAR_FLOOR = 3;
 // The tower's roaming threat is introduced at floor 5; keep all generation
 // paths and the runtime scene guard on the same boundary.
 export const WANDERER_MIN_SPAWN_FLOOR = 5;

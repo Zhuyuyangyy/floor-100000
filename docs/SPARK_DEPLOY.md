@@ -255,19 +255,60 @@ ONLINE_BASE=http://127.0.0.1:7860 node tools/verify-online-api.mjs
 > ```
 >
 > 只给 `FORCE_WRITE` 不给 `SHOT_DIR` 会被拒绝（防止覆盖默认目录里的真产物）。
+> 同理 `SHOT_DIR` 解出来等于默认目录或等于仓库根，也会被拒绝——实测这三条
+> 都是「打印一句拒绝、目录里 0 个文件」，而 `EXIT` 在成功和拒绝两种情况下**都是 1**
+> （无 token 时验收不完整，退出码本来就该是 1）。**别拿退出码判断有没有落盘，数文件。**
+>
+> 想做对照实验、改一份副本再跑的话，**副本要留在 `tools/` 下**。脚本按自身位置推仓库根，
+> 位置一变，「仓库根」跟着变——把副本放到别处去测「`SHOT_DIR=<仓库根>` 该被拒」，
+> 实测会算出错误的根，然后真把文件写进仓库。**实验装置会改掉被测对象**，
+> 这类判据必须在原位测。
 
 > **门不止一道，而且最后一道和你拿没拿 token 无关。**
-> 判据共六条，`3609d16` 一个提交里加了两条（它标题写的那件 + message 里自称「顺带」的那件），
-> 所以下表同一提交出现两次——**漏掉一行会让人以为「采样内容」只有一道保护**：
+> 下表按**判据**分行，共八行，分属六个提交。**八行不等于现在生效八道**——
+> 有两行已被后来的提交收严掉，当前真正在挡的是**六道**。把两个数字混着读，
+> 会得出「八道门」或「六行」这种在任何一版代码里都对不上的结论：
 >
-> | 提交 | 判据 | 挡的是 |
-> |---|---|---|
-> | `600c450` | 无凭证不落盘 | 401 空跑冒充证据 |
-> | `a2918b3` | `FORCE_WRITE` 必须配 `SHOT_DIR` | 只给开关不给目录 |
-> | `215b210` | 不得解回默认目录 | `SHOT_DIR=output/online-verify` |
-> | `3609d16` | 不得解回仓库根 | `SHOT_DIR=.` |
-> | `3609d16` | **采样内容要有样本才写** | 无效 token 写出「三组全 `complete:false`」的假记忆证据 |
-> | `4290c43` | **目标目录已有 `api-verify.json` 且本轮 0 样本 → 拒绝** | 任何指向已有证据目录的写法 |
+> | 提交 | 判据 | 判据式 | 挡的是 | 现在还生效 |
+> |---|---|---|---|---|
+> | `600c450` | 基础三份无凭证不落盘 | `if (!meta.hasToken)` | 401 空跑覆盖 `api-verify`/`notes`/`meta` | 是（形态未变）|
+> | `600c450` | `real-model-runs` 无凭证不落盘 | `if (TOKEN.length > 0)` | 同上，但这份当时单独判 | **已被取代** |
+> | `d2b2f79` | 记忆两份也无凭证不落盘 | `if (TOKEN.length > 0)` ×2 | 401 空跑覆盖记忆证据 | **已被取代** |
+> | `a2918b3` | `FORCE_WRITE` 必须配 `SHOT_DIR` | `FORCE_WRITE && !SHOT_DIR` | 只给开关不给目录 | 是 |
+> | `215b210` | 不得解回默认目录 | `FORCE_WRITE && SHOT_DIR && resolve(SHOT_DIR) === DEFAULT_OUT` | `SHOT_DIR=output/online-verify` | 是 |
+> | `3609d16` | 不得解回仓库根 | `FORCE_WRITE && SHOT_DIR && resolve(SHOT_DIR) === REPO_ROOT` | `SHOT_DIR=.` | 是 |
+> | `3609d16` | **采样内容要有样本才写** | `CAN_WRITE_CHECKLIST && sampleCount > 0` | 无效 token 写出「三组全 `complete:false`」的假记忆证据 | 是 |
+> | `4290c43` | **目标目录已有 `api-verify.json` 且本轮 0 样本 → 拒绝** | `OUT_HAS_EVIDENCE && modelSamplesObserved === 0` | 任何指向已有证据目录的写法 | 是 |
+>
+> **为什么 `600c450` 占两行：** 它在同一笔里用了**两种**写法，末尾那组是
+> `if (!meta.hasToken) { 不写 } else { 写三份 }`，而 `real-model-runs.json` 外面
+> 是 `if (TOKEN.length > 0)`。写成一行「基础四份」会掩盖一件事：这两种写法
+> 后来是**分别**被处理的——`!meta.hasToken` 至今原样保留，`TOKEN.length > 0`
+> 那三处在 `3609d16` 被统一换成了 `samplingWritable(...)`。
+>
+> **三道位置门都带 `FORCE_WRITE &&` 前缀，只有最后一道不带。** 这一点常被读漏：
+> 没开 `FORCE_WRITE` 时那三道恒为 `false`，它们不是「位置检查」，是
+> 「**强制留档时**的位置检查」。而 `4290c43` 那道没有前缀，所以它能挡住
+> 「带（无效）token 走错目录」——那条路径压根不开 `FORCE_WRITE`。
+> 判据式里省掉前缀，读者会以为「只要 `SHOT_DIR` 指错就拦」，实测不是。
+>
+> **`600c450` 不是一次就补全的。** 它只盖住六份落盘文件里的四份；两份记忆证据
+> 当时是裸 `writeFileSync`，守卫是 `d2b2f79`（同日 02:56，晚 8 分钟）才补上的。
+> 实测 `600c450` + JSON 401 桩 + 无 token：`api-verify` / `notes` / `meta` /
+> `real-model-runs` 四份未动，`memory-evidence`（30B → 2564B）与
+> `memory-weight-evidence`（37B → 405B）**被覆盖**。
+> 这提醒的是：**一道门只覆盖「当时想到的那几份文件」，而文件清单会变。**
+>
+> **上面这个结论只对 JSON 体的 401 成立。** 若 401 的 body 是 `text/plain`
+> （平台层当时就是），`600c450` 的 `/healthz` 是 `await r.json()` 没有兜底，
+> 脚本直接抛 `SyntaxError` 崩掉，**一份都不写**——不是「保住了四份」，
+> 是根本没走到落盘那一段。所以那句话要读成「JSON 体下保住四份」。
+>
+> **但 `d2b2f79` 那道现在已经不在代码里了**——`3609d16` 把它换成了
+> `samplingWritable(sampleCount)`，门槛从「填了字符串」收紧到「真的采到样本」。
+> 当前生效的六道就是上表最后一列写着「是」的那六行，`if (TOKEN.length > 0)`
+> 在现行版本里出现 **0 次**。`d2b2f79` 占一行是为了留住
+> 「这个洞真的被利用过」这件事，不是因为它现在还在挡。
 >
 > **`4290c43` 那条是无条件的，不在 `FORCE_WRITE` 分支里。** 它挡的是这样一条路径：
 >
@@ -294,14 +335,18 @@ ONLINE_BASE=http://127.0.0.1:7860 node tools/verify-online-api.mjs
 > **但更要紧的是「内容」这一轴：** 前面全过了也只证明「允许写」，不证明「有东西可写」。
 > 一份「允许写 + 什么都没测到」的文件结构合法、字段齐全，是最容易冒充证据的一种——
 > 所以 `samplingWritable()` 包住了三处采样落盘，没有样本就不写。
-> 复核要看**形状，不要看行数**（注释里点一次这个名字，裸计数就会 +1）：
+> 复核要看**形状，不要看行数**（注释里点一次这个名字，裸计数就会 +1）。
+> **按参数名数调用，不要按「行首 `if (`」数**——后者要求 `if (` 和 `samplingWritable(`
+> 同行，一旦有人把它折开就少数（我实测过：折行后 `node --check` 通过、判据没变，
+> 而「行首」口径从 3 掉到 2）：
 >
 > ```bash
-> grep -cE '^function samplingWritable' tools/verify-online-api.mjs                     # 应为 1
-> grep -cE '^\s*(if|\} else if)\s*\(.*samplingWritable\(' tools/verify-online-api.mjs   # 应为 3
+> grep -cE '^function samplingWritable' tools/verify-online-api.mjs                                                  # 应为 1
+> grep -cE 'samplingWritable\((weightSamples|contrastSamples|measuredRuns\.length)\)' tools/verify-online-api.mjs    # 应为 3
 > ```
 >
-> 只剩定义、没有调用，就说明这道判据被摘了。
+> 只剩定义、没有调用，就说明这道判据被摘了。**这两条在折行、加空行、加注释三种排版下
+> 都是 1 / 3**，因为它们不依赖 `if` 和调用落在同一行。
 
 `tools/verify-online-api.mjs` 是本项目的线上验收脚本，分两段：
 **基础段 32 条**（无条件执行）+ **记忆段**（同样无条件执行）。
@@ -332,6 +377,13 @@ node -e "const L=require('fs').readFileSync('tools/verify-online-api.mjs','utf8'
 > `−4` 是首页段 `else` 支的 4 条 `checkSkipped`、`−2` 是提案段 `if/else` 的一支，
 > 而 `+2` 是记忆段 `记忆改变决策：…` 在 3 元循环里展开成 3 条。
 > `47 − 3 − 4 − 2 + 2 = 40`。拿全局去校验必然对不上。
+>
+> **`47` 是调用点数，别当成「断言名有 47 个」。** 47 = 行首 `check(` 32 + `checkSkipped(` 7
+> + `checkIfMeasured(` 8。首参是单引号字面量的是 **43** 处（另 4 处传的是 `name` 变量或
+> 模板字符串，名字在运行期才定），其中 6 组名字各出现两次（`JS 资源 200`、
+> `前端产物无密钥/上游地址`、`前端走同源代理`、`产物含六位楼内居民`、`提案是 dialogue`、
+> `台词非空`——都是 `if/else` 两支各一份），去重后是 **37** 个不同的名字。
+> 拿 47 去对 `api-verify.json` 里的 40 条只会得到「对不上」，因为两者量的不是一回事。
 
 它按段落标题定位，不认行号，所以脚本重排也不会失效。
 

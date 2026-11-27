@@ -111,29 +111,49 @@ export const ENV_FILES: Record<string, string> = {
 // by a colour wash in FLOOR_AMBIENCE. Measured on the shipped art that meant
 // wall.png was 0.0% warm and floor.png 0.0% warm - every floor was the same
 // grey-blue corridor with a different tint, which is exactly what it looked
-// like. Five finished 2880x200 backdrops had been sitting in the art library
-// the whole time, never loaded.
+// like.
 //
-// These are 1280x200 windows cut out of those strips by
-// tools/build-floor-backdrops.mjs. They are NOT stretched: 2880 source is nine
-// 320px blocks and the world is four, so the script picks a contiguous four-
-// block window per floor and keeps the native pixel scale. A door stays a door.
+// A first pass wired five backdrops cut from the art library, and it was the
+// wrong subject: those strips painted four self-contained rooms with doors off
+// an empty corridor, i.e. an apartment block. This tower is a dormitory for tens
+// of thousands of people - a floor should read as ranks of bunk beds packed
+// together, not four private rooms. The wiring below is kept because it is
+// correct and tested; the images are withdrawn until the repaint lands.
 //
-// The key is per floor rather than one shared key, and the Record is keyed by
-// the playable floor union, so adding a floor without a backdrop is a compile
-// error instead of a silently recycled corridor.
+// `null` means "this floor has no painted backdrop yet" and the scene falls
+// back to the shared wall+floor pair. Keeping the Record keyed by the playable
+// floor union means every floor is accounted for at compile time - a new floor
+// either gets an image or an explicit null, it cannot be forgotten.
+//
+// To install a repaint: drop 1280x200 files in public/assets/env/ and replace
+// the null with the filename. No other code changes.
 export const FLOOR_BACKDROP_PREFIX = 'floor-backdrop';
 
 /** Playable floors. Mirrors PLAYABLE_FLOORS_V01 in src/core/constants.ts. */
 type PlayableFloor = 1 | 2 | 3 | 4 | 5;
 
-export const FLOOR_BACKDROP_FILES: Record<PlayableFloor, string> = {
-  1: 'backdrop-floor1.png',
-  2: 'backdrop-floor2.png',
-  3: 'backdrop-floor3.png',
-  4: 'backdrop-floor4.png',
-  5: 'backdrop-floor5.png',
+/**
+ * Floor -> backdrop file, or null when that floor has no painted backdrop.
+ *
+ * Images are 1280x200 (one world-width by one floor-height) so they need no
+ * scaling; a stretched backdrop squashes every door in the painting.
+ * tools/build-floor-backdrops.mjs produces them from 2880px source strips and
+ * is kept for the repaint.
+ */
+export const FLOOR_BACKDROP_FILES: Record<PlayableFloor, string | null> = {
+  1: null,
+  2: null,
+  3: null,
+  4: null,
+  5: null,
 };
+
+/** The floors that currently have a painted backdrop. */
+export function floorsWithBackdrop(): number[] {
+  return Object.entries(FLOOR_BACKDROP_FILES)
+    .filter(([, file]) => file !== null)
+    .map(([floor]) => Number(floor));
+}
 
 export function floorBackdropKey(floor: number): string {
   return `${FLOOR_BACKDROP_PREFIX}-${floor}`;

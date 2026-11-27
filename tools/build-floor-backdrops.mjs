@@ -1,27 +1,25 @@
 #!/usr/bin/env node
 /**
- * Ingest the owner's five floor backdrops into the game's env asset slots.
+ * Cut per-floor backdrops out of the art library's 2880x200 strips.
  *
- * The 素材库 backdrops are 2880x200 RGBA "one whole floor" renders: ceiling,
- * conduit run, wall, and the walkable ground band, in one image, already at the
- * game's own FLOOR_HEIGHT of 200. They were built against this geometry (the
- * 320x200 block split matches FLOOR_WIDTH/4 exactly), so 2880 = 9 blocks is not
- * a scroll width - it is nine alternative room facades for a floor that only
- * needs four.
+ * ── STATUS: on hold, images withdrawn ─────────────────────────────────────
  *
- * That is the whole problem this script solves: the game has ONE wall.png and
- * ONE floor.png shared by all five floors, distinguished only by a colour tint
- * in FLOOR_AMBIENCE. So floor 3 looks like floor 1 with a green wash. We have
- * five finished backdrops and have never shown any of them.
+ * This script produced five backdrops that were wired and shipped, then pulled,
+ * because they painted the wrong subject. The library strips show four
+ * self-contained rooms with doors off an empty corridor - an apartment block.
+ * This tower is a dormitory for tens of thousands of people: a floor should be
+ * ranks of bunk beds packed tightly together, with laundry strung overhead and
+ * personal belongings wedged wherever they fit. The paintings showed nobody,
+ * nothing extra, and a corridor wide enough to walk four abreast, which is the
+ * opposite of the setting.
  *
- * The fix is a per-floor texture, cut to the world width the camera actually
- * uses (FLOOR_WIDTH = 1280). We do NOT stretch 2880 -> 1280: that would squash
- * every door 2.25x. We pick a contiguous 1280px window (four 320px blocks) out
- * of the nine, per floor, so the wall keeps its native pixel scale and the
- * distinct content (stairs, lockers, sink, mesh gate) survives.
+ * The script is kept because the geometry is right and a repaint will need it:
+ * the library renders are already exactly FLOOR_HEIGHT (200) tall and their
+ * 320px blocks divide FLOOR_WIDTH by four, so cutting a 1280px window keeps the
+ * native pixel scale instead of squashing every door 2.25x.
  *
- * Which four blocks each floor gets is a deliberate choice, recorded in
- * FLOOR_WINDOW below: a floor should open on something that says what it is.
+ * To use it on a repaint: same input geometry (2880x200 or any multiple of 320
+ * wide by 200 tall), then set FLOOR_BACKDROP_FILES in src/render/artpack.ts.
  *
  * Usage:
  *   node tools/build-floor-backdrops.mjs            # write the five files
@@ -44,36 +42,22 @@ const WORLD_H = 200;
 const BLOCK_W = 320;
 
 /**
- * Which four consecutive blocks each floor shows, and why.
+ * Which four consecutive blocks each floor shows.
  *
  * Block index is 1-based over the nine in that floor's own source strip. Each
- * floor has its OWN 2880px strip drawn to its own design (stairs on floor 1,
- * beds on floor 2, shelving on 3, plant room on 4, sink and mesh gate on 5),
- * so a block index means something different per floor - this table is a
- * per-floor choice, not a shared crop.
+ * floor has its OWN 2880px strip, so a block index means something different
+ * per floor - this table is a per-floor choice, not a shared crop.
  *
- * The strip is nine room facades for a floor that only uses four, so the job is
- * picking the four that say what the floor is at a glance. Verified from the
- * rendered result: floor 1 shows the stair out, floor 2 the beds, floor 3 the
- * crates, floor 4 the pipes, floor 5 the sinks and gate.
+ * NOTE: these indices were chosen against the withdrawn paintings. A repaint
+ * will have its own layout and this table has to be re-picked after looking at
+ * the new strips. Do not trust these numbers blindly on new art.
  */
 const FLOOR_WINDOW = {
-  // Floor 1, the player's own room. The stairs out are the point of the floor:
-  // the first thing to learn is "you can go up".
-  1: { from: 1, note: '楼梯 + 房门 + 储物架：先看懂"能上楼"' },
-  // Floor 2, neighbours. Opens on the beds - "other people live here" - and
-  // keeps a door and the shelf bay in frame.
-  2: { from: 2, note: '两张床 + 邻居住房门 + 储物架' },
-  // Floor 3, abandoned storage. Shelving, lockers, crates and no bed: nothing
-  // personal. This is where the chapter's materials live.
-  3: { from: 3, note: '货架 + 储物柜 + 木箱：没有床，全是存货' },
-  // Floor 4, maintenance. Pipes, tanks, the breaker panel and the work bench:
-  // this is the floor where things get fixed.
-  4: { from: 5, note: '管道 + 储罐 + 电箱 + 工作台' },
-  // Floor 5, canteen / inspection desk. The sink bay with towels on one side,
-  // the mesh gate on the other - water and a barrier, which is what the canteen
-  // and the reinspection counter are.
-  5: { from: 6, note: '洗手台 + 毛巾 + 铁网门：食堂与复验台' },
+  1: { from: 1, note: '（旧图）楼梯 + 房门 + 储物架' },
+  2: { from: 2, note: '（旧图）床 + 邻居住房门 + 储物架' },
+  3: { from: 3, note: '（旧图）货架 + 储物柜 + 木箱' },
+  4: { from: 5, note: '（旧图）管道 + 储罐 + 电箱 + 工作台' },
+  5: { from: 6, note: '（旧图）洗手台 + 毛巾 + 铁网门' },
 };
 
 function arg(name, dflt) {

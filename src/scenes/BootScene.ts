@@ -77,8 +77,9 @@ export class BootScene extends Phaser.Scene {
 
     // Per-floor backdrops. These replace the shared wall+floor pair at runtime;
     // the shared pair stays loaded because the corridor fallback still uses it
-    // when a floor has no backdrop (and because the tests build floors from it).
+    // for any floor whose entry is null (i.e. no repaint installed yet).
     for (const [floor, file] of Object.entries(FLOOR_BACKDROP_FILES)) {
+      if (!file) continue;
       this.load.image(floorBackdropKey(Number(floor)), `assets/env/${file}`);
     }
 

@@ -263,3 +263,38 @@ Running 3 tests using 1 worker
 
   线上那 40 条判据（39 通过 / 1 FAIL，记忆段 8/8）**不在本文件里**——
   它的权威产物是 artifacts/online-verify/，汇总见 trace-summary.json。
+
+================================================================================
+10) 2026-11-28 发布线收尾复验
+================================================================================
+
+工作树：deploy-ms-20261125
+收尾代码基线：d0328c8（随后包含本轮 E2E 稳定性和触摸取消修复）
+
+门禁：
+  npm run typecheck        exit 0
+  npm run build            exit 0
+  npm run test:ci          exit 0 — 85 文件通过 / 2 文件跳过；1244 通过 / 6 跳过
+  npm run test:collection  exit 0 — 87 文件 / 1250 用例，集合没有缩小
+  npm run competition:benchmark -- --seeds 1,42,2026
+                           exit 0 — 9/9 重放一致，100.0%
+
+本地完整浏览器套件：
+  npx playwright test --workers=1 --retries=1 --timeout=90000 --trace=off
+                           exit 0 — 123 passed / 2 skipped / 125 tests
+  说明：使用独立 E2E_PORT，关闭 trace 以避免旧失败产物目录造成 ENOENT。
+
+公开匿名冒烟：
+  PUBLIC_BASE=https://www.modelscope.cn/studios/a1578804454/floor-100000 \
+    npx playwright test -c playwright.public.config.ts --workers=1
+                           exit 0 — 3 passed
+
+本轮修复：
+  · 第 3 层结算卡后的楼梯 E2E 现在按真实玩家操作按 Enter 继续。
+  · 连续赠礼、Judge Mode 赠礼和近路 F 键断言等待下一游戏帧，避免同帧输入保护吞掉第二次输入。
+  · pointercancel / blur / visibilitychange 清理触摸方向时同时清零速度，取消手势后不再漂移。
+
+诚实边界：
+  · 真人试玩记录仍为 0，未伪造主观反馈或原话。
+  · 视频仍未录制。
+  · 线上模型多 seed 成功率、线上 fallback 采样和线上 world_tick 观测仍未由本轮公开冒烟覆盖。

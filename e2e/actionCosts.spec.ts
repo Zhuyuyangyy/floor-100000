@@ -53,7 +53,7 @@ async function startGame(page: Page, seed: number): Promise<void> {
     if (started) break;
   }
   await waitForScene(page, 'Game');
-  await markAlinGateOpenForUnrelatedTraversal(page);
+  await markAlinGateOpenForUnrelatedTraversal(page, { showChapterCard: true });
 }
 
 async function walkLeftTo(page: Page, x: number): Promise<void> {
@@ -136,7 +136,16 @@ test('a climb from floor 1 to floor 5 costs a real slice of the day', async ({ p
   // descent. Climb for real — the walk is most of the cost, and that is the
   // honest number.
   await searchFloorOneCabinet(page);
-  for (let floor = 2; floor <= 5; floor++) await climbOneFloor(page, floor);
+  await climbOneFloor(page, 2);
+  await climbOneFloor(page, 3);
+  // Floor 3 pauses the run on its one-time milestone card. Resume through
+  // the real Continue action before sending more movement and stair input.
+  await waitForScene(page, 'End');
+  await page.keyboard.press('Enter');
+  await waitForScene(page, 'Game');
+  expect((await readState(page)).currentFloor).toBe(3);
+  await climbOneFloor(page, 4);
+  await climbOneFloor(page, 5);
 
   const after = await readState(page);
   expect(after.currentFloor).toBe(5);

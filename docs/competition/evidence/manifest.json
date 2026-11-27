@@ -181,6 +181,31 @@
     "recordedVideoMinutes": 0,
     "recordedVideoMinutesNote": "视频尚未录制，见 video-timestamps.md 的清单骨架。"
   },
+  "closeoutVerification": {
+    "date": "2026-11-28",
+    "releaseHeadBeforeCloseoutCommit": "d0328c88996a864b92e0fd7b5b8f1ef409264190",
+    "typecheck": "exit 0",
+    "build": "exit 0; existing large-chunk warning",
+    "testCi": "exit 0; 85 files passed, 2 skipped; 1244 passed, 6 skipped",
+    "testCollection": "exit 0; 87 files and 1250 cases",
+    "offlineReplay": {
+      "seeds": [1, 42, 2026],
+      "sampleCount": 9,
+      "replayMatchCount": 9,
+      "replayMatchRate": 1,
+      "contentSha256": "6fb2f118b197d9303a567f3bde59df81d6c7c9aab78294306f4e567857b017e9",
+      "report": "output/closeout/competition-replay-20261127.json"
+    },
+    "localBrowser": "exit 0; 123 passed, 2 skipped, 125 tests; single worker, retries=1, trace=off",
+    "publicSmoke": "exit 0; 3 passed against the public portal",
+    "humanPlaytestSessions": 0,
+    "recordedVideoMinutes": 0,
+    "boundaries": [
+      "Human participant feedback was not present and was not invented.",
+      "The closeout did not produce a recorded demo video.",
+      "Online multi-seed model quality, online fallback sampling and live world_tick observation remain unverified by this run."
+    ]
+  },
   "evidenceFiles": [
     {
       "path": "docs/competition/evidence/manifest.json",
@@ -205,6 +230,18 @@
     {
       "path": "docs/competition/evidence/natural-playthrough.md",
       "summary": "真人试玩记录模板 + 已由自动测试覆盖 / 必须由真人验证的机制划分（尚无真人记录）。"
+    },
+    {
+      "path": "docs/competition/evidence/verification-report-20261128.md",
+      "summary": "发布线收尾复验：类型、构建、单测、集合门禁、离线回放、完整浏览器套件和公开冒烟。"
+    },
+    {
+      "path": "docs/competition/evidence/closeout-20261128.md",
+      "summary": "本轮收尾证据索引和自动化/真人试玩边界。"
+    },
+    {
+      "path": "docs/competition/evidence/public-f2-residents.png",
+      "summary": "匿名公开冒烟中第 2 层居民场景截图。"
     }
   ],
   "sourceEvidence": {

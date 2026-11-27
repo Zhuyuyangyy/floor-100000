@@ -140,6 +140,14 @@ async function readGiftResult(page: Page): Promise<PhaserSceneProbe['lastAlinGif
   return page.evaluate(() => (window as unknown as { __PHASER_GAME__?: { scene: { getScene: (k: string) => PhaserSceneProbe | null } } }).__PHASER_GAME__?.scene.getScene('Game')?.lastAlinGiftResult);
 }
 
+async function waitForNextGameFrame(page: Page): Promise<void> {
+  const frame = await page.evaluate(() => (window as unknown as { __PHASER_GAME__?: { getFrame?: () => number } }).__PHASER_GAME__?.getFrame?.() ?? -1);
+  await page.waitForFunction((previous) => {
+    const current = (window as unknown as { __PHASER_GAME__?: { getFrame?: () => number } }).__PHASER_GAME__?.getFrame?.() ?? -1;
+    return current > previous;
+  }, frame, { timeout: 5000 });
+}
+
 test('玩家赠礼通过游戏对话改变双方库存、信任和 NPC 记忆', async ({ page }) => {
   const errors: string[] = [];
   await page.setViewportSize({ width: 390, height: 844 });
@@ -152,6 +160,7 @@ test('玩家赠礼通过游戏对话改变双方库存、信任和 NPC 记忆', 
   await selectOption(page, '赠礼');
   await page.keyboard.press('Enter');
   await expect.poll(() => hasVisibleText(page, '赠送 净水×1（持有3）')).toBe(true);
+  await waitForNextGameFrame(page);
   await page.keyboard.press('Enter');
 
   await expect.poll(async () => (await readGiftResult(page))?.status).not.toBeUndefined();
@@ -250,6 +259,7 @@ test('第2层保底材料可实际拾取，赠礼不消耗预留物资，维修�
   // Three ordinary gifts raise trust above 70 under the existing game rule.
   // Each one uses the visible dialogue option and the actual gift executor.
   for (const remaining of [2, 1, 0]) {
+    await waitForNextGameFrame(page);
     await page.keyboard.press('Enter');
     await page.waitForFunction((expectedWater) => {
       const w = window as unknown as {

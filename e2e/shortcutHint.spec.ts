@@ -32,6 +32,14 @@ async function reachFloorFourStairs(page: Page): Promise<void> {
   }
 }
 
+async function waitForNextGameFrame(page: Page): Promise<void> {
+  const frame = await page.evaluate(() => (window as unknown as { __PHASER_GAME__?: { getFrame?: () => number } }).__PHASER_GAME__?.getFrame?.() ?? -1);
+  await page.waitForFunction((previous) => {
+    const current = (window as unknown as { __PHASER_GAME__?: { getFrame?: () => number } }).__PHASER_GAME__?.getFrame?.() ?? -1;
+    return current > previous;
+  }, frame, { timeout: 5000 });
+}
+
 test('floor-four shortcut hint matches the real charge on failure and success', async ({ page }) => {
   await startGame(page);
   await markAlinGateOpenForUnrelatedTraversal(page);
@@ -70,6 +78,7 @@ test('floor-four shortcut hint matches the real charge on failure and success', 
     if (!state) throw new Error('missing game state');
     state.player.gold = gold;
   }, quoted);
+  await waitForNextGameFrame(page);
   await page.keyboard.press('f');
   await page.waitForFunction(() => window.__PHASER_SESSION__?.getState()?.currentFloor === 5, undefined, { timeout: 5000 });
   const success = await page.evaluate(() => {

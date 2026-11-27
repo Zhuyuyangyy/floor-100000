@@ -42,7 +42,7 @@ async function startJudgeGame(page: Page): Promise<void> {
   }
   await waitForScene(page, 'Game');
   await expect(page.getByTestId('judge-mode-panel')).toBeVisible();
-  await expect(page.getByTestId('judge-mode-toggle')).toContainText('offline-fallback');
+  await expect(page.getByTestId('judge-mode-toggle')).toContainText('等待中');
   await expect(page.getByTestId('judge-mode-toggle')).toContainText('seed 42');
 }
 
@@ -63,6 +63,14 @@ async function visibleGameText(page: Page, text: string): Promise<boolean> {
     const objects = (window as WindowProbe).__PHASER_GAME__?.scene.getScene('Game')?.children.list ?? [];
     return objects.some((object) => object.type === 'Text' && object.visible && (object.text ?? '').includes(needle));
   }, text);
+}
+
+async function waitForNextGameFrame(page: Page): Promise<void> {
+  const frame = await page.evaluate(() => (window as WindowProbe & { __PHASER_GAME__?: { getFrame?: () => number } }).__PHASER_GAME__?.getFrame?.() ?? -1);
+  await page.waitForFunction((previous) => {
+    const current = (window as WindowProbe & { __PHASER_GAME__?: { getFrame?: () => number } }).__PHASER_GAME__?.getFrame?.() ?? -1;
+    return current > previous;
+  }, frame, { timeout: 5000 });
 }
 
 async function cursorLabel(page: Page): Promise<string> {
@@ -88,7 +96,8 @@ test('Judge Mode displays the real Alin gift trace and exports auditable JSON ev
   page.on('pageerror', (error) => errors.push(error.message));
   await startJudgeGame(page);
   await page.getByTestId('judge-mode-toggle').click();
-  await expect(page.getByTestId('judge-trace')).toContainText('alin-repair-gate');
+  await expect(page.getByTestId('judge-trace')).toContainText('"npc": null');
+  await expect(page.getByTestId('judge-trace')).toContainText('"target": null');
 
   await moveAndWaitForSceneSync(page, 40);
   await page.keyboard.press('E');
@@ -103,6 +112,7 @@ test('Judge Mode displays the real Alin gift trace and exports auditable JSON ev
   await selectOption(page, '赠礼');
   await page.keyboard.press('Enter');
   await expect.poll(() => visibleGameText(page, '赠送 净水×1（持有3）')).toBe(true);
+  await waitForNextGameFrame(page);
   await page.keyboard.press('Enter');
 
   await expect.poll(() => page.getByTestId('judge-trace').textContent()).toContain('"status": "executed"');
@@ -160,6 +170,7 @@ test('Xiaozhou gift changes only Xiaozhou and exports a social-gift trace', asyn
   await selectOption(page, '赠礼');
   await page.keyboard.press('Enter');
   await expect.poll(() => visibleGameText(page, '赠送 ')).toBe(true);
+  await waitForNextGameFrame(page);
   await page.keyboard.press('Enter');
 
   await expect.poll(() => page.getByTestId('judge-trace').textContent(), { timeout: 10_000 })

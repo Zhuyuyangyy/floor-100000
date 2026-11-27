@@ -152,3 +152,9 @@
 - [ ] 视频总时长、录制日期、录制机器与浏览器版本
 
 **在上述各项回填之前，本文件不得被引用为「视频已交付」。**
+
+---
+
+## 2026-11-28 closeout update
+
+The three required videos were not recorded during this closeout. The automated browser artifacts prove the corresponding mechanics, but they are not video evidence and are not counted as recorded minutes.

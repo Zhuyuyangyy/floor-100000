@@ -1,13 +1,17 @@
 import type { Page } from '@playwright/test';
 import { ALIN_REPAIR_GATE_FLAG } from '../src/data/floorGates';
+import { FLAG_CHAPTER1_CLEARED } from '../src/systems/WorldFlags';
 
 /**
  * Generic floor/gameplay E2E cases predate the story gate and test unrelated
- * systems. Mark those runs as a legacy save that already passed the gate;
- * dedicated AI-NPC cases exercise the real locked-and-repaired progression.
+ * systems. Mark those runs like saves that already passed the gate and saw the
+ * one-time chapter card. A route that covers the card can opt in to seeing it.
  */
-export async function markAlinGateOpenForUnrelatedTraversal(page: Page): Promise<void> {
-  await page.evaluate((gateFlag) => {
+export async function markAlinGateOpenForUnrelatedTraversal(
+  page: Page,
+  { showChapterCard = false } = {},
+): Promise<void> {
+  await page.evaluate(({ gateFlag, chapterFlag, showChapterCard }) => {
     type StateProbe = { flags?: Record<string, number> };
     const w = window as unknown as {
       __PHASER_SESSION__?: { getState: () => StateProbe | null };
@@ -19,11 +23,12 @@ export async function markAlinGateOpenForUnrelatedTraversal(page: Page): Promise
     const apply = (state: StateProbe | null | undefined): void => {
       if (!state) throw new Error('missing game state for gate fixture');
       state.flags = { ...state.flags, [gateFlag]: 1 };
+      if (!showChapterCard) state.flags[chapterFlag] = 1;
     };
     if (w.__PHASER_TEST_MUTATE__) {
       w.__PHASER_TEST_MUTATE__(apply);
       return;
     }
     apply(w.__PHASER_SESSION__?.getState());
-  }, ALIN_REPAIR_GATE_FLAG);
+  }, { gateFlag: ALIN_REPAIR_GATE_FLAG, chapterFlag: FLAG_CHAPTER1_CLEARED, showChapterCard });
 }

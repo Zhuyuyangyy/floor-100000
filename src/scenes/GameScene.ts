@@ -315,7 +315,13 @@ export class GameScene extends Phaser.Scene {
   private hudContextBottom: number = HUD_LAYOUT.contextBottom;
   private statBarLayout: Array<{ x: number; y: number; width: number }> = [];
   private touchDirectionPointers = new Map<number, 'left' | 'right'>();
-  private clearTouchDirections = (): void => { this.touchDirectionPointers.clear(); };
+  private clearTouchDirections = (): void => {
+    this.touchDirectionPointers.clear();
+    // A cancelled pointer never sends a normal release event. Drop the
+    // acceleration ramp too, otherwise the survivor keeps drifting for several
+    // frames after the OS has already cancelled the gesture.
+    this.speedX = 0;
+  };
   private touchControls: Array<Phaser.GameObjects.GameObject & { setVisible(visible: boolean): unknown }> = [];
 
   private floorView!: GeneratedFloor;

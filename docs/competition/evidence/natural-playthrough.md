@@ -140,3 +140,17 @@
 - **自动测试已覆盖 39/40 条线上判据**，覆盖的是「机制是否成立」，**不是「好不好玩」**。
 - 三条尚未有证据的事（视频、真人试玩、多 seed benchmark）在本包的其他文件里同样标注为未完成：
   见 `manifest.json` 的 `notYetEvidenced` 与 `video-timestamps.md` 的状态声明。
+
+---
+
+## 2026-11-28 closeout update
+
+### Automated normal-entry evidence
+
+The final release-line browser run completed **123 passed / 2 skipped across 125 tests**. It includes the chapter route, save recovery, NPC gift and repair, offline fallback, survival, combat, touch, mouse and UI flows. These are automated observations and do not count as human sessions.
+
+The anonymous public smoke run completed **3/3**. It opened the public portal, booted the iframe game, reached floor 2 with the resident roster visible, and received a non-empty `decisionSource=model` response through the same-origin proxy.
+
+### Human session status
+
+No participant supplied a session record, timing, subjective feedback or verbatim quote during this closeout. The human-session count therefore remains **0**, and no feedback has been invented.

@@ -637,3 +637,7 @@ npx playwright test -c playwright.public.config.ts --workers=1
 5. **把对话来源标签的措辞改掉**（§3.4）：远端 Spark 决策被标成 `Ollama 本地模型`，
    会被评委理解成「模型跑在玩家机器上」。二分（model / offline-fallback）是对的，措辞要中性。
 6. **QA-03 请作者本人去做**（§7 脚本已就绪）：A9 不代替作者编反馈。
+
+## 2026-11-28 closeout rerun
+
+The public golden-route command was rerun against the same portal after the fallback repair. It completed **2/2 passed**. The normal model-backed repair route reached the chapter completion card, and the forced model-failure route continued through an explicitly labelled `offline-fallback` path. The earlier 1-pass/1-fail result above is retained as historical evidence of the defect before the fix.

@@ -255,10 +255,10 @@ Running 3 tests using 1 worker
 9) 这些门禁**没有**覆盖的东西（别拿它们当更大范围的保证）
 ================================================================================
   · 线上模型的多 seed 成功率 / 非法动作率 / 重规划率 —— **未统计**。
-  · offline-fallback 降级链路 —— 本次证据集里**没有**一次 fallback 采样。
+  · offline-fallback 降级链路 —— 本节形成时尚未采样；后续 2026-11-28 公开黄金路线已完成 1 次强制断网 fallback 覆盖（见本节末）。
   · 第二个 NPC（阿林以外）的线上真实模型闭环 —— **不存在**。
-  · NPC 自主行动（AI-06）—— 在**已提交基线**上尚未实现；
-    共享工作区里 A3 的在途实现本次未被线上部署、也未被本证据包验收。
+  · NPC 自主行动（AI-06）—— 早期证据快照曾记录为未实现；当前发布线已提交实现并通过行为层测试，
+    但本轮线上公开测试尚未观测到一次 `world_tick` 触发。
   · 真人试玩与演示视频 —— 见 natural-playthrough.md / video-timestamps.md，均为 0。
 
   线上那 40 条判据（39 通过 / 1 FAIL，记忆段 8/8）**不在本文件里**——
@@ -289,6 +289,11 @@ Running 3 tests using 1 worker
     npx playwright test -c playwright.public.config.ts --workers=1
                            exit 0 — 3 passed
 
+公开黄金路线：
+  PUBLIC_BASE=https://www.modelscope.cn/studios/a1578804454/floor-100000 \
+    npx playwright test -c playwright.config.ts e2e/onlineGoldenRoute.spec.ts --workers=1 --timeout=300000
+                           exit 0 — 2 passed（正常模型维修 + 强制模型失败 fallback）
+
 本轮修复：
   · 第 3 层结算卡后的楼梯 E2E 现在按真实玩家操作按 Enter 继续。
   · 连续赠礼、Judge Mode 赠礼和近路 F 键断言等待下一游戏帧，避免同帧输入保护吞掉第二次输入。
@@ -297,4 +302,4 @@ Running 3 tests using 1 worker
 诚实边界：
   · 真人试玩记录仍为 0，未伪造主观反馈或原话。
   · 视频仍未录制。
-  · 线上模型多 seed 成功率、线上 fallback 采样和线上 world_tick 观测仍未由本轮公开冒烟覆盖。
+  · 线上模型多 seed 成功率和线上 world_tick 观测仍未由本轮公开测试覆盖。

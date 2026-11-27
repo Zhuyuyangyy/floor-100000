@@ -15,6 +15,7 @@ The release-line code and local public-surface regression suite were revalidated
 | `npm run competition:benchmark -- --seeds 1,42,2026 --output output/closeout/competition-replay-20261127.json` | 0 | 9/9 offline replay matches, 100% |
 | `npx playwright test --workers=1 --retries=1 --timeout=90000 --trace=off` | 0 | 123 passed, 2 skipped, 125 tests |
 | `PUBLIC_BASE=... npx playwright test -c playwright.public.config.ts --workers=1` | 0 | 3/3 anonymous public smoke tests passed |
+| `PUBLIC_BASE=... npx playwright test -c playwright.config.ts e2e/onlineGoldenRoute.spec.ts --workers=1 --timeout=300000` | 0 | 2/2 public golden-route tests passed, including forced model-failure fallback |
 
 Executed on the clean `deploy-ms-20261125` worktree. The browser suite used a dedicated Vite port and an offline local AI configuration so the results do not depend on a local model service.
 
@@ -27,13 +28,14 @@ Executed on the clean `deploy-ms-20261125` worktree. The browser suite used a de
 - Stair path 1→2→3→4→5 is covered through the normal scene entry and the chapter card.
 - NPC gift, repair fallback, Judge Mode, adversarial inputs, save recovery, survival, UI, combat, touch, mouse and tower flows are covered by the final 125-test run.
 - The public smoke suite covered anonymous portal access, iframe game boot, floor-2 residents and an online model response.
+- The public golden-route suite covered the model-backed repair route and the forced network-failure fallback route.
 - The offline benchmark covered seeds 1, 42 and 2026 with three scenarios per seed. It is a determinism and conservation check, not an online model quality benchmark.
 
 ## Remaining evidence boundaries
 
 - No human participant feedback was present in the repository, so no human quote or subjective playtest result was added.
 - No video file was recorded in this closeout. The video checklist remains a recording brief.
-- The public smoke run does not prove online multi-seed model success rates, online fallback sampling, or a live world-tick observation.
+- The public runs do not prove online multi-seed model success rates or a live world-tick observation.
 
 ## Verdict
 

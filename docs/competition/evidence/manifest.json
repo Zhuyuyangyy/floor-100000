@@ -198,12 +198,13 @@
     },
     "localBrowser": "exit 0; 123 passed, 2 skipped, 125 tests; single worker, retries=1, trace=off",
     "publicSmoke": "exit 0; 3 passed against the public portal",
+    "onlineGoldenRoute": "exit 0; 2 passed against the public portal, covering model repair and forced network-failure fallback",
     "humanPlaytestSessions": 0,
     "recordedVideoMinutes": 0,
     "boundaries": [
       "Human participant feedback was not present and was not invented.",
       "The closeout did not produce a recorded demo video.",
-      "Online multi-seed model quality, online fallback sampling and live world_tick observation remain unverified by this run."
+      "Online multi-seed model quality and live world_tick observation remain unverified by this run."
     ]
   },
   "evidenceFiles": [
@@ -378,7 +379,6 @@
     "演示视频：三个名场面的录像尚未录制（video-timestamps.md 只给清单骨架与判据）。",
     "真人试玩：0 次独立真人试玩记录（natural-playthrough.md 只给模板与机制划分）。",
     "多 seed benchmark：线上模型的多 seed 成功率 / 非法动作率 / 重规划率均未统计。",
-    "线上 offline-fallback 路径：本证据集里没有一次 fallback 采样，降级链路没有被线上证据覆盖。",
     "第二个 NPC 的线上真实模型闭环证据。",
     "NPC 自主行动（AI-06）：已实现（4ae9fc1）并部署，行为层证据来自其 15 条单元测试（含电池 4→2 的库存守恒与重复触发零动作）；但**线上尚未观测到一次 autonomous tick 触发**——线上黄金路线走到第 3 层结算卡，没有经过「停电阶段变化 / 跨整点」这类世界触发点。名场面 C 仍不可录。"
   ],

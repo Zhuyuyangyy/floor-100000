@@ -107,7 +107,7 @@
 | **无软锁** | 判据能测单条路径，测不出「人的走法」 | 试玩能完成第一章；失败能恢复或明确重新开始 |
 | **存档与刷新的实际体验** | 功能可测，**体验**不可测 | 刷新后接得上，且**知道**自己存档了 |
 | **难度分布** | **目前也没有**——多 seed benchmark 未做（见 `manifest.json` 的 `notYetEvidenced`） | 待补 |
-| **第二次 NPC 与自主行动** | **在已提交基线上功能尚未实现**：`world_tick` 全仓库 0 次，居民只在按 E 时行动（`docs/competition/A0-BASE-01-VERIFICATION.md:44`）。**2026-11-27 00:00 观察**：A3 已在共享工作区落地自主 tick 的在途实现（未提交、未部署、未验证，且当前使 `tsc`/`build` 失败），**因此截至本证据包仍不可测、不可录** | 待 A3 交付 + 重新部署后重录重测 |
+| **第二次 NPC 与自主行动** | 行为层已实现并有 15 条单元测试，发布线已通过类型检查、构建和完整 E2E；本轮线上黄金路线尚未经过停电阶段变化或跨整点，因此没有线上 `world_tick` 观测可引用 | 待线上触发一次自主行动并记录状态差量与来源 |
 
 ### 3.3 三个必须由人看、而不是由机器看的东西（容易被自动测试"骗过去"的）
 
@@ -150,6 +150,8 @@
 The final release-line browser run completed **123 passed / 2 skipped across 125 tests**. It includes the chapter route, save recovery, NPC gift and repair, offline fallback, survival, combat, touch, mouse and UI flows. These are automated observations and do not count as human sessions.
 
 The anonymous public smoke run completed **3/3**. It opened the public portal, booted the iframe game, reached floor 2 with the resident roster visible, and received a non-empty `decisionSource=model` response through the same-origin proxy.
+
+The public golden-route suite completed **2/2**. It covered the model-backed repair route and the forced network-failure route, where the game continued through an explicitly labelled `offline-fallback` path.
 
 ### Human session status
 

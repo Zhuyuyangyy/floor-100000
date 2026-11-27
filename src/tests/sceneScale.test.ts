@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { CHARACTER_FILES, ENV_FILES, FURNITURE_FILES, TILE_DOOR_KEY, TILE_WINDOW_KEY } from '../render/artpack';
+import { CHARACTER_FILES, ENV_FILES, FLOOR_BACKDROP_FILES, floorBackdropKey, FURNITURE_FILES, TILE_DOOR_KEY, TILE_WINDOW_KEY } from '../render/artpack';
 
 // The scene carried three unrelated scales for a long time without anything
 // noticing: 16px for the tiled wall, floor, doors and windows; 16x24 for the
@@ -101,5 +101,49 @@ describe('doors and windows are architectural, not fixtures', () => {
 
   it('keeps a door narrower than it is tall', () => {
     expect(door.width).toBeLessThan(door.height);
+  });
+});
+
+// The five floors shared one wall.png and one floor.png for a long time, told
+// apart only by a colour wash - which is why every floor looked the same. Five
+// finished 2880x200 backdrops were sitting in the art library the whole time.
+// These are the checks that keep them wired: a floor without its own image, or
+// an image at the wrong geometry, is the failure this replaced.
+describe('every playable floor has its own backdrop', () => {
+  const BACKDROP_DIR = ENV_DIR;
+  const floors = Object.keys(FLOOR_BACKDROP_FILES).map(Number);
+
+  it('covers all five playable floors', () => {
+    expect(floors.sort()).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('gives each floor a distinct file - no two floors reuse one image', () => {
+    const files = Object.values(FLOOR_BACKDROP_FILES);
+    expect(new Set(files).size).toBe(files.length);
+  });
+
+  it('ships a file for every floor', () => {
+    for (const [floor, file] of Object.entries(FLOOR_BACKDROP_FILES)) {
+      expect(existsSync(join(BACKDROP_DIR, file)), `floor ${floor} is missing ${file}`).toBe(true);
+    }
+  });
+
+  it('is exactly one world-width by one floor-height, so it needs no scaling', () => {
+    // A stretched backdrop squashes every door in the painting. 2880 -> 1280
+    // would be a 2.25x horizontal crush; the build script crops instead.
+    for (const [floor, file] of Object.entries(FLOOR_BACKDROP_FILES)) {
+      const size = pngSize(BACKDROP_DIR, file);
+      expect(size.width, `floor ${floor}`).toBe(1280); // FLOOR_WIDTH
+      expect(size.height, `floor ${floor}`).toBe(200); // FLOOR_HEIGHT
+    }
+  });
+
+  it('does not collide with the shared wall/floor keys', () => {
+    for (const floor of floors) {
+      const key = floorBackdropKey(floor);
+      expect(Object.values(ENV_FILES)).not.toContain(`${key}.png`);
+      expect(key).not.toBe('env-wall');
+      expect(key).not.toBe('env-floor');
+    }
   });
 });

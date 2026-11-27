@@ -105,6 +105,40 @@ export const ENV_FILES: Record<string, string> = {
   [TILE_WINDOW_KEY]: 'tile-window.png',
 };
 
+// ── per-floor backdrops ────────────────────────────────────────────────────
+//
+// The five floors used to share ONE wall.png and ONE floor.png, told apart only
+// by a colour wash in FLOOR_AMBIENCE. Measured on the shipped art that meant
+// wall.png was 0.0% warm and floor.png 0.0% warm - every floor was the same
+// grey-blue corridor with a different tint, which is exactly what it looked
+// like. Five finished 2880x200 backdrops had been sitting in the art library
+// the whole time, never loaded.
+//
+// These are 1280x200 windows cut out of those strips by
+// tools/build-floor-backdrops.mjs. They are NOT stretched: 2880 source is nine
+// 320px blocks and the world is four, so the script picks a contiguous four-
+// block window per floor and keeps the native pixel scale. A door stays a door.
+//
+// The key is per floor rather than one shared key, and the Record is keyed by
+// the playable floor union, so adding a floor without a backdrop is a compile
+// error instead of a silently recycled corridor.
+export const FLOOR_BACKDROP_PREFIX = 'floor-backdrop';
+
+/** Playable floors. Mirrors PLAYABLE_FLOORS_V01 in src/core/constants.ts. */
+type PlayableFloor = 1 | 2 | 3 | 4 | 5;
+
+export const FLOOR_BACKDROP_FILES: Record<PlayableFloor, string> = {
+  1: 'backdrop-floor1.png',
+  2: 'backdrop-floor2.png',
+  3: 'backdrop-floor3.png',
+  4: 'backdrop-floor4.png',
+  5: 'backdrop-floor5.png',
+};
+
+export function floorBackdropKey(floor: number): string {
+  return `${FLOOR_BACKDROP_PREFIX}-${floor}`;
+}
+
 // Which file holds each furniture texture. The seven procedural drawers in
 // pixelArt.ts used to own these; they are gone now, so this is the only list.
 //

@@ -102,7 +102,7 @@ import {
   buildPanelWell,
   drawStatBar,
 } from '../render/uiKit';
-import { ENV_FLOOR_KEY, ENV_WALL_KEY, NIGHT_OVERLAY_KEY } from '../render/artpack';
+import { ENV_FLOOR_KEY, ENV_WALL_KEY, floorBackdropKey, NIGHT_OVERLAY_KEY } from '../render/artpack';
 import {
   ATTACK_FRAME_START,
   ATTACK_FRAMES,
@@ -1912,16 +1912,35 @@ export class GameScene extends Phaser.Scene {
   // — the ceiling shadow, the light sources, and the doors.
   private drawDormRoom(): void {
     const wallH = FLOOR_HEIGHT - FLOOR_BAND;
+    const backdropKey = floorBackdropKey(STARTING_FLOOR);
 
-    const wall = this.add.image(0, 8, ENV_WALL_KEY).setOrigin(0, 0);
-    const floor = this.add.image(0, wallH, ENV_FLOOR_KEY).setOrigin(0, 0);
+    // The floor's own painted backdrop, if this floor has one. It is a whole
+    // cross-section of a floor - ceiling shadow, conduit run, wall, skirting and
+    // the walkable ground band - at exactly FLOOR_HEIGHT tall, so it is drawn as
+    // ONE image at y=0 rather than the wall/floor pair split at wallH.
+    //
+    // Drawing it in two pieces would double-paint the skirting: the backdrop's
+    // ground band is part of the same perspective, and cutting it at wallH would
+    // leave the wall image's own bottom edge showing through.
+    const backdrop = this.textures.exists(backdropKey);
+    if (backdrop) {
+      this.add.image(0, 0, backdropKey).setOrigin(0, 0).setDepth(-10);
+    } else {
+      // Fallback: the shared wall+floor pair. Unchanged behaviour for any floor
+      // without a backdrop, which is what keeps a stripped build bootable.
+      const wall = this.add.image(0, 8, ENV_WALL_KEY).setOrigin(0, 0);
+      const floor = this.add.image(0, wallH, ENV_FLOOR_KEY).setOrigin(0, 0);
+      this.floorObjects.push(wall, floor);
+    }
 
     const g = this.add.graphics();
-    // Ceiling shadow only. The skirting, the two service pipes, the damp patches
-    // and the pinned notice all used to be drawn here; the wall image has them, and
-    // drawing them again printed them straight over the art.
-    g.fillStyle(0x0b0f12, 1);
-    g.fillRect(0, 0, FLOOR_WIDTH, 8);
+    // Ceiling shadow only, and only over the shared art: the backdrop already
+    // has its own ceiling band in the painting. Drawing an 8px black bar over
+    // the backdrop would cut the top off the conduit run.
+    if (!backdrop) {
+      g.fillStyle(0x0b0f12, 1);
+      g.fillRect(0, 0, FLOOR_WIDTH, 8);
+    }
 
     // One lit window per room. The pool is drawn row by row as an ellipse with
     // banded alpha: three stacked rectangles used to sit here, and over textured
@@ -1975,7 +1994,7 @@ export class GameScene extends Phaser.Scene {
       this.floorObjects.push(this.add.image(i * ROOM_WIDTH, wallH, 'tile_door').setOrigin(0.5, 1));
     }
 
-    this.floorObjects.push(wall, floor, g);
+    this.floorObjects.push(g);
 
     // OVERHAUL Art Pass 2: ceiling shadow, baseboard seam, floor gradient and
     // reflections under the lights — the four cues that make a flat side view
@@ -2032,17 +2051,31 @@ export class GameScene extends Phaser.Scene {
     const wallH = FLOOR_HEIGHT - FLOOR_BAND;
     const tint = corridorTint(floor);
 
-    const wall = this.add.image(0, 8, ENV_WALL_KEY).setOrigin(0, 0);
-    const floorBand = this.add.image(0, wallH, ENV_FLOOR_KEY).setOrigin(0, 0);
-    this.floorObjects.push(wall, floorBand);
+    // Same per-floor backdrop rule as drawDormRoom: one whole cross-section
+    // image at y=0 when the floor has one, else the shared wall/floor pair.
+    const backdropKey = floorBackdropKey(floor);
+    const backdrop = this.textures.exists(backdropKey);
+    if (backdrop) {
+      this.floorObjects.push(this.add.image(0, 0, backdropKey).setOrigin(0, 0).setDepth(-10));
+    } else {
+      const wall = this.add.image(0, 8, ENV_WALL_KEY).setOrigin(0, 0);
+      const floorBand = this.add.image(0, wallH, ENV_FLOOR_KEY).setOrigin(0, 0);
+      this.floorObjects.push(wall, floorBand);
+    }
 
-    if (tint) {
+    // The colour wash exists to make five identical corridors distinguishable.
+    // With a real backdrop per floor that job is done by the art, and a 0.16
+    // alpha wash over a painting just dirties it - so it is skipped whenever the
+    // backdrop is present, and kept as the fallback's only separator when not.
+    if (tint && !backdrop) {
       this.floorObjects.push(this.add.rectangle(FLOOR_WIDTH / 2, 8 + (wallH - 8) / 2, FLOOR_WIDTH, wallH - 8, tint.color, tint.alpha));
     }
 
     const g = this.add.graphics();
-    g.fillStyle(0x0b0f12, 1);
-    g.fillRect(0, 0, FLOOR_WIDTH, 8);
+    if (!backdrop) {
+      g.fillStyle(0x0b0f12, 1);
+      g.fillRect(0, 0, FLOOR_WIDTH, 8);
+    }
 
     // Props, room by room. Each theme decides its own dressing; the loop only
     // supplies the room's position so nothing has to recompute the layout.
@@ -2205,14 +2238,23 @@ export class GameScene extends Phaser.Scene {
       for (const o of objs) layer.add(o);
     };
 
-    // Base art. Same wall and floor band as every other floor of the tower.
-    add(this.add.image(0, 8, ENV_WALL_KEY).setOrigin(0, 0));
-    add(this.add.image(0, wallH, ENV_FLOOR_KEY).setOrigin(0, 0));
-    if (tint) add(this.add.rectangle(FLOOR_WIDTH / 2, 8 + (wallH - 8) / 2, FLOOR_WIDTH, wallH - 8, tint.color, tint.alpha));
-    const ceilingSeam = this.add.graphics();
-    ceilingSeam.fillStyle(0x0b0f12, 1);
-    ceilingSeam.fillRect(0, 0, FLOOR_WIDTH, 8);
-    add(ceilingSeam);
+    // Base art. The floor's own painted backdrop when it has one, else the
+    // shared wall+floor pair. Same rule as the live floor and drawCorridor -
+    // if the player's floor is painted and the two visible floors around it are
+    // grey rectangles, the cross-section reads as one room pasted into a diagram.
+    const backdropKey = floorBackdropKey(floor);
+    const backdrop = this.textures.exists(backdropKey);
+    if (backdrop) {
+      add(this.add.image(0, 0, backdropKey).setOrigin(0, 0));
+    } else {
+      add(this.add.image(0, 8, ENV_WALL_KEY).setOrigin(0, 0));
+      add(this.add.image(0, wallH, ENV_FLOOR_KEY).setOrigin(0, 0));
+      if (tint) add(this.add.rectangle(FLOOR_WIDTH / 2, 8 + (wallH - 8) / 2, FLOOR_WIDTH, wallH - 8, tint.color, tint.alpha));
+      const ceilingSeam = this.add.graphics();
+      ceilingSeam.fillStyle(0x0b0f12, 1);
+      ceilingSeam.fillRect(0, 0, FLOOR_WIDTH, 8);
+      add(ceilingSeam);
+    }
 
     // The same two-band ambient wash the live floor's light layer lays down,
     // slightly stronger: the wall keeps its own light at the very top, the wall
@@ -2223,15 +2265,21 @@ export class GameScene extends Phaser.Scene {
     const amb = ambienceFor(floor);
     const clearY = FLOOR_HEIGHT * 0.16;
     const floorTop = FLOOR_HEIGHT * 0.62;
+    // A painted backdrop carries its own light and its own atmosphere, so the
+    // wash is cut to a third: enough to read as "further away", not enough to
+    // turn the painting back into the flat colour it was brought in to replace.
+    // On the shared art the full wash stays - that art has no atmosphere of its
+    // own and the wash is the only depth cue it gets.
+    const wash = backdrop ? 0.35 : 1;
     add(
       this.add
         .rectangle(FLOOR_WIDTH / 2, (clearY + floorTop) / 2, FLOOR_WIDTH, floorTop - clearY, amb.color)
-        .setAlpha(Math.min(0.55, amb.wallAlpha * 1.45)),
+        .setAlpha(Math.min(0.55, amb.wallAlpha * 1.45) * wash),
     );
     add(
       this.add
         .rectangle(FLOOR_WIDTH / 2, (floorTop + FLOOR_HEIGHT) / 2, FLOOR_WIDTH, FLOOR_HEIGHT - floorTop, amb.color)
-        .setAlpha(Math.min(0.62, amb.floorAlpha * 1.45)),
+        .setAlpha(Math.min(0.62, amb.floorAlpha * 1.45) * wash),
     );
 
     // Depth cues, identical to the playable floor's so a neighbour reads as a

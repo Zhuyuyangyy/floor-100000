@@ -22,7 +22,7 @@ const CUSTOM_ENV = import.meta.glob('../assets/env/*.png', {
   query: '?url',
   import: 'default',
 }) as Record<string, string>;
-import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHAPTER1_CLEAR_BG_KEY, CHARACTER_FILES, ENV_FILES, ENV_FLOOR_KEY, ENV_WALL_KEY, FURNITURE_FILES, ITEM_ICON_FILES, NIGHT_OVERLAY_KEY, TITLE_BG_KEY } from '../render/artpack';
+import { ART_BANNER_LOSE_KEY, ART_BANNER_WIN_KEY, ART_SLOT_KEY, CHAPTER1_CLEAR_BG_KEY, CHARACTER_FILES, ENV_FILES, ENV_FLOOR_KEY, ENV_WALL_KEY, FLOOR_BACKDROP_FILES, floorBackdropKey, FURNITURE_FILES, ITEM_ICON_FILES, NIGHT_OVERLAY_KEY, TITLE_BG_KEY } from '../render/artpack';
 
 // Bakes all procedural pixel-art textures, loads the licensed UI pack
 // (GHI-04), then shows the title menu (开始新游戏 / 继续游戏 / 操作说明).
@@ -73,6 +73,13 @@ export class BootScene extends Phaser.Scene {
     // The room's wall and floor: single wide images, not 16x16 tiles.
     for (const [key, file] of Object.entries(ENV_FILES)) {
       this.load.image(key, `assets/env/${file}`);
+    }
+
+    // Per-floor backdrops. These replace the shared wall+floor pair at runtime;
+    // the shared pair stays loaded because the corridor fallback still uses it
+    // when a floor has no backdrop (and because the tests build floors from it).
+    for (const [floor, file] of Object.entries(FLOOR_BACKDROP_FILES)) {
+      this.load.image(floorBackdropKey(Number(floor)), `assets/env/${file}`);
     }
 
     // The title screen's painted backdrop. MenuScene falls back to the

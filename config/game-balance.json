@@ -61,5 +61,21 @@
     "这些是首版初始平衡值，必须通过真实试玩调整。",
     "不要为补齐配置而自行添加未在设计文档中批准的复杂系统。",
     "道具、配方和楼层掉落的详细定义由对应 TypeScript 数据模块维护，并以本文件中的数值为准。"
-  ]
+  ],
+  "bunks": {
+    "_comment": "宿舍通铺的搜刮/拆解表（移植自 integrate/sprint-01 的 AG-51）。概率全部走 seeded RNG，禁 Math.random；同 (runSeed, 层, 床, 天) 同结果。材料 only——不碰 survivalBalance 钉死的「每层恰好一瓶 guaranteed 水 + 一份食物」，床垫底下的东西不许改写生存曲线。",
+    "searchCostMinutes": 10,
+    "dismantleCostMinutes": 30,
+    "searchLoot": [
+      { "itemId": "cloth", "min": 1, "max": 2, "probability": 0.55 },
+      { "itemId": "scrap_metal", "min": 1, "max": 2, "probability": 0.4 },
+      { "itemId": "wood", "min": 1, "max": 2, "probability": 0.3 },
+      { "itemId": "tape", "min": 1, "max": 1, "probability": 0.2 }
+    ],
+    "dismantleTools": ["crowbar"],
+    "dismantleYield": [
+      { "itemId": "wood", "min": 2, "max": 4 },
+      { "itemId": "cloth", "min": 1, "max": 3 }
+    ]
+  }
 }

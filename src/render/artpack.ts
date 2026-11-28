@@ -98,11 +98,61 @@ export const TILE_WINDOW_KEY = 'tile_window';
 // this codebase could generate. Gameplay stays pixel art.
 export const TITLE_BG_KEY = 'title-dorm';
 
+// ── the bunk rows ─────────────────────────────────────────────────────────
+//
+// A dormitory floor is not four rooms with one bed each; it is ranks of packed
+// bunks with a body under every blanket. These three sprites are the furniture
+// for that reading, and they come with their own alpha channel (96x64, RGBA,
+// hard-edged - measured 0.0% partial alpha, so no magenta halo to clean).
+//
+//   bunk-sleeper  someone is in it, blanket lifted
+//   bunk-empty    stripped mattress, nobody home
+//   bunk-loaded   mattress with a bundle on it
+//
+// Only `-sleeper` is drawn by the dorm rows today. The other two are loaded
+// because "the bed you already searched" and "the bed you dismantled" are the
+// obvious next two states, and registering all three keeps the loader honest
+// about what the art pack actually contains.
+export const BUNK_SLEEPER_KEY = 'env-bunk-sleeper';
+export const BUNK_EMPTY_KEY = 'env-bunk-empty';
+export const BUNK_LOADED_KEY = 'env-bunk-loaded';
+
+// ── the people on the floor ───────────────────────────────────────────────
+//
+// The bunk rows are the furniture. These four are the population: a hundred
+// thousand people live in this tower and the bottom of it is where they still
+// are, so a slum bay is a corridor you have to step over people to walk down.
+//
+//   sleep-side-a/b  64x32, lying on their side, blanket over the legs
+//   sit-a/b         48x56, upright against the wall, knees up
+//
+// Two of each rather than one: a hundred bodies from a single sprite is a
+// pattern, and the eye finds the repeat in under a second. Drawn origin-bottom
+// on the floor line - both sheets put the figure on the bottom edge of the
+// canvas, so that one origin is the whole alignment story.
+export const SLEEP_A_KEY = 'env-sleep-a';
+export const SLEEP_B_KEY = 'env-sleep-b';
+export const SIT_A_KEY = 'env-sit-a';
+export const SIT_B_KEY = 'env-sit-b';
+
+// Under-bed debris: what a bed looks like once you have been through it.
+export const UNDERBED_A_KEY = 'env-underbed-a';
+export const UNDERBED_B_KEY = 'env-underbed-b';
+
 export const ENV_FILES: Record<string, string> = {
   [ENV_WALL_KEY]: 'wall.png',
   [ENV_FLOOR_KEY]: 'floor.png',
   [TILE_DOOR_KEY]: 'tile-door.png',
   [TILE_WINDOW_KEY]: 'tile-window.png',
+  [BUNK_SLEEPER_KEY]: 'dorm/bunk-sleeper.png',
+  [BUNK_EMPTY_KEY]: 'dorm/bunk-empty.png',
+  [BUNK_LOADED_KEY]: 'dorm/bunk-loaded.png',
+  [SLEEP_A_KEY]: 'dorm/sleep-side-a.png',
+  [SLEEP_B_KEY]: 'dorm/sleep-side-b.png',
+  [SIT_A_KEY]: 'dorm/sit-a.png',
+  [SIT_B_KEY]: 'dorm/sit-b.png',
+  [UNDERBED_A_KEY]: 'dorm/underbed-a.png',
+  [UNDERBED_B_KEY]: 'dorm/underbed-b.png',
 };
 
 // ── per-floor backdrops ────────────────────────────────────────────────────

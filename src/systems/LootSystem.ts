@@ -1,7 +1,9 @@
 import { containerItemKey, generateFloor, getFloorTemplate } from '../data/floorTemplates';
-import { addItem, removeItem } from './InventorySystem';
+import { addItem, countItem, removeItem } from './InventorySystem';
 import { getItem } from '../data/items';
-import type { GameState, GeneratedFloor, InventoryStack } from '../core/gameTypes';
+import { deriveSeed, makeRng } from '../core/rng';
+import { GAME_CONFIG } from '../core/config';
+import type { GameState, GeneratedFloor, InventoryStack, ItemId } from '../core/gameTypes';
 
 // Turns looting into GameState so a saved + reloaded game never re-spawns loot
 // (docs/03_TASKS.md#p0-03). visitedFloors[floor].lootedItems stores stable keys;
@@ -120,4 +122,145 @@ export function lootGround(
   }
   visit.lootedItems.push(key);
   return { took: { itemId: ground.itemId, quantity: ground.quantity }, full: false };
+}
+
+// ── the bunk rows ─────────────────────────────────────────────────────────
+//
+// A dormitory floor is ranks of bunks, and every bunk is something to bend over:
+// a mattress to search, a frame to break up for wood. That makes a bed a second
+// kind of lootable, next to containers — except a bed is not a container. It is
+// not in generateFloor's layout, it has no `c:` key, and it does not belong in
+// visitedFloors.openedContainers (that list is what "已取" on the map reads).
+//
+// So beds get their own key namespace inside lootedItems:
+//
+//   bunksearch:<floor>:<bunkId>:<day>   searched today — resets tomorrow
+//   bunkgone:<floor>:<bunkId>           dismantled — permanent, never comes back
+//
+// All rolls go through the seeded RNG, so the same (runSeed, floor, bunk, day)
+// always pays out the same. Nothing here uses Math.random: a reload must not
+// reroll a bed, or "search it tomorrow" becomes "reload until it pays".
+
+const BUNKS = GAME_CONFIG.bunks;
+
+/** Game-minutes to search one bed (config/game-balance.json bunks.searchCostMinutes). */
+export const BUNK_SEARCH_COST = BUNKS.searchCostMinutes;
+/** Game-minutes to break one bed up. */
+export const BUNK_DISMANTLE_COST = BUNKS.dismantleCostMinutes;
+
+/** Has this bed been searched today? The key carries the day — tomorrow it is a fresh bed. */
+export const bunkSearchKey = (floor: number, bunkId: string, day: number): string =>
+  `bunksearch:${floor}:${bunkId}:${day}`;
+/** Has this bed been dismantled? No day in the key — it never comes back. */
+export const bunkGoneKey = (floor: number, bunkId: string): string => `bunkgone:${floor}:${bunkId}`;
+
+export function isBunkSearched(state: GameState, floor: number, bunkId: string): boolean {
+  return state.visitedFloors[floor]?.lootedItems.includes(bunkSearchKey(floor, bunkId, state.day)) ?? false;
+}
+
+export function isBunkDismantled(state: GameState, floor: number, bunkId: string): boolean {
+  return state.visitedFloors[floor]?.lootedItems.includes(bunkGoneKey(floor, bunkId)) ?? false;
+}
+
+/**
+ * The first tool in the bag that can break a bunk frame, or null.
+ *
+ * Deliberately narrow (config/game-balance.json bunks.dismantleTools). A frame
+ * that is pegged and screwed together comes apart with a crowbar. Letting every
+ * blade in the game open it would collapse the distinction between "a weapon"
+ * and "a tool", which is the whole reason tools exist in this kit. Tools are
+ * equipment, not consumables: the crowbar is still there afterwards.
+ *
+ * The upstream line also accepts a fire axe; this branch has no such item, and
+ * listing an id that `items.ts` does not define would make the check silently
+ * dead. One real tool is honest; two where one does not exist is not.
+ */
+export function bunkDismantleTool(inventory: GameState['player']['inventory']): ItemId | null {
+  for (const id of BUNKS.dismantleTools) {
+    if (countItem(inventory, id as ItemId) > 0) return id as ItemId;
+  }
+  return null;
+}
+
+export interface BunkSearchResult {
+  took: InventoryStack[];
+  full: boolean;
+  /** Already searched today — no fresh roll, no time charged. */
+  already: boolean;
+}
+
+/**
+ * Search one bunk: roll the under-mattress table, move what fits into the bag,
+ * mark it searched for today.
+ *
+ * A bag that fills up mid-roll keeps what already went in and does not force the
+ * rest (same rule as lootContainer: dropping something is worse than not fitting
+ * it). `full` is reported and the caller says so.
+ */
+export function searchBunk(state: GameState, floor: number, bunkId: string): BunkSearchResult {
+  const visit = recordFloorVisit(state, floor);
+  const key = bunkSearchKey(floor, bunkId, state.day);
+  if (visit.lootedItems.includes(key)) return { took: [], full: false, already: true };
+  const rng = makeRng(deriveSeed('bunk-search', state.runSeed, floor, bunkId, state.day));
+  const took: InventoryStack[] = [];
+  let full = false;
+  for (const spec of BUNKS.searchLoot) {
+    if (full) break;
+    if (!rng.chance(spec.probability ?? 1)) continue;
+    const quantity = rng.nextInt(spec.min, spec.max);
+    const result = addItem(state.player.inventory, spec.itemId as ItemId, quantity);
+    if (result.overflow === 0) {
+      took.push({ itemId: spec.itemId as ItemId, quantity });
+    } else {
+      removeItem(state.player.inventory, spec.itemId as ItemId, result.added); // undo partial add
+      full = true;
+    }
+  }
+  // Only a search that actually reached a verdict counts. If the bag was too
+  // full to take a single thing, the roll is not spent — clear a slot and come
+  // back the same day.
+  if (full && took.length === 0) return { took, full, already: false };
+  visit.lootedItems.push(key);
+  return { took, full, already: false };
+}
+
+export interface BunkDismantleResult {
+  ok: boolean;
+  reason?: string;
+  took: InventoryStack[];
+  full: boolean;
+}
+
+/**
+ * Break one bunk up: wood and cloth, and the bed is gone from then on.
+ *
+ * Two deliberate differences from searching:
+ *   1. It needs a tool — refuses with a reason naming what is missing.
+ *   2. All or nothing. A one-shot action must not be half-swallowed by a full
+ *      bag: if any stack does not fit, every stack is rolled back and the bed is
+ *      NOT marked, so the player clears a slot and comes back to a bed that is
+ *      still standing.
+ */
+export function dismantleBunk(state: GameState, floor: number, bunkId: string): BunkDismantleResult {
+  if (isBunkDismantled(state, floor, bunkId)) return { ok: false, reason: '这床已经拆掉了', took: [], full: false };
+  if (!bunkDismantleTool(state.player.inventory)) {
+    return { ok: false, reason: '赤手拆不了床架，需要撬棍', took: [], full: false };
+  }
+  const visit = recordFloorVisit(state, floor);
+  const rng = makeRng(deriveSeed('bunk-gone', state.runSeed, floor, bunkId));
+  const took: InventoryStack[] = [];
+  for (const spec of BUNKS.dismantleYield) {
+    const quantity = rng.nextInt(spec.min, spec.max);
+    const result = addItem(state.player.inventory, spec.itemId as ItemId, quantity);
+    if (result.overflow > 0) {
+      // None of it: roll back this stack and everything already taken, leave the
+      // bed standing so it can be tried again.
+      removeItem(state.player.inventory, spec.itemId as ItemId, result.added);
+      for (const s of took) removeItem(state.player.inventory, s.itemId, s.quantity);
+      return { ok: false, reason: '背包已满：拆下的材料放不下，先腾包', took: [], full: true };
+    }
+    took.push({ itemId: spec.itemId as ItemId, quantity });
+  }
+  visit.lootedItems.push(bunkGoneKey(floor, bunkId));
+  return { ok: true, took, full: false };
 }

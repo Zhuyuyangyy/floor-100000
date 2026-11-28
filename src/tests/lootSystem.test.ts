@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createNewGame } from '../core/gameState';
 import { FLOOR_TEMPLATES, generateFloor, groundItemKey } from '../data/floorTemplates';
-import { describeFloorContents, getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
+import { describeFloorContents, dismantleBunk, getFloorView, isBunkDismantled, isBunkSearched, lootContainer, lootGround, recordFloorVisit, searchBunk } from '../systems/LootSystem';
 import { countItem } from '../systems/InventorySystem';
 import { deserialize, serialize } from '../systems/SaveSystem';
 
@@ -248,5 +248,128 @@ describe('save round-trip prevents re-loot', () => {
     if (!reloaded.ok) return;
     expect(getFloorView(reloaded.state, 4).containers.find((c) => c.id === 'fuse_box')?.items.length ?? 0).toBe(0);
     expect(lootContainer(reloaded.state, 4, 'fuse_box').took).toHaveLength(0);
+  });
+});
+
+// ── the dorm bunks ─────────────────────────────────────────────────────────
+// Floor 1 is packed with roommates' beds. These are the rules that make the
+// rows a progression rather than a wall of identical prompts: a bed can be
+// searched once a day, and once searched it can be broken up for timber — but
+// only with a tool, and only if the bag can take the whole yield.
+describe('bunk search', () => {
+  const bunk = (floor: number, x: number): string => `dorm_bed_${floor}_${x}`;
+
+  it('rolls the same loot for the same run, floor, bed and day', () => {
+    const a = createNewGame(777);
+    const b = createNewGame(777);
+    const first = searchBunk(a, 1, bunk(1, 236));
+    const second = searchBunk(b, 1, bunk(1, 236));
+    expect(second.took).toEqual(first.took);
+  });
+
+  it('gives different beds different loot, so 13 beds are not 13 copies', () => {
+    const s = createNewGame(777);
+    const rolls = [236, 332, 428, 588, 684, 780, 876, 972].map((x) => searchBunk(s, 1, bunk(1, x)).took.map((t) => t.itemId).join(','));
+    expect(new Set(rolls).size).toBeGreaterThan(1);
+  });
+
+  it('refuses the same bed twice in one day and charges nothing the second time', () => {
+    const s = createNewGame(42);
+    const id = bunk(1, 332);
+    expect(searchBunk(s, 1, id).already).toBe(false);
+    const before = countItem(s.player.inventory, 'cloth');
+    const again = searchBunk(s, 1, id);
+    expect(again.already).toBe(true);
+    expect(again.took).toHaveLength(0);
+    expect(countItem(s.player.inventory, 'cloth')).toBe(before);
+  });
+
+  it('is a fresh bed tomorrow: the key carries the day', () => {
+    const s = createNewGame(42);
+    const id = bunk(1, 428);
+    searchBunk(s, 1, id);
+    expect(isBunkSearched(s, 1, id)).toBe(true);
+    s.day += 1;
+    expect(isBunkSearched(s, 1, id)).toBe(false);
+    expect(searchBunk(s, 1, id).already).toBe(false);
+  });
+
+  it('does not spend the roll when the bag cannot take a single thing', () => {
+    const s = createNewGame(42);
+    // seed 42 bed 332 rolls cloth + wood; every slot is held by scrap metal, so
+    // none of it can merge its way in and none of it fits as a new stack.
+    s.player.inventory.slots = Array.from({ length: s.player.inventory.slotCount }, () => ({
+      itemId: 'scrap_metal' as const,
+      quantity: 99,
+    }));
+    const id = bunk(1, 332);
+    const result = searchBunk(s, 1, id);
+    expect(result.full).toBe(true);
+    expect(result.took).toHaveLength(0);
+    // Nothing was marked, so clearing a slot still leaves a bed worth searching.
+    expect(isBunkSearched(s, 1, id)).toBe(false);
+  });
+});
+
+describe('bunk dismantle', () => {
+  const bunk = (floor: number, x: number): string => `dorm_bed_${floor}_${x}`;
+
+  it('needs a crowbar and names what is missing when there is none', () => {
+    const s = createNewGame(42);
+    s.player.inventory.slots = [];
+    const result = dismantleBunk(s, 1, bunk(1, 236));
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('撬棍');
+    expect(isBunkDismantled(s, 1, bunk(1, 236))).toBe(false);
+  });
+
+  it('takes wood and cloth and the bed never comes back', () => {
+    const s = createNewGame(42);
+    s.player.inventory.slots = [{ itemId: 'crowbar', quantity: 1 }];
+    const id = bunk(1, 236);
+    const result = dismantleBunk(s, 1, id);
+    expect(result.ok).toBe(true);
+    expect(result.took.map((t) => t.itemId).sort()).toEqual(['cloth', 'wood']);
+    expect(isBunkDismantled(s, 1, id)).toBe(true);
+    // Tomorrow does not bring it back — no day in the key, by design.
+    s.day += 1;
+    expect(isBunkDismantled(s, 1, id)).toBe(true);
+    expect(dismantleBunk(s, 1, id).ok).toBe(false);
+  });
+
+  it('keeps the crowbar: a tool is equipment, not a consumable', () => {
+    const s = createNewGame(42);
+    s.player.inventory.slots = [{ itemId: 'crowbar', quantity: 1 }];
+    dismantleBunk(s, 1, bunk(1, 332));
+    expect(countItem(s.player.inventory, 'crowbar')).toBe(1);
+  });
+
+  it('is all-or-nothing: a full bag leaves the bed standing and refunds the roll', () => {
+    const s = createNewGame(42);
+    // Slot 0 keeps the crowbar, or the refusal would be "no tool" rather than
+    // "no room" and the test would pass for the wrong reason.
+    s.player.inventory.slots = Array.from({ length: s.player.inventory.slotCount }, (_, i) =>
+      i === 0 ? { itemId: 'crowbar' as const, quantity: 1 } : { itemId: 'scrap_metal' as const, quantity: 99 },
+    );
+    const id = bunk(1, 428);
+    const result = dismantleBunk(s, 1, id);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('背包已满');
+    expect(result.full).toBe(true);
+    expect(result.took).toHaveLength(0);
+    expect(isBunkDismantled(s, 1, id)).toBe(false);
+    // And the rollback left nothing behind in the bag.
+    expect(countItem(s.player.inventory, 'wood')).toBe(0);
+    expect(countItem(s.player.inventory, 'cloth')).toBe(0);
+  });
+
+  it('survives a save round-trip, so a broken bed stays broken', () => {
+    const s = createNewGame(42);
+    s.player.inventory.slots = [{ itemId: 'crowbar', quantity: 1 }];
+    dismantleBunk(s, 1, bunk(1, 588));
+    const reloaded = deserialize(serialize(s));
+    expect(reloaded.ok).toBe(true);
+    if (!reloaded.ok) return;
+    expect(isBunkDismantled(reloaded.state, 1, bunk(1, 588))).toBe(true);
   });
 });

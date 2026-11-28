@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { ROOM_WIDTH } from '../core/constants';
+import { SIT_A_KEY, SIT_B_KEY, SLEEP_A_KEY, SLEEP_B_KEY } from './artpack';
 
 // Per-floor corridor art (docs/05_ART_GUIDE.md §3).
 //
@@ -407,6 +408,76 @@ const THEMES: Record<number, (ctx: CorridorContext) => void> = {
 /** Draws one room of a corridor floor into the shared detail layer. */
 export function drawCorridorRoom(ctx: CorridorContext): void {
   THEMES[ctx.floor]?.(ctx);
+}
+
+// ── the people who never left ──────────────────────────────────────────────
+//
+// A hundred thousand people live in this tower and the bottom of it is where
+// they still are. Before this pass a "worker dorm" floor was a corridor with
+// furniture in it and nobody in the furniture: two NPCs standing upright in an
+// empty bay, which reads as a showroom rather than as a place people sleep.
+//
+// The count falls as the player climbs — the slum is packed, the plant floor is
+// three men on a break, the canteen is nearly empty because it is a place you
+// pass through rather than live in. That gradient is the cheapest honest way to
+// say "this building is full and you are at the bottom of it".
+//
+// Deliberately crowded: a hundred-thousand-storey dormitory's ground tier is
+// not a corridor with a few sleepers in it, it is a corridor somebody had to
+// step over people to walk down.
+const CROWD_BY_FLOOR: Record<number, number> = {
+  1: 12, // the player's own bay: the whole tier sleeps here
+  2: 12, // worker housing, still packed
+  3: 6, // store room: people sheltering among the crates
+  4: 3, // plant floor: a work party on a break
+  5: 1, // canteen: one person who has not moved in a while
+};
+
+/** How many bodies lie on a floor's floorboards, per room. */
+export function crowdFor(floor: number): number {
+  return CROWD_BY_FLOOR[floor] ?? 0;
+}
+
+/**
+ * The people who never left, drawn on the floor line behind the room's props.
+ *
+ * `lying` is a two-in-three roll seeded off (room, index) rather than
+ * `Math.random`: the same floor has to look the same on every visit, or walking
+ * out and back in reshuffles the bodies and the floor stops being a place.
+ *
+ * Feet on the floor line: both sheets are drawn with the figure sitting on the
+ * bottom edge of the canvas, so origin-bottom is the whole alignment story.
+ */
+export function drawCrowd(
+  scene: Phaser.Scene,
+  objects: Phaser.GameObjects.GameObject[],
+  opts: { roomX: number; floorY: number; floor: number; room: number; depth?: number },
+): void {
+  const { roomX, floorY, floor, room } = opts;
+  const count = crowdFor(floor);
+  if (count === 0) return;
+  const depth = opts.depth ?? 2;
+  for (let i = 0; i < count; i++) {
+    // Slot assignment: `i * 5 + room * 7` modulo 12. The stride is coprime with
+    // 12, so twelve bodies take twelve DIFFERENT slots — a plain `i * 3 % 10`
+    // mapped 12 people onto 10 positions and two of them landed on the exact
+    // same pixel, which reads as one glitched figure rather than as two people.
+    //
+    // The pitch is 22px against a 64px-wide sheet on purpose: the bodies overlap
+    // by roughly half, which is what a floor somebody has to step over people to
+    // cross actually looks like. Distinct positions, overlapping art.
+    const slot = (i * 5 + room * 7) % 12;
+    const x = roomX + 26 + slot * 22;
+    const variant = (room + i) % 2;
+    const lying = (room + i) % 3 !== 0;
+    const key = lying ? (variant ? SLEEP_B_KEY : SLEEP_A_KEY) : variant ? SIT_B_KEY : SIT_A_KEY;
+    if (!scene.textures.exists(key)) continue;
+    const img = scene.add.image(x, floorY, key).setOrigin(0.5, 1).setDepth(depth);
+    // The lying sheets are darker than the standing crowd: a body under a
+    // blanket in a dark room is a value, not a silhouette with a face on it.
+    if (lying) img.setAlpha(0.96);
+    objects.push(img);
+  }
 }
 
 /** The wall tint for a floor, or null when the floor draws its own base. */

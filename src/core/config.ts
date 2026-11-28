@@ -27,6 +27,19 @@ export interface GameBalanceConfig {
     craft: number;
     trade: number;
   };
+  // The bunk rows' loot table. Materials only, on purpose: the survival curve is
+  // pinned elsewhere (one guaranteed bottle and one meal per floor) and what is
+  // under a mattress must not be able to rewrite it.
+  //
+  // Rolls go through the seeded RNG, so the same (runSeed, floor, bunk, day)
+  // always yields the same result - a reload cannot reroll a bed.
+  bunks: {
+    searchCostMinutes: number;
+    dismantleCostMinutes: number;
+    searchLoot: Array<{ itemId: string; min: number; max: number; probability?: number }>;
+    dismantleTools: string[];
+    dismantleYield: Array<{ itemId: string; min: number; max: number }>;
+  };
   // B3-15: game-minutes of dwelling on one floor between dwell-pressure rolls.
   // At 3 game-minutes per real second this is one roll every 20 real seconds —
   // fast enough that the M1 playtest's 8-hour idle window (≈8 rolls) actually
@@ -135,6 +148,20 @@ export function assertGameBalanceConfig(raw: unknown): GameBalanceConfig {
   }
   if (!Array.isArray((cfg.inventory as Record<string, unknown> | undefined)?.startingItems)) {
     problems.push('inventory.startingItems 必须是数组');
+  }
+
+  // The bunk table is read as `bunks.searchLoot` etc. at call time; a missing
+  // block would only surface as `undefined.map` the first time a player bends
+  // over a bed. Name it at startup instead.
+  const bunksCfg = cfg.bunks as Record<string, unknown> | undefined;
+  if (!bunksCfg || typeof bunksCfg !== 'object') {
+    problems.push('bunks 段缺失（宿舍通铺的搜刮/拆解表）');
+  } else {
+    if (typeof bunksCfg.searchCostMinutes !== 'number') problems.push('bunks.searchCostMinutes 不是数字');
+    if (typeof bunksCfg.dismantleCostMinutes !== 'number') problems.push('bunks.dismantleCostMinutes 不是数字');
+    if (!Array.isArray(bunksCfg.searchLoot)) problems.push('bunks.searchLoot 必须是数组');
+    if (!Array.isArray(bunksCfg.dismantleTools)) problems.push('bunks.dismantleTools 必须是数组');
+    if (!Array.isArray(bunksCfg.dismantleYield)) problems.push('bunks.dismantleYield 必须是数组');
   }
 
   if (problems.length > 0) {

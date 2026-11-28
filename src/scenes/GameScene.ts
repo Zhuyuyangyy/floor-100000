@@ -44,7 +44,19 @@ import {
   stepHorizontalSpeed,
   tryChangeFloor,
 } from '../systems/FloorSystem';
-import { getFloorView, lootContainer, lootGround, recordFloorVisit } from '../systems/LootSystem';
+import {
+  BUNK_DISMANTLE_COST,
+  BUNK_SEARCH_COST,
+  bunkDismantleTool,
+  dismantleBunk,
+  getFloorView,
+  isBunkDismantled,
+  isBunkSearched,
+  lootContainer,
+  lootGround,
+  recordFloorVisit,
+  searchBunk,
+} from '../systems/LootSystem';
 import { clearChapter1 } from '../systems/chapters';
 import { countItem, isBagFull, STAT_LABEL, useConsumable } from '../systems/InventorySystem';
 import { canCraft, craft, hasUpgrade, nightOverlayAlpha, purifyWater } from '../systems/CraftingSystem';
@@ -102,7 +114,7 @@ import {
   buildPanelWell,
   drawStatBar,
 } from '../render/uiKit';
-import { ENV_FLOOR_KEY, ENV_WALL_KEY, floorBackdropKey, NIGHT_OVERLAY_KEY } from '../render/artpack';
+import { BUNK_SLEEPER_KEY, ENV_FLOOR_KEY, ENV_WALL_KEY, floorBackdropKey, NIGHT_OVERLAY_KEY } from '../render/artpack';
 import {
   ATTACK_FRAME_START,
   ATTACK_FRAMES,
@@ -123,7 +135,7 @@ import {
 import { WEAPON_H, WEAPON_W, nextWeaponVisual, weaponSwingAngle, weaponVisual, type WeaponVisualId } from '../render/weapon.ts';
 import { itemIconKey } from '../render/itemIcons';
 import { containerTextureKey } from '../render/furniture';
-import { corridorTint, drawCorridorRoom } from '../render/corridors';
+import { corridorTint, drawCorridorRoom, drawCrowd } from '../render/corridors';
 import {
   ACTOR_DEPTH,
   DUST_DEPTH,
@@ -224,6 +236,63 @@ const STAIR_CAMERA_HUD_GAP = 12;
 const WANDERER_FLEE_SAFE_DISTANCE = 280;
 const WANDERER_FLEE_EXIT_MARGIN = 24;
 
+// ── the dorm's bunk rows ──────────────────────────────────────────────────
+//
+// A dormitory for tens of thousands does not give each resident a room: it
+// gives them a bunk in a rank of bunks, with a body under every blanket. Floor 1
+// is therefore two rows of them, and the spacing is what carries the reading.
+//
+// Pitch 96 against a 96px-wide sprite: the beds nearly touch, which is the
+// point. A comfortable gap turns the same sprites into hotel furniture.
+//
+// The front row is pitched clear of the three things already standing on floor
+// 1 — the containers cluster around 160, the workbench is at 480 and the
+// player's own bed is at 1120 — and stops at 972 so it does not run into the
+// own bed. The back row is offset half a pitch, which is what stops the two rows
+// merging into one long rank.
+//
+// AND CLEAR OF THE FOUR THINGS THE FLOOR IS FOR. Every front bunk is a hot zone
+// with INTERACT_DISTANCE = 44 of reach, and three of floor 1's props are also
+// hot zones: the cabinet at 160, the workbench at 480, the player's own bed at
+// 1120 — and the player enters at ENTRY_X = 640.
+//
+// The binding rule is not "don't stand on the prop", it is "no point on the
+// floor is inside two radii at once". A bed 76px from the cabinet (upstream had
+// one at 236) is 76 apart, and 76 < 88 = 2 × 44, so the walk-up to the cabinet
+// passes through a point where E opens a mattress instead of the locker the
+// onboarding line points at. Every front bunk is therefore kept more than 2 ×
+// INTERACT_DISTANCE + margin from every prop, from the spawn, and from the beds
+// beside it. That is the seven positions below; a solver check walks the whole
+// 1280px floor and finds no position reaching two of them.
+//
+// The back row is scenery: it stands above the walkable line at 0.72 scale and
+// registers no hot zone (see drawDormBeds), so it can be as dense as the wall
+// allows without stealing a single keypress. Fifteen bunks in the room, and the
+// crowd layer puts another twelve people on the floor per room beside them.
+const DORM_FRONT_BEDS: readonly number[] = [260, 352, 580, 688, 780, 872, 964];
+const DORM_BACK_BEDS: readonly number[] = [268, 356, 444, 596, 680, 764, 848, 932];
+// Where the rows stand. The front row's feet are at the walkable line the props
+// use (FLOOR_HEIGHT - 60); the back row is higher up the wall and smaller, which
+// is the whole depth cue.
+const BUNK_FRONT_Y = FLOOR_HEIGHT - 60;
+const BUNK_BACK_Y = BUNK_FRONT_Y - 26;
+const BUNK_BACK_SCALE = 0.72;
+
+// ── the two depths that make the dorm readable ────────────────────────────
+//
+// The bunk rows are 13 sprites at depth 4 standing right where the containers,
+// the workbench and the player's own bed are. Those props kept Phaser's default
+// depth 0, so the rows printed straight over them and the first build shipped
+// with 储物柜 / 工作台 / 床（睡觉） sliced in half by mattresses — the labels of
+// the three things the player actually interacts with, hidden behind scenery.
+//
+// CONTAINER_DEPTH puts the props on the same plane as the front bunk row;
+// LABEL_DEPTH puts every furniture label above all of it, which is the rule the
+// HUD already follows: words go on top. ACTOR_DEPTH (5) is above both, so the
+// player still walks in front of a bunk rather than behind it.
+const CONTAINER_DEPTH = 4;
+const LABEL_DEPTH = 6;
+
 // Row pitch for the four HUD stat bars. 15px gives an 11px label plus a 7px bar
 // with breathing room; 13px was too cramped to read at a glance.
 
@@ -321,6 +390,17 @@ export class GameScene extends Phaser.Scene {
   private floorView!: GeneratedFloor;
   private containerObjs = new Map<string, { box: Phaser.GameObjects.Graphics | Phaser.GameObjects.Image; label: Phaser.GameObjects.Text }>();
   private groundObjs = new Map<string, Phaser.GameObjects.Rectangle>();
+  // The dorm's bunk rows, keyed by the same id the loot logs use
+  // (`dorm_bed_<floor>_<x>`). Only floor 1's bunks are interactive today, so
+  // this normally holds 13 entries and is rebuilt on every floor draw.
+  //
+  // `own` marks the one bed the player actually owns — the row's beds are all
+  // searchable, but only the player's own is where sleeping happens, and the
+  // difference has to be caught at the interaction, not inferred from x.
+  private bunkObjs = new Map<string, { x: number; own: boolean; objects: Phaser.GameObjects.GameObject[] }>();
+  // The "Z z" marks above sleeping bodies, so they can breathe. Each carries its
+  // own baseline and phase; they are dropped when their bunk is broken up.
+  private dormSleepers: Array<{ obj: Phaser.GameObjects.Text; baseY: number; phase: number }> = [];
   private floorObjects: Phaser.GameObjects.GameObject[] = [];
   private wanderer?: Phaser.GameObjects.Sprite;
   /** the dim red pool that makes the wanderer findable in the dark */
@@ -582,6 +662,10 @@ export class GameScene extends Phaser.Scene {
     this.floorObjects = [];
     this.containerObjs.clear();
     this.groundObjs.clear();
+    // Same reason as clearFloor: a scene restart re-runs create() but not the
+    // field initialisers, so stale bunk zones would point at destroyed images.
+    this.bunkObjs.clear();
+    this.dormSleepers = [];
     this.invObjects = [];
     this.invSlotTexts = [];
     this.invSlotIcons = [];
@@ -886,6 +970,12 @@ export class GameScene extends Phaser.Scene {
     this.speedX = 0;
     this.containerObjs.clear();
     this.groundObjs.clear();
+    // The bunks and their sleeping neighbours belong to the floor that is
+    // leaving. Left in place, the Map would hand the next floor a hot zone at a
+    // position from the previous one, and dormSleepers would keep animating a
+    // "Z z" that was destroyed with floorObjects.
+    this.bunkObjs.clear();
+    this.dormSleepers = [];
     this.wanderer?.destroy();
     this.wanderer = undefined;
     this.wandererAI = undefined;
@@ -1996,6 +2086,22 @@ export class GameScene extends Phaser.Scene {
 
     this.floorObjects.push(g);
 
+    // The roommates. A dormitory floor is not four rooms with one bed each; it
+    // is ranks of packed bunks with a body under every blanket, and this is the
+    // furniture half of that sentence. Drawn here rather than in drawBed()
+    // because the rows are the room, not the player's furniture — and drawn
+    // before the depth cues so the haze and the clutter land on top of them.
+    this.drawDormBeds(STARTING_FLOOR, DORM_FRONT_BEDS, DORM_BACK_BEDS, true);
+
+    // And the people who are not in a bunk. Two-thirds of them lie down and the
+    // rest sit against the wall; drawn after the beds so a body in front reads
+    // as lying among them rather than behind the frames.
+    const crowd: Phaser.GameObjects.GameObject[] = [];
+    for (let r = 0; r < ROOM_COUNT; r++) {
+      drawCrowd(this, crowd, { roomX: r * ROOM_WIDTH, floorY: FLOOR_HEIGHT - 60, floor: STARTING_FLOOR, room: r, depth: 3 });
+    }
+    this.floorObjects.push(...crowd);
+
     // OVERHAUL Art Pass 2: ceiling shadow, baseboard seam, floor gradient and
     // reflections under the lights — the four cues that make a flat side view
     // read as a room with depth.
@@ -2081,6 +2187,11 @@ export class GameScene extends Phaser.Scene {
     // supplies the room's position so nothing has to recompute the layout.
     const props: Phaser.GameObjects.GameObject[] = [];
     for (let r = 0; r < ROOM_COUNT; r++) {
+      // The floor's population goes in before the theme's props so a crate is
+      // in front of the man sleeping behind it. Depth 2, not 3: the corridor's
+      // wall dressing is also at 1-2 and a body above it would lose its own
+      // shadow, but below the front-row bunks at 4.
+      drawCrowd(this, props, { roomX: r * ROOM_WIDTH, floorY: wallH, floor, room: r, depth: 2 });
       drawCorridorRoom({ scene: this, g, floor, roomX: r * ROOM_WIDTH, floorY: wallH, room: r, objects: props, fixtures: this.lightFixtures });
     }
     this.floorObjects.push(g, ...props);
@@ -2408,13 +2519,14 @@ export class GameScene extends Phaser.Scene {
       // is unchanged either way — hit detection still goes through c.x and
       // INTERACT_DISTANCE.
       this.floorObjects.push(...addContactShadow(this, c.x, y, 44, 2, 0.45));
-      const box = this.add.image(c.x, y - 4, key ?? '').setOrigin(0.5, 1);
+      const box = this.add.image(c.x, y - 4, key ?? '').setOrigin(0.5, 1).setDepth(CONTAINER_DEPTH);
       // The props are ~80px tall now rather than 16-32, so the label has to sit
       // above the prop instead of at a fixed offset from the floor line — at the
       // old spot it would be printed straight across the middle of the crate.
       const label = this.add
         .text(c.x, y - 4 - box.displayHeight - 8, c.label, { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) })
-        .setOrigin(0.5);
+        .setOrigin(0.5)
+        .setDepth(LABEL_DEPTH);
       this.containerObjs.set(c.id, { box, label });
       this.floorObjects.push(box, label);
       this.setContainerEmptyVisual(c.id, c.items.length === 0);
@@ -2450,9 +2562,94 @@ export class GameScene extends Phaser.Scene {
 
   private drawBed(): void {
     const y = FLOOR_HEIGHT - 64;
-    const bed = this.add.image(BED_X, y + 4, 'furn_bed').setOrigin(0.5, 1);
-    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5);
+    const bed = this.add.image(BED_X, y + 4, 'furn_bed').setOrigin(0.5, 1).setDepth(CONTAINER_DEPTH);
+    const bedLabel = this.add.text(BED_X, y + 4 - bed.displayHeight - 8, '床（睡觉）', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5).setDepth(LABEL_DEPTH);
     this.floorObjects.push(bed, bedLabel);
+  }
+
+  /**
+   * The roommates' bunks: a back row up the wall and smaller, a front row on the
+   * floor line, with a blanketed body in every one.
+   *
+   * The bodies are the sprite, not a pose: no character sheet in this kit has a
+   * lying frame (the walk sheets are standing side views, and rotating one would
+   * resample it), so `env-bunk-sleeper` — mattress, blanket, a head and a lump
+   * under the cover — is what reads as "someone is in it". A "Z z" drifting above
+   * each one finishes the sentence and tells the player, at a glance, that this
+   * floor is full of people rather than furniture.
+   *
+   * `interactive` is what puts the bunks in `bunkObjs`, i.e. makes them something
+   * to bend over. Only the floor the player is standing on gets that; the
+   * neighbours drawn above and below are scenery.
+   */
+  private drawDormBeds(floor: number, front: readonly number[], back: readonly number[], interactive = false): void {
+    const drawBedAt = (x: number, inBackRow: boolean, index: number): void => {
+      // A bunk that has been broken up does not come back — the record lives in
+      // the save (`bunkgone:`), so it survives leaving the floor and reloading.
+      if (interactive && isBunkDismantled(getGame(), floor, `dorm_bed_${floor}_${x}`)) return;
+
+      // The back row is scenery, never a hot zone. It stands above the walkable
+      // line (BUNK_BACK_Y) and is drawn at 0.72 scale against the wall, so a
+      // search prompt for it would be a prompt for a bed the player cannot
+      // actually reach — and the one at x=640 sits directly over the spawn,
+      // which would take the foot bar on frame one. `interactive` therefore
+      // only ever registers the front row; the back row still has to honour
+      // `isBunkDismantled` so a broken bed does not leave its wall bunk behind.
+      const reachable = interactive && !inBackRow;
+
+      if (inBackRow) {
+        // A dismantled front-row bed takes its back-row counterpart with it:
+        // the player broke the frame, and half a bunk hanging on the wall reads
+        // as a rendering bug rather than as salvage.
+        if (interactive && isBunkDismantled(getGame(), floor, `dorm_bed_${floor}_${x + 32}`)) return;
+        const bed = this.add
+          .image(x, BUNK_BACK_Y, BUNK_SLEEPER_KEY)
+          .setOrigin(0.5, 1)
+          .setScale(BUNK_BACK_SCALE)
+          .setDepth(2);
+        const z = this.add
+          .text(x + 26, BUNK_BACK_Y - 28, 'Z z', { fontFamily: FONT_FAMILY, fontSize: '14px', color: hex(TEXT.disabledDeep) })
+          .setOrigin(0.5)
+          .setDepth(3);
+        this.floorObjects.push(bed, z);
+        this.dormSleepers.push({ obj: z, baseY: z.y, phase: 3.4 + index * 1.3 });
+        return;
+      }
+
+      const bed = this.add.image(x, BUNK_FRONT_Y, BUNK_SLEEPER_KEY).setOrigin(0.5, 1).setDepth(4);
+      const shadow = addContactShadow(this, x + 28, BUNK_FRONT_Y + 2, 52, 2, 0.35);
+      // The label and the Z are placed against the bed's own top edge, not
+      // against a fixed offset from the floor line: a taller sprite pushed a
+      // fixed offset straight up into the sleeper's head.
+      const label = this.add
+        .text(x, BUNK_FRONT_Y - 62, '室友', { fontFamily: FONT_FAMILY, fontSize: '17px', color: hex(TEXT.dim) })
+        .setOrigin(0.5)
+        .setDepth(3);
+      const z = this.add
+        .text(x + 30, BUNK_FRONT_Y - 50, 'Z z', { fontFamily: FONT_FAMILY, fontSize: '15px', color: hex(TEXT.dim) })
+        .setOrigin(0.5)
+        .setDepth(3);
+      this.floorObjects.push(bed, ...shadow, label, z);
+      this.dormSleepers.push({ obj: z, baseY: z.y, phase: index * 1.7 });
+      if (reachable) this.bunkObjs.set(`dorm_bed_${floor}_${x}`, { x, own: false, objects: [bed, ...shadow, label, z] });
+    };
+
+    // Back row first so the front row overlaps it — that overlap is what makes
+    // the two rows read as depth instead of as two lines of sprites.
+    back.forEach((x, i) => drawBedAt(x, true, i));
+    front.forEach((x, i) => drawBedAt(x, false, i));
+  }
+
+  /**
+   * Breathing for the "Z z" marks. Each has its own phase so the room does not
+   * pulse in unison, which reads as a screensaver rather than as sleeping people.
+   */
+  private updateDormSleepers(time: number): void {
+    for (const s of this.dormSleepers) {
+      if (!s.obj.active) continue;
+      s.obj.y = s.baseY - Math.sin(time / 900 + s.phase) * 3;
+      s.obj.setAlpha(0.55 + Math.sin(time / 700 + s.phase) * 0.3);
+    }
   }
 
   // ── HUD & inventory UI ─────────────────────────────────────────────────
@@ -3113,9 +3310,9 @@ export class GameScene extends Phaser.Scene {
 
   private drawWorkbench(): void {
     const y = FLOOR_HEIGHT - 64;
-    const bench = this.add.image(CRAFT_X, y + 4, 'furn_workbench').setOrigin(0.5, 1);
-    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5);
-    this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5);
+    const bench = this.add.image(CRAFT_X, y + 4, 'furn_workbench').setOrigin(0.5, 1).setDepth(CONTAINER_DEPTH);
+    const benchLabel = this.add.text(CRAFT_X, y + 4 - bench.displayHeight - 8, '工作台', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(TEXT.primary) }).setOrigin(0.5).setDepth(LABEL_DEPTH);
+    this.upgradeBoard = this.add.text(CRAFT_X, y + 34, '', { fontFamily: FONT_FAMILY, fontSize: '22px', color: hex(PALETTE.clothHigh) }).setOrigin(0.5).setDepth(LABEL_DEPTH);
     this.floorObjects.push(bench, benchLabel, this.upgradeBoard);
     this.refreshUpgradeBoard();
   }
@@ -4998,6 +5195,15 @@ export class GameScene extends Phaser.Scene {
       this.openDialogue(npc);
       return;
     }
+    // The roommates' bunks, after NPCs and before containers: a bed is
+    // furniture, and it should not lose the key to a half-empty locker standing
+    // next to it. The player's own bed is a separate object (drawBed/nearBed) and
+    // is not in this Map, so the two paths cannot both fire.
+    const bunk = this.nearestInteractiveBunk(state);
+    if (bunk) {
+      this.interactWithBunk(state, bunk);
+      return;
+    }
     if (this.nearBed(state)) {
       this.attemptSleep();
       return;
@@ -5098,6 +5304,120 @@ export class GameScene extends Phaser.Scene {
 
   private nearBed(state: GameState): boolean {
     return state.currentFloor === STARTING_FLOOR && Math.abs(state.player.x - BED_X) <= INTERACT_DISTANCE;
+  }
+
+  // ── the roommates' bunks ──────────────────────────────────────────────
+  // E or a click at arm's length from a bunk. The rules live in LootSystem as
+  // pure functions (seeded RNG — same seed same loot, no Math.random); this is
+  // only the animation, the flash and the teardown when a bed is broken up.
+
+  /** The nearest bunk in reach that is still standing, or null. */
+  private nearestInteractiveBunk(state: GameState): { id: string; x: number; own: boolean } | null {
+    let best: { id: string; x: number; own: boolean } | null = null;
+    let bestDist = INTERACT_DISTANCE;
+    for (const [id, bunk] of this.bunkObjs) {
+      if (isBunkDismantled(state, state.currentFloor, id)) continue;
+      const d = Math.abs(bunk.x - state.player.x);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = { id, x: bunk.x, own: bunk.own };
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Bend over a bunk: search it, or break it up if it has already been searched
+   * today and the bag holds a tool that can.
+   *
+   * Searching is repeatable tomorrow (the key carries the day); breaking it up
+   * is permanent (the key does not). That asymmetry is the whole progression —
+   * a searched bed is a bed you can come back to, a dismantled one is timber.
+   */
+  private interactWithBunk(state: GameState, bunk: { id: string; x: number; own: boolean }): void {
+    if (!isBunkSearched(state, state.currentFloor, bunk.id)) {
+      this.runBunkSearch(state, bunk);
+      return;
+    }
+    // Already searched today. Dismantling is the next step, not a mis-tap: it
+    // is only offered when the bag can actually do it, and otherwise the answer
+    // is "come back tomorrow" rather than a silent no-op.
+    if (!bunkDismantleTool(state.player.inventory)) {
+      this.flash('这张床今天已经翻过了，明天再来');
+      return;
+    }
+    this.runBunkDismantle(state, bunk);
+  }
+
+  private runBunkSearch(state: GameState, bunk: { id: string; x: number }): void {
+    const result = searchBunk(state, state.currentFloor, bunk.id);
+    if (result.already) {
+      this.flash('今天已经翻过这张床了');
+      return;
+    }
+    saveToStorage(state);
+    this.refreshInventory();
+    // 420ms against the container's own clip: bending over a mattress is the
+    // same motion as bending into a locker, so it gets the same pose and the
+    // same hold.
+    this.playActionAnim(searchAnimKey(this.metaSelectedCharacter()), 420);
+    if (result.took.length > 0) {
+      playSfx('pickup');
+      playFx(this, 'collect-burst', bunk.x, PLAYER_FEET_Y - 50, LIGHT_DEPTH);
+      this.flash(`翻到 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${BUNK_SEARCH_COST} 分钟）`);
+    } else if (result.full) {
+      // The roll was not spent — the bag was too full to take a single thing.
+      // Say so, because "nothing here" and "nowhere to put it" are different
+      // messages and the fix (clear a slot, come back today) is different too.
+      this.flash('背包已满：翻出来的东西放不下，先腾包');
+    } else {
+      this.flash('床垫下面只有灰和一根断头发');
+    }
+    this.chargeTime(BUNK_SEARCH_COST);
+  }
+
+  private runBunkDismantle(state: GameState, bunk: { id: string; x: number }): void {
+    const result = dismantleBunk(state, state.currentFloor, bunk.id);
+    if (!result.ok) {
+      this.flash(result.reason ?? '拆不了这张床');
+      return;
+    }
+    saveToStorage(state);
+    this.refreshInventory();
+    this.removeBunk(bunk.id);
+    // Heavier than a search: the frame comes apart and the boards land. 520ms
+    // of the same clip reads as a longer, harder version of the same motion.
+    this.playActionAnim(searchAnimKey(this.metaSelectedCharacter()), 520);
+    playSfx('chest');
+    playFx(this, 'collect-burst', bunk.x, PLAYER_FEET_Y - 40, LIGHT_DEPTH);
+    this.flash(`拆了床，得到 ${result.took.map((s) => `${getItem(s.itemId).displayName}×${s.quantity}`).join('、')}（-${BUNK_DISMANTLE_COST} 分钟）`);
+    this.chargeTime(BUNK_DISMANTLE_COST);
+  }
+
+  /**
+   * The bed is gone: destroy what drew it, drop its "Z z" from the breathing
+   * queue and unregister the hot zone.
+   *
+   * The sleeping body is not a separate object — it is part of the bunk sprite
+   * — so removing the bunk removes the person in it, which is the intended
+   * reading: you took the bed apart, they moved.
+   */
+  private removeBunk(id: string): void {
+    const bunk = this.bunkObjs.get(id);
+    if (!bunk) return;
+    for (const o of bunk.objects) o.destroy();
+    const dropped = new Set(bunk.objects);
+    this.dormSleepers = this.dormSleepers.filter((s) => !dropped.has(s.obj));
+    this.floorObjects = this.floorObjects.filter((o) => !dropped.has(o));
+    this.bunkObjs.delete(id);
+  }
+
+  /** What the foot bar says in reach of a bunk, or null when there is none. */
+  private bunkHint(state: GameState): string | null {
+    const bunk = this.nearestInteractiveBunk(state);
+    if (!bunk) return null;
+    if (!isBunkSearched(state, state.currentFloor, bunk.id)) return '按 E 搜刮床铺';
+    return bunkDismantleTool(state.player.inventory) ? '按 E 拆解床铺（撬棍）' : '这张床今天翻过了';
   }
 
   private attemptSleep(): void {
@@ -5499,6 +5819,10 @@ export class GameScene extends Phaser.Scene {
   override update(_time: number, delta: number): void {
     this.refreshTouchControlVisibility();
     this.refreshBagFullWarning();
+    // The sleeping roommates breathe on wall-clock time, not on game time: a
+    // paused game still has people asleep in the room. Above the panel
+    // early-return so opening the bag does not freeze them mid-breath.
+    this.updateDormSleepers(this.time.now);
     // The crowbar is stepped here, above the panel early-return.
     //
     // A fight holds encounterOpen for its whole duration and this method bails
@@ -5707,6 +6031,13 @@ export class GameScene extends Phaser.Scene {
 
     if (this.nearBed(state)) {
       this.setInteractionHint(isNight(state.gameMinuteOfDay) ? '按 E 安排夜间行动' : '床位 · 20:00 后可安排夜间行动');
+      return;
+    }
+    // The bunk hint has to follow the same priority the key does, or the bar
+    // advertises a container the key will not open.
+    const bunkHint = this.bunkHint(state);
+    if (bunkHint) {
+      this.setInteractionHint(bunkHint);
       return;
     }
     if (this.nearCraftStation(state)) {
